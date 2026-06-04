@@ -5,35 +5,33 @@
 
 ## Project Status Summary
 
-✅ **COMPLETED THIS SESSION**:
-- Device list + detail views (search, type filter, repair history)
-- Mileage log view (month filter, running total)
-- Authentication — login/logout pages, all views protected
-- Nav bar shows logged-in username, logout link, admin link (staff only)
-- GitHub repository connected and up to date
-
-✅ **COMPLETED PREVIOUSLY**:
+✅ **COMPLETED**:
 - Database schema fully designed and documented
 - Django project initialized with all dependencies
 - 13 data models created with proper relationships
 - Database migrations created and applied (SQLite ready, PostgreSQL configured)
 - Django settings configured for dev/production
-- Email integration prepared for ticket ingestion
-- Logging and static file handling configured
-- Git repository with clean commit history — pushed to GitHub
+- Git repository with clean commit history — pushed to GitHub (private)
 - Django admin customized for all 13 models (search, filters, inlines)
-- Base template with navigation (Tailwind CSS)
-- Work order list view (search, filter by status/technician, pagination)
-- Work order detail view (notes, items, quick actions)
-- Client list view (search, active/inactive filter)
-- Client detail view (contacts, devices, work order history)
+- Base template with navigation (Tailwind CSS, dark nav bar)
+- Authentication — login/logout, all views protected with LoginRequiredMixin
+- Dashboard — stats, open work orders, recently closed, quick action buttons
+- Work order list + detail views
+- Work order create/edit native forms
+- Client list + detail views
+- Client create/edit native forms
+- Device list + detail views
+- Device create/edit native forms
+- Mileage log view (month filter, running total)
 
 ⬜ **NEXT — IN ORDER**:
-1. **Dashboard** (home page, landing after login)
-2. **Native create/edit forms** (work orders, clients, devices — no admin required)
-3. **HTMX** (checklist toggles, inline notes)
-4. **Testing suite**
-5. **Deployment** (internal network)
+1. **Review ticketing context** (Mike has prior conversation — must review before building ticket views)
+2. **HTMX inline notes** (add notes to work orders without page reload)
+3. **HTMX checklist toggling** (mark items complete without page reload)
+4. **Ticket views** (list, detail, create, convert-to-work-order)
+5. **Mileage create form** (native form, no admin required)
+6. **Testing suite**
+7. **Deployment** (internal network)
 
 ---
 
@@ -250,38 +248,33 @@
 cd ~/Documents/Claude/murphys-bench
 source venv/bin/activate
 python manage.py runserver
-# Visit http://localhost:8000 — redirects to login
+# Visit http://localhost:8000 — goes to dashboard (login required)
 # Login: admin / password123 (local dev only)
 ```
 
-**What's working now**:
-- `/` → redirects to login (dashboard not built yet)
-- `/accounts/login/` — login page
-- `/work-orders/` — work order list
-- `/work-orders/<id>/` — work order detail
-- `/clients/` — client list
-- `/clients/<id>/` — client detail
-- `/devices/` — device list
-- `/devices/<id>/` — device detail
-- `/mileage/` — mileage log
-- `/admin/` — Django admin (all data entry done here for now)
+**⚠️ Start next session by**:
+1. Reading CLAUDE.md (especially the "IMPORTANT — READ FIRST" section)
+2. Getting ticketing context from Mike (prior conversation)
+3. Then proceeding with HTMX inline notes
 
-**Build next — Dashboard**:
-- Add `DashboardView` to `core/views.py`
-- Add `path('', DashboardView.as_view(), name='dashboard')` to `core/urls.py`
-- Create `core/templates/core/dashboard.html`
-- Show: open WO counts by status, recent work orders, quick links
-- Use `WorkOrder.objects.values('status').annotate(count=Count('status'))` for counts
-- Reference the mockup at `~/Documents/Claude/dashboard-mockup.html` for layout ideas
+**Build next — HTMX Inline Notes**:
+- Add a note form directly on `work_order_detail.html`
+- POST to a new view `WorkOrderNoteCreateView` in `core/views.py`
+- Add URL: `path('work-orders/<int:pk>/notes/add/', ..., name='work_order_note_add')`
+- Use HTMX to submit and render the new note without page reload
+- Add HTMX CDN script to `base.html`
+- Note form fields: `note_type` (internal/customer_visible), `content`
+- On success: return just the new note HTML fragment, prepend to notes list
 
 **Key files**:
 - `core/views.py` — all views
 - `core/urls.py` — URL routing
-- `core/models.py` — all data models
+- `core/models.py` — all 13 data models
+- `core/forms.py` — WorkOrderForm, ClientForm, DeviceForm
 - `core/admin.py` — admin customization
 - `core/templates/core/` — all HTML templates
 - `accounts/views.py` — login/logout
-- `murphys_bench/settings.py` — Django settings
+- `murphys_bench/settings.py` — Django settings (LOGIN_URL set)
 
 ---
 
