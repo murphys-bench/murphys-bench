@@ -1,37 +1,59 @@
 # Murphy's Bench Development Roadmap
 
+**Last Updated**: June 4, 2026  
+**Current Phase**: Phase 1 - SCS Internal (Backend Foundation Complete, Views & UI Next)
+
+## Project Status Summary
+
+✅ **COMPLETED**:
+- Database schema fully designed and documented
+- Django project initialized with all dependencies
+- 13 data models created with proper relationships
+- Database migrations created and applied (SQLite ready, PostgreSQL configured)
+- Django settings configured for dev/production
+- Email integration prepared for ticket ingestion
+- Logging and static file handling configured
+- Git repository with clean commit history
+
+⬜ **NEXT**: 
+- Admin interface customization
+- Core workflows: views and forms (tickets, work orders, clients)
+- HTML templates with Tailwind CSS
+- HTMX for dynamic interactions (no page reloads)
+- Testing suite
+
+---
+
 ## Phase 1: SCS Internal (Current Focus)
 
 ### Foundation & Setup
-- [ ] **Finalize database schema**
-  - Review current SCS Repair Tracker workflows in detail
-  - Document entity relationships (ER diagram)
-  - Define all required fields and constraints
-  - Create schema documentation (docs/database-schema.md)
-  - Estimated: 1-2 hours
+- [x] **Finalize database schema** ✅ COMPLETE
+  - [x] Document entity relationships (ER diagram)
+  - [x] Define all fields and constraints
+  - [x] Created schema documentation (docs/database-schema.md)
+  - [x] 13 models with optimized indexes
 
-- [ ] **Initialize Django project structure**
-  - Create Django project (`django-admin startproject`)
-  - Create core app (`manage.py startapp core`)
-  - Create accounts app (`manage.py startapp accounts`)
-  - Set up settings.py (dev/prod, environment variables)
-  - Configure PostgreSQL connection
-  - Estimated: 1 hour
+- [x] **Initialize Django project structure** ✅ COMPLETE
+  - [x] Created Django 4.2.30 project
+  - [x] Created core app (business logic)
+  - [x] Created accounts app (auth)
+  - [x] Set up settings.py (dev/prod, environment variables)
+  - [x] PostgreSQL + SQLite support
+  - [x] Email configuration
+  - [x] Logging setup
 
-- [ ] **Create models**
-  - User/Technician model (auth)
-  - Client model
-  - Client contact model
-  - Device model
-  - Work order model
-  - Work order notes (customer vs. internal)
-  - Work order items/checklist model
-  - Mileage model
-  - Repair type model
-  - Checklist template model
-  - Canned response model
-  - Run migrations
-  - Estimated: 3-4 hours
+- [x] **Create models** ✅ COMPLETE
+  - [x] User model (extended Django User with roles)
+  - [x] Client, Contact, Device models
+  - [x] Ticket model (NEW - initial service request)
+  - [x] WorkOrder model (repair job)
+  - [x] WorkOrderNote (customer visible + internal)
+  - [x] WorkOrderItem (checklist, parts, time)
+  - [x] Mileage model
+  - [x] RepairType, Checklist, ChecklistItem models
+  - [x] CannedResponse model
+  - [x] Migrations created and applied
+  - [x] Database created with all tables
 
 ### Core Workflows (MVP)
 - [ ] **Work order list view**
@@ -214,6 +236,27 @@
 - Would require separate SaaS codebase/infrastructure
 - Original Murphy's Bench remains self-hosted
 - Decision point: When/if actual demand is clear (not now)
+
+---
+
+## Quick Start (Next Session)
+
+To pick up development in the next chat:
+
+```bash
+cd ~/Documents/Claude/murphys-bench
+source venv/bin/activate
+python manage.py runserver  # Starts on http://localhost:8000
+python manage.py createsuperuser  # Create admin account
+# Visit http://localhost:8000/admin/ to log in
+```
+
+**What's ready to build next**:
+1. Admin customization (`core/admin.py`) - Configure admin interface for data entry
+2. Views layer (`core/views.py`) - Create, list, detail, update views for main workflows
+3. URL routing (`core/urls.py`) - Map views to URLs
+4. Templates (`core/templates/`) - HTML with Tailwind CSS
+5. Forms (`core/forms.py`) - Validation for tickets, work orders, etc.
 
 ---
 
