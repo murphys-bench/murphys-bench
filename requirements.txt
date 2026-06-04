@@ -1,11 +1,11 @@
 # Core
 Django==4.2.30
-psycopg2-binary==2.9.9  # PostgreSQL adapter
-python-decouple==3.8    # Environment variables
+psycopg2-binary==2.9.9
+python-decouple==3.8
 
 # Frontend
 django-crispy-forms==2.1
-crispy-tailwind==0.5.1
+crispy-tailwind==1.0.3
 django-htmx==1.17.3
 
 # Testing
@@ -22,9 +22,7 @@ isort==5.13.2
 
 # Security
 django-cors-headers==4.3.1
-django-ratelimit==4.1.0
 
 # Utilities
-django-environ==0.21.0
-Pillow==10.1.0  # Image handling
+Pillow==10.1.0
 requests==2.31.0

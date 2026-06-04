@@ -166,7 +166,6 @@ class Ticket(models.Model):
     description = models.TextField()
     source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='email')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open', db_index=True)
-    work_order = models.OneToOneField('WorkOrder', on_delete=models.SET_NULL, null=True, blank=True, related_name='ticket')
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='tickets_created')
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
