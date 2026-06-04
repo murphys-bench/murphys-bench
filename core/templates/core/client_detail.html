@@ -12,7 +12,7 @@
                 <span class="px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">Inactive</span>
             {% endif %}
         </div>
-        <a href="/admin/core/client/{{ client.pk }}/change/"
+        <a href="{% url 'core:client_edit' client.pk %}"
            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
             Edit
         </a>
