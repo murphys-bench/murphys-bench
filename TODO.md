@@ -22,10 +22,9 @@
 - Client detail view (contacts, devices, work order history)
 
 ⬜ **NEXT**:
-- Device list + detail views
-- Mileage logging view
-- Native create/edit forms (work orders, clients, devices)
 - Authentication (login/logout pages)
+- Dashboard (home page with key metrics)
+- Native create/edit forms (work orders, clients, devices)
 - HTMX for dynamic interactions (checklist toggles, quick notes)
 - Testing suite
 
@@ -133,6 +132,14 @@
   - [ ] Edit existing client
   - [ ] Add/edit contacts
   - [ ] Estimated: 2 hours
+
+- [ ] **Dashboard (home page)**
+  - [ ] Open work order count by status (New, In Progress, Completed)
+  - [ ] Work orders assigned per technician
+  - [ ] Recent activity (last 10 work orders updated)
+  - [ ] Quick links: New Work Order, New Client
+  - [ ] Set as default landing page after login
+  - [ ] Estimated: 1-2 hours
 
 - [ ] **Device management**
   - [ ] Device list view
