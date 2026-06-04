@@ -1,11 +1,18 @@
 # Murphy's Bench Development Roadmap
 
 **Last Updated**: June 4, 2026  
-**Current Phase**: Phase 1 - SCS Internal (Views & Forms In Progress)
+**Current Phase**: Phase 1 - SCS Internal (Views complete, Dashboard + Forms next)
 
 ## Project Status Summary
 
-✅ **COMPLETED**:
+✅ **COMPLETED THIS SESSION**:
+- Device list + detail views (search, type filter, repair history)
+- Mileage log view (month filter, running total)
+- Authentication — login/logout pages, all views protected
+- Nav bar shows logged-in username, logout link, admin link (staff only)
+- GitHub repository connected and up to date
+
+✅ **COMPLETED PREVIOUSLY**:
 - Database schema fully designed and documented
 - Django project initialized with all dependencies
 - 13 data models created with proper relationships
@@ -21,12 +28,12 @@
 - Client list view (search, active/inactive filter)
 - Client detail view (contacts, devices, work order history)
 
-⬜ **NEXT**:
-- Authentication (login/logout pages)
-- Dashboard (home page with key metrics)
-- Native create/edit forms (work orders, clients, devices)
-- HTMX for dynamic interactions (checklist toggles, quick notes)
-- Testing suite
+⬜ **NEXT — IN ORDER**:
+1. **Dashboard** (home page, landing after login)
+2. **Native create/edit forms** (work orders, clients, devices — no admin required)
+3. **HTMX** (checklist toggles, inline notes)
+4. **Testing suite**
+5. **Deployment** (internal network)
 
 ---
 
@@ -70,12 +77,22 @@
   - [x] Timestamps read-only and collapsible
   - [x] Auto-generate work order and ticket numbers on save
 
+### Authentication
+- [x] **Login/logout pages** ✅ COMPLETE
+  - [x] Login page with error messaging (accounts/login/)
+  - [x] Logout redirects to login page
+  - [x] All views protected with LoginRequiredMixin
+  - [x] Unauthenticated users redirected to login
+  - [x] Nav shows username, logout link, admin link (staff only)
+  - [x] LOGIN_URL, LOGIN_REDIRECT_URL set in settings
+
 ### UI & Frontend
 - [x] **Base template & navigation** ✅ COMPLETE
   - [x] base.html with dark nav bar
   - [x] Nav links: Work Orders, Clients, Devices, Mileage, Admin
   - [x] Active state highlighting per page
   - [x] Tailwind CSS via CDN
+  - [x] User info and logout in nav
 
 - [ ] **Styling polish** *(deferred — functionality first)*
   - [ ] Visual design refinement
@@ -107,7 +124,7 @@
   - [x] Quick actions (Edit, Add Note)
 
 - [ ] **Work order create/edit forms**
-  - [ ] Create new work order from client
+  - [ ] Create new work order (native form, not admin)
   - [ ] Edit existing work order
   - [ ] Assign technician
   - [ ] Update status
@@ -128,57 +145,55 @@
   - [x] Client notes
 
 - [ ] **Client create/edit forms**
-  - [ ] Create new client
+  - [ ] Create new client (native form, not admin)
   - [ ] Edit existing client
   - [ ] Add/edit contacts
   - [ ] Estimated: 2 hours
 
-- [ ] **Dashboard (home page)**
+- [ ] **Dashboard (home page)** ← BUILD NEXT
   - [ ] Open work order count by status (New, In Progress, Completed)
   - [ ] Work orders assigned per technician
   - [ ] Recent activity (last 10 work orders updated)
   - [ ] Quick links: New Work Order, New Client
-  - [ ] Set as default landing page after login
+  - [ ] Set as default landing page after login (url: /)
   - [ ] Estimated: 1-2 hours
 
-- [ ] **Device management**
-  - [ ] Device list view
-  - [ ] Device detail with repair history
-  - [ ] Create/edit device
+- [x] **Device list view** ✅ COMPLETE
+  - [x] Search by name, serial, model, client
+  - [x] Filter by device type
+  - [x] Clickable rows → detail view
+
+- [x] **Device detail view** ✅ COMPLETE
+  - [x] Device info sidebar (manufacturer, model, serial, client)
+  - [x] Repair history table
+  - [x] Link back to client
+
+- [ ] **Device create/edit forms**
+  - [ ] Create new device linked to client
+  - [ ] Edit existing device
   - [ ] Estimated: 1-2 hours
 
 - [ ] **Checklist functionality**
   - [ ] Display checklist items for work order (based on repair type)
   - [ ] Mark items complete with HTMX (no page reload)
-  - [ ] Update work order completion status
   - [ ] Estimated: 2 hours
 
-- [ ] **Notes (customer-facing vs. internal)**
-  - [ ] Add customer-visible notes inline (no admin required)
-  - [ ] Add internal technician notes inline
-  - [ ] Edit/delete notes
+- [ ] **Notes (inline, no admin required)**
+  - [ ] Add customer-visible notes from work order detail page
+  - [ ] Add internal notes from work order detail page
   - [ ] Estimated: 1-2 hours
 
-- [ ] **Mileage logging**
-  - [ ] Quick mileage entry (date, from/to, miles, purpose)
-  - [ ] Mileage list with summary totals
-  - [ ] Edit/delete mileage entries
-  - [ ] Estimated: 1.5 hours
-
-### Authentication
-- [ ] **Login/logout pages**
-  - [ ] Login page (currently redirects to admin login)
-  - [ ] Logout
-  - [ ] Protect all views with LoginRequiredMixin
-  - [ ] Redirect to login on unauthenticated access
-  - [ ] Estimated: 1 hour
+- [x] **Mileage log view** ✅ COMPLETE
+  - [x] List all entries with date, technician, from/to, miles, purpose
+  - [x] Filter by month
+  - [x] Running total (filtered and overall)
+  - [x] Link to associated work order
 
 ### Testing & Quality
 - [ ] **Write tests**
   - [ ] Model tests (validation, relationships)
   - [ ] View tests (authentication, permissions, data display)
   - [ ] Form tests (validation, submission)
-  - [ ] Service/utility function tests
   - [ ] Aim for 70%+ code coverage
   - [ ] Estimated: 4-6 hours
 
@@ -186,7 +201,6 @@
   - [ ] Run black (code formatter)
   - [ ] Run flake8 (linter)
   - [ ] Run isort (import sorting)
-  - [ ] Clean up any warnings
   - [ ] Estimated: 1 hour
 
 ### Documentation
@@ -197,44 +211,13 @@
   - [ ] Project structure explanation
   - [ ] Estimated: 1 hour
 
-- [ ] **Workflow documentation** (in docs/workflows.md)
-  - [ ] SCS-specific workflows
-  - [ ] How to use each feature
-  - [ ] Common tasks and their steps
-  - [ ] Estimated: 1-2 hours
-
 ### Deployment & Operations (Internal Network)
-- [ ] **Local deployment testing**
-  - [ ] Create script to set up fresh dev database
-  - [ ] Test on clean machine (documentation accuracy)
-  - [ ] Estimated: 1 hour
-
 - [ ] **Internal network readiness**
-  - [ ] Configure for internal deployment (settings, logging)
+  - [ ] Configure for internal deployment
   - [ ] Set up HTTPS with self-signed certificate
-  - [ ] Database backups strategy (on-network)
-  - [ ] Deployment documentation (how to set up on internal server)
+  - [ ] Database backups strategy
   - [ ] Test on internal network (10.58.58.235 or equivalent)
   - [ ] Estimated: 2-3 hours
-
-- [ ] **Network security configuration**
-  - [ ] Firewall rules (internal network only)
-  - [ ] No public internet exposure
-  - [ ] Email integration (SMTP inbound/outbound)
-  - [ ] Documentation: Security model for self-hosting
-  - [ ] Estimated: 1-2 hours
-
-### Iteration & Feedback
-- [ ] **Deploy to SCS and gather feedback**
-  - [ ] Techs use it for real work
-  - [ ] Collect pain points and suggestions
-  - [ ] Log bugs
-
-- [ ] **Iterate on UI/UX**
-  - [ ] Adjust layouts based on feedback
-  - [ ] Add missing features identified in use
-  - [ ] Performance optimization if needed
-  - [ ] Estimated: Variable
 
 ### Phase 1 Completion Criteria
 - [ ] All SCS core workflows functional (ticketing, work orders, tracking)
@@ -243,15 +226,12 @@
 - [ ] Tests passing, code quality good
 - [ ] No critical bugs in production
 - [ ] Email integration working (inbound tickets, outbound updates)
-- [ ] Taskbar utility working (creates tickets via email)
 - [ ] Comprehensive self-hosting documentation
-- [ ] Security model documented for internal deployment
 
 ---
 
 ## Phase 2: Integrations & Polish (Future - Not Starting Yet)
 
-*To be detailed after Phase 1 completion. Focus on reducing context switching and integrating with existing tools:*
 - Invoice Ninja API bridge (send completed work orders → invoices)
 - Email parsing improvements (better ticket extraction)
 - Optional integrations (Slack notifications, etc.)
@@ -260,66 +240,55 @@
 
 ## Phase 3+: Multi-Tenant SaaS (Speculative - Only if Demand Emerges)
 
-*Note: This is speculative and NOT being planned for now. Only reconsidered if multiple companies request it AND we decide to offer a hosted version.*
-
-- Would require separate SaaS codebase/infrastructure
-- Original Murphy's Bench remains self-hosted
-- Decision point: When/if actual demand is clear (not now)
+*Only reconsidered if multiple companies request it AND we decide to offer a hosted version.*
 
 ---
 
 ## Quick Start (Next Session)
 
-To pick up development in the next chat:
-
 ```bash
 cd ~/Documents/Claude/murphys-bench
 source venv/bin/activate
-python manage.py runserver  # Starts on http://localhost:8000
-# Visit http://localhost:8000/work-orders/ — main app
-# Visit http://localhost:8000/admin/ — admin panel (login: admin)
+python manage.py runserver
+# Visit http://localhost:8000 — redirects to login
+# Login: admin / password123 (local dev only)
 ```
 
 **What's working now**:
-- `/work-orders/` — work order list with search and filters
+- `/` → redirects to login (dashboard not built yet)
+- `/accounts/login/` — login page
+- `/work-orders/` — work order list
 - `/work-orders/<id>/` — work order detail
-- `/clients/` — client list with search
-- `/clients/<id>/` — client detail with contacts, devices, work history
-- `/admin/` — full admin panel for all data entry
+- `/clients/` — client list
+- `/clients/<id>/` — client detail
+- `/devices/` — device list
+- `/devices/<id>/` — device detail
+- `/mileage/` — mileage log
+- `/admin/` — Django admin (all data entry done here for now)
 
-**What's ready to build next**:
-1. Device list + detail views (`core/views.py`, `core/urls.py`, new templates)
-2. Mileage list view
-3. Native create/edit forms (so techs don't need to use admin)
-4. Login/logout authentication pages
-5. HTMX checklist toggling
+**Build next — Dashboard**:
+- Add `DashboardView` to `core/views.py`
+- Add `path('', DashboardView.as_view(), name='dashboard')` to `core/urls.py`
+- Create `core/templates/core/dashboard.html`
+- Show: open WO counts by status, recent work orders, quick links
+- Use `WorkOrder.objects.values('status').annotate(count=Count('status'))` for counts
+- Reference the mockup at `~/Documents/Claude/dashboard-mockup.html` for layout ideas
 
----
-
-## Estimated Timeline
-
-**Phase 1 MVP** (all views, forms, auth, email integration): **~15-20 hours remaining**
-
-**Phase 1 Complete** (with testing, documentation, deployment, iteration): **3-5 weeks of part-time work** (assuming 10-15 hours/week)
-
-**Phase 2** (integrations, polish): **Depends on scope, TBD after Phase 1**
-
-**Phase 3+** (multi-tenant SaaS if it ever happens): **Years away, only if explicit demand emerges**
-
----
-
-## Dependencies & Blockers
-
-- [x] GitHub repository set up and connected
-- [ ] Access to SCS internal network for deployment
-- [ ] Feedback from SCS techs during development
+**Key files**:
+- `core/views.py` — all views
+- `core/urls.py` — URL routing
+- `core/models.py` — all data models
+- `core/admin.py` — admin customization
+- `core/templates/core/` — all HTML templates
+- `accounts/views.py` — login/logout
+- `murphys_bench/settings.py` — Django settings
 
 ---
 
 ## Notes
 
-- This is a living roadmap; adjust as you learn more
-- Time estimates are rough and may change
-- Testing and documentation are built in, not afterthoughts
-- Each completed feature should be deployable (even if not released to users yet)
 - Visual polish is intentionally deferred — functionality first
+- All views require login (LoginRequiredMixin on everything)
+- Data entry still goes through /admin/ until native forms are built
+- Tailwind CSS loaded via CDN (no build step needed)
+- SQLite in dev, PostgreSQL planned for production
