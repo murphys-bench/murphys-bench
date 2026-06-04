@@ -1,11 +1,12 @@
 from django.shortcuts import render
 from django.views.generic import ListView, DetailView, CreateView, UpdateView
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.urls import reverse_lazy
 from django.db.models import Q
 from .models import WorkOrder, Client, Device, Mileage
 
 
-class WorkOrderListView(ListView):
+class WorkOrderListView(LoginRequiredMixin, ListView):
     """Display list of all work orders with filtering and search"""
     model = WorkOrder
     template_name = 'core/work_order_list.html'
@@ -42,7 +43,7 @@ class WorkOrderListView(ListView):
         return context
 
 
-class WorkOrderDetailView(DetailView):
+class WorkOrderDetailView(LoginRequiredMixin, DetailView):
     """Display full details of a single work order"""
     model = WorkOrder
     template_name = 'core/work_order_detail.html'
@@ -54,7 +55,7 @@ class WorkOrderDetailView(DetailView):
         ).prefetch_related('notes', 'items', 'notes__created_by')
 
 
-class ClientListView(ListView):
+class ClientListView(LoginRequiredMixin, ListView):
     """Display list of all clients"""
     model = Client
     template_name = 'core/client_list.html'
@@ -81,7 +82,7 @@ class ClientListView(ListView):
         return queryset.order_by('name')
 
 
-class ClientDetailView(DetailView):
+class ClientDetailView(LoginRequiredMixin, DetailView):
     """Display full details of a single client"""
     model = Client
     template_name = 'core/client_detail.html'
@@ -93,7 +94,7 @@ class ClientDetailView(DetailView):
         )
 
 
-class DeviceListView(ListView):
+class DeviceListView(LoginRequiredMixin, ListView):
     """Display list of all devices"""
     model = Device
     template_name = 'core/device_list.html'
@@ -124,7 +125,7 @@ class DeviceListView(ListView):
         return context
 
 
-class DeviceDetailView(DetailView):
+class DeviceDetailView(LoginRequiredMixin, DetailView):
     """Display full details of a single device"""
     model = Device
     template_name = 'core/device_detail.html'
@@ -138,7 +139,7 @@ class DeviceDetailView(DetailView):
         )
 
 
-class MileageListView(ListView):
+class MileageListView(LoginRequiredMixin, ListView):
     """Display mileage log with totals"""
     model = Mileage
     template_name = 'core/mileage_list.html'
