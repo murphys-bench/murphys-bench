@@ -29,12 +29,14 @@
                            {% if request.resolver_match.url_name == 'client_list' or request.resolver_match.url_name == 'client_detail' %}bg-gray-700{% endif %}">
                             Clients
                         </a>
-                        <a href="#"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 text-gray-400">
+                        <a href="{% url 'core:device_list' %}"
+                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700
+                           {% if request.resolver_match.url_name == 'device_list' or request.resolver_match.url_name == 'device_detail' %}bg-gray-700{% endif %}">
                             Devices
                         </a>
-                        <a href="#"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 text-gray-400">
+                        <a href="{% url 'core:mileage_list' %}"
+                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700
+                           {% if request.resolver_match.url_name == 'mileage_list' %}bg-gray-700{% endif %}">
                             Mileage
                         </a>
                     </div>

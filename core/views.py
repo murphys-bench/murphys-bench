@@ -2,7 +2,7 @@ from django.shortcuts import render
 from django.views.generic import ListView, DetailView, CreateView, UpdateView
 from django.urls import reverse_lazy
 from django.db.models import Q
-from .models import WorkOrder, Client, Device
+from .models import WorkOrder, Client, Device, Mileage
 
 
 class WorkOrderListView(ListView):
@@ -91,3 +91,83 @@ class ClientDetailView(DetailView):
         return Client.objects.prefetch_related(
             'contacts', 'devices', 'work_orders', 'work_orders__assigned_to'
         )
+
+
+class DeviceListView(ListView):
+    """Display list of all devices"""
+    model = Device
+    template_name = 'core/device_list.html'
+    context_object_name = 'devices'
+    paginate_by = 25
+
+    def get_queryset(self):
+        queryset = Device.objects.select_related('client', 'repair_type')
+
+        search = self.request.GET.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) |
+                Q(serial_number__icontains=search) |
+                Q(model__icontains=search) |
+                Q(client__name__icontains=search)
+            )
+
+        device_type = self.request.GET.get('device_type')
+        if device_type:
+            queryset = queryset.filter(device_type=device_type)
+
+        return queryset.order_by('client__name', 'name')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['device_type_choices'] = Device.DEVICE_TYPE_CHOICES
+        return context
+
+
+class DeviceDetailView(DetailView):
+    """Display full details of a single device"""
+    model = Device
+    template_name = 'core/device_detail.html'
+    context_object_name = 'device'
+
+    def get_queryset(self):
+        return Device.objects.select_related(
+            'client', 'repair_type'
+        ).prefetch_related(
+            'work_orders', 'work_orders__assigned_to'
+        )
+
+
+class MileageListView(ListView):
+    """Display mileage log with totals"""
+    model = Mileage
+    template_name = 'core/mileage_list.html'
+    context_object_name = 'entries'
+    paginate_by = 50
+
+    def get_queryset(self):
+        queryset = Mileage.objects.select_related('technician', 'work_order')
+
+        # Filter by technician
+        technician = self.request.GET.get('technician')
+        if technician:
+            queryset = queryset.filter(technician_id=technician)
+
+        # Filter by month
+        month = self.request.GET.get('month')
+        if month:
+            try:
+                year, mo = month.split('-')
+                queryset = queryset.filter(trip_date__year=year, trip_date__month=mo)
+            except ValueError:
+                pass
+
+        return queryset.order_by('-trip_date')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        # Total miles for current filtered queryset
+        from django.db.models import Sum
+        total = self.get_queryset().aggregate(total=Sum('miles'))['total'] or 0
+        context['total_miles'] = total
+        return context
