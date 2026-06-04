@@ -1,0 +1,185 @@
+{% extends "core/base.html" %}
+
+{% block title %}{{ work_order.work_order_number }} - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex items-center justify-between">
+        <div>
+            <div class="flex items-center gap-3">
+                <a href="{% url 'core:work_order_list' %}" class="text-gray-400 hover:text-gray-600 text-sm">← Work Orders</a>
+            </div>
+            <h1 class="text-2xl font-bold text-gray-900 mt-1">{{ work_order.work_order_number }}</h1>
+            <p class="text-gray-500 text-sm">{{ work_order.client.name }}{% if work_order.device %} — {{ work_order.device.name }}{% endif %}</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <span class="px-3 py-1 text-sm font-semibold rounded-full
+                {% if work_order.status == 'new' %}bg-blue-100 text-blue-800
+                {% elif work_order.status == 'assigned' %}bg-purple-100 text-purple-800
+                {% elif work_order.status == 'in_progress' %}bg-yellow-100 text-yellow-800
+                {% elif work_order.status == 'completed' %}bg-green-100 text-green-800
+                {% elif work_order.status == 'closed' %}bg-gray-100 text-gray-800
+                {% else %}bg-red-100 text-red-800
+                {% endif %}">
+                {{ work_order.get_status_display }}
+            </span>
+            <span class="px-3 py-1 text-sm font-semibold rounded-full
+                {% if work_order.priority == 'low' %}bg-gray-100 text-gray-600
+                {% elif work_order.priority == 'normal' %}bg-blue-100 text-blue-800
+                {% elif work_order.priority == 'high' %}bg-orange-100 text-orange-800
+                {% else %}bg-red-100 text-red-800
+                {% endif %}">
+                {{ work_order.get_priority_display }} Priority
+            </span>
+            <a href="/admin/core/workorder/{{ work_order.pk }}/change/"
+               class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
+                Edit
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+    <!-- Left Column: Main Info -->
+    <div class="lg:col-span-2 space-y-6">
+
+        <!-- Work Order Info -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Details</h2>
+            <dl class="grid grid-cols-2 gap-4">
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">Client</dt>
+                    <dd class="text-sm text-gray-900 mt-1">{{ work_order.client.name }}</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">Device</dt>
+                    <dd class="text-sm text-gray-900 mt-1">{{ work_order.device.name|default:"—" }}</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">Repair Type</dt>
+                    <dd class="text-sm text-gray-900 mt-1">{{ work_order.repair_type|default:"—" }}</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">Assigned To</dt>
+                    <dd class="text-sm text-gray-900 mt-1">{{ work_order.assigned_to.get_full_name|default:"Unassigned" }}</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">Scheduled Date</dt>
+                    <dd class="text-sm text-gray-900 mt-1">{{ work_order.scheduled_date|date:"M d, Y"|default:"—" }}</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">Time Spent</dt>
+                    <dd class="text-sm text-gray-900 mt-1">
+                        {% if work_order.time_spent_minutes %}
+                            {{ work_order.time_spent_minutes }} min
+                        {% else %}
+                            —
+                        {% endif %}
+                    </dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">Created</dt>
+                    <dd class="text-sm text-gray-900 mt-1">{{ work_order.created_at|date:"M d, Y g:i A" }}</dd>
+                </div>
+                {% if work_order.completed_date %}
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">Completed</dt>
+                    <dd class="text-sm text-gray-900 mt-1">{{ work_order.completed_date|date:"M d, Y g:i A" }}</dd>
+                </div>
+                {% endif %}
+            </dl>
+        </div>
+
+        <!-- Customer-Visible Notes -->
+        {% if work_order.notes_customer_visible %}
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-3">Customer Notes</h2>
+            <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ work_order.notes_customer_visible }}</p>
+        </div>
+        {% endif %}
+
+        <!-- Internal Notes -->
+        {% if work_order.notes_internal %}
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-yellow-900 mb-3">🔒 Internal Notes</h2>
+            <p class="text-sm text-yellow-800 whitespace-pre-wrap">{{ work_order.notes_internal }}</p>
+        </div>
+        {% endif %}
+
+        <!-- Activity Notes -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Activity</h2>
+            {% if work_order.notes.all %}
+                <div class="space-y-4">
+                    {% for note in work_order.notes.all %}
+                    <div class="border-l-4 pl-4
+                        {% if note.note_type == 'internal' %}border-yellow-400 bg-yellow-50{% else %}border-blue-400 bg-blue-50{% endif %}
+                        rounded-r py-2">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-xs font-semibold
+                                {% if note.note_type == 'internal' %}text-yellow-700{% else %}text-blue-700{% endif %}">
+                                {% if note.note_type == 'internal' %}🔒 Internal{% else %}👤 Customer Visible{% endif %}
+                            </span>
+                            <span class="text-xs text-gray-400">
+                                {{ note.created_by.get_full_name|default:"Unknown" }} — {{ note.created_at|date:"M d, Y g:i A" }}
+                            </span>
+                        </div>
+                        <p class="text-sm text-gray-700">{{ note.content }}</p>
+                    </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-gray-400 text-sm">No activity notes yet.</p>
+            {% endif %}
+        </div>
+
+    </div>
+
+    <!-- Right Column: Sidebar -->
+    <div class="space-y-6">
+
+        <!-- Checklist / Items -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Items & Checklist</h2>
+            {% if work_order.items.all %}
+                <ul class="space-y-2">
+                    {% for item in work_order.items.all %}
+                    <li class="flex items-start gap-2 text-sm">
+                        <span class="mt-0.5">
+                            {% if item.is_completed %}✅{% else %}⬜{% endif %}
+                        </span>
+                        <span class="{% if item.is_completed %}line-through text-gray-400{% else %}text-gray-700{% endif %}">
+                            {{ item.description }}
+                            {% if item.quantity and item.quantity != 1 %}
+                                <span class="text-gray-400">({{ item.quantity }} {{ item.unit }})</span>
+                            {% endif %}
+                        </span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="text-gray-400 text-sm">No items yet.</p>
+            {% endif %}
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
+            <div class="space-y-2">
+                <a href="/admin/core/workorder/{{ work_order.pk }}/change/"
+                   class="block w-full text-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
+                    Edit Work Order
+                </a>
+                <a href="/admin/core/workordernote/add/?work_order={{ work_order.pk }}"
+                   class="block w-full text-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">
+                    Add Note
+                </a>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}

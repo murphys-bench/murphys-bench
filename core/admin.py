@@ -140,7 +140,8 @@ class WorkOrderAdmin(admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         if not change:  # Creating new work order
-            obj.work_order_number = obj.work_order_number or 'generating...'
+            if not obj.work_order_number:
+                obj.work_order_number = WorkOrder.generate_work_order_number()
         super().save_model(request, obj, form, change)
 
 
