@@ -1,0 +1,180 @@
+{% extends "core/base.html" %}
+
+{% block title %}{{ client.name }} - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex items-center justify-between">
+        <div>
+            <a href="{% url 'core:client_list' %}" class="text-gray-400 hover:text-gray-600 text-sm">← Clients</a>
+            <h1 class="text-2xl font-bold text-gray-900 mt-1">{{ client.name }}</h1>
+            {% if not client.is_active %}
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">Inactive</span>
+            {% endif %}
+        </div>
+        <a href="/admin/core/client/{{ client.pk }}/change/"
+           class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
+            Edit
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+    <!-- Left Column -->
+    <div class="lg:col-span-2 space-y-6">
+
+        <!-- Work Orders -->
+        <div class="bg-white rounded-lg shadow overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-gray-900">Work Orders</h2>
+                <a href="/admin/core/workorder/add/?client={{ client.pk }}"
+                   class="text-sm text-blue-600 hover:underline">+ New</a>
+            </div>
+            {% if client.work_orders.all %}
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Work Order #</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned To</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                        {% for wo in client.work_orders.all %}
+                            <tr class="hover:bg-gray-50 cursor-pointer" onclick="window.location='{% url 'core:work_order_detail' wo.pk %}'">
+                                <td class="px-6 py-3 text-sm font-medium text-blue-600">
+                                    <a href="{% url 'core:work_order_detail' wo.pk %}">{{ wo.work_order_number }}</a>
+                                </td>
+                                <td class="px-6 py-3">
+                                    <span class="px-2 py-1 text-xs font-semibold rounded-full
+                                        {% if wo.status == 'new' %}bg-blue-100 text-blue-800
+                                        {% elif wo.status == 'in_progress' %}bg-yellow-100 text-yellow-800
+                                        {% elif wo.status == 'completed' %}bg-green-100 text-green-800
+                                        {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                        {{ wo.get_status_display }}
+                                    </span>
+                                </td>
+                                <td class="px-6 py-3 text-sm text-gray-600">
+                                    {{ wo.assigned_to.get_full_name|default:"Unassigned" }}
+                                </td>
+                                <td class="px-6 py-3 text-sm text-gray-600">
+                                    {{ wo.created_at|date:"M d, Y" }}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <div class="px-6 py-8 text-center text-gray-400 text-sm">No work orders yet.</div>
+            {% endif %}
+        </div>
+
+        <!-- Devices -->
+        <div class="bg-white rounded-lg shadow overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-gray-900">Devices</h2>
+                <a href="/admin/core/device/add/?client={{ client.pk }}"
+                   class="text-sm text-blue-600 hover:underline">+ New</a>
+            </div>
+            {% if client.devices.all %}
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Model</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Serial #</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                        {% for device in client.devices.all %}
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-6 py-3 text-sm font-medium text-gray-900">{{ device.name }}</td>
+                                <td class="px-6 py-3 text-sm text-gray-600">{{ device.get_device_type_display }}</td>
+                                <td class="px-6 py-3 text-sm text-gray-600">{{ device.model|default:"—" }}</td>
+                                <td class="px-6 py-3 text-sm text-gray-600">{{ device.serial_number|default:"—" }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <div class="px-6 py-8 text-center text-gray-400 text-sm">No devices on file.</div>
+            {% endif %}
+        </div>
+
+    </div>
+
+    <!-- Right Column: Sidebar -->
+    <div class="space-y-6">
+
+        <!-- Contact Info -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Contact Info</h2>
+            <dl class="space-y-3">
+                {% if client.phone %}
+                <div>
+                    <dt class="text-xs font-medium text-gray-500 uppercase">Phone</dt>
+                    <dd class="text-sm text-gray-900 mt-1">{{ client.phone }}</dd>
+                </div>
+                {% endif %}
+                {% if client.email %}
+                <div>
+                    <dt class="text-xs font-medium text-gray-500 uppercase">Email</dt>
+                    <dd class="text-sm text-gray-900 mt-1">{{ client.email }}</dd>
+                </div>
+                {% endif %}
+                {% if client.address_street %}
+                <div>
+                    <dt class="text-xs font-medium text-gray-500 uppercase">Address</dt>
+                    <dd class="text-sm text-gray-900 mt-1">
+                        {{ client.address_street }}<br>
+                        {{ client.address_city }}{% if client.address_state %}, {{ client.address_state }}{% endif %} {{ client.address_zip }}
+                    </dd>
+                </div>
+                {% endif %}
+            </dl>
+        </div>
+
+        <!-- Contacts -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-900">Contacts</h2>
+                <a href="/admin/core/contact/add/?client={{ client.pk }}"
+                   class="text-sm text-blue-600 hover:underline">+ Add</a>
+            </div>
+            {% if client.contacts.all %}
+                <div class="space-y-3">
+                    {% for contact in client.contacts.all %}
+                        <div class="text-sm">
+                            <p class="font-medium text-gray-900">
+                                {{ contact.first_name }} {{ contact.last_name }}
+                                {% if contact.is_primary %}
+                                    <span class="text-xs text-blue-600 font-normal ml-1">Primary</span>
+                                {% endif %}
+                            </p>
+                            {% if contact.title %}<p class="text-gray-500">{{ contact.title }}</p>{% endif %}
+                            {% if contact.email %}<p class="text-gray-600">{{ contact.email }}</p>{% endif %}
+                            {% if contact.phone %}<p class="text-gray-600">{{ contact.phone }}</p>{% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-gray-400 text-sm">No contacts on file.</p>
+            {% endif %}
+        </div>
+
+        {% if client.notes %}
+        <!-- Notes -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-3">Notes</h2>
+            <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ client.notes }}</p>
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Murphy's Bench{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+    <!-- Top Navigation Bar -->
+    <nav class="bg-gray-900 text-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+
+                <!-- Logo / App Name -->
+                <div class="flex items-center gap-8">
+                    <span class="text-xl font-bold tracking-tight">🔧 Murphy's Bench</span>
+
+                    <!-- Nav Links -->
+                    <div class="hidden md:flex items-center gap-1">
+                        <a href="{% url 'core:work_order_list' %}"
+                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700
+                           {% if request.resolver_match.url_name == 'work_order_list' %}bg-gray-700{% endif %}">
+                            Work Orders
+                        </a>
+                        <a href="{% url 'core:client_list' %}"
+                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700
+                           {% if request.resolver_match.url_name == 'client_list' or request.resolver_match.url_name == 'client_detail' %}bg-gray-700{% endif %}">
+                            Clients
+                        </a>
+                        <a href="#"
+                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 text-gray-400">
+                            Devices
+                        </a>
+                        <a href="#"
+                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 text-gray-400">
+                            Mileage
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Right Side: Admin link -->
+                <div class="flex items-center gap-4">
+                    <a href="/admin/" class="text-sm text-gray-400 hover:text-white">Admin</a>
+                </div>
+
+            </div>
+        </div>
+    </nav>
+
+    <!-- Page Header -->
+    {% block page_header %}{% endblock %}
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
+        {% block content %}{% endblock %}
+    </main>
+
+</body>
+</html>

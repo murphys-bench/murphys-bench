@@ -1,12 +1,11 @@
 from django.shortcuts import render
 from django.views.generic import ListView, DetailView, CreateView, UpdateView
-from django.contrib.auth.mixins import LoginRequiredMixin
 from django.urls import reverse_lazy
-from django.db import models
+from django.db.models import Q
 from .models import WorkOrder, Client, Device
 
 
-class WorkOrderListView(LoginRequiredMixin, ListView):
+class WorkOrderListView(ListView):
     """Display list of all work orders with filtering and search"""
     model = WorkOrder
     template_name = 'core/work_order_list.html'
@@ -30,8 +29,8 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
         search = self.request.GET.get('search')
         if search:
             queryset = queryset.filter(
-                models.Q(work_order_number__icontains=search) |
-                models.Q(client__name__icontains=search)
+                Q(work_order_number__icontains=search) |
+                Q(client__name__icontains=search)
             )
 
         return queryset.order_by('-created_at')
@@ -41,3 +40,54 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
         context['status_choices'] = WorkOrder.STATUS_CHOICES
         context['priority_choices'] = WorkOrder.PRIORITY_CHOICES
         return context
+
+
+class WorkOrderDetailView(DetailView):
+    """Display full details of a single work order"""
+    model = WorkOrder
+    template_name = 'core/work_order_detail.html'
+    context_object_name = 'work_order'
+
+    def get_queryset(self):
+        return WorkOrder.objects.select_related(
+            'client', 'assigned_to', 'device', 'repair_type', 'ticket'
+        ).prefetch_related('notes', 'items', 'notes__created_by')
+
+
+class ClientListView(ListView):
+    """Display list of all clients"""
+    model = Client
+    template_name = 'core/client_list.html'
+    context_object_name = 'clients'
+    paginate_by = 25
+
+    def get_queryset(self):
+        queryset = Client.objects.all()
+
+        search = self.request.GET.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) |
+                Q(email__icontains=search) |
+                Q(phone__icontains=search)
+            )
+
+        active = self.request.GET.get('active')
+        if active == 'yes':
+            queryset = queryset.filter(is_active=True)
+        elif active == 'no':
+            queryset = queryset.filter(is_active=False)
+
+        return queryset.order_by('name')
+
+
+class ClientDetailView(DetailView):
+    """Display full details of a single client"""
+    model = Client
+    template_name = 'core/client_detail.html'
+    context_object_name = 'client'
+
+    def get_queryset(self):
+        return Client.objects.prefetch_related(
+            'contacts', 'devices', 'work_orders', 'work_orders__assigned_to'
+        )
