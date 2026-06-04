@@ -153,18 +153,26 @@
   - Common tasks and their steps
   - Estimated: 1-2 hours
 
-### Deployment & Operations
+### Deployment & Operations (Internal Network)
 - [ ] **Local deployment testing**
   - Create script to set up fresh dev database
   - Test on clean machine (documentation accuracy)
   - Estimated: 1 hour
 
-- [ ] **Production readiness** (for SCS internal network)
-  - Configure for production (settings, security, logging)
-  - Set up SSL/HTTPS
-  - Database backups strategy
-  - Deployment to 10.58.58.235 (or new server)
+- [ ] **Internal network readiness**
+  - Configure for internal deployment (settings, logging)
+  - Set up HTTPS with self-signed certificate
+  - Database backups strategy (on-network)
+  - Deployment documentation (how to set up on internal server)
+  - Test on internal network (10.58.58.235 or equivalent)
   - Estimated: 2-3 hours
+
+- [ ] **Network security configuration**
+  - Firewall rules (internal network only)
+  - No public internet exposure
+  - Email integration (SMTP inbound/outbound)
+  - Documentation: Security model for self-hosting
+  - Estimated: 1-2 hours
 
 ### Iteration & Feedback
 - [ ] **Deploy to SCS and gather feedback**
@@ -179,33 +187,45 @@
   - Estimated: Variable
 
 ### Phase 1 Completion Criteria
-- [ ] All SCS core workflows functional
+- [ ] All SCS core workflows functional (ticketing, work orders, tracking)
 - [ ] Deployed to internal network and in daily use
 - [ ] Techs prefer it to legacy PHP app
 - [ ] Tests passing, code quality good
 - [ ] No critical bugs in production
-- [ ] Comprehensive documentation
+- [ ] Email integration working (inbound tickets, outbound updates)
+- [ ] Taskbar utility working (creates tickets via email)
+- [ ] Comprehensive self-hosting documentation
+- [ ] Security model documented for internal deployment
 
 ---
 
-## Phase 2: Multi-Tenant Platform (Future - Not Starting Yet)
+## Phase 2: Integrations & Polish (Future - Not Starting Yet)
 
-*To be detailed after Phase 1 completion. Will include:*
-- Company/organization data models
-- Admin UI for company configuration
-- Customizable workflows per company
-- Information block rearrangement
-- Custom field support
-- Data isolation/filtering per company
-- Subscription/billing integration (if needed)
+*To be detailed after Phase 1 completion. Focus on reducing context switching and integrating with existing tools:*
+- Invoice Ninja API bridge (send completed work orders → invoices)
+- Email parsing improvements (better ticket extraction)
+- Optional integrations (Slack notifications, etc.)
+- Performance optimization based on real usage
+
+## Phase 3+: Multi-Tenant SaaS (Speculative - Only if Demand Emerges)
+
+*Note: This is speculative and NOT being planned for now. Only reconsidered if multiple companies request it AND we decide to offer a hosted version.*
+
+- Would require separate SaaS codebase/infrastructure
+- Original Murphy's Bench remains self-hosted
+- Decision point: When/if actual demand is clear (not now)
 
 ---
 
 ## Estimated Timeline
 
-**Phase 1 MVP** (1 hour HTMX, 2 hours CSS, 3 hours models, 5+ hours views/forms, 2 hours admin): **~20-25 hours of development**
+**Phase 1 MVP** (models, views, email integration, basic admin): **~20-30 hours of development**
 
-With iteration, testing, documentation, and deployment: **4-6 weeks of part-time work** (assuming 10-15 hours/week)
+**Phase 1 Complete** (with testing, documentation, deployment, iteration): **4-6 weeks of part-time work** (assuming 10-15 hours/week)
+
+**Phase 2** (integrations, polish): **Depends on scope, TBD after Phase 1**
+
+**Phase 3+** (multi-tenant SaaS if it ever happens): **Years away, only if explicit demand emerges**
 
 ---
 

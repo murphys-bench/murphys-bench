@@ -2,7 +2,7 @@
 
 **Status**: Planning / Phase 1 Development  
 **Tech Stack**: Python 3.11+ / Django 5.x / HTMX / Tailwind CSS  
-**Target Deployment**: Internal network (SCS) → Future: Cloud-hosted multi-tenant  
+**Deployment Model**: Self-hosted on internal network (not cloud, not SaaS)  
 **Repository**: Local development (`~/Documents/Claude/murphys-bench`)
 
 ---
@@ -17,21 +17,37 @@ Murphy's Bench is a work order and service management platform designed for fiel
 
 ## Vision & Philosophy
 
+Murphy's Bench is **internal-first, self-hosted software** for small field service businesses.
+
+### Core Principle
+Build one thing well: a self-hosted repair tracking system that runs on a business's internal network. Other companies can self-host it on their infrastructure. We don't pursue SaaS hosting or multi-tenancy unless/until there's explicit demand.
+
 ### Phase 1: SCS Internal (Current)
-Build a single-company, optimized web application for Shamrock Computer Services (SCS). This is the proof-of-concept that will inform all future decisions.
+Build a single-company, optimized web application for Shamrock Computer Services (SCS).
 
 - **Focus**: Get SCS's workflow working perfectly
-- **Scope**: Client management, work orders, device tracking, mileage logging, admin controls
+- **Scope**: Ticketing, work orders, device tracking, mileage logging, admin controls
+- **Deployment**: Internal network (10.58.58.235 or equivalent)
+- **Communication**: Email-based (inbound tickets, outbound updates, ongoing communication)
+- **Taskbar utility**: Simple quick-capture app (sends via email)
 - **Timeline**: Target 4-8 weeks to MVP for internal use
 - **Success**: SCS techs prefer this to the legacy PHP app
 
-### Phase 2: Multi-Tenant Platform (Future)
-Once Phase 1 is stable and learnings are captured, expand to serve other field service companies with customizable workflows.
+### Phase 2: Integrations & Polish (Future)
+Once Phase 1 is stable, add integrations with existing tools (Invoice Ninja, RMM systems, etc.).
 
-- **Focus**: Company-specific configuration, flexible workflows, customization
-- **Scope**: Not defined yet (will be informed by Phase 1)
+- **Focus**: Reduce context switching, integrate with existing workflow
+- **Scope**: Invoice Ninja API bridge, email parsing improvements, optional integrations
 - **Timeline**: Post Phase 1 stabilization
 - **Not starting until Phase 1 is complete**
+
+### Phase 3+: If Multi-Tenancy Emerges (Speculative)
+**Only if** multiple companies demand this AND we decide to offer it, transition to a SaaS model.
+
+- **New business model**: Murphy's Bench becomes a hosted SaaS product
+- **Team responsibility**: Company hosts, maintains, supports it
+- **Timeline**: Years away, if ever
+- **Decision point**: Will be made based on actual demand, not speculation
 
 ---
 
@@ -63,9 +79,10 @@ Once Phase 1 is stable and learnings are captured, expand to serve other field s
 This combination prioritizes:
 1. **Security from day one** (Django enforces security patterns)
 2. **Maintainability** (clear separation of concerns, easy to understand)
-3. **Flexibility for Phase 2** (can add Vue admin panel without rewriting core)
-4. **Developer experience** (Django's documentation and patterns are excellent)
-5. **Appropriate complexity** (not over-engineered for Phase 1, extensible for Phase 2)
+3. **Simplicity** (no over-engineering for hypothetical future scenarios)
+4. **Self-hosting friendly** (can run on internal infrastructure, minimal ops)
+5. **Email integration** (primary communication mechanism, works everywhere)
+6. **Open source** (when/if released, easy for others to self-host)
 
 ---
 
@@ -291,19 +308,28 @@ The PHP app stays in maintenance mode (security fixes, small improvements) until
 
 ## Notes for Future Development
 
-### Phase 1 → Phase 2 Transition
-When moving to multi-tenant in Phase 2:
-- Database models will add `company` foreign key to all relevant tables
-- Views will filter by logged-in user's company
-- Configuration layer will handle company-specific workflows
-- Admin panel will evolve to include company administration (not just system admin)
+### Self-Hosting Philosophy
+This project is designed for self-hosting:
+- Runs on a business's internal network
+- No cloud dependency
+- Firewall/network security is the primary protection
+- Email is the integration mechanism (proven, portable)
+- Other companies can self-host on their own infrastructure
+
+### If Multi-Tenancy Emerges (Phase 3+)
+**Only if** multiple companies want this AND we decide to support it:
+- That becomes a separate SaaS offering (Murphy's Bench Hosted)
+- Original codebase remains self-hosted
+- New codebase/team would manage the SaaS version
+- Decision made only when demand is explicit, not speculative
 
 ### Open Source Aspirations
 This project is being built with eventual open-source release in mind:
 - Clear code patterns and documentation
 - Tests as specification and quality assurance
 - No SCS-specific hard-coding (use configuration instead)
-- Comprehensive README and setup guides
+- Comprehensive README and self-hosting setup guides
+- Other small businesses can run this on their infrastructure
 
 ---
 
