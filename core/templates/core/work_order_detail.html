@@ -31,7 +31,7 @@
                 {% endif %}">
                 {{ work_order.get_priority_display }} Priority
             </span>
-            <a href="/admin/core/workorder/{{ work_order.pk }}/change/"
+            <a href="{% url 'core:work_order_edit' work_order.pk %}"
                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
                 Edit
             </a>
@@ -169,7 +169,7 @@
         <div class="bg-white rounded-lg shadow p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
             <div class="space-y-2">
-                <a href="/admin/core/workorder/{{ work_order.pk }}/change/"
+                <a href="{% url 'core:work_order_edit' work_order.pk %}"
                    class="block w-full text-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
                     Edit Work Order
                 </a>

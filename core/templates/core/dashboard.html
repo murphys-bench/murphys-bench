@@ -10,11 +10,11 @@
             <p class="text-gray-500 text-sm mt-1">Welcome back, {{ user.get_full_name|default:user.username }}</p>
         </div>
         <div class="flex gap-3">
-            <a href="/admin/core/workorder/add/"
+            <a href="{% url 'core:work_order_create' %}"
                class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">
                 + New Work Order
             </a>
-            <a href="/admin/core/client/add/"
+            <a href="{% url 'core:client_create' %}"
                class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm font-medium">
                 + New Client
             </a>

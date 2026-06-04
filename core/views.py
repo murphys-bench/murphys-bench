@@ -4,6 +4,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.urls import reverse_lazy
 from django.db.models import Q
 from .models import WorkOrder, Client, Device, Mileage
+from .forms import WorkOrderForm, ClientForm, DeviceForm
 
 
 class DashboardView(LoginRequiredMixin, ListView):
@@ -214,4 +215,104 @@ class MileageListView(LoginRequiredMixin, ListView):
         from django.db.models import Sum
         total = self.get_queryset().aggregate(total=Sum('miles'))['total'] or 0
         context['total_miles'] = total
+        return context
+
+
+# --- Work Order Create / Edit ---
+
+class WorkOrderCreateView(LoginRequiredMixin, CreateView):
+    model = WorkOrder
+    form_class = WorkOrderForm
+    template_name = 'core/work_order_form.html'
+
+    def form_valid(self, form):
+        form.instance.work_order_number = WorkOrder.generate_work_order_number()
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse_lazy('core:work_order_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'New Work Order'
+        context['cancel_url'] = reverse_lazy('core:work_order_list')
+        return context
+
+
+class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
+    model = WorkOrder
+    form_class = WorkOrderForm
+    template_name = 'core/work_order_form.html'
+
+    def get_success_url(self):
+        return reverse_lazy('core:work_order_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = f'Edit {self.object.work_order_number}'
+        context['cancel_url'] = reverse_lazy('core:work_order_detail', kwargs={'pk': self.object.pk})
+        return context
+
+
+# --- Client Create / Edit ---
+
+class ClientCreateView(LoginRequiredMixin, CreateView):
+    model = Client
+    form_class = ClientForm
+    template_name = 'core/client_form.html'
+
+    def get_success_url(self):
+        return reverse_lazy('core:client_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'New Client'
+        context['cancel_url'] = reverse_lazy('core:client_list')
+        return context
+
+
+class ClientUpdateView(LoginRequiredMixin, UpdateView):
+    model = Client
+    form_class = ClientForm
+    template_name = 'core/client_form.html'
+
+    def get_success_url(self):
+        return reverse_lazy('core:client_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = f'Edit {self.object.name}'
+        context['cancel_url'] = reverse_lazy('core:client_detail', kwargs={'pk': self.object.pk})
+        return context
+
+
+# --- Device Create / Edit ---
+
+class DeviceCreateView(LoginRequiredMixin, CreateView):
+    model = Device
+    form_class = DeviceForm
+    template_name = 'core/device_form.html'
+
+    def get_success_url(self):
+        return reverse_lazy('core:device_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'New Device'
+        context['cancel_url'] = reverse_lazy('core:device_list')
+        return context
+
+
+class DeviceUpdateView(LoginRequiredMixin, UpdateView):
+    model = Device
+    form_class = DeviceForm
+    template_name = 'core/device_form.html'
+
+    def get_success_url(self):
+        return reverse_lazy('core:device_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = f'Edit {self.object.name}'
+        context['cancel_url'] = reverse_lazy('core:device_detail', kwargs={'pk': self.object.pk})
         return context
