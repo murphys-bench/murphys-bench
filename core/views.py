@@ -6,6 +6,49 @@ from django.db.models import Q
 from .models import WorkOrder, Client, Device, Mileage
 
 
+class DashboardView(LoginRequiredMixin, ListView):
+    """Home page — key metrics and recent work orders"""
+    template_name = 'core/dashboard.html'
+    context_object_name = 'open_work_orders'
+
+    def get_queryset(self):
+        return WorkOrder.objects.select_related(
+            'client', 'assigned_to', 'device'
+        ).exclude(
+            status__in=['closed', 'cancelled']
+        ).order_by('-created_at')
+
+    def get_context_data(self, **kwargs):
+        from django.db.models import Count
+        context = super().get_context_data(**kwargs)
+
+        # Status counts for open work orders
+        context['status_counts'] = {
+            'new': WorkOrder.objects.filter(status='new').count(),
+            'assigned': WorkOrder.objects.filter(status='assigned').count(),
+            'in_progress': WorkOrder.objects.filter(status='in_progress').count(),
+            'completed': WorkOrder.objects.filter(status='completed').count(),
+        }
+
+        # Total open (anything not closed/cancelled)
+        context['open_total'] = WorkOrder.objects.exclude(
+            status__in=['closed', 'cancelled']
+        ).count()
+
+        # Recently closed (last 5)
+        context['recently_closed'] = WorkOrder.objects.select_related(
+            'client', 'assigned_to'
+        ).filter(
+            status__in=['closed', 'cancelled']
+        ).order_by('-updated_at')[:5]
+
+        # Quick stats
+        context['active_clients'] = Client.objects.filter(is_active=True).count()
+        context['total_devices'] = Device.objects.filter(is_active=True).count()
+
+        return context
+
+
 class WorkOrderListView(LoginRequiredMixin, ListView):
     """Display list of all work orders with filtering and search"""
     model = WorkOrder
