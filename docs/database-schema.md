@@ -1,8 +1,8 @@
 # Murphy's Bench Database Schema
 
-**Version**: 1.0  
-**Last Updated**: June 2026  
-**Database**: PostgreSQL
+**Version**: 1.1  
+**Last Updated**: June 4, 2026  
+**Database**: PostgreSQL (SQLite in dev)
 
 ---
 
@@ -32,7 +32,12 @@
     Ticket
            ├─→ Client (reported by)
            ├─→ Device (about device)
+           ├─→ TicketReply (conversation thread)
            └─→ WorkOrder (converts to)
+
+    TicketReply
+           ├─→ Ticket (belongs to)
+           └─→ User (created by)
 
     WorkOrder
            ├─→ Client (for)
@@ -161,13 +166,30 @@
 | subject | String(255) | NOT NULL | Brief description |
 | description | Text | NOT NULL | Full problem description |
 | source | String(20) | NOT NULL | 'email', 'phone', 'web', 'rmm' |
-| status | String(20) | DEFAULT 'open' | 'open', 'in_progress', 'closed', 'converted' |
-| work_order_id | Integer | FK → WorkOrder | If converted to WO |
-| created_by_id | Integer | FK → User, NOT NULL | Tech who created ticket |
+| status | String(20) | DEFAULT 'new' | 'new', 'open', 'in_progress', 'waiting_on_customer', 'resolved', 'closed', 'converted' |
+| created_by_id | Integer | FK → User | Tech who created ticket |
 | created_at | DateTime | DEFAULT now() | |
 | updated_at | DateTime | DEFAULT now(), AUTO UPDATE | |
 
 **Indexes**: ticket_number (unique), client_id, status, source, created_at
+
+---
+
+### 5a. TicketReply
+
+**Purpose**: Threaded conversation on a ticket (replies, internal notes, status updates)
+
+| Field | Type | Constraints | Notes |
+|-------|------|-------------|-------|
+| id | Integer | PK, auto-increment | |
+| ticket_id | Integer | FK → Ticket, NOT NULL | Parent ticket |
+| reply_type | String(20) | NOT NULL | 'customer_visible', 'internal' |
+| content | Text | NOT NULL | The reply text |
+| created_by_id | Integer | FK → User | Staff author (null if system-generated) |
+| created_at | DateTime | DEFAULT now() | |
+| updated_at | DateTime | DEFAULT now(), AUTO UPDATE | |
+
+**Indexes**: ticket_id, reply_type, created_at
 
 ---
 
@@ -362,7 +384,7 @@
 
 1. **Cascade deletes**: Deleting a Client SHOULD NOT cascade (preserve history), instead soft-delete
 2. **Status workflows**:
-   - Ticket: open → in_progress → closed OR closed → converted (to WorkOrder)
+   - Ticket: new → open → in_progress → waiting_on_customer → resolved → closed OR converted (to WorkOrder)
    - WorkOrder: new → assigned → in_progress → completed → closed
 3. **Work order completion**: When completed_date is set, status becomes 'completed'
 4. **Audit trail**: All tables have created_at and updated_at for tracking changes
