@@ -8,17 +8,17 @@
 
 ---
 
-## ⚠️ IMPORTANT — READ FIRST (Next Session)
+## ⚠️ Ticketing System Requirements (Locked In)
 
-**Before building anything**, check two things:
+Murphy's Bench includes a **full-featured ticketing system** — not just work order tracking. Key requirements:
 
-1. **Ticketing context**: There is a prior conversation about ticket workflow design that has NOT been fully incorporated into this documentation. Mike has that conversation and will provide it. Do NOT build ticket views until that context is reviewed — the ticketing workflow (how tickets are created, triaged, and converted to work orders) had substantial design discussion that needs to inform the implementation.
+1. **Ticket Ingestion** — Accept initial service requests (via email, web form, or manual entry)
+2. **Threaded Conversation** — Track ticket + all replies/updates (who said what, when)
+3. **Ticket-to-Work Order Conversion** — Convert selected tickets to Work Orders; retain historical data
+4. **Trend Analysis** — Store historical ticket data by client and device to identify patterns
+5. **Scope**: Ticketing + work order management. **No CRM, no financial functions** beyond Invoice Ninja integration (Phase 2)
 
-2. **Build order**: Follow TODO.md strictly. Do not skip ahead. The next items are:
-   - HTMX inline notes (add notes to work orders without page reload)
-   - HTMX checklist toggling
-   - Ticket views (after ticketing context is reviewed)
-   - Testing
+See [Ticketing System Design](#ticketing-system-design) below for model details.
 
 ---
 
@@ -53,9 +53,9 @@ The app is running locally at `http://localhost:8000`. All views require login.
 - `/admin/` — Django admin (full access, staff only)
 
 **What still requires admin panel:**
-- Adding notes to work orders (no native form yet)
+- Adding notes to work orders (HTMX form coming next)
 - Logging mileage (no native form yet)
-- Managing tickets (no native views built yet)
+- Managing tickets (no native views built yet — coming after HTMX notes)
 - Managing checklists and canned responses
 
 ---
@@ -134,13 +134,14 @@ murphys-bench/
     └── database-schema.md
 ```
 
-### Data Models (13 total)
+### Data Models (14 total)
 - **User** — extended Django user with role (admin/technician/viewer)
 - **Client** — company/customer
 - **Contact** — person at a client company
 - **Device** — equipment being serviced
-- **Ticket** — initial service request (intake)
-- **WorkOrder** — repair job (main entity)
+- **Ticket** — initial service request (intake); statuses: new, open, in_progress, waiting_on_customer, resolved, closed, converted
+- **TicketReply** — threaded conversation on a ticket (customer_visible or internal)
+- **WorkOrder** — repair job (main entity); linked back to originating ticket
 - **WorkOrderNote** — customer-visible or internal notes on a work order
 - **WorkOrderItem** — checklist items, parts, time entries
 - **Mileage** — travel logging
@@ -151,13 +152,57 @@ murphys-bench/
 
 ### Workflow (Intended)
 ```
-Ticket (intake) → Work Order (repair) → Notes/Checklist → Closed → Invoice Ninja
+Ticket (intake + replies) → Triage → Work Order (repair) → Notes/Checklist → Closed → Invoice Ninja
 ```
 - Tickets are created via email, phone, or web form
-- Tickets are triaged and converted to Work Orders
+- Ticket conversation tracked (replies, updates, status changes)
+- Triaged and converted to Work Orders (historical data retained)
 - Work Orders track the actual repair
 - Notes distinguish customer-visible vs. internal
 - Checklists ensure consistent repair steps
+- Invoice Ninja integration (Phase 2) — completed work orders → invoices
+
+---
+
+## Ticketing System Design
+
+### Ticket Model Requirements
+
+**Ticket statuses**: New, Open, In Progress, Waiting on Customer, Resolved, Closed
+
+**Fields**:
+- Unique ticket number (auto-generated: `TKT-YYYYMMDD-NNNN`)
+- Client (foreign key)
+- Device (foreign key, optional — may be discovered during triage)
+- Subject
+- Initial description
+- Status (dropdown)
+- Priority (if applicable)
+- Created/updated timestamps
+- Created by (user)
+
+**Ticket replies/conversation** (separate model):
+- Parent ticket (foreign key)
+- Author (user or external contact)
+- Content
+- Is internal (boolean — internal staff notes vs. customer-visible)
+- Created timestamp
+
+### Ticket Views Needed
+
+1. **Ticket list** — search, filter by status, sort by created/updated, pagination
+2. **Ticket detail** — show ticket + threaded replies, quick actions (edit, close, convert to work order)
+3. **Ticket reply form** — add reply (internal or customer-visible) inline
+4. **Convert to work order** — button that creates work order from ticket, retains ticket reference
+5. **Historical search** — search tickets by client/device to identify trends
+
+### Ticket Data Retention
+
+When a ticket is converted to a work order:
+- Ticket remains in system (marked as "Converted")
+- Work order contains a reference back to the original ticket
+- All historical ticket data (replies, updates) stays accessible
+- This allows trend analysis: "How many tickets from this client?" "What devices have recurring issues?"
 
 ---
 

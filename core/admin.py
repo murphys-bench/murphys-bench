@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import (
-    User, Client, Contact, Device, Ticket, WorkOrder, WorkOrderNote,
+    User, Client, Contact, Device, Ticket, TicketReply, WorkOrder, WorkOrderNote,
     WorkOrderItem, Mileage, RepairType, Checklist, ChecklistItem, CannedResponse
 )
 
@@ -86,11 +86,20 @@ class RepairTypeAdmin(admin.ModelAdmin):
 
 
 # Ticket Admin
+# Ticket Reply Inline
+class TicketReplyInline(admin.TabularInline):
+    model = TicketReply
+    extra = 1
+    fields = ['reply_type', 'content', 'created_by', 'created_at']
+    readonly_fields = ['created_by', 'created_at']
+
+
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
     list_display = ['ticket_number', 'client', 'subject', 'status', 'source', 'created_at']
     list_filter = ['status', 'source', 'created_at']
     search_fields = ['ticket_number', 'subject', 'client__name', 'description']
+    inlines = [TicketReplyInline]
     fieldsets = (
         ('Ticket Info', {'fields': ('ticket_number', 'client', 'device', 'source')}),
         ('Issue', {'fields': ('subject', 'description')}),
@@ -103,6 +112,14 @@ class TicketAdmin(admin.ModelAdmin):
         if not change:  # Creating new ticket
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
+
+
+@admin.register(TicketReply)
+class TicketReplyAdmin(admin.ModelAdmin):
+    list_display = ['ticket', 'reply_type', 'created_by', 'created_at']
+    list_filter = ['reply_type', 'created_at']
+    search_fields = ['ticket__ticket_number', 'content']
+    readonly_fields = ['created_at', 'updated_at']
 
 
 # Work Order Notes & Items Inlines

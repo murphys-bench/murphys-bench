@@ -1,18 +1,18 @@
 # Murphy's Bench Development Roadmap
 
 **Last Updated**: June 4, 2026  
-**Current Phase**: Phase 1 - SCS Internal (Views complete, Dashboard + Forms next)
+**Current Phase**: Phase 1 - SCS Internal (Data layer complete, HTMX + Ticket views next)
 
 ## Project Status Summary
 
 ✅ **COMPLETED**:
 - Database schema fully designed and documented
 - Django project initialized with all dependencies
-- 13 data models created with proper relationships
+- 14 data models created with proper relationships
 - Database migrations created and applied (SQLite ready, PostgreSQL configured)
 - Django settings configured for dev/production
 - Git repository with clean commit history — pushed to GitHub (private)
-- Django admin customized for all 13 models (search, filters, inlines)
+- Django admin customized for all 14 models (search, filters, inlines)
 - Base template with navigation (Tailwind CSS, dark nav bar)
 - Authentication — login/logout, all views protected with LoginRequiredMixin
 - Dashboard — stats, open work orders, recently closed, quick action buttons
@@ -23,12 +23,16 @@
 - Device list + detail views
 - Device create/edit native forms
 - Mileage log view (month filter, running total)
+- Ticketing system design finalized and documented
+- TicketReply model added (threaded conversation)
+- Ticket statuses expanded (new, open, in_progress, waiting_on_customer, resolved, closed, converted)
+- Migration 0002 applied cleanly
 
 ⬜ **NEXT — IN ORDER**:
-1. **Review ticketing context** (Mike has prior conversation — must review before building ticket views)
+1. ✅ **Ticketing context locked in** — full-featured ticketing with threaded conversation, ticket→work order conversion, trend analysis
 2. **HTMX inline notes** (add notes to work orders without page reload)
 3. **HTMX checklist toggling** (mark items complete without page reload)
-4. **Ticket views** (list, detail, create, convert-to-work-order)
+4. **Ticket views** (list, detail, reply form, convert-to-work-order)
 5. **Mileage create form** (native form, no admin required)
 6. **Testing suite**
 7. **Deployment** (internal network)
@@ -171,6 +175,16 @@
   - [ ] Edit existing device
   - [ ] Estimated: 1-2 hours
 
+- [ ] **Ticket views** (full-featured ticketing system)
+  - [ ] Ticket model extended with statuses (New, Open, In Progress, Waiting on Customer, Resolved, Closed)
+  - [ ] TicketReply model for threaded conversation (customer-visible vs. internal)
+  - [ ] Ticket list view (search, filter by status, pagination)
+  - [ ] Ticket detail view (show ticket + threaded replies)
+  - [ ] Inline reply form (add customer-visible or internal reply via form)
+  - [ ] Convert-to-work-order button (creates WO, retains ticket reference)
+  - [ ] Historical search (find tickets by client/device for trend analysis)
+  - [ ] Estimated: 4-5 hours
+
 - [ ] **Checklist functionality**
   - [ ] Display checklist items for work order (based on repair type)
   - [ ] Mark items complete with HTMX (no page reload)
@@ -253,9 +267,9 @@ python manage.py runserver
 ```
 
 **⚠️ Start next session by**:
-1. Reading CLAUDE.md (especially the "IMPORTANT — READ FIRST" section)
-2. Getting ticketing context from Mike (prior conversation)
-3. Then proceeding with HTMX inline notes
+1. Reading CLAUDE.md and docs/ticketing-design.md for full context
+2. Proceed with HTMX inline notes (work order detail page)
+3. Then ticket views
 
 **Build next — HTMX Inline Notes**:
 - Add a note form directly on `work_order_detail.html`

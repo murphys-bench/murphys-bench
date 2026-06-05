@@ -1,7 +1,7 @@
 # Murphy's Bench Ticketing System Design
 
 **Date**: June 4, 2026  
-**Status**: Design Finalized, Implementation Ready
+**Status**: Design Finalized — Data Layer Complete, Views In Progress
 
 ---
 
@@ -118,15 +118,18 @@ WorkOrder is now the source of truth
 
 | Status | Meaning | Next State |
 |--------|---------|-----------|
-| `open` | Just created, waiting for triage | in_progress or converted |
-| `in_progress` | Being evaluated/diagnosed | converted or closed |
+| `new` | Just created, not yet triaged | open |
+| `open` | Acknowledged, waiting for tech action | in_progress or converted |
+| `in_progress` | Being evaluated/diagnosed | waiting_on_customer, converted, or resolved |
+| `waiting_on_customer` | Awaiting info or action from client | in_progress or resolved |
+| `resolved` | Issue resolved, pending confirmation | closed or reopened |
 | `closed` | Resolved without WO (e.g., question answered) | — |
 | `converted` | Converted to Work Order | — (historical) |
 
 **Rules:**
 - Once `converted` or `closed`, ticket is read-only
-- Can only have ONE associated Work Order
-- Status updates via email replies
+- Can only have ONE associated Work Order (OneToOne)
+- All replies tracked via TicketReply model
 
 ### Work Order Statuses
 
@@ -287,15 +290,18 @@ Tech can reply via Murphy's Bench UI:
 Ticket 1 → 0..1 WorkOrder (one ticket converts to at most one WO)
 Ticket N → 1 Client
 Ticket N → 1 Device (optional)
-Ticket N → N WorkOrderNote (conversation thread)
+Ticket 1 → N TicketReply (threaded conversation)
 
-WorkOrder 1 → 1 Ticket (optional link back)
+TicketReply N → 1 Ticket
+TicketReply N → 1 User (created_by)
+
+WorkOrder 1 → 0..1 Ticket (optional link back to originating ticket)
 WorkOrder N → 1 Client
 WorkOrder N → 1 Device (optional)
 WorkOrder N → 1 RepairType
 WorkOrder N → 1 Technician (assigned_to)
-WorkOrder N → N WorkOrderNote (conversation)
-WorkOrder N → N WorkOrderItem (checklist, parts, time)
+WorkOrder 1 → N WorkOrderNote (conversation)
+WorkOrder 1 → N WorkOrderItem (checklist, parts, time)
 ```
 
 ### Auto-Generated Numbers
@@ -311,24 +317,28 @@ WorkOrder N → N WorkOrderItem (checklist, parts, time)
 ### Phase 1 (Current)
 
 - [x] Ticket model and fields
-- [x] WorkOrder model and fields
-- [ ] Admin interface for ticket/WO management
-- [ ] Views for ticket list/detail/create
-- [ ] Manual email parsing (copy-paste into form for now)
-- [ ] Forms for converting ticket → WO
+- [x] TicketReply model (threaded conversation)
+- [x] Ticket statuses expanded (new, open, in_progress, waiting_on_customer, resolved, closed, converted)
+- [x] WorkOrder model with ticket FK
+- [x] Migration 0002 applied
+- [x] Admin interface for all ticket/WO models (with inline replies)
+- [ ] Views: ticket list, detail, create, reply form
+- [ ] Convert ticket → work order (UI button + view)
+- [ ] Native ticket create form (no admin required)
+- [ ] Email ingestion: manual copy-paste into form (Phase 1 — automated is Phase 2)
 
 ### Phase 1.5 (Taskbar App)
 
-- [ ] Simple taskbar utility
+- [ ] Simple taskbar utility (Electron — separate project)
 - [ ] Quick ticket creation form
 - [ ] Screenshot capture
 - [ ] Send via email to Murphy's Bench
 
 ### Phase 2 (Integrations)
 
-- [ ] Automated email parsing service
-- [ ] Invoice Ninja API integration
-- [ ] Email reply-to handling
+- [ ] Automated email parsing service (inbound SMTP/IMAP)
+- [ ] Invoice Ninja API integration (one-way push on WO completion)
+- [ ] Email reply-to handling (replies update ticket)
 - [ ] Slack/Teams notifications (optional)
 
 ---

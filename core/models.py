@@ -152,8 +152,11 @@ class Ticket(models.Model):
     ]
 
     STATUS_CHOICES = [
+        ('new', 'New'),
         ('open', 'Open'),
         ('in_progress', 'In Progress'),
+        ('waiting_on_customer', 'Waiting on Customer'),
+        ('resolved', 'Resolved'),
         ('closed', 'Closed'),
         ('converted', 'Converted to Work Order'),
     ]
@@ -188,6 +191,33 @@ class Ticket(models.Model):
         today = timezone.now().strftime('%Y%m%d')
         count = cls.objects.filter(created_at__date=timezone.now().date()).count() + 1
         return f"TKT-{today}-{count:04d}"
+
+
+class TicketReply(models.Model):
+    """Threaded conversation on a ticket (replies, updates, status changes)"""
+
+    REPLY_TYPE_CHOICES = [
+        ('customer_visible', 'Customer Visible'),
+        ('internal', 'Internal Only'),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='replies')
+    reply_type = models.CharField(max_length=20, choices=REPLY_TYPE_CHOICES, default='customer_visible', db_index=True)
+    content = models.TextField()
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='ticket_replies')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ticket_replies'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['ticket', 'reply_type']),
+        ]
+
+    def __str__(self):
+        return f"Reply on {self.ticket} by {self.created_by}"
 
 
 class WorkOrder(models.Model):
