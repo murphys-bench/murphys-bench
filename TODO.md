@@ -31,6 +31,7 @@
 - **Ticket views**: list, detail, create/edit, HTMX inline reply, convert-to-work-order
 - **Batch 1**: Collision Avoidance (TicketLock), WO/Ticket Closure Dependency, Ticket Linking (TicketLink)
 - **Batch 2**: Audit Log (django-auditlog, History tab on ticket/WO), Attachments (GenericFK, local/S3, SiteSettings admin panel)
+- **Batch 3**: Outbound Email (EmailTemplate, SMTP via SiteSettings), Auto-Responder (ticket_created trigger), three-layer suppression (client flag, pattern list, exact address), EmailSendLog
 
 ---
 
@@ -87,7 +88,7 @@
 
 #### Batch 3 — Outbound Email, Auto-Responder
 
-- [ ] **Outbound Email** (#7)
+- ✅ **Outbound Email** (#7)
   - Configure SMTP in settings (host, port, TLS, credentials)
   - `EmailTemplate` model: trigger (ticket_created, reply_added, status_changed, overdue, ticket_resolved), subject template, body template
   - Template variables: `{{ ticket.ticket_number }}`, `{{ ticket.subject }}`, `{{ client.name }}`, `{{ tech.name }}`, etc.
@@ -95,7 +96,7 @@
   - Synchronous sending (no queue/Celery needed at this scale)
   - Email config UI in admin settings panel
 
-- [ ] **Auto-Responder + Outgoing Email Filtering** (#8)
+- ✅ **Auto-Responder + Outgoing Email Filtering** (#8)
   - On ticket create: automatically send acknowledgment email to client's primary contact email
   - Three-layer suppression system — all managed from admin settings panel:
     1. **Pattern-based blocklist**: catches common automated senders (`noreply@*`, `donotreply@*`, `mailer-daemon@*`, `postmaster@*`, `no-reply@*`) — admin-editable

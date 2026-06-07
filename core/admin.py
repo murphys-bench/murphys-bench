@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import (
     User, Client, Contact, Device, Ticket, TicketReply, WorkOrder, WorkOrderNote,
     WorkOrderItem, Mileage, RepairType, Checklist, ChecklistItem, CannedResponse,
-    SiteSettings, Attachment,
+    SiteSettings, Attachment, EmailTemplate, SuppressedAddress, EmailSendLog,
 )
 
 
@@ -36,7 +36,7 @@ class ClientAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Company Info', {'fields': ('name', 'email', 'phone')}),
         ('Address', {'fields': ('address_street', 'address_city', 'address_state', 'address_zip')}),
-        ('Status', {'fields': ('is_active',)}),
+        ('Status', {'fields': ('is_active', 'suppress_emails')}),
         ('Notes', {'fields': ('notes',), 'classes': ('collapse',)}),
         ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
     )
@@ -216,6 +216,13 @@ class CannedResponseAdmin(admin.ModelAdmin):
 @admin.register(SiteSettings)
 class SiteSettingsAdmin(admin.ModelAdmin):
     fieldsets = (
+        ('Outbound Email', {
+            'fields': ('email_enabled', 'email_from', 'email_host', 'email_port', 'email_use_tls', 'email_username', 'email_password'),
+        }),
+        ('Email Suppression Patterns', {
+            'fields': ('email_suppression_patterns',),
+            'description': 'One fnmatch pattern per line (e.g. noreply@*). Emails matching any pattern are suppressed and logged.',
+        }),
         ('Attachments — Limits', {
             'fields': ('max_attachment_size_mb', 'blocked_extensions'),
         }),
@@ -242,3 +249,40 @@ class AttachmentAdmin(admin.ModelAdmin):
     list_filter = ['content_type', 'created_at']
     search_fields = ['original_filename', 'uploaded_by__username']
     readonly_fields = ['content_type', 'object_id', 'file', 'original_filename', 'mime_type', 'size_bytes', 'uploaded_by', 'created_at']
+
+
+@admin.register(EmailTemplate)
+class EmailTemplateAdmin(admin.ModelAdmin):
+    list_display = ['get_trigger_display', 'subject_template', 'is_active']
+    list_filter = ['is_active', 'trigger']
+    fieldsets = (
+        ('Template', {'fields': ('trigger', 'is_active', 'subject_template', 'body_template')}),
+        ('Available Variables', {
+            'description': (
+                '{{ ticket.ticket_number }} — {{ ticket.subject }} — {{ ticket.get_status_display }} — '
+                '{{ client.name }} — {{ tech_name }} — {{ status }} — {{ site_name }}'
+            ),
+            'fields': (),
+        }),
+    )
+
+
+@admin.register(SuppressedAddress)
+class SuppressedAddressAdmin(admin.ModelAdmin):
+    list_display = ['email', 'reason', 'created_at']
+    search_fields = ['email', 'reason']
+    readonly_fields = ['created_at']
+
+
+@admin.register(EmailSendLog)
+class EmailSendLogAdmin(admin.ModelAdmin):
+    list_display = ['created_at', 'trigger', 'to_email', 'status', 'reason', 'ticket']
+    list_filter = ['status', 'trigger', 'created_at']
+    search_fields = ['to_email', 'ticket__ticket_number']
+    readonly_fields = ['ticket', 'to_email', 'trigger', 'status', 'reason', 'detail', 'created_at']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
