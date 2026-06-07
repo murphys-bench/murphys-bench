@@ -54,6 +54,15 @@
                     <label class="block text-sm font-medium text-gray-700 mb-1">Repair Type</label>
                     {{ form.repair_type }}
                 </div>
+                {% if is_create %}
+                <div class="md:col-span-2">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        {{ form.apply_checklist }}
+                        <span class="text-sm text-gray-700">Apply default checklist for selected repair type</span>
+                    </label>
+                    <p class="text-xs text-gray-400 mt-1 ml-6">Copies checklist items to this work order. Only applies if the selected repair type has a default checklist.</p>
+                </div>
+                {% endif %}
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Assigned To</label>
                     {{ form.assigned_to }}
