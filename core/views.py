@@ -1,12 +1,12 @@
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render, get_object_or_404, redirect
 from django.views import View
 from django.views.generic import ListView, DetailView, CreateView, UpdateView
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import HttpResponse
 from django.urls import reverse_lazy
 from django.db.models import Q
-from .models import WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist
-from .forms import WorkOrderForm, ClientForm, DeviceForm
+from .models import WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist, Ticket, TicketReply, TicketLock, TicketLink
+from .forms import WorkOrderForm, ClientForm, DeviceForm, TicketForm, TicketConvertForm
 
 
 class DashboardView(LoginRequiredMixin, ListView):
@@ -299,7 +299,17 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
     template_name = 'core/work_order_form.html'
 
     def form_valid(self, form):
+        old_status = WorkOrder.objects.get(pk=self.object.pk).status
         response = super().form_valid(form)
+
+        # Auto-resolve linked ticket when WO closes (if setting is on)
+        if self.object.status == 'closed' and old_status != 'closed':
+            from django.conf import settings
+            if getattr(settings, 'AUTO_RESOLVE_TICKET_ON_WO_CLOSE', False):
+                ticket = self.object.ticket
+                if ticket and ticket.status not in ('resolved', 'closed', 'converted'):
+                    ticket.status = 'resolved'
+                    ticket.save()
 
         # Optionally append the default checklist for the selected repair type
         if form.cleaned_data.get('apply_checklist') and self.object.repair_type:
@@ -391,3 +401,268 @@ class DeviceUpdateView(LoginRequiredMixin, UpdateView):
         context['title'] = f'Edit {self.object.name}'
         context['cancel_url'] = reverse_lazy('core:device_detail', kwargs={'pk': self.object.pk})
         return context
+
+
+# --- Ticket Views ---
+
+class TicketListView(LoginRequiredMixin, ListView):
+    model = Ticket
+    template_name = 'core/ticket_list.html'
+    context_object_name = 'tickets'
+    paginate_by = 25
+
+    def get_queryset(self):
+        queryset = Ticket.objects.select_related('client', 'device', 'created_by')
+
+        status = self.request.GET.get('status')
+        if status:
+            queryset = queryset.filter(status=status)
+
+        search = self.request.GET.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(ticket_number__icontains=search) |
+                Q(subject__icontains=search) |
+                Q(client__name__icontains=search)
+            )
+
+        return queryset.order_by('-created_at')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['status_choices'] = Ticket.STATUS_CHOICES
+        return context
+
+
+class TicketDetailView(LoginRequiredMixin, DetailView):
+    model = Ticket
+    template_name = 'core/ticket_detail.html'
+    context_object_name = 'ticket'
+
+    def get_queryset(self):
+        return Ticket.objects.select_related(
+            'client', 'device', 'created_by'
+        ).prefetch_related('replies', 'replies__created_by')
+
+    def get(self, request, *args, **kwargs):
+        response = super().get(request, *args, **kwargs)
+        ticket = self.object
+        try:
+            lock = ticket.lock
+            if lock.is_expired() or lock.locked_by == request.user:
+                lock.locked_by = request.user
+                lock.save()
+        except TicketLock.DoesNotExist:
+            TicketLock.objects.create(ticket=ticket, locked_by=request.user)
+        return response
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        ticket = self.object
+        # Determine lock warning state
+        try:
+            lock = ticket.lock
+            if not lock.is_expired() and lock.locked_by != self.request.user:
+                context['lock_user'] = lock.locked_by
+        except TicketLock.DoesNotExist:
+            pass
+        # WO dependency context
+        wo = getattr(ticket, 'work_order_created', None)
+        if wo:
+            context['linked_wo'] = wo
+            context['wo_is_open'] = wo.status not in ('closed', 'cancelled')
+        # Linked tickets
+        context['linked_tickets'] = ticket.get_linked_tickets()
+        return context
+
+
+class TicketCreateView(LoginRequiredMixin, CreateView):
+    model = Ticket
+    form_class = TicketForm
+    template_name = 'core/ticket_form.html'
+
+    def form_valid(self, form):
+        form.instance.ticket_number = Ticket.generate_ticket_number()
+        form.instance.created_by = self.request.user
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse_lazy('core:ticket_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'New Ticket'
+        context['cancel_url'] = reverse_lazy('core:ticket_list')
+        return context
+
+
+class TicketUpdateView(LoginRequiredMixin, UpdateView):
+    model = Ticket
+    form_class = TicketForm
+    template_name = 'core/ticket_form.html'
+
+    def form_valid(self, form):
+        new_status = form.cleaned_data.get('status')
+        if new_status in ('resolved', 'closed'):
+            wo = getattr(self.object, 'work_order_created', None)
+            if wo and wo.status not in ('closed', 'cancelled'):
+                form.add_error('status', f'Cannot close this ticket — linked work order {wo.work_order_number} is still open.')
+                return self.form_invalid(form)
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse_lazy('core:ticket_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = f'Edit {self.object.ticket_number}'
+        context['cancel_url'] = reverse_lazy('core:ticket_detail', kwargs={'pk': self.object.pk})
+        return context
+
+
+class TicketReplyCreateView(LoginRequiredMixin, View):
+    """Add a reply to a ticket — returns HTML fragment for HTMX"""
+
+    def post(self, request, pk):
+        ticket = get_object_or_404(Ticket, pk=pk)
+        reply_type = request.POST.get('reply_type', 'internal')
+        content = request.POST.get('content', '').strip()
+
+        if not content:
+            return HttpResponse(status=204)
+
+        reply = TicketReply.objects.create(
+            ticket=ticket,
+            reply_type=reply_type,
+            content=content,
+            created_by=request.user,
+        )
+        return render(request, 'core/partials/ticket_reply_item.html', {'reply': reply})
+
+
+class TicketConvertView(LoginRequiredMixin, View):
+    """Convert a ticket to a work order"""
+
+    def get(self, request, pk):
+        ticket = get_object_or_404(Ticket, pk=pk)
+        if ticket.status == 'converted':
+            return redirect('core:ticket_detail', pk=pk)
+        form = TicketConvertForm()
+        return render(request, 'core/ticket_convert.html', {'ticket': ticket, 'form': form})
+
+    def post(self, request, pk):
+        ticket = get_object_or_404(Ticket, pk=pk)
+        if ticket.status == 'converted':
+            return redirect('core:ticket_detail', pk=pk)
+
+        form = TicketConvertForm(request.POST)
+        if not form.is_valid():
+            return render(request, 'core/ticket_convert.html', {'ticket': ticket, 'form': form})
+
+        work_order = WorkOrder.objects.create(
+            work_order_number=WorkOrder.generate_work_order_number(),
+            ticket=ticket,
+            client=ticket.client,
+            device=ticket.device,
+            repair_type=form.cleaned_data.get('repair_type'),
+            assigned_to=form.cleaned_data.get('assigned_to'),
+            status='new',
+        )
+
+        ticket.status = 'converted'
+        ticket.save()
+
+        return redirect('core:work_order_detail', pk=work_order.pk)
+
+
+# --- Collision Avoidance (TicketLock) ---
+
+class TicketLockReleaseView(LoginRequiredMixin, View):
+    """Release a ticket lock — called via JS beforeunload"""
+
+    def post(self, request, pk):
+        try:
+            lock = TicketLock.objects.get(ticket_id=pk, locked_by=request.user)
+            lock.delete()
+        except TicketLock.DoesNotExist:
+            pass
+        return HttpResponse(status=204)
+
+
+class TicketLockStatusView(LoginRequiredMixin, View):
+    """Return lock banner HTML fragment — polled every 30s by HTMX"""
+
+    def get(self, request, pk):
+        ticket = get_object_or_404(Ticket, pk=pk)
+        lock_user = None
+        try:
+            lock = ticket.lock
+            if not lock.is_expired() and lock.locked_by != request.user:
+                lock_user = lock.locked_by
+        except TicketLock.DoesNotExist:
+            pass
+        return render(request, 'core/partials/ticket_lock_banner.html', {'lock_user': lock_user})
+
+
+# --- Ticket Linking ---
+
+class TicketLinkAddView(LoginRequiredMixin, View):
+    """Add a link between two tickets — returns updated linked tickets partial"""
+
+    def post(self, request, pk):
+        ticket = get_object_or_404(Ticket, pk=pk)
+        ticket_number = request.POST.get('ticket_number', '').strip()
+        link_type = request.POST.get('link_type', 'related')
+        error = None
+
+        try:
+            other = Ticket.objects.get(ticket_number__iexact=ticket_number)
+        except Ticket.DoesNotExist:
+            error = f'Ticket "{ticket_number}" not found.'
+            other = None
+
+        if other and other.pk == ticket.pk:
+            error = 'A ticket cannot be linked to itself.'
+            other = None
+
+        if other and not error:
+            # Check for existing link in either direction
+            exists = (
+                TicketLink.objects.filter(ticket_a=ticket, ticket_b=other).exists() or
+                TicketLink.objects.filter(ticket_a=other, ticket_b=ticket).exists()
+            )
+            if exists:
+                error = f'{ticket_number} is already linked to this ticket.'
+            else:
+                TicketLink.objects.create(
+                    ticket_a=ticket,
+                    ticket_b=other,
+                    link_type=link_type,
+                    created_by=request.user,
+                )
+
+        return render(request, 'core/partials/ticket_linked_list.html', {
+            'ticket': ticket,
+            'linked_tickets': ticket.get_linked_tickets(),
+            'link_error': error,
+        })
+
+
+class TicketLinkRemoveView(LoginRequiredMixin, View):
+    """Remove a ticket link — returns updated linked tickets partial"""
+
+    def post(self, request, pk):
+        ticket = get_object_or_404(Ticket, pk=pk)
+        link_id = request.POST.get('link_id')
+        try:
+            link = TicketLink.objects.get(pk=link_id)
+            if link.ticket_a == ticket or link.ticket_b == ticket:
+                link.delete()
+        except TicketLink.DoesNotExist:
+            pass
+
+        return render(request, 'core/partials/ticket_linked_list.html', {
+            'ticket': ticket,
+            'linked_tickets': ticket.get_linked_tickets(),
+            'link_error': None,
+        })

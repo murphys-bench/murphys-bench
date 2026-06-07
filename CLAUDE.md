@@ -1,32 +1,10 @@
 # Murphy's Bench
 
-**Status**: Phase 1 Active Development  
-**Tech Stack**: Python 3.11 / Django 4.2 / HTMX / Tailwind CSS (CDN)  
-**Deployment Model**: Self-hosted on internal network (not cloud, not SaaS)  
-**Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)  
-**Last Updated**: June 4, 2026
-
----
-
-## ⚠️ Ticketing System Requirements (Locked In)
-
-Murphy's Bench includes a **full-featured ticketing system** — not just work order tracking. Key requirements:
-
-1. **Ticket Ingestion** — Accept initial service requests (via email, web form, or manual entry)
-2. **Threaded Conversation** — Track ticket + all replies/updates (who said what, when)
-3. **Ticket-to-Work Order Conversion** — Convert selected tickets to Work Orders; retain historical data
-4. **Trend Analysis** — Store historical ticket data by client and device to identify patterns
-5. **Scope**: Ticketing + work order management. **No CRM, no financial functions** beyond Invoice Ninja integration (Phase 2)
-
-See [Ticketing System Design](#ticketing-system-design) below for model details.
-
----
-
-## What This Is
-
-Murphy's Bench is a work order and service management platform for field service businesses — particularly small MSPs. It handles the workflow between receiving a repair request and completing the job: managing clients, tracking devices, assigning technicians, logging work, and maintaining audit trails.
-
-**Named for Murphy's Law**: A tool built to *prevent* things from going wrong.
+**Status**: Phase 1 Active Development
+**Tech Stack**: Python 3.11 / Django 4.2 / HTMX / Tailwind CSS (CDN)
+**Deployment Model**: Self-hosted on internal network (not cloud, not SaaS)
+**Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
+**Last Updated**: June 7, 2026
 
 ---
 
@@ -39,51 +17,57 @@ The app is running locally at `http://localhost:8000`. All views require login.
 - `/accounts/login/` — Login page
 - `/work-orders/` — Work order list (search, filter, pagination)
 - `/work-orders/new/` — Create work order (native form)
-- `/work-orders/<id>/` — Work order detail
-- `/work-orders/<id>/edit/` — Edit work order (native form)
+- `/work-orders/<id>/` — Work order detail (HTMX inline notes, checklist toggling)
+- `/work-orders/<id>/edit/` — Edit work order
 - `/clients/` — Client list (search, active filter)
-- `/clients/new/` — Create client (native form)
+- `/clients/new/` — Create client
 - `/clients/<id>/` — Client detail (contacts, devices, work history)
-- `/clients/<id>/edit/` — Edit client (native form)
+- `/clients/<id>/edit/` — Edit client
 - `/devices/` — Device list (search, type filter)
-- `/devices/new/` — Create device (native form)
+- `/devices/new/` — Create device
 - `/devices/<id>/` — Device detail (repair history)
-- `/devices/<id>/edit/` — Edit device (native form)
+- `/devices/<id>/edit/` — Edit device
 - `/mileage/` — Mileage log (month filter, running total)
+- `/tickets/` — Ticket list (search, status filter, pagination)
+- `/tickets/new/` — Create ticket (native form)
+- `/tickets/<id>/` — Ticket detail (HTMX inline replies, convert-to-WO)
+- `/tickets/<id>/edit/` — Edit ticket
+- `/tickets/<id>/convert/` — Convert ticket to work order
 - `/admin/` — Django admin (full access, staff only)
 
 **What still requires admin panel:**
 - Logging mileage (no native form yet)
-- Managing tickets (no native views built yet — next build)
-- Managing checklists and canned responses (editable via /admin/)
+- Managing checklists and canned responses
 
 ---
 
 ## Vision & Philosophy
 
-Murphy's Bench is **internal-first, self-hosted software** for small field service businesses.
+Murphy's Bench is **internal-first, self-hosted software** for small field service businesses (MSPs).
 
 ### Core Principle
-Build one thing well: a self-hosted repair tracking system that runs on a business's internal network. Other companies can self-host it on their infrastructure. No SaaS hosting or multi-tenancy unless/until there's explicit demand.
+Build one thing well: a self-hosted repair tracking system that runs on a business's internal network. Other companies can self-host it on their infrastructure.
+
+### Workflow
+```
+Ticket (intake + replies) → Triage → Work Order (repair) → Notes/Checklist → Closed → Invoice Ninja
+```
 
 ### Phase 1: SCS Internal (Current)
-Build a single-company, optimized web application for Shamrock Computer Services (SCS).
-
 - **Focus**: Get SCS's workflow working perfectly
-- **Scope**: Ticketing, work orders, device tracking, mileage logging, admin controls
-- **Deployment**: Internal network (10.58.58.235 or equivalent)
-- **Communication**: Email-based (inbound tickets, outbound updates, ongoing communication)
+- **Scope**: Ticketing, work orders, device tracking, mileage, email integration, reporting
+- **Deployment**: Internal network
 - **Success**: SCS techs prefer this to the legacy PHP app
 
 ### Phase 2: Integrations & Polish (Future)
 - Invoice Ninja API bridge
-- Email parsing improvements
-- Optional integrations (Slack, etc.)
+- Email OAuth2 (Gmail/Office 365)
+- Departments, Teams, Auto-routing
+- Customer self-service portal
+- REST API (for Taskbar Utility App / Clover integration)
 - Visual design polish
-- NOT starting until Phase 1 is complete
 
 ### Phase 3+: Multi-Tenancy (Speculative)
-Only if explicit demand emerges. Years away, if ever.
 
 ---
 
@@ -91,7 +75,7 @@ Only if explicit demand emerges. Years away, if ever.
 
 ### Tech Stack
 - **Backend**: Python 3.11 / Django 4.2.30
-- **Frontend**: Tailwind CSS (CDN), HTMX (not yet implemented)
+- **Frontend**: Tailwind CSS (CDN), HTMX
 - **Database**: SQLite (dev), PostgreSQL (planned for production)
 - **Auth**: Django session auth, LoginRequiredMixin on all views
 
@@ -99,19 +83,19 @@ Only if explicit demand emerges. Years away, if ever.
 ```
 murphys-bench/
 ├── CLAUDE.md                    # This file — read first each session
-├── TODO.md                      # Full roadmap and build order
+├── todo.md                      # Full roadmap and build order
 ├── manage.py
 ├── requirements.txt
 ├── murphys_bench/              # Django project settings
 │   ├── settings.py
-│   └── urls.py                 # Root URL routing
+│   └── urls.py
 ├── core/                        # Main app
-│   ├── models.py               # All 13 data models
-│   ├── views.py                # All views (list, detail, create, edit)
+│   ├── models.py               # All 14 data models
+│   ├── views.py                # All views
 │   ├── urls.py                 # Core URL patterns
-│   ├── forms.py                # WorkOrderForm, ClientForm, DeviceForm
-│   ├── admin.py                # Admin customization for all models
-│   └── templates/core/         # All HTML templates
+│   ├── forms.py                # All forms
+│   ├── admin.py                # Admin customization
+│   └── templates/core/
 │       ├── base.html           # Shared layout + nav
 │       ├── dashboard.html
 │       ├── work_order_list.html
@@ -123,24 +107,29 @@ murphys-bench/
 │       ├── device_list.html
 │       ├── device_detail.html
 │       ├── device_form.html
-│       └── mileage_list.html
+│       ├── mileage_list.html
+│       ├── ticket_list.html
+│       ├── ticket_detail.html
+│       ├── ticket_form.html
+│       ├── ticket_convert.html
+│       └── partials/
+│           ├── note_item.html
+│           ├── checklist_item.html
+│           └── ticket_reply_item.html
 ├── accounts/                    # Auth app
-│   ├── views.py                # LoginView, logout_view
-│   ├── urls.py
-│   └── templates/accounts/
-│       └── login.html
 └── docs/
-    └── database-schema.md
+    ├── database-schema.md
+    └── ticketing-design.md
 ```
 
-### Data Models (14 total)
-- **User** — extended Django user with role (admin/technician/viewer)
+### Data Models (14 current)
+- **User** — extended Django user with role (transitioning to Role FK — see Planned Features)
 - **Client** — company/customer
 - **Contact** — person at a client company
 - **Device** — equipment being serviced
-- **Ticket** — initial service request (intake); statuses: new, open, in_progress, waiting_on_customer, resolved, closed, converted
+- **Ticket** — initial service request; statuses: new, open, in_progress, waiting_on_customer, resolved, closed, converted
 - **TicketReply** — threaded conversation on a ticket (customer_visible or internal)
-- **WorkOrder** — repair job (main entity); linked back to originating ticket
+- **WorkOrder** — repair job (main entity); linked back to originating ticket via OneToOne
 - **WorkOrderNote** — customer-visible or internal notes on a work order
 - **WorkOrderItem** — checklist items, parts, time entries
 - **Mileage** — travel logging
@@ -149,59 +138,80 @@ murphys-bench/
 - **ChecklistItem** — individual task in a checklist template
 - **CannedResponse** — template notes for common situations
 
-### Workflow (Intended)
-```
-Ticket (intake + replies) → Triage → Work Order (repair) → Notes/Checklist → Closed → Invoice Ninja
-```
-- Tickets are created via email, phone, or web form
-- Ticket conversation tracked (replies, updates, status changes)
-- Triaged and converted to Work Orders (historical data retained)
-- Work Orders track the actual repair
-- Notes distinguish customer-visible vs. internal
-- Checklists ensure consistent repair steps
-- Invoice Ninja integration (Phase 2) — completed work orders → invoices
-
 ---
 
 ## Ticketing System Design
 
-### Ticket Model Requirements
+See `docs/ticketing-design.md` for full detail.
 
-**Ticket statuses**: New, Open, In Progress, Waiting on Customer, Resolved, Closed
+### Ticket Statuses
+`new` → `open` → `in_progress` → `waiting_on_customer` → `resolved` → `closed`
+Also: `converted` (converted to Work Order — read-only after this point)
 
-**Fields**:
-- Unique ticket number (auto-generated: `TKT-YYYYMMDD-NNNN`)
-- Client (foreign key)
-- Device (foreign key, optional — may be discovered during triage)
-- Subject
-- Initial description
-- Status (dropdown)
-- Priority (if applicable)
-- Created/updated timestamps
-- Created by (user)
+### Ticket → Work Order Rules
+- A ticket linked to an open WO **cannot** be closed/resolved — hard block
+- When the WO closes, ticket shows a prompt: "WO complete — ready to resolve" — tech closes manually
+- `AUTO_RESOLVE_TICKET_ON_WO_CLOSE` admin setting (default **off**) for shops that prefer automatic behavior
+- Ticket remains in system after conversion — full history retained
 
-**Ticket replies/conversation** (separate model):
-- Parent ticket (foreign key)
-- Author (user or external contact)
-- Content
-- Is internal (boolean — internal staff notes vs. customer-visible)
-- Created timestamp
+---
 
-### Ticket Views Needed
+## Planned Phase 1 Features
 
-1. **Ticket list** — search, filter by status, sort by created/updated, pagination
-2. **Ticket detail** — show ticket + threaded replies, quick actions (edit, close, convert to work order)
-3. **Ticket reply form** — add reply (internal or customer-visible) inline
-4. **Convert to work order** — button that creates work order from ticket, retains ticket reference
-5. **Historical search** — search tickets by client/device to identify trends
+All design decisions have been finalized. Build order and full specs in `todo.md`.
 
-### Ticket Data Retention
+### Batch 1 — Collision Avoidance, WO/Ticket Dependency, Ticket Linking
+- **Collision Avoidance**: `TicketLock` model, 10-min expiry, non-blocking banner, HTMX polling
+- **WO/Ticket Dependency**: Hard block on ticket close while WO open; prompt when WO closes; manual resolution only
+- **Ticket Linking**: `TicketLink` model, link types: `related` and `duplicate` only
 
-When a ticket is converted to a work order:
-- Ticket remains in system (marked as "Converted")
-- Work order contains a reference back to the original ticket
-- All historical ticket data (replies, updates) stays accessible
-- This allows trend analysis: "How many tickets from this client?" "What devices have recurring issues?"
+### Batch 2 — Audit Log, Attachments
+- **Audit Log**: `django-auditlog` package, History tab on ticket and WO detail
+- **Attachments**: GenericForeignKey to Ticket/TicketReply/WorkOrder/WorkOrderNote; local filesystem + S3-compatible storage (both Phase 1); 25 MB default max; all settings editable in admin
+
+### Batch 3 — Outbound Email, Auto-Responder
+- **Outbound Email**: SMTP config, `EmailTemplate` model with trigger-based sending, synchronous
+- **Auto-Responder + Filtering**: Three-layer suppression — pattern blocklist + exact address list + per-client suppress flag; suppression is logged not silent
+
+### Batch 4 — SLA, Help Topics/KB, Roles & Permissions
+- **SLA Plans**: Grace period, overdue badges on ticket + linked WO, acknowledgment workflow (requires note), in-app only
+- **Knowledge Base**: Single unified KB (not split ticket/WO), `KBCategory` + `KBArticle`, article types (troubleshooting/how_to/vendor/internal), `is_restricted` for admin-only articles, accessible from ticket and WO detail
+- **Roles & Permissions**: Replace flat role field with `Role` model + permission flags; seed Administrator + Technician; `TechSkill` M2M on User for future skill-based routing
+
+### Batch 5 — Inbound Email
+- **Email Piping**: IMAP + POP3 (both selectable in admin), cPanel/standard mail, no OAuth2 needed; threading by ticket number in subject; attachments on inbound emails saved automatically
+
+### Batch 6 — Queues, Sidebar, Dashboard, Reporting
+- **Custom Queues**: System queues (admin-created) + personal queues (per-user); left sidebar on ticket list/detail
+- **Persistent Sidebar**: Visible on all pages except dashboard; accordion with My Tickets / My Work Orders sections; color-coded by status; tech sees own assignments only
+- **Enhanced Dashboard**: Two tile rows (Tickets + WOs); tech sees own work, admin sees everything; fully configurable tiles in admin (`DashboardTile` model)
+- **Reporting**: 8 reports including ticket-to-WO conversion rate; Chart.js charts; CSV export; configurable in admin
+
+### Batch 7 — Custom Fields
+- **Custom Fields**: Available on both Tickets and Work Orders; field types: text/textarea/select/checkbox/date; EAV storage; scoped to HelpTopic or RepairType
+
+### Batch 8 — MFA
+- **MFA**: TOTP via `django-two-factor-auth`; available to all users; enforcement toggle in admin (default off); backup codes for admin only; admin resets for lost devices
+
+---
+
+## Key Decisions Made
+
+- **Tailwind via CDN** — no build step needed for now
+- **LoginRequiredMixin on all views** — app is internal-only
+- **Work order numbers** auto-generated as `WO-YYYYMMDD-NNNN`
+- **Ticket numbers** auto-generated as `TKT-YYYYMMDD-NNNN`
+- **SQLite for dev** — switch to PostgreSQL for production
+- **Visual polish deferred** — functionality first
+- **GitHub**: Private repo, push after each working feature
+- **HTMX** for inline interactions (notes, replies, checklist toggling) — already implemented
+- **No Celery/async queue** — synchronous email sending is sufficient at MSP scale; reassess in Phase 2
+- **No OAuth2** for email — SCS uses cPanel-hosted mail with standard IMAP/POP3 credentials
+- **Single unified KB** — not split between tickets and work orders
+- **Ticket close is always manual** even when linked WO closes — forces human contact
+- **MFA backup codes for admin only** — other users recover via admin reset
+- **SLA overdue alerts are in-app only** — acknowledgment with required note creates audit trail
+- **Attachment storage Phase 1**: local filesystem (configurable path) + S3-compatible (covers B2, MinIO, Wasabi, AWS)
 
 ---
 
@@ -216,21 +226,8 @@ python manage.py runserver
 
 ---
 
-## Key Decisions Made
-
-- **Tailwind via CDN** — no build step needed for now; can switch to compiled later
-- **LoginRequiredMixin on all views** — app is internal-only
-- **Admin panel still used** for notes, mileage entry, ticket management until native forms are built
-- **Work order numbers** auto-generated as `WO-YYYYMMDD-NNNN`
-- **Ticket numbers** auto-generated as `TKT-YYYYMMDD-NNNN`
-- **SQLite for dev** — switch to PostgreSQL for production deployment
-- **Visual polish deferred** — functionality first, design later
-- **GitHub**: Private repo, push after each working feature
-
----
-
 ## Related Projects
 
 - **scs-repair-tracker** (`~/Documents/Claude/scs-repair-tracker`) — Legacy PHP app, reference only
-- **Clover** (`~/Documents/Clover`) — macOS desktop app, future integration (Phase 2+)
-- **dashboard-mockup.html** (`~/Documents/Claude/dashboard-mockup.html`) — Original UI mockup reference
+- **Clover** (`~/Documents/Clover`) — macOS desktop app, future integration Phase 2+
+- **Invoice Ninja** — Financial backend; API research required before Phase 2 integration
