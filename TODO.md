@@ -159,7 +159,7 @@
 
 #### Batch 5 — Inbound Email
 
-- [ ] **Inbound Email Piping** (#6)
+- ✅ **Inbound Email Piping** (#6)
   - Management command `fetch_inbound_email`: polls mailbox, processes messages
   - Protocol selectable in admin settings: **IMAP** or **POP3**
   - Run via system cron every 1–5 minutes

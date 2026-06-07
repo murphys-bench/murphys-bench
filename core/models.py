@@ -724,6 +724,37 @@ class SiteSettings(models.Model):
         help_text='One fnmatch pattern per line. Emails matching any pattern are suppressed.',
     )
 
+    # Inbound email (IMAP / POP3)
+    INBOUND_PROTOCOL_CHOICES = [
+        ('imap', 'IMAP'),
+        ('pop3', 'POP3'),
+    ]
+    inbound_email_enabled = models.BooleanField(
+        default=False,
+        help_text='Enable polling the mailbox for incoming tickets and replies.',
+    )
+    inbound_protocol = models.CharField(
+        max_length=10, choices=INBOUND_PROTOCOL_CHOICES, default='imap',
+    )
+    inbound_host = models.CharField(max_length=255, blank=True, help_text='e.g. mail.yourdomain.com')
+    inbound_port = models.IntegerField(default=993, help_text='993 for IMAP SSL, 995 for POP3 SSL, 143/110 without SSL.')
+    inbound_ssl = models.BooleanField(default=True)
+    inbound_username = models.CharField(max_length=255, blank=True)
+    inbound_password = models.CharField(max_length=255, blank=True, help_text='Stored in plaintext — internal use only.')
+    inbound_folder = models.CharField(max_length=100, default='INBOX', help_text='IMAP folder to poll. Ignored for POP3.')
+    inbound_delete_after_fetch = models.BooleanField(
+        default=False,
+        help_text='Delete messages after processing (IMAP). POP3 always deletes. Default: mark as read.',
+    )
+    strip_quoted_replies = models.BooleanField(
+        default=True,
+        help_text='Strip quoted reply text (> lines, On … wrote: blocks) from inbound replies.',
+    )
+    inbound_default_client_name = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text='When no client matches the sender email, new tickets are filed under a new client. Leave blank to auto-name from the sender email domain.',
+    )
+
     class Meta:
         db_table = 'site_settings'
         verbose_name = 'Site Settings'
@@ -887,6 +918,32 @@ class EmailSendLog(models.Model):
 
     def __str__(self):
         return f'{self.trigger} → {self.to_email} [{self.status}]'
+
+
+class InboundEmailLog(models.Model):
+    """Audit log for every message fetched from the inbound mailbox."""
+
+    STATUS_CHOICES = [
+        ('new_ticket', 'Created New Ticket'),
+        ('reply', 'Added Reply to Ticket'),
+        ('duplicate', 'Duplicate — Already Processed'),
+        ('error', 'Processing Error'),
+    ]
+
+    message_id = models.CharField(max_length=500, blank=True, db_index=True, help_text='Email Message-ID header.')
+    from_email = models.CharField(max_length=255, blank=True)
+    subject = models.CharField(max_length=500, blank=True)
+    ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='inbound_log')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    detail = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'inbound_email_log'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.from_email} → {self.status} ({self.created_at:%Y-%m-%d %H:%M})'
 
 
 class KBCategory(models.Model):
