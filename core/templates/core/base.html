@@ -6,76 +6,78 @@
     <title>{% block title %}Murphy's Bench{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
 
-
     <!-- Top Navigation Bar -->
-    <nav class="bg-gray-900 text-white">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex items-center justify-between h-16">
-
-                <!-- Logo / App Name -->
-                <div class="flex items-center gap-8">
-                    <a href="{% url 'core:dashboard' %}" class="text-xl font-bold tracking-tight hover:text-gray-300">🔧 Murphy's Bench</a>
-
-                    <!-- Nav Links -->
+    <nav class="bg-gray-900 text-white fixed top-0 left-0 right-0 z-30">
+        <div class="px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-14">
+                <div class="flex items-center gap-6">
+                    <a href="{% url 'core:dashboard' %}" class="text-lg font-bold tracking-tight hover:text-gray-300 whitespace-nowrap">🔧 Murphy's Bench</a>
                     <div class="hidden md:flex items-center gap-1">
                         <a href="{% url 'core:work_order_list' %}"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700
-                           {% if request.resolver_match.url_name == 'work_order_list' %}bg-gray-700{% endif %}">
-                            Work Orders
-                        </a>
+                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'work_order' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Work Orders</a>
                         <a href="{% url 'core:client_list' %}"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700
-                           {% if request.resolver_match.url_name == 'client_list' or request.resolver_match.url_name == 'client_detail' %}bg-gray-700{% endif %}">
-                            Clients
-                        </a>
+                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'client' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Clients</a>
                         <a href="{% url 'core:device_list' %}"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700
-                           {% if request.resolver_match.url_name == 'device_list' or request.resolver_match.url_name == 'device_detail' %}bg-gray-700{% endif %}">
-                            Devices
-                        </a>
+                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'device' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Devices</a>
                         <a href="{% url 'core:ticket_list' %}"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700
-                           {% if request.resolver_match.url_name == 'ticket_list' or request.resolver_match.url_name == 'ticket_detail' %}bg-gray-700{% endif %}">
-                            Tickets
-                        </a>
+                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'ticket' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Tickets</a>
+                        <a href="{% url 'core:queue_list' %}"
+                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'queue' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Queues</a>
                         <a href="{% url 'core:mileage_list' %}"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700
-                           {% if request.resolver_match.url_name == 'mileage_list' %}bg-gray-700{% endif %}">
-                            Mileage
-                        </a>
+                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if request.resolver_match.url_name == 'mileage_list' %}bg-gray-700{% endif %}">Mileage</a>
                         <a href="{% url 'core:kb_list' %}"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700
-                           {% if 'kb' in request.resolver_match.url_name %}bg-gray-700{% endif %}">
-                            KB
-                        </a>
+                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'kb' in request.resolver_match.url_name %}bg-gray-700{% endif %}">KB</a>
+                        <a href="{% url 'core:reports' %}"
+                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'report' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Reports</a>
                     </div>
                 </div>
-
-                <!-- Right Side: User info + logout -->
                 <div class="flex items-center gap-4">
                     {% if user.is_authenticated %}
                         <span class="text-sm text-gray-400">{{ user.get_full_name|default:user.username }}</span>
-                        {% if user.is_staff %}
-                            <a href="/admin/" class="text-sm text-gray-400 hover:text-white">Admin</a>
-                        {% endif %}
+                        {% if user.is_staff %}<a href="/admin/" class="text-sm text-gray-400 hover:text-white">Admin</a>{% endif %}
                         <a href="{% url 'accounts:logout' %}" class="text-sm text-gray-400 hover:text-white">Log Out</a>
                     {% endif %}
                 </div>
-
             </div>
         </div>
     </nav>
 
-    <!-- Page Header -->
+    <!-- Fixed nav spacer -->
+    <div class="h-14"></div>
+
     {% block page_header %}{% endblock %}
 
-    <!-- Main Content -->
-    <main class="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-        {% block content %}{% endblock %}
-    </main>
+    <!-- Body layout: sidebar + content, or full-width on dashboard -->
+    <div class="flex" style="min-height: calc(100vh - 3.5rem)">
+
+        {% if request.resolver_match.url_name != 'dashboard' and user.is_authenticated %}
+        <!-- Persistent Sidebar -->
+        <aside class="w-52 flex-shrink-0 bg-gray-800 text-white flex flex-col pt-3 pb-6 overflow-y-auto" style="min-height: calc(100vh - 3.5rem)">
+            <div class="px-3 mb-2">
+                <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">My Work</p>
+            </div>
+            <div id="sidebar-content"
+                 hx-get="{% url 'core:sidebar_fragment' %}"
+                 hx-trigger="load"
+                 hx-swap="innerHTML"
+                 class="flex-1 px-1">
+                <p class="px-3 py-2 text-xs text-gray-600 italic">Loading…</p>
+            </div>
+        </aside>
+        {% endif %}
+
+        <!-- Main content -->
+        <div class="flex-1 min-w-0">
+            <main class="{% if request.resolver_match.url_name == 'dashboard' %}max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8{% else %}px-6 py-6{% endif %}">
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+
+    </div>
 
 {% block extra_js %}{% endblock %}
 </body>

@@ -4,7 +4,7 @@ from .models import (
     WorkOrderItem, Mileage, RepairType, Checklist, ChecklistItem, CannedResponse,
     SiteSettings, Attachment, EmailTemplate, SuppressedAddress, EmailSendLog,
     Role, TechSkill, SLAPlan, HelpTopic, KBCategory, KBArticle,
-    InboundEmailLog,
+    InboundEmailLog, TicketQueue, DashboardTile,
 )
 
 
@@ -126,14 +126,14 @@ class TicketReplyInline(admin.TabularInline):
 
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
-    list_display = ['ticket_number', 'client', 'subject', 'status', 'source', 'created_at']
-    list_filter = ['status', 'source', 'created_at']
+    list_display = ['ticket_number', 'client', 'subject', 'status', 'assigned_to', 'source', 'created_at']
+    list_filter = ['status', 'source', 'assigned_to', 'created_at']
     search_fields = ['ticket_number', 'subject', 'client__name', 'description']
     inlines = [TicketReplyInline]
     fieldsets = (
         ('Ticket Info', {'fields': ('ticket_number', 'client', 'device', 'source')}),
         ('Issue', {'fields': ('subject', 'description')}),
-        ('Status', {'fields': ('status', 'created_by')}),
+        ('Status', {'fields': ('status', 'assigned_to', 'created_by')}),
         ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
     )
     readonly_fields = ['ticket_number', 'created_at', 'updated_at']
@@ -382,3 +382,19 @@ class KBArticleAdmin(admin.ModelAdmin):
         ('Content', {'fields': ('content',)}),
         ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
     )
+
+
+@admin.register(TicketQueue)
+class TicketQueueAdmin(admin.ModelAdmin):
+    list_display = ['name', 'owner', 'is_active', 'sort_field', 'sort_direction']
+    list_filter = ['is_active']
+    search_fields = ['name']
+    readonly_fields = ['created_at']
+
+
+@admin.register(DashboardTile)
+class DashboardTileAdmin(admin.ModelAdmin):
+    list_display = ['label', 'row', 'visible_to', 'sort_order', 'is_active']
+    list_filter = ['row', 'visible_to', 'is_active']
+    list_editable = ['sort_order', 'is_active']
+    ordering = ['row', 'sort_order']

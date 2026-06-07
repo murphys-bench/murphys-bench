@@ -1,0 +1,323 @@
+{% extends "core/base.html" %}
+
+{% block title %}Reports - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow">
+    <div class="px-6 py-4 flex items-center justify-between">
+        <h1 class="text-xl font-bold text-gray-900">Reports &amp; Analytics</h1>
+        <form method="get" class="flex items-center gap-3">
+            <label class="text-sm text-gray-600">From</label>
+            <input type="date" name="start_date" value="{{ start_date|date:'Y-m-d' }}"
+                   class="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <label class="text-sm text-gray-600">To</label>
+            <input type="date" name="end_date" value="{{ end_date|date:'Y-m-d' }}"
+                   class="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <button type="submit"
+                    class="px-4 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
+                Apply
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+
+{% with qs="start_date="|add:start_date|date:"Y-m-d"|add:"&end_date="|add:end_date|date:"Y-m-d" %}
+
+<div class="space-y-8">
+
+<!-- 1. Ticket Volume Over Time -->
+<div class="bg-white rounded-lg shadow p-5">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-gray-900">1. Ticket Volume Over Time</h2>
+        <a href="{% url 'core:reports_csv' 'volume' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
+           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
+            ↓ CSV
+        </a>
+    </div>
+    {% if volume_data %}
+    <div style="height:220px"><canvas id="chartVolume"></canvas></div>
+    {% else %}
+    <p class="text-sm text-gray-400 italic">No data for this period.</p>
+    {% endif %}
+</div>
+
+<!-- 2. Open Tickets by Status -->
+<div class="bg-white rounded-lg shadow p-5">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-gray-900">2. Open Tickets by Status</h2>
+        <a href="{% url 'core:reports_csv' 'status' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
+           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
+            ↓ CSV
+        </a>
+    </div>
+    {% if status_data %}
+    <div class="flex gap-8 items-center">
+        <div style="height:200px;width:200px;flex-shrink:0"><canvas id="chartStatus"></canvas></div>
+        <div class="space-y-1">
+            {% for i in status_labels %}
+            <div class="flex items-center gap-2 text-sm">
+                <span class="inline-block w-3 h-3 rounded-full" id="statusDot{{ forloop.counter0 }}"></span>
+                <span class="text-gray-700">{{ status_labels|join:"," }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% else %}
+    <p class="text-sm text-gray-400 italic">No open tickets.</p>
+    {% endif %}
+</div>
+
+<!-- 3. Tickets by Client -->
+<div class="bg-white rounded-lg shadow p-5">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-gray-900">3. Tickets by Client</h2>
+        <a href="{% url 'core:reports_csv' 'by_client' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
+           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
+            ↓ CSV
+        </a>
+    </div>
+    {% if by_client %}
+    <div class="grid grid-cols-2 gap-6">
+        <table class="text-sm w-full">
+            <thead><tr class="text-xs text-gray-500 uppercase border-b">
+                <th class="text-left pb-1">Client</th>
+                <th class="text-right pb-1">Tickets</th>
+            </tr></thead>
+            <tbody class="divide-y divide-gray-50">
+            {% for row in by_client %}
+            <tr>
+                <td class="py-1.5 text-gray-800">{{ row.client__name }}</td>
+                <td class="py-1.5 text-right font-medium text-gray-900">{{ row.count }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <div style="height:220px"><canvas id="chartClients"></canvas></div>
+    </div>
+    {% else %}
+    <p class="text-sm text-gray-400 italic">No data for this period.</p>
+    {% endif %}
+</div>
+
+<!-- 4. Tickets by Technician -->
+<div class="bg-white rounded-lg shadow p-5">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-gray-900">4. Tickets by Technician (Workload)</h2>
+        <a href="{% url 'core:reports_csv' 'by_tech' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
+           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
+            ↓ CSV
+        </a>
+    </div>
+    {% if by_tech %}
+    <table class="text-sm w-full max-w-md">
+        <thead><tr class="text-xs text-gray-500 uppercase border-b">
+            <th class="text-left pb-1">Technician</th>
+            <th class="text-right pb-1">Tickets Assigned</th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-50">
+        {% for row in by_tech %}
+        <tr>
+            <td class="py-1.5 text-gray-800">{{ row.assigned_to__first_name }} {{ row.assigned_to__last_name }}</td>
+            <td class="py-1.5 text-right font-medium text-gray-900">{{ row.count }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-sm text-gray-400 italic">No assigned tickets in this period.</p>
+    {% endif %}
+</div>
+
+<!-- 5. Average Resolution Time -->
+<div class="bg-white rounded-lg shadow p-5">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-gray-900">5. Average Ticket Resolution Time</h2>
+        <a href="{% url 'core:reports_csv' 'resolution' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
+           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
+            ↓ CSV
+        </a>
+    </div>
+    {% if avg_res_by_tech %}
+    <table class="text-sm w-full max-w-md">
+        <thead><tr class="text-xs text-gray-500 uppercase border-b">
+            <th class="text-left pb-1">Technician</th>
+            <th class="text-right pb-1">Closed</th>
+            <th class="text-right pb-1">Avg Hours</th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-50">
+        {% for row in avg_res_by_tech %}
+        <tr>
+            <td class="py-1.5 text-gray-800">{{ row.name }}</td>
+            <td class="py-1.5 text-right text-gray-600">{{ row.count }}</td>
+            <td class="py-1.5 text-right font-medium text-gray-900">{{ row.avg_hours }}h</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-sm text-gray-400 italic">No closed tickets in this period.</p>
+    {% endif %}
+</div>
+
+<!-- 6. SLA Compliance -->
+<div class="bg-white rounded-lg shadow p-5">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-gray-900">6. SLA Compliance Rate</h2>
+        <a href="{% url 'core:reports_csv' 'sla' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
+           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
+            ↓ CSV
+        </a>
+    </div>
+    {% if total_sla %}
+    <div class="flex items-center gap-8">
+        <div>
+            <p class="text-5xl font-bold {% if sla_rate >= 90 %}text-green-600{% elif sla_rate >= 70 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                {{ sla_rate }}%
+            </p>
+            <p class="text-sm text-gray-500 mt-1">Tickets closed before due date</p>
+        </div>
+        <div class="text-sm text-gray-600 space-y-1">
+            <p>Total tickets with SLA: <strong>{{ total_sla }}</strong></p>
+            <p>Closed on time: <strong>{{ closed_on_time }}</strong></p>
+        </div>
+    </div>
+    {% else %}
+    <p class="text-sm text-gray-400 italic">No tickets with SLA plans in this period.</p>
+    {% endif %}
+</div>
+
+<!-- 7. Ticket → WO Conversion Rate -->
+<div class="bg-white rounded-lg shadow p-5">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-gray-900">7. Ticket → Work Order Conversion Rate</h2>
+        <a href="{% url 'core:reports_csv' 'conversion' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
+           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
+            ↓ CSV
+        </a>
+    </div>
+    {% if total_tickets %}
+    <div class="flex items-center gap-8">
+        <div>
+            <p class="text-5xl font-bold text-blue-600">{{ conversion_rate }}%</p>
+            <p class="text-sm text-gray-500 mt-1">Tickets converted to work orders</p>
+        </div>
+        <div class="text-sm text-gray-600 space-y-1">
+            <p>Total tickets: <strong>{{ total_tickets }}</strong></p>
+            <p>Converted: <strong>{{ converted_count }}</strong></p>
+        </div>
+    </div>
+    {% else %}
+    <p class="text-sm text-gray-400 italic">No tickets in this period.</p>
+    {% endif %}
+</div>
+
+<!-- 8. Mileage by Tech and Month -->
+<div class="bg-white rounded-lg shadow p-5">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-gray-900">8. Mileage by Technician &amp; Month</h2>
+        <a href="{% url 'core:reports_csv' 'mileage' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
+           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
+            ↓ CSV
+        </a>
+    </div>
+    {% if mileage_data %}
+    <table class="text-sm w-full max-w-md">
+        <thead><tr class="text-xs text-gray-500 uppercase border-b">
+            <th class="text-left pb-1">Technician</th>
+            <th class="text-left pb-1">Month</th>
+            <th class="text-right pb-1">Miles</th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-50">
+        {% for row in mileage_data %}
+        <tr>
+            <td class="py-1.5 text-gray-800">{{ row.technician__first_name }} {{ row.technician__last_name }}</td>
+            <td class="py-1.5 text-gray-600">{{ row.month|date:"M Y" }}</td>
+            <td class="py-1.5 text-right font-medium text-gray-900">{{ row.miles }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-sm text-gray-400 italic">No mileage logged in this period.</p>
+    {% endif %}
+</div>
+
+</div><!-- end space-y-8 -->
+{% endwith %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+const CHART_COLORS = [
+  '#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6',
+  '#EC4899','#14B8A6','#F97316','#6366F1','#84CC16'
+];
+
+{% if volume_data %}
+new Chart(document.getElementById('chartVolume'), {
+  type: 'bar',
+  data: {
+    labels: {{ volume_labels|safe }},
+    datasets: [{
+      label: 'Tickets',
+      data: {{ volume_data|safe }},
+      backgroundColor: '#3B82F6',
+      borderRadius: 3,
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+  }
+});
+{% endif %}
+
+{% if status_data %}
+new Chart(document.getElementById('chartStatus'), {
+  type: 'doughnut',
+  data: {
+    labels: {{ status_labels|safe }},
+    datasets: [{
+      data: {{ status_data|safe }},
+      backgroundColor: CHART_COLORS,
+      borderWidth: 2,
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { position: 'right' } }
+  }
+});
+{% endif %}
+
+{% if by_client %}
+new Chart(document.getElementById('chartClients'), {
+  type: 'bar',
+  data: {
+    labels: [{% for r in by_client %}"{{ r.client__name }}"{% if not forloop.last %},{% endif %}{% endfor %}],
+    datasets: [{
+      label: 'Tickets',
+      data: [{% for r in by_client %}{{ r.count }}{% if not forloop.last %},{% endif %}{% endfor %}],
+      backgroundColor: CHART_COLORS,
+      borderRadius: 3,
+    }]
+  },
+  options: {
+    indexAxis: 'y',
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: { x: { beginAtZero: true, ticks: { precision: 0 } } }
+  }
+});
+{% endif %}
+</script>
+{% endblock %}

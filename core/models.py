@@ -326,6 +326,13 @@ class Ticket(models.Model):
     description = models.TextField()
     source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='email')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open', db_index=True)
+    assigned_to = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tickets_assigned',
+    )
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='tickets_created')
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -335,6 +342,7 @@ class Ticket(models.Model):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['client', 'status']),
+            models.Index(fields=['assigned_to', 'status']),
             models.Index(fields=['source']),
         ]
 
@@ -1002,6 +1010,72 @@ class KBArticle(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class TicketQueue(models.Model):
+    """Saved, filterable ticket views. owner=None means system queue (visible to all)."""
+
+    SORT_DIRECTION_CHOICES = [('asc', 'Ascending'), ('desc', 'Descending')]
+
+    name = models.CharField(max_length=100)
+    owner = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='queues',
+        help_text='Leave blank for a system queue visible to all users.',
+    )
+    filter_criteria = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Keys: status (list), assigned_to (int), help_topic (int), sla_plan (int), overdue (bool), client (int)',
+    )
+    sort_field = models.CharField(max_length=50, default='created_at')
+    sort_direction = models.CharField(max_length=4, choices=SORT_DIRECTION_CHOICES, default='desc')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'ticket_queues'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def is_system_queue(self):
+        return self.owner is None
+
+
+class DashboardTile(models.Model):
+    """Configurable tile on the dashboard. Two rows: ticket and workorder."""
+
+    ROW_CHOICES = [('ticket', 'Tickets'), ('workorder', 'Work Orders')]
+    VISIBLE_TO_CHOICES = [('all', 'All Users'), ('admin', 'Admins Only'), ('tech', 'Techs Only')]
+
+    row = models.CharField(max_length=12, choices=ROW_CHOICES)
+    label = models.CharField(max_length=100)
+    status_filter = models.JSONField(
+        default=list,
+        help_text='List of status values to count. Empty = count all.',
+    )
+    link_url = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text='URL the tile links to. Use relative paths.',
+    )
+    sort_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    visible_to = models.CharField(max_length=10, choices=VISIBLE_TO_CHOICES, default='all')
+    icon = models.CharField(max_length=10, blank=True, help_text='Optional emoji icon.')
+
+    class Meta:
+        db_table = 'dashboard_tiles'
+        ordering = ['row', 'sort_order']
+
+    def __str__(self):
+        return f'{self.get_row_display()} — {self.label}'
 
 
 # --- Audit Log Registration ---

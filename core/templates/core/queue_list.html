@@ -1,0 +1,77 @@
+{% extends "core/base.html" %}
+
+{% block title %}Ticket Queues - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow">
+    <div class="px-6 py-4 flex items-center justify-between">
+        <h1 class="text-xl font-bold text-gray-900">Ticket Queues</h1>
+        <a href="{% url 'core:queue_create' %}"
+           class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
+            + New Queue
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- System Queues -->
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        <div class="px-5 py-3 border-b border-gray-200 bg-gray-50">
+            <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide">System Queues</h2>
+        </div>
+        {% if system_queues %}
+        <ul class="divide-y divide-gray-100">
+            {% for queue in system_queues %}
+            <li class="flex items-center justify-between px-5 py-3 hover:bg-gray-50">
+                <a href="{% url 'core:queue_detail' queue.pk %}" class="text-blue-600 hover:underline font-medium">
+                    {{ queue.name }}
+                </a>
+                <div class="flex items-center gap-3">
+                    <span class="text-xs text-gray-400">Sort: {{ queue.sort_field }} {{ queue.sort_direction }}</span>
+                    {% if user.is_staff %}
+                    <a href="{% url 'core:queue_edit' queue.pk %}" class="text-xs text-gray-500 hover:text-gray-800">Edit</a>
+                    {% endif %}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="px-5 py-4 text-sm text-gray-400 italic">No system queues defined.</p>
+        {% endif %}
+    </div>
+
+    <!-- Personal Queues -->
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        <div class="px-5 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide">My Queues</h2>
+        </div>
+        {% if my_queues %}
+        <ul class="divide-y divide-gray-100">
+            {% for queue in my_queues %}
+            <li class="flex items-center justify-between px-5 py-3 hover:bg-gray-50">
+                <a href="{% url 'core:queue_detail' queue.pk %}" class="text-blue-600 hover:underline font-medium">
+                    {{ queue.name }}
+                </a>
+                <div class="flex items-center gap-3">
+                    <a href="{% url 'core:queue_edit' queue.pk %}" class="text-xs text-gray-500 hover:text-gray-800">Edit</a>
+                    <form method="post" action="{% url 'core:queue_delete' queue.pk %}"
+                          onsubmit="return confirm('Delete queue {{ queue.name }}?')">
+                        {% csrf_token %}
+                        <button type="submit" class="text-xs text-red-500 hover:text-red-700">Delete</button>
+                    </form>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="px-5 py-4 text-sm text-gray-400 italic">You haven't saved any personal queues yet.
+            <a href="{% url 'core:queue_create' %}" class="text-blue-600 hover:underline">Create one →</a>
+        </p>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}
