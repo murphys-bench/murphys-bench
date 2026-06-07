@@ -1,0 +1,14 @@
+<div class="border-l-4 pl-4
+    {% if reply.reply_type == 'internal' %}border-yellow-400 bg-yellow-50{% else %}border-blue-400 bg-blue-50{% endif %}
+    rounded-r py-2">
+    <div class="flex items-center justify-between mb-1">
+        <span class="text-xs font-semibold
+            {% if reply.reply_type == 'internal' %}text-yellow-700{% else %}text-blue-700{% endif %}">
+            {% if reply.reply_type == 'internal' %}🔒 Internal{% else %}👤 Customer Visible{% endif %}
+        </span>
+        <span class="text-xs text-gray-400">
+            {{ reply.created_by.get_full_name|default:"Unknown" }} — {{ reply.created_at|date:"M d, Y g:i A" }}
+        </span>
+    </div>
+    <p class="text-sm text-gray-700">{{ reply.content }}</p>
+</div>
