@@ -46,6 +46,10 @@ class Client(models.Model):
     address_zip = models.CharField(max_length=10, blank=True)
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
+    suppress_emails = models.BooleanField(
+        default=False,
+        help_text='Suppress all automated outbound emails to this client.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -518,6 +522,24 @@ class SiteSettings(models.Model):
     )
     s3_region = models.CharField(max_length=50, blank=True)
 
+    # Email config
+    email_enabled = models.BooleanField(
+        default=False,
+        help_text='Master switch — disabling this stops all automated outbound email.',
+    )
+    email_host = models.CharField(max_length=255, blank=True, help_text='e.g. mail.yourdomain.com')
+    email_port = models.IntegerField(default=587)
+    email_use_tls = models.BooleanField(default=True)
+    email_username = models.CharField(max_length=255, blank=True)
+    email_password = models.CharField(max_length=255, blank=True, help_text='Stored in plaintext — for internal use only.')
+    email_from = models.EmailField(blank=True, help_text='From address shown to clients. e.g. support@yourdomain.com')
+
+    # Auto-responder suppression patterns (newline-separated fnmatch patterns)
+    email_suppression_patterns = models.TextField(
+        default='noreply@*\nno-reply@*\ndonotreply@*\nmailer-daemon@*\npostmaster@*\nbounce@*',
+        help_text='One fnmatch pattern per line. Emails matching any pattern are suppressed.',
+    )
+
     class Meta:
         db_table = 'site_settings'
         verbose_name = 'Site Settings'
@@ -599,6 +621,88 @@ class CannedResponse(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class EmailTemplate(models.Model):
+    """Trigger-based email templates sent to clients on ticket events."""
+
+    TRIGGER_CHOICES = [
+        ('ticket_created', 'Ticket Created (auto-responder)'),
+        ('reply_added', 'Customer-Visible Reply Added'),
+        ('status_changed', 'Status Changed'),
+        ('ticket_resolved', 'Ticket Resolved'),
+    ]
+
+    trigger = models.CharField(max_length=30, choices=TRIGGER_CHOICES, unique=True)
+    subject_template = models.CharField(
+        max_length=255,
+        help_text='Django template syntax. Variables: {{ ticket.ticket_number }}, {{ ticket.subject }}, {{ client.name }}, {{ status }}, {{ tech_name }}',
+    )
+    body_template = models.TextField(
+        help_text='Plain text body. Same template variables available.',
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'email_templates'
+        ordering = ['trigger']
+
+    def __str__(self):
+        return f'{self.get_trigger_display()}'
+
+
+class SuppressedAddress(models.Model):
+    """Exact email addresses that should never receive automated emails."""
+
+    email = models.EmailField(unique=True)
+    reason = models.CharField(max_length=255, blank=True, help_text='Why this address is suppressed.')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'suppressed_addresses'
+        ordering = ['email']
+        verbose_name_plural = 'Suppressed Addresses'
+
+    def __str__(self):
+        return self.email
+
+
+class EmailSendLog(models.Model):
+    """Audit log of every attempted outbound email — sent or suppressed."""
+
+    STATUS_CHOICES = [
+        ('sent', 'Sent'),
+        ('suppressed', 'Suppressed'),
+        ('failed', 'Failed'),
+    ]
+
+    REASON_CHOICES = [
+        ('', 'N/A'),
+        ('client_flag', 'Client suppress_emails flag'),
+        ('pattern', 'Matched suppression pattern'),
+        ('exact_address', 'Exact address suppression list'),
+        ('no_address', 'No recipient address found'),
+        ('no_template', 'No active template for trigger'),
+        ('send_error', 'SMTP send error'),
+        ('email_disabled', 'Outbound email disabled'),
+    ]
+
+    ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, related_name='email_log')
+    to_email = models.EmailField(blank=True)
+    trigger = models.CharField(max_length=30)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    reason = models.CharField(max_length=50, blank=True)
+    detail = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'email_send_log'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.trigger} → {self.to_email} [{self.status}]'
 
 
 # --- Audit Log Registration ---

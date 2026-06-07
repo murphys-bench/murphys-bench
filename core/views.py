@@ -533,6 +533,8 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
         form.instance.created_by = self.request.user
         response = super().form_valid(form)
         _save_attachments(self.request, self.object)
+        from .email_utils import send_ticket_email
+        send_ticket_email('ticket_created', self.object)
         return response
 
     def get_success_url(self):
@@ -557,7 +559,14 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
             if wo and wo.status not in ('closed', 'cancelled'):
                 form.add_error('status', f'Cannot close this ticket — linked work order {wo.work_order_number} is still open.')
                 return self.form_invalid(form)
-        return super().form_valid(form)
+        old_status = self.object.status
+        response = super().form_valid(form)
+        from .email_utils import send_ticket_email
+        if self.object.status != old_status:
+            send_ticket_email('status_changed', self.object, {'old_status': old_status})
+            if self.object.status == 'resolved':
+                send_ticket_email('ticket_resolved', self.object)
+        return response
 
     def get_success_url(self):
         return reverse_lazy('core:ticket_detail', kwargs={'pk': self.object.pk})
@@ -587,6 +596,9 @@ class TicketReplyCreateView(LoginRequiredMixin, View):
             created_by=request.user,
         )
         _save_attachments(request, reply)
+        if reply.reply_type == 'customer_visible':
+            from .email_utils import send_ticket_email
+            send_ticket_email('reply_added', ticket, {'reply': reply})
         return render(request, 'core/partials/ticket_reply_item.html', {'reply': reply})
 
 
