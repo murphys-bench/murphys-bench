@@ -5,7 +5,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import HttpResponse
 from django.urls import reverse_lazy
 from django.db.models import Q
-from .models import WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage
+from .models import WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist
 from .forms import WorkOrderForm, ClientForm, DeviceForm
 
 
@@ -263,7 +263,24 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
 
     def form_valid(self, form):
         form.instance.work_order_number = WorkOrder.generate_work_order_number()
-        return super().form_valid(form)
+        response = super().form_valid(form)
+
+        # Optionally apply the default checklist for the selected repair type
+        if form.cleaned_data.get('apply_checklist') and self.object.repair_type:
+            checklist = self.object.repair_type.checklists.filter(
+                is_default=True, is_active=True
+            ).first()
+            if checklist:
+                for item in checklist.items.filter(is_active=True).order_by('sort_order'):
+                    WorkOrderItem.objects.create(
+                        work_order=self.object,
+                        item_type='checklist',
+                        description=item.description,
+                        quantity=1,
+                        is_completed=False,
+                    )
+
+        return response
 
     def get_success_url(self):
         return reverse_lazy('core:work_order_detail', kwargs={'pk': self.object.pk})
@@ -272,6 +289,7 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
         context = super().get_context_data(**kwargs)
         context['title'] = 'New Work Order'
         context['cancel_url'] = reverse_lazy('core:work_order_list')
+        context['is_create'] = True
         return context
 
 
@@ -287,6 +305,7 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
         context = super().get_context_data(**kwargs)
         context['title'] = f'Edit {self.object.work_order_number}'
         context['cancel_url'] = reverse_lazy('core:work_order_detail', kwargs={'pk': self.object.pk})
+        context['is_create'] = False
         return context
 
 

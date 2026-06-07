@@ -3,6 +3,13 @@ from .models import WorkOrder, Client, Contact, Device
 
 
 class WorkOrderForm(forms.ModelForm):
+    apply_checklist = forms.BooleanField(
+        required=False,
+        initial=False,
+        label='Apply default checklist for selected repair type',
+        widget=forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
+    )
+
     class Meta:
         model = WorkOrder
         fields = [
