@@ -7,8 +7,13 @@ from django.urls import reverse_lazy
 from django.db.models import Q
 from django.contrib.contenttypes.models import ContentType
 from django.http import FileResponse, Http404
-from .models import WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist, Ticket, TicketReply, TicketLock, TicketLink, Attachment, SiteSettings
-from .forms import WorkOrderForm, ClientForm, DeviceForm, TicketForm, TicketConvertForm
+from django.utils import timezone
+from .models import (
+    WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist,
+    Ticket, TicketReply, TicketLock, TicketLink, Attachment, SiteSettings,
+    KBCategory, KBArticle,
+)
+from .forms import WorkOrderForm, ClientForm, DeviceForm, TicketForm, TicketConvertForm, KBArticleForm
 
 
 def _save_attachments(request, obj):
@@ -137,6 +142,8 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         context['audit_log'] = LogEntry.objects.get_for_object(self.object).select_related('actor')[:50]
         ct = ContentType.objects.get_for_model(WorkOrder)
         context['wo_attachments'] = Attachment.objects.filter(content_type=ct, object_id=self.object.pk)
+        # Linked ticket for overdue badge
+        context['linked_ticket'] = getattr(self.object, 'ticket', None)
         return context
 
 
@@ -764,3 +771,130 @@ class TicketLinkRemoveView(LoginRequiredMixin, View):
             'linked_tickets': ticket.get_linked_tickets(),
             'link_error': None,
         })
+
+
+# ---------------------------------------------------------------------------
+# SLA — Overdue Acknowledgment
+# ---------------------------------------------------------------------------
+
+class TicketAcknowledgeOverdueView(LoginRequiredMixin, View):
+    """Acknowledge an overdue ticket with a required internal note."""
+
+    def get(self, request, pk):
+        ticket = get_object_or_404(Ticket, pk=pk)
+        return render(request, 'core/partials/overdue_ack_form.html', {'ticket': ticket})
+
+    def post(self, request, pk):
+        ticket = get_object_or_404(Ticket, pk=pk)
+        note_text = request.POST.get('note', '').strip()
+        if not note_text:
+            # Re-render the ack form with an error
+            return render(request, 'core/partials/overdue_ack_form.html', {
+                'ticket': ticket,
+                'ack_error': 'A note is required to acknowledge the overdue status.',
+            })
+        TicketReply.objects.create(
+            ticket=ticket,
+            reply_type='internal',
+            content=f'[Overdue Acknowledged] {note_text}',
+            created_by=request.user,
+        )
+        ticket.overdue_acknowledged_by = request.user
+        ticket.overdue_acknowledged_at = timezone.now()
+        ticket.save(update_fields=['overdue_acknowledged_by', 'overdue_acknowledged_at'])
+        return render(request, 'core/partials/overdue_badge.html', {'ticket': ticket})
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Base
+# ---------------------------------------------------------------------------
+
+class KBListView(LoginRequiredMixin, View):
+    def get(self, request):
+        q = request.GET.get('q', '').strip()
+        category_id = request.GET.get('category', '')
+        article_type = request.GET.get('type', '')
+
+        articles = KBArticle.objects.select_related('category', 'author').filter(is_active=True)
+
+        # Restrict admin-only articles
+        can_view_restricted = (
+            request.user.is_staff or request.user.has_perm_flag('can_view_restricted_kb')
+        )
+        if not can_view_restricted:
+            articles = articles.filter(is_restricted=False)
+
+        if q:
+            articles = articles.filter(Q(title__icontains=q) | Q(content__icontains=q))
+        if category_id:
+            articles = articles.filter(category_id=category_id)
+        if article_type:
+            articles = articles.filter(article_type=article_type)
+
+        categories = KBCategory.objects.order_by('sort_order', 'name')
+        return render(request, 'core/kb_list.html', {
+            'articles': articles.order_by('-updated_at'),
+            'categories': categories,
+            'article_types': KBArticle.ARTICLE_TYPE_CHOICES,
+            'q': q,
+            'selected_category': category_id,
+            'selected_type': article_type,
+        })
+
+
+class KBDetailView(LoginRequiredMixin, View):
+    def get(self, request, pk):
+        article = get_object_or_404(KBArticle, pk=pk, is_active=True)
+        can_view_restricted = (
+            request.user.is_staff or request.user.has_perm_flag('can_view_restricted_kb')
+        )
+        if article.is_restricted and not can_view_restricted:
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        return render(request, 'core/kb_detail.html', {'article': article})
+
+
+class KBArticleCreateView(LoginRequiredMixin, View):
+    def get(self, request):
+        can_manage = request.user.is_staff or request.user.has_perm_flag('can_manage_kb')
+        if not can_manage:
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        form = KBArticleForm()
+        return render(request, 'core/kb_form.html', {'form': form, 'action': 'Create'})
+
+    def post(self, request):
+        can_manage = request.user.is_staff or request.user.has_perm_flag('can_manage_kb')
+        if not can_manage:
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        form = KBArticleForm(request.POST)
+        if form.is_valid():
+            article = form.save(commit=False)
+            article.author = request.user
+            article.save()
+            return redirect('core:kb_detail', pk=article.pk)
+        return render(request, 'core/kb_form.html', {'form': form, 'action': 'Create'})
+
+
+class KBArticleEditView(LoginRequiredMixin, View):
+    def get(self, request, pk):
+        can_manage = request.user.is_staff or request.user.has_perm_flag('can_manage_kb')
+        if not can_manage:
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        article = get_object_or_404(KBArticle, pk=pk)
+        form = KBArticleForm(instance=article)
+        return render(request, 'core/kb_form.html', {'form': form, 'article': article, 'action': 'Edit'})
+
+    def post(self, request, pk):
+        can_manage = request.user.is_staff or request.user.has_perm_flag('can_manage_kb')
+        if not can_manage:
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        article = get_object_or_404(KBArticle, pk=pk)
+        form = KBArticleForm(request.POST, instance=article)
+        if form.is_valid():
+            form.save()
+            return redirect('core:kb_detail', pk=article.pk)
+        return render(request, 'core/kb_form.html', {'form': form, 'article': article, 'action': 'Edit'})

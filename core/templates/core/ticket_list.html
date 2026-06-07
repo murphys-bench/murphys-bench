@@ -80,8 +80,15 @@
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">
                                 <a href="{% url 'core:ticket_detail' ticket.pk %}">{{ ticket.ticket_number }}</a>
                             </td>
-                            <td class="px-6 py-4 text-sm text-gray-900 max-w-xs truncate">
-                                {{ ticket.subject }}
+                            <td class="px-6 py-4 text-sm text-gray-900 max-w-xs">
+                                <div class="truncate">{{ ticket.subject }}</div>
+                                {% if ticket.is_overdue %}
+                                    {% if ticket.overdue_is_acknowledged %}
+                                        <span class="text-xs text-yellow-600 font-medium">⚠ Overdue (acked)</span>
+                                    {% else %}
+                                        <span class="text-xs text-red-600 font-semibold">🔴 Overdue</span>
+                                    {% endif %}
+                                {% endif %}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                                 {{ ticket.client.name }}

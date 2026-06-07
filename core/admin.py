@@ -3,19 +3,47 @@ from .models import (
     User, Client, Contact, Device, Ticket, TicketReply, WorkOrder, WorkOrderNote,
     WorkOrderItem, Mileage, RepairType, Checklist, ChecklistItem, CannedResponse,
     SiteSettings, Attachment, EmailTemplate, SuppressedAddress, EmailSendLog,
+    Role, TechSkill, SLAPlan, HelpTopic, KBCategory, KBArticle,
 )
+
+
+@admin.register(Role)
+class RoleAdmin(admin.ModelAdmin):
+    list_display = ['name', 'is_system', 'can_manage_settings', 'can_view_all_tickets', 'can_close_tickets', 'can_manage_users']
+    list_filter = ['is_system']
+    fieldsets = (
+        (None, {'fields': ('name', 'description', 'is_system')}),
+        ('Ticket Permissions', {'fields': (
+            'can_create_ticket', 'can_edit_ticket', 'can_delete_ticket',
+            'can_assign_ticket', 'can_reply_internal', 'can_reply_customer',
+            'can_close_tickets', 'can_view_all_tickets',
+        )}),
+        ('Work Order Permissions', {'fields': ('can_create_workorder', 'can_edit_workorder', 'can_close_workorder')}),
+        ('System Permissions', {'fields': (
+            'can_manage_settings', 'can_manage_users', 'can_view_reports',
+            'can_manage_kb', 'can_view_restricted_kb',
+        )}),
+    )
+
+
+@admin.register(TechSkill)
+class TechSkillAdmin(admin.ModelAdmin):
+    list_display = ['name', 'description']
+    search_fields = ['name']
 
 
 # User Admin
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ['username', 'first_name', 'last_name', 'role', 'is_staff', 'is_active']
-    list_filter = ['role', 'is_staff', 'is_active', 'date_joined']
+    list_display = ['username', 'first_name', 'last_name', 'role', 'role_obj', 'is_staff', 'is_active']
+    list_filter = ['role', 'role_obj', 'is_staff', 'is_active', 'date_joined']
     search_fields = ['username', 'first_name', 'last_name', 'email', 'phone']
+    filter_horizontal = ['skills']
     fieldsets = (
         ('Login', {'fields': ('username', 'password')}),
         ('Personal Info', {'fields': ('first_name', 'last_name', 'email', 'phone')}),
-        ('Permissions', {'fields': ('role', 'is_staff', 'is_active', 'groups', 'user_permissions')}),
+        ('Role & Skills', {'fields': ('role', 'role_obj', 'skills')}),
+        ('Permissions', {'fields': ('is_staff', 'is_active', 'groups', 'user_permissions')}),
         ('Important Dates', {'fields': ('last_login', 'date_joined'), 'classes': ('collapse',)}),
     )
 
@@ -286,3 +314,43 @@ class EmailSendLogAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return False
+
+
+@admin.register(SLAPlan)
+class SLAPlanAdmin(admin.ModelAdmin):
+    list_display = ['name', 'grace_period_hours', 'is_active', 'is_transient', 'disable_overdue_alerts']
+    list_filter = ['is_active', 'is_transient']
+    search_fields = ['name']
+
+
+@admin.register(HelpTopic)
+class HelpTopicAdmin(admin.ModelAdmin):
+    list_display = ['name', 'default_sla', 'is_active', 'sort_order']
+    list_filter = ['is_active', 'default_sla']
+    search_fields = ['name']
+
+
+class KBArticleInline(admin.TabularInline):
+    model = KBArticle
+    extra = 0
+    fields = ['title', 'article_type', 'is_active', 'is_restricted']
+
+
+@admin.register(KBCategory)
+class KBCategoryAdmin(admin.ModelAdmin):
+    list_display = ['name', 'sort_order']
+    search_fields = ['name']
+    inlines = [KBArticleInline]
+
+
+@admin.register(KBArticle)
+class KBArticleAdmin(admin.ModelAdmin):
+    list_display = ['title', 'category', 'article_type', 'author', 'is_active', 'is_restricted', 'updated_at']
+    list_filter = ['article_type', 'category', 'is_active', 'is_restricted']
+    search_fields = ['title', 'content']
+    readonly_fields = ['created_at', 'updated_at']
+    fieldsets = (
+        (None, {'fields': ('title', 'category', 'article_type', 'author', 'is_active', 'is_restricted')}),
+        ('Content', {'fields': ('content',)}),
+        ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
+    )

@@ -13,6 +13,61 @@ def attachment_upload_path(instance, filename):
     return f'attachments/{ct.app_label}/{ct.model}/{instance.object_id}/{filename}'
 
 
+class Role(models.Model):
+    """Permission role assigned to users."""
+
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    is_system = models.BooleanField(
+        default=False,
+        help_text='System roles cannot be deleted.',
+    )
+
+    # Permission flags
+    can_manage_settings = models.BooleanField(default=False, help_text='Access admin panel and SiteSettings.')
+    can_view_all_tickets = models.BooleanField(default=False, help_text='View all tickets (vs. own only).')
+    can_close_tickets = models.BooleanField(default=False, help_text='Resolve and close tickets.')
+    can_manage_users = models.BooleanField(default=False, help_text='Create and manage user accounts.')
+    can_view_reports = models.BooleanField(default=False, help_text='Access reporting section (Batch 6).')
+    can_view_restricted_kb = models.BooleanField(default=False, help_text='View admin-only KB articles.')
+    can_manage_kb = models.BooleanField(default=False, help_text='Create and edit KB articles.')
+    can_create_ticket = models.BooleanField(default=True)
+    can_edit_ticket = models.BooleanField(default=True)
+    can_delete_ticket = models.BooleanField(default=False)
+    can_assign_ticket = models.BooleanField(default=True)
+    can_reply_internal = models.BooleanField(default=True)
+    can_reply_customer = models.BooleanField(default=True)
+    can_create_workorder = models.BooleanField(default=True)
+    can_edit_workorder = models.BooleanField(default=True)
+    can_close_workorder = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'roles'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+    def delete(self, *args, **kwargs):
+        if self.is_system:
+            raise ValueError(f'Cannot delete system role: {self.name}')
+        super().delete(*args, **kwargs)
+
+
+class TechSkill(models.Model):
+    """Skills that can be assigned to technicians for future routing."""
+
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'tech_skills'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
 class User(AbstractUser):
     """Extended user model for technicians and admins"""
 
@@ -23,7 +78,16 @@ class User(AbstractUser):
     ]
 
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='technician')
+    role_obj = models.ForeignKey(
+        'Role',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='users',
+        help_text='Role-based permission set. Replaces the legacy role field.',
+    )
     phone = models.CharField(max_length=20, blank=True)
+    skills = models.ManyToManyField(TechSkill, blank=True, related_name='users')
 
     class Meta:
         db_table = 'users'
@@ -31,6 +95,15 @@ class User(AbstractUser):
 
     def __str__(self):
         return f"{self.first_name} {self.last_name}" or self.username
+
+    def has_perm_flag(self, flag):
+        """Check a permission flag on the user's role_obj."""
+        if self.role_obj:
+            return getattr(self.role_obj, flag, False)
+        # Fallback: admin role string = all perms
+        if self.role == 'admin':
+            return True
+        return False
 
 
 class Client(models.Model):
@@ -153,6 +226,55 @@ class Device(models.Model):
         return f"{self.name} ({self.client.name})"
 
 
+class SLAPlan(models.Model):
+    """Service Level Agreement — defines response/resolution deadline."""
+
+    name = models.CharField(max_length=100, unique=True)
+    grace_period_hours = models.PositiveIntegerField(
+        default=24,
+        help_text='Hours from ticket creation until overdue.',
+    )
+    is_active = models.BooleanField(default=True)
+    is_transient = models.BooleanField(
+        default=False,
+        help_text='Transient SLAs apply to short-lived tickets (e.g. same-day callbacks).',
+    )
+    disable_overdue_alerts = models.BooleanField(
+        default=False,
+        help_text='Suppress overdue badges for tickets on this plan.',
+    )
+
+    class Meta:
+        db_table = 'sla_plans'
+        ordering = ['name']
+
+    def __str__(self):
+        return f'{self.name} ({self.grace_period_hours}h)'
+
+
+class HelpTopic(models.Model):
+    """Ticket classification topic with optional default SLA."""
+
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    default_sla = models.ForeignKey(
+        SLAPlan,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='help_topics',
+    )
+    is_active = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = 'help_topics'
+        ordering = ['sort_order', 'name']
+
+    def __str__(self):
+        return self.name
+
+
 class Ticket(models.Model):
     """Initial service request (starts workflow)"""
 
@@ -177,6 +299,29 @@ class Ticket(models.Model):
     ticket_number = models.CharField(max_length=20, unique=True, db_index=True)
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='tickets')
     device = models.ForeignKey(Device, on_delete=models.SET_NULL, null=True, blank=True, related_name='tickets')
+    help_topic = models.ForeignKey(
+        'HelpTopic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tickets',
+    )
+    sla_plan = models.ForeignKey(
+        'SLAPlan',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tickets',
+    )
+    due_at = models.DateTimeField(null=True, blank=True, help_text='Calculated from SLA grace period on assignment.')
+    overdue_acknowledged_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='overdue_acknowledgments',
+    )
+    overdue_acknowledged_at = models.DateTimeField(null=True, blank=True)
     subject = models.CharField(max_length=255)
     description = models.TextField()
     source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='email')
@@ -205,6 +350,33 @@ class Ticket(models.Model):
         return f"TKT-{today}-{count:04d}"
 
     attachments = GenericRelation('Attachment')
+
+    CLOSED_STATUSES = {'resolved', 'closed', 'converted'}
+
+    @property
+    def is_overdue(self):
+        if not self.due_at:
+            return False
+        if self.status in self.CLOSED_STATUSES:
+            return False
+        if self.sla_plan and self.sla_plan.disable_overdue_alerts:
+            return False
+        return timezone.now() > self.due_at
+
+    @property
+    def overdue_is_acknowledged(self):
+        """True if the current overdue period has been acknowledged."""
+        return self.is_overdue and self.overdue_acknowledged_at is not None
+
+    def assign_sla(self, sla_plan):
+        """Assign an SLA plan and calculate due_at. Clears any prior acknowledgment."""
+        self.sla_plan = sla_plan
+        if sla_plan:
+            self.due_at = self.created_at + timezone.timedelta(hours=sla_plan.grace_period_hours)
+        else:
+            self.due_at = None
+        self.overdue_acknowledged_by = None
+        self.overdue_acknowledged_at = None
 
     def get_linked_tickets(self):
         """Return all tickets linked to this one, regardless of link direction"""
@@ -703,6 +875,64 @@ class EmailSendLog(models.Model):
 
     def __str__(self):
         return f'{self.trigger} → {self.to_email} [{self.status}]'
+
+
+class KBCategory(models.Model):
+    """Knowledge base article category."""
+
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = 'kb_categories'
+        ordering = ['sort_order', 'name']
+        verbose_name = 'KB Category'
+        verbose_name_plural = 'KB Categories'
+
+    def __str__(self):
+        return self.name
+
+
+class KBArticle(models.Model):
+    """Internal knowledge base article."""
+
+    ARTICLE_TYPE_CHOICES = [
+        ('troubleshooting', 'Troubleshooting'),
+        ('how_to', 'How-To'),
+        ('vendor', 'Vendor Info'),
+        ('internal', 'Internal Procedure'),
+    ]
+
+    title = models.CharField(max_length=255)
+    content = models.TextField()
+    category = models.ForeignKey(
+        KBCategory,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='articles',
+    )
+    article_type = models.CharField(max_length=20, choices=ARTICLE_TYPE_CHOICES, default='how_to', db_index=True)
+    author = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='kb_articles')
+    is_active = models.BooleanField(default=True, db_index=True)
+    is_restricted = models.BooleanField(
+        default=False,
+        help_text='Restricted articles are visible only to users with can_view_restricted_kb.',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'kb_articles'
+        ordering = ['-updated_at']
+        indexes = [
+            models.Index(fields=['category', 'is_active']),
+            models.Index(fields=['article_type', 'is_active']),
+        ]
+
+    def __str__(self):
+        return self.title
 
 
 # --- Audit Log Registration ---
