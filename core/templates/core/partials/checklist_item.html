@@ -1,0 +1,16 @@
+<li id="item-{{ item.pk }}"
+    class="flex items-start gap-2 text-sm cursor-pointer select-none hover:bg-gray-50 rounded px-1 py-1 transition-colors"
+    hx-post="{% url 'core:work_order_item_toggle' item.pk %}"
+    hx-target="#item-{{ item.pk }}"
+    hx-swap="outerHTML"
+    title="Click to toggle">
+    <span class="mt-0.5 flex-shrink-0">
+        {% if item.is_completed %}✅{% else %}⬜{% endif %}
+    </span>
+    <span class="{% if item.is_completed %}line-through text-gray-400{% else %}text-gray-700{% endif %}">
+        {{ item.description }}
+        {% if item.quantity and item.quantity != 1 %}
+            <span class="text-gray-400">({{ item.quantity }} {{ item.unit }})</span>
+        {% endif %}
+    </span>
+</li>

@@ -161,19 +161,9 @@
         <div class="bg-white rounded-lg shadow p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">Items & Checklist</h2>
             {% if work_order.items.all %}
-                <ul class="space-y-2">
+                <ul class="space-y-1">
                     {% for item in work_order.items.all %}
-                    <li class="flex items-start gap-2 text-sm">
-                        <span class="mt-0.5">
-                            {% if item.is_completed %}✅{% else %}⬜{% endif %}
-                        </span>
-                        <span class="{% if item.is_completed %}line-through text-gray-400{% else %}text-gray-700{% endif %}">
-                            {{ item.description }}
-                            {% if item.quantity and item.quantity != 1 %}
-                                <span class="text-gray-400">({{ item.quantity }} {{ item.unit }})</span>
-                            {% endif %}
-                        </span>
-                    </li>
+                        {% include "core/partials/checklist_item.html" %}
                     {% endfor %}
                 </ul>
             {% else %}

@@ -30,7 +30,7 @@
 
 ⬜ **NEXT — IN ORDER**:
 1. ✅ **Ticketing context locked in** — full-featured ticketing with threaded conversation, ticket→work order conversion, trend analysis
-2. **HTMX inline notes** (add notes to work orders without page reload)
+2. ✅ **HTMX inline notes** — notes added to work orders without page reload
 3. **HTMX checklist toggling** (mark items complete without page reload)
 4. **Ticket views** (list, detail, reply form, convert-to-work-order)
 5. **Mileage create form** (native form, no admin required)
