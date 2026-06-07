@@ -1,9 +1,11 @@
-from django.shortcuts import render
+from django.shortcuts import render, get_object_or_404
+from django.views import View
 from django.views.generic import ListView, DetailView, CreateView, UpdateView
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.http import HttpResponse
 from django.urls import reverse_lazy
 from django.db.models import Q
-from .models import WorkOrder, Client, Device, Mileage
+from .models import WorkOrder, WorkOrderNote, Client, Device, Mileage
 from .forms import WorkOrderForm, ClientForm, DeviceForm
 
 
@@ -216,6 +218,28 @@ class MileageListView(LoginRequiredMixin, ListView):
         total = self.get_queryset().aggregate(total=Sum('miles'))['total'] or 0
         context['total_miles'] = total
         return context
+
+
+# --- Work Order Note (HTMX) ---
+
+class WorkOrderNoteCreateView(LoginRequiredMixin, View):
+    """Add a note to a work order — returns HTML fragment for HTMX"""
+
+    def post(self, request, pk):
+        work_order = get_object_or_404(WorkOrder, pk=pk)
+        note_type = request.POST.get('note_type', 'internal')
+        content = request.POST.get('content', '').strip()
+
+        if not content:
+            return HttpResponse(status=204)  # Nothing to add
+
+        note = WorkOrderNote.objects.create(
+            work_order=work_order,
+            note_type=note_type,
+            content=content,
+            created_by=request.user,
+        )
+        return render(request, 'core/partials/note_item.html', {'note': note})
 
 
 # --- Work Order Create / Edit ---
