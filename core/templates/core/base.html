@@ -36,6 +36,11 @@
                            {% if request.resolver_match.url_name == 'device_list' or request.resolver_match.url_name == 'device_detail' %}bg-gray-700{% endif %}">
                             Devices
                         </a>
+                        <a href="{% url 'core:ticket_list' %}"
+                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700
+                           {% if request.resolver_match.url_name == 'ticket_list' or request.resolver_match.url_name == 'ticket_detail' %}bg-gray-700{% endif %}">
+                            Tickets
+                        </a>
                         <a href="{% url 'core:mileage_list' %}"
                            class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700
                            {% if request.resolver_match.url_name == 'mileage_list' %}bg-gray-700{% endif %}">

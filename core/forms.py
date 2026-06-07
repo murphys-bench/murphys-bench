@@ -1,5 +1,5 @@
 from django import forms
-from .models import WorkOrder, Client, Contact, Device
+from .models import WorkOrder, Client, Contact, Device, Ticket, RepairType
 
 
 class WorkOrderForm(forms.ModelForm):
@@ -93,3 +93,45 @@ class DeviceForm(forms.ModelForm):
         self.fields['model'].required = False
         self.fields['serial_number'].required = False
         self.fields['notes'].required = False
+
+
+SELECT_WIDGET = {'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}
+TEXT_WIDGET = {'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}
+TEXTAREA_WIDGET = {'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'rows': 4}
+
+
+class TicketForm(forms.ModelForm):
+    class Meta:
+        model = Ticket
+        fields = ['client', 'device', 'subject', 'description', 'source', 'status']
+        widgets = {
+            'client': forms.Select(attrs=SELECT_WIDGET),
+            'device': forms.Select(attrs=SELECT_WIDGET),
+            'subject': forms.TextInput(attrs=TEXT_WIDGET),
+            'description': forms.Textarea(attrs=TEXTAREA_WIDGET),
+            'source': forms.Select(attrs=SELECT_WIDGET),
+            'status': forms.Select(attrs=SELECT_WIDGET),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['client'].queryset = Client.objects.filter(is_active=True).order_by('name')
+        self.fields['device'].required = False
+
+
+class TicketConvertForm(forms.Form):
+    repair_type = forms.ModelChoiceField(
+        queryset=RepairType.objects.filter(is_active=True).order_by('name'),
+        required=False,
+        widget=forms.Select(attrs=SELECT_WIDGET),
+    )
+    assigned_to = forms.ModelChoiceField(
+        queryset=None,
+        required=False,
+        widget=forms.Select(attrs=SELECT_WIDGET),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .models import User
+        self.fields['assigned_to'].queryset = User.objects.filter(is_active=True).order_by('first_name', 'last_name')

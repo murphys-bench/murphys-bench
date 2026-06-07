@@ -1,0 +1,74 @@
+{% extends "core/base.html" %}
+
+{% block title %}Convert Ticket - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        <div class="flex items-center gap-3 mb-1">
+            <a href="{% url 'core:ticket_detail' ticket.pk %}" class="text-gray-400 hover:text-gray-600 text-sm">← {{ ticket.ticket_number }}</a>
+        </div>
+        <h1 class="text-2xl font-bold text-gray-900">Convert to Work Order</h1>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl">
+
+    <!-- Ticket Summary -->
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+        <p class="text-sm font-semibold text-blue-900">{{ ticket.ticket_number }} — {{ ticket.subject }}</p>
+        <p class="text-sm text-blue-700 mt-1">{{ ticket.client.name }}{% if ticket.device %} · {{ ticket.device.name }}{% endif %}</p>
+        <p class="text-xs text-blue-600 mt-2">
+            A new work order will be created linked to this ticket. The ticket will be marked as <strong>Converted</strong> and kept for historical reference.
+        </p>
+    </div>
+
+    <form method="post" class="space-y-6">
+        {% csrf_token %}
+
+        {% if form.errors %}
+        <div class="bg-red-50 border border-red-200 rounded-md p-4">
+            <p class="text-sm font-medium text-red-800">Please fix the errors below:</p>
+            <ul class="mt-2 text-sm text-red-700 list-disc list-inside">
+                {% for field in form %}
+                    {% for error in field.errors %}
+                        <li>{{ field.label }}: {{ error }}</li>
+                    {% endfor %}
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-base font-semibold text-gray-900 mb-4">Work Order Details</h2>
+            <p class="text-sm text-gray-500 mb-4">
+                Client and device will be copied from the ticket. You can update them after creation.
+            </p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Repair Type</label>
+                    {{ form.repair_type }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Assign To</label>
+                    {{ form.assigned_to }}
+                </div>
+            </div>
+        </div>
+
+        <div class="flex gap-3">
+            <button type="submit"
+                    class="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">
+                Create Work Order
+            </button>
+            <a href="{% url 'core:ticket_detail' ticket.pk %}"
+               class="px-6 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">
+                Cancel
+            </a>
+        </div>
+
+    </form>
+</div>
+{% endblock %}
