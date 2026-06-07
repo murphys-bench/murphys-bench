@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.11 / Django 4.2 / HTMX / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (not cloud, not SaaS)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 7, 2026
+**Last Updated**: June 7, 2026 (end of session 3)
 
 ---
 
@@ -33,11 +33,20 @@ The app is running locally at `http://localhost:8000`. All views require login.
 - `/tickets/<id>/` — Ticket detail (HTMX inline replies, convert-to-WO)
 - `/tickets/<id>/edit/` — Edit ticket
 - `/tickets/<id>/convert/` — Convert ticket to work order
+- `/tickets/<id>/lock/release/` — Release ticket lock (called via JS beforeunload)
+- `/tickets/<id>/lock/status/` — Lock status fragment (HTMX polled every 30s)
+- `/tickets/<id>/links/add/` — Link two tickets (HTMX)
+- `/tickets/<id>/links/remove/` — Unlink tickets (HTMX)
+- `/attachments/<id>/download/` — Secure authenticated file download
 - `/admin/` — Django admin (full access, staff only)
 
 **What still requires admin panel:**
 - Logging mileage (no native form yet)
 - Managing checklists and canned responses
+- Email template editing (EmailTemplate model)
+- Suppressed address management (SuppressedAddress model)
+- Email send log review (EmailSendLog model, read-only)
+- Site settings: SMTP config, attachment limits, storage backend
 
 ---
 
@@ -122,7 +131,7 @@ murphys-bench/
     └── ticketing-design.md
 ```
 
-### Data Models (14 current)
+### Data Models (22 current)
 - **User** — extended Django user with role (transitioning to Role FK — see Planned Features)
 - **Client** — company/customer
 - **Contact** — person at a client company
@@ -137,6 +146,13 @@ murphys-bench/
 - **Checklist** — template task list linked to a repair type
 - **ChecklistItem** — individual task in a checklist template
 - **CannedResponse** — template notes for common situations
+- **TicketLock** — collision avoidance; OneToOne on Ticket, 10-min expiry
+- **TicketLink** — links related/duplicate tickets; unique_together on (ticket_a, ticket_b)
+- **SiteSettings** — singleton; SMTP config, attachment limits/storage, suppression patterns
+- **Attachment** — GenericFK to Ticket/TicketReply/WorkOrder/WorkOrderNote; local or S3 storage
+- **EmailTemplate** — trigger-based outbound email templates (4 triggers, seeded with defaults)
+- **SuppressedAddress** — exact email addresses that never receive automated email
+- **EmailSendLog** — audit trail for every send attempt (sent / suppressed / failed)
 
 ---
 
