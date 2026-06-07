@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.11 / Django 4.2 / HTMX / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (not cloud, not SaaS)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 7, 2026 (end of session 4)
+**Last Updated**: June 7, 2026 (end of session 5)
 
 ---
 
@@ -40,6 +40,12 @@ The app is running locally at `http://localhost:8000`. All views require login.
 - `/tickets/<id>/links/remove/` — Unlink tickets (HTMX)
 - `/tickets/<id>/acknowledge-overdue/` — Acknowledge overdue with required note (HTMX)
 - `/attachments/<id>/download/` — Secure authenticated file download
+- `/queues/` — Ticket queue list (system + personal queues)
+- `/queues/<id>/` — Queue detail (filtered ticket list)
+- `/queues/new/` — Create queue
+- `/queues/<id>/edit/` — Edit queue
+- `/reports/` — Reporting & analytics (8 reports, Chart.js, CSV export per report)
+- `/sidebar/` — HTMX fragment: my tickets + my work orders for sidebar
 - `/kb/` — Knowledge base list (search, category + type filters)
 - `/kb/new/` — Create KB article (staff/can_manage_kb only)
 - `/kb/<id>/` — KB article detail
@@ -183,6 +189,8 @@ murphys-bench/
 - **InboundEmailLog** — audit trail for every inbound message fetched (new_ticket / reply / duplicate / error)
 - **KBCategory** — knowledge base category (admin-managed)
 - **KBArticle** — KB article; types: troubleshooting / how_to / vendor / internal; is_restricted flag
+- **TicketQueue** — Saved ticket filters; owner=null = system queue (all users); personal queues scoped to owner; filter_criteria JSONField; 3 seeded system queues
+- **DashboardTile** — Configurable dashboard tile; row (ticket/workorder), status_filter (JSON list), visible_to (all/admin/tech); seeded defaults for both rows
 
 ---
 
@@ -212,8 +220,9 @@ Full specs in `todo.md`. Design decisions finalized.
 ### ✅ Batch 4 — SLA Plans, Help Topics/KB, Roles & Permissions
 - Bonus: Stopwatch timer on WO detail (localStorage, HTMX log-time)
 ### ✅ Batch 5 — Inbound Email (IMAP/POP3, threading, quote strip, attachments)
+### ✅ Batch 6 — Custom Queues, Persistent Sidebar, Enhanced Dashboard, Reporting
 
-### Batch 6 — Queues, Sidebar, Dashboard, Reporting ← NEXT
+### Batch 7 — Custom Fields ← NEXT
 - **Custom Queues**: System queues (admin-created) + personal queues (per-user); left sidebar on ticket list/detail
 - **Persistent Sidebar**: Visible on all pages except dashboard; accordion with My Tickets / My Work Orders sections; color-coded by status; tech sees own assignments only
 - **Enhanced Dashboard**: Two tile rows (Tickets + WOs); tech sees own work, admin sees everything; fully configurable tiles in admin (`DashboardTile` model)

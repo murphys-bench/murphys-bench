@@ -103,12 +103,13 @@ TEXTAREA_WIDGET = {'class': 'w-full px-3 py-2 border border-gray-300 rounded-md 
 class TicketForm(forms.ModelForm):
     class Meta:
         model = Ticket
-        fields = ['client', 'device', 'help_topic', 'sla_plan', 'subject', 'description', 'source', 'status']
+        fields = ['client', 'device', 'help_topic', 'sla_plan', 'assigned_to', 'subject', 'description', 'source', 'status']
         widgets = {
             'client': forms.Select(attrs=SELECT_WIDGET),
             'device': forms.Select(attrs=SELECT_WIDGET),
             'help_topic': forms.Select(attrs=SELECT_WIDGET),
             'sla_plan': forms.Select(attrs=SELECT_WIDGET),
+            'assigned_to': forms.Select(attrs=SELECT_WIDGET),
             'subject': forms.TextInput(attrs=TEXT_WIDGET),
             'description': forms.Textarea(attrs=TEXTAREA_WIDGET),
             'source': forms.Select(attrs=SELECT_WIDGET),
@@ -117,12 +118,15 @@ class TicketForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        from .models import User as UserModel
         self.fields['client'].queryset = Client.objects.filter(is_active=True).order_by('name')
         self.fields['device'].required = False
         self.fields['help_topic'].queryset = HelpTopic.objects.filter(is_active=True).order_by('sort_order', 'name')
         self.fields['help_topic'].required = False
         self.fields['sla_plan'].queryset = SLAPlan.objects.filter(is_active=True).order_by('name')
         self.fields['sla_plan'].required = False
+        self.fields['assigned_to'].queryset = UserModel.objects.filter(is_active=True).order_by('first_name', 'last_name')
+        self.fields['assigned_to'].required = False
 
     def save(self, commit=True):
         ticket = super().save(commit=False)
@@ -177,3 +181,35 @@ class TicketConvertForm(forms.Form):
         super().__init__(*args, **kwargs)
         from .models import User
         self.fields['assigned_to'].queryset = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
+
+
+class TicketQueueForm(forms.ModelForm):
+    class Meta:
+        from .models import TicketQueue
+        model = TicketQueue
+        fields = ['name', 'sort_field', 'sort_direction', 'is_active']
+        widgets = {
+            'name': forms.TextInput(attrs=TEXT_WIDGET),
+            'sort_field': forms.Select(attrs=SELECT_WIDGET, choices=[
+                ('created_at', 'Date Created'),
+                ('updated_at', 'Last Updated'),
+                ('due_at', 'Due Date'),
+                ('subject', 'Subject'),
+            ]),
+            'sort_direction': forms.Select(attrs=SELECT_WIDGET),
+            'is_active': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
+        }
+
+    def __init__(self, *args, is_admin=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.is_admin = is_admin
+        # owner field only shown to admins (for system queue creation)
+        if is_admin:
+            from .models import User as UserModel
+            self.fields['owner'] = forms.ModelChoiceField(
+                queryset=UserModel.objects.filter(is_active=True).order_by('first_name', 'last_name'),
+                required=False,
+                widget=forms.Select(attrs=SELECT_WIDGET),
+                label='Owner (leave blank for system queue)',
+            )
+            self.Meta.fields = ['name', 'owner', 'sort_field', 'sort_direction', 'is_active']

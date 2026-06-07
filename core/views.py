@@ -11,9 +11,9 @@ from django.utils import timezone
 from .models import (
     WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist,
     Ticket, TicketReply, TicketLock, TicketLink, Attachment, SiteSettings,
-    KBCategory, KBArticle,
+    KBCategory, KBArticle, TicketQueue, DashboardTile, User,
 )
-from .forms import WorkOrderForm, ClientForm, DeviceForm, TicketForm, TicketConvertForm, KBArticleForm
+from .forms import WorkOrderForm, ClientForm, DeviceForm, TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm
 
 
 def _save_attachments(request, obj):
@@ -45,47 +45,71 @@ def _save_attachments(request, obj):
     return saved
 
 
-class DashboardView(LoginRequiredMixin, ListView):
-    """Home page — key metrics and recent work orders"""
+def _is_admin(user):
+    return user.is_staff or user.has_perm_flag('can_manage_settings')
+
+
+def _tile_count(tile, user, is_admin):
+    """Return the count for a DashboardTile."""
+    statuses = tile.status_filter or []
+    if tile.row == 'ticket':
+        qs = Ticket.objects.all()
+        if not is_admin:
+            qs = qs.filter(assigned_to=user)
+        if statuses:
+            qs = qs.filter(status__in=statuses)
+        if '/overdue' in tile.link_url or 'overdue=1' in tile.link_url:
+            from django.utils import timezone as tz
+            qs = qs.filter(due_at__lt=tz.now()).exclude(status__in=['closed', 'resolved', 'converted'])
+    else:
+        qs = WorkOrder.objects.all()
+        if not is_admin:
+            qs = qs.filter(assigned_to=user)
+        if statuses:
+            qs = qs.filter(status__in=statuses)
+    return qs.count()
+
+
+class DashboardView(LoginRequiredMixin, View):
     template_name = 'core/dashboard.html'
-    context_object_name = 'open_work_orders'
 
-    def get_queryset(self):
-        return WorkOrder.objects.select_related(
-            'client', 'assigned_to', 'device'
-        ).exclude(
-            status__in=['closed', 'cancelled']
-        ).order_by('-created_at')
+    def get(self, request):
+        is_admin = _is_admin(request.user)
 
-    def get_context_data(self, **kwargs):
-        from django.db.models import Count
-        context = super().get_context_data(**kwargs)
+        tiles_qs = DashboardTile.objects.filter(is_active=True)
+        ticket_tiles = []
+        wo_tiles = []
+        for tile in tiles_qs:
+            if tile.visible_to == 'admin' and not is_admin:
+                continue
+            if tile.visible_to == 'tech' and is_admin:
+                continue
+            entry = {'tile': tile, 'count': _tile_count(tile, request.user, is_admin)}
+            if tile.row == 'ticket':
+                ticket_tiles.append(entry)
+            else:
+                wo_tiles.append(entry)
 
-        # Status counts for open work orders
-        context['status_counts'] = {
-            'new': WorkOrder.objects.filter(status='new').count(),
-            'assigned': WorkOrder.objects.filter(status='assigned').count(),
-            'in_progress': WorkOrder.objects.filter(status='in_progress').count(),
-            'completed': WorkOrder.objects.filter(status='completed').count(),
-        }
+        # Recent open work orders (tech sees own, admin sees all)
+        wo_qs = WorkOrder.objects.select_related('client', 'assigned_to', 'device').exclude(status__in=['closed', 'cancelled'])
+        if not is_admin:
+            wo_qs = wo_qs.filter(assigned_to=request.user)
+        open_work_orders = wo_qs.order_by('-created_at')[:10]
 
-        # Total open (anything not closed/cancelled)
-        context['open_total'] = WorkOrder.objects.exclude(
-            status__in=['closed', 'cancelled']
-        ).count()
-
-        # Recently closed (last 5)
-        context['recently_closed'] = WorkOrder.objects.select_related(
-            'client', 'assigned_to'
-        ).filter(
+        recently_closed = WorkOrder.objects.select_related('client', 'assigned_to').filter(
             status__in=['closed', 'cancelled']
         ).order_by('-updated_at')[:5]
 
-        # Quick stats
-        context['active_clients'] = Client.objects.filter(is_active=True).count()
-        context['total_devices'] = Device.objects.filter(is_active=True).count()
-
-        return context
+        context = {
+            'ticket_tiles': ticket_tiles,
+            'wo_tiles': wo_tiles,
+            'open_work_orders': open_work_orders,
+            'recently_closed': recently_closed,
+            'active_clients': Client.objects.filter(is_active=True).count(),
+            'total_devices': Device.objects.filter(is_active=True).count(),
+            'is_admin': is_admin,
+        }
+        return render(request, self.template_name, context)
 
 
 class WorkOrderListView(LoginRequiredMixin, ListView):
@@ -477,11 +501,21 @@ class TicketListView(LoginRequiredMixin, ListView):
     paginate_by = 25
 
     def get_queryset(self):
-        queryset = Ticket.objects.select_related('client', 'device', 'created_by')
+        queryset = Ticket.objects.select_related('client', 'device', 'created_by', 'assigned_to')
 
         status = self.request.GET.get('status')
         if status:
             queryset = queryset.filter(status=status)
+
+        assigned_to = self.request.GET.get('assigned_to')
+        if assigned_to == 'me':
+            queryset = queryset.filter(assigned_to=self.request.user)
+        elif assigned_to:
+            queryset = queryset.filter(assigned_to_id=assigned_to)
+
+        overdue = self.request.GET.get('overdue')
+        if overdue:
+            queryset = queryset.filter(due_at__lt=timezone.now()).exclude(status__in=['closed', 'resolved', 'converted'])
 
         search = self.request.GET.get('search')
         if search:
@@ -915,3 +949,370 @@ class KBArticleEditView(LoginRequiredMixin, View):
             form.save()
             return redirect('core:kb_detail', pk=article.pk)
         return render(request, 'core/kb_form.html', {'form': form, 'article': article, 'action': 'Edit'})
+
+
+# ─── Custom Queues ────────────────────────────────────────────────────────────
+
+def _apply_queue_filters(qs, criteria, user):
+    """Apply filter_criteria dict to a Ticket queryset."""
+    if not criteria:
+        return qs
+    statuses = criteria.get('status')
+    if statuses:
+        qs = qs.filter(status__in=statuses)
+    assigned_to = criteria.get('assigned_to')
+    if assigned_to is None and 'assigned_to' in criteria:
+        qs = qs.filter(assigned_to__isnull=True)
+    elif assigned_to:
+        qs = qs.filter(assigned_to_id=assigned_to)
+    help_topic = criteria.get('help_topic')
+    if help_topic:
+        qs = qs.filter(help_topic_id=help_topic)
+    sla_plan = criteria.get('sla_plan')
+    if sla_plan:
+        qs = qs.filter(sla_plan_id=sla_plan)
+    client = criteria.get('client')
+    if client:
+        qs = qs.filter(client_id=client)
+    if criteria.get('overdue'):
+        qs = qs.filter(due_at__lt=timezone.now()).exclude(status__in=['closed', 'resolved', 'converted'])
+    return qs
+
+
+class QueueListView(LoginRequiredMixin, View):
+    def get(self, request):
+        system_queues = TicketQueue.objects.filter(owner=None, is_active=True)
+        my_queues = TicketQueue.objects.filter(owner=request.user, is_active=True)
+        return render(request, 'core/queue_list.html', {
+            'system_queues': system_queues,
+            'my_queues': my_queues,
+        })
+
+
+class QueueDetailView(LoginRequiredMixin, View):
+    def get(self, request, pk):
+        queue = get_object_or_404(TicketQueue, pk=pk)
+        if queue.owner and queue.owner != request.user and not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        sort_prefix = '' if queue.sort_direction == 'asc' else '-'
+        sort_field = sort_prefix + queue.sort_field
+        tickets = _apply_queue_filters(
+            Ticket.objects.select_related('client', 'assigned_to', 'sla_plan', 'help_topic'),
+            queue.filter_criteria,
+            request.user,
+        ).order_by(sort_field)
+        return render(request, 'core/queue_detail.html', {
+            'queue': queue,
+            'tickets': tickets,
+        })
+
+
+class QueueCreateView(LoginRequiredMixin, View):
+    def get(self, request):
+        from .forms import TicketQueueForm
+        is_admin = _is_admin(request.user)
+        form = TicketQueueForm(is_admin=is_admin)
+        return render(request, 'core/queue_form.html', {'form': form, 'action': 'Create'})
+
+    def post(self, request):
+        from .forms import TicketQueueForm
+        is_admin = _is_admin(request.user)
+        form = TicketQueueForm(request.POST, is_admin=is_admin)
+        if form.is_valid():
+            queue = form.save(commit=False)
+            if not is_admin:
+                queue.owner = request.user
+            queue.save()
+            return redirect('core:queue_detail', pk=queue.pk)
+        return render(request, 'core/queue_form.html', {'form': form, 'action': 'Create'})
+
+
+class QueueEditView(LoginRequiredMixin, View):
+    def _get_queue(self, request, pk):
+        queue = get_object_or_404(TicketQueue, pk=pk)
+        is_admin = _is_admin(request.user)
+        if queue.owner is None and not is_admin:
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        if queue.owner and queue.owner != request.user and not is_admin:
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        return queue, is_admin
+
+    def get(self, request, pk):
+        from .forms import TicketQueueForm
+        queue, is_admin = self._get_queue(request, pk)
+        form = TicketQueueForm(instance=queue, is_admin=is_admin)
+        return render(request, 'core/queue_form.html', {'form': form, 'queue': queue, 'action': 'Edit'})
+
+    def post(self, request, pk):
+        from .forms import TicketQueueForm
+        queue, is_admin = self._get_queue(request, pk)
+        form = TicketQueueForm(request.POST, instance=queue, is_admin=is_admin)
+        if form.is_valid():
+            form.save()
+            return redirect('core:queue_detail', pk=queue.pk)
+        return render(request, 'core/queue_form.html', {'form': form, 'queue': queue, 'action': 'Edit'})
+
+
+class QueueDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        queue = get_object_or_404(TicketQueue, pk=pk)
+        is_admin = _is_admin(request.user)
+        if queue.owner is None and not is_admin:
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        if queue.owner and queue.owner != request.user and not is_admin:
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        queue.delete()
+        return redirect('core:queue_list')
+
+
+# ─── Sidebar Fragment ─────────────────────────────────────────────────────────
+
+class SidebarFragmentView(LoginRequiredMixin, View):
+    """HTMX endpoint: returns sidebar content (my tickets + my WOs)."""
+    def get(self, request):
+        my_tickets = Ticket.objects.select_related('client').filter(
+            assigned_to=request.user
+        ).exclude(status__in=['closed', 'resolved', 'converted']).order_by('-updated_at')[:20]
+        my_wos = WorkOrder.objects.select_related('client').filter(
+            assigned_to=request.user
+        ).exclude(status__in=['closed', 'cancelled']).order_by('-updated_at')[:20]
+        return render(request, 'core/partials/sidebar_content.html', {
+            'my_tickets': my_tickets,
+            'my_wos': my_wos,
+        })
+
+
+# ─── Reports ──────────────────────────────────────────────────────────────────
+
+class ReportsView(LoginRequiredMixin, View):
+    def get(self, request):
+        if not (_is_admin(request.user) or request.user.has_perm_flag('can_view_reports')):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+
+        from datetime import timedelta, date
+        from django.db.models import Count, Avg, F, Sum, ExpressionWrapper, DurationField, FloatField
+        from django.db.models.functions import TruncDay, TruncWeek
+
+        # Date range
+        end_date_str = request.GET.get('end_date', '')
+        start_date_str = request.GET.get('start_date', '')
+        try:
+            end_date = date.fromisoformat(end_date_str)
+        except ValueError:
+            end_date = date.today()
+        try:
+            start_date = date.fromisoformat(start_date_str)
+        except ValueError:
+            start_date = end_date - timedelta(days=30)
+
+        start_dt = timezone.make_aware(
+            timezone.datetime(start_date.year, start_date.month, start_date.day)
+        )
+        end_dt = timezone.make_aware(
+            timezone.datetime(end_date.year, end_date.month, end_date.day, 23, 59, 59)
+        )
+
+        tickets_in_range = Ticket.objects.filter(created_at__range=(start_dt, end_dt))
+
+        # 1. Ticket volume over time
+        volume_by_day = list(
+            tickets_in_range.annotate(day=TruncDay('created_at'))
+            .values('day').annotate(count=Count('id')).order_by('day')
+        )
+        volume_labels = [str(r['day'].date()) for r in volume_by_day]
+        volume_data = [r['count'] for r in volume_by_day]
+
+        # 2. Open tickets by status
+        status_counts = list(
+            Ticket.objects.exclude(status__in=['closed', 'resolved', 'converted'])
+            .values('status').annotate(count=Count('id'))
+        )
+        status_labels = [r['status'] for r in status_counts]
+        status_data = [r['count'] for r in status_counts]
+
+        # 3. Tickets by client
+        by_client = list(
+            tickets_in_range.values('client__name').annotate(count=Count('id')).order_by('-count')[:15]
+        )
+
+        # 4. Tickets by technician (workload)
+        by_tech = list(
+            tickets_in_range.filter(assigned_to__isnull=False)
+            .values('assigned_to__first_name', 'assigned_to__last_name', 'assigned_to__username')
+            .annotate(count=Count('id')).order_by('-count')
+        )
+
+        # 5. Average resolution time (seconds → hours)
+        closed_tickets = tickets_in_range.filter(
+            status__in=['closed', 'resolved'],
+            updated_at__isnull=False,
+        )
+        # By tech
+        resolution_by_tech = []
+        for entry in (
+            closed_tickets.filter(assigned_to__isnull=False)
+            .values('assigned_to__first_name', 'assigned_to__last_name')
+            .annotate(count=Count('id'))
+        ):
+            resolution_by_tech.append(entry)
+
+        # Compute avg resolution hours per tech using Python (SQLite compat)
+        tech_resolution = []
+        for entry in closed_tickets.filter(assigned_to__isnull=False).select_related('assigned_to'):
+            delta = (entry.updated_at - entry.created_at).total_seconds() / 3600
+            tech_name = entry.assigned_to.get_full_name() or entry.assigned_to.username
+            tech_resolution.append((tech_name, delta))
+        tech_res_agg = {}
+        for name, hours in tech_resolution:
+            tech_res_agg.setdefault(name, []).append(hours)
+        avg_res_by_tech = [
+            {'name': k, 'avg_hours': round(sum(v) / len(v), 1), 'count': len(v)}
+            for k, v in tech_res_agg.items()
+        ]
+
+        # 6. SLA compliance
+        tickets_with_sla = tickets_in_range.filter(due_at__isnull=False)
+        total_sla = tickets_with_sla.count()
+        closed_on_time = tickets_with_sla.filter(
+            status__in=['closed', 'resolved'],
+            updated_at__lte=F('due_at'),
+        ).count()
+        sla_rate = round(100 * closed_on_time / total_sla, 1) if total_sla else None
+
+        # 7. Ticket → WO conversion rate
+        total_tickets = tickets_in_range.count()
+        converted_count = tickets_in_range.filter(status='converted').count()
+        conversion_rate = round(100 * converted_count / total_tickets, 1) if total_tickets else None
+
+        # 8. Mileage by tech and month
+        from django.db.models.functions import TruncMonth
+        mileage_data = list(
+            Mileage.objects.filter(trip_date__range=(start_date, end_date))
+            .annotate(month=TruncMonth('trip_date'))
+            .values('technician__first_name', 'technician__last_name', 'month')
+            .annotate(miles=Sum('miles'))
+            .order_by('month', 'technician__last_name')
+        )
+
+        context = {
+            'start_date': start_date,
+            'end_date': end_date,
+            # 1
+            'volume_labels': volume_labels,
+            'volume_data': volume_data,
+            # 2
+            'status_labels': status_labels,
+            'status_data': status_data,
+            # 3
+            'by_client': by_client,
+            # 4
+            'by_tech': by_tech,
+            # 5
+            'avg_res_by_tech': avg_res_by_tech,
+            # 6
+            'sla_rate': sla_rate,
+            'total_sla': total_sla,
+            'closed_on_time': closed_on_time,
+            # 7
+            'conversion_rate': conversion_rate,
+            'converted_count': converted_count,
+            'total_tickets': total_tickets,
+            # 8
+            'mileage_data': mileage_data,
+        }
+        return render(request, 'core/reports.html', context)
+
+
+class ReportsCSVView(LoginRequiredMixin, View):
+    """Download a specific report as CSV."""
+    def get(self, request, report):
+        if not (_is_admin(request.user) or request.user.has_perm_flag('can_view_reports')):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+
+        import csv
+        from datetime import timedelta, date
+
+        end_date_str = request.GET.get('end_date', '')
+        start_date_str = request.GET.get('start_date', '')
+        try:
+            end_date = date.fromisoformat(end_date_str)
+        except ValueError:
+            end_date = date.today()
+        try:
+            start_date = date.fromisoformat(start_date_str)
+        except ValueError:
+            start_date = end_date - timedelta(days=30)
+        start_dt = timezone.make_aware(timezone.datetime(start_date.year, start_date.month, start_date.day))
+        end_dt = timezone.make_aware(timezone.datetime(end_date.year, end_date.month, end_date.day, 23, 59, 59))
+
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="report_{report}.csv"'
+        writer = csv.writer(response)
+
+        tickets_in_range = Ticket.objects.filter(created_at__range=(start_dt, end_dt))
+        from django.db.models import Count, F, Sum
+        from django.db.models.functions import TruncDay, TruncMonth
+
+        if report == 'volume':
+            writer.writerow(['Date', 'Tickets Created'])
+            for r in tickets_in_range.annotate(day=TruncDay('created_at')).values('day').annotate(count=Count('id')).order_by('day'):
+                writer.writerow([r['day'].date(), r['count']])
+
+        elif report == 'status':
+            writer.writerow(['Status', 'Count'])
+            for r in Ticket.objects.exclude(status__in=['closed', 'resolved', 'converted']).values('status').annotate(count=Count('id')):
+                writer.writerow([r['status'], r['count']])
+
+        elif report == 'by_client':
+            writer.writerow(['Client', 'Tickets'])
+            for r in tickets_in_range.values('client__name').annotate(count=Count('id')).order_by('-count'):
+                writer.writerow([r['client__name'], r['count']])
+
+        elif report == 'by_tech':
+            writer.writerow(['Tech', 'Tickets Assigned'])
+            for r in tickets_in_range.filter(assigned_to__isnull=False).values('assigned_to__first_name', 'assigned_to__last_name').annotate(count=Count('id')).order_by('-count'):
+                writer.writerow([f"{r['assigned_to__first_name']} {r['assigned_to__last_name']}", r['count']])
+
+        elif report == 'resolution':
+            writer.writerow(['Tech', 'Tickets Closed', 'Avg Resolution (hours)'])
+            closed = tickets_in_range.filter(status__in=['closed', 'resolved']).select_related('assigned_to')
+            tech_res_agg = {}
+            for t in closed.filter(assigned_to__isnull=False):
+                name = t.assigned_to.get_full_name() or t.assigned_to.username
+                tech_res_agg.setdefault(name, []).append((t.updated_at - t.created_at).total_seconds() / 3600)
+            for name, hours in tech_res_agg.items():
+                writer.writerow([name, len(hours), round(sum(hours) / len(hours), 1)])
+
+        elif report == 'sla':
+            writer.writerow(['Metric', 'Value'])
+            t = tickets_in_range.filter(due_at__isnull=False)
+            total = t.count()
+            on_time = t.filter(status__in=['closed', 'resolved'], updated_at__lte=F('due_at')).count()
+            writer.writerow(['Total tickets with SLA', total])
+            writer.writerow(['Closed on time', on_time])
+            writer.writerow(['Compliance rate', f"{round(100*on_time/total,1) if total else 'N/A'}%"])
+
+        elif report == 'conversion':
+            writer.writerow(['Metric', 'Value'])
+            total = tickets_in_range.count()
+            converted = tickets_in_range.filter(status='converted').count()
+            writer.writerow(['Total tickets', total])
+            writer.writerow(['Converted to WO', converted])
+            writer.writerow(['Conversion rate', f"{round(100*converted/total,1) if total else 'N/A'}%"])
+
+        elif report == 'mileage':
+            writer.writerow(['Tech', 'Month', 'Miles'])
+            for r in Mileage.objects.filter(trip_date__range=(start_date, end_date)).annotate(month=TruncMonth('trip_date')).values('technician__first_name', 'technician__last_name', 'month').annotate(miles=Sum('miles')).order_by('month', 'technician__last_name'):
+                writer.writerow([f"{r['technician__first_name']} {r['technician__last_name']}", r['month'].strftime('%Y-%m'), r['miles']])
+
+        else:
+            writer.writerow(['Error', 'Unknown report'])
+
+        return response

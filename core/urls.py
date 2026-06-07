@@ -37,4 +37,15 @@ urlpatterns = [
     path('kb/new/', views.KBArticleCreateView.as_view(), name='kb_create'),
     path('kb/<int:pk>/', views.KBDetailView.as_view(), name='kb_detail'),
     path('kb/<int:pk>/edit/', views.KBArticleEditView.as_view(), name='kb_edit'),
+    # Queues
+    path('queues/', views.QueueListView.as_view(), name='queue_list'),
+    path('queues/new/', views.QueueCreateView.as_view(), name='queue_create'),
+    path('queues/<int:pk>/', views.QueueDetailView.as_view(), name='queue_detail'),
+    path('queues/<int:pk>/edit/', views.QueueEditView.as_view(), name='queue_edit'),
+    path('queues/<int:pk>/delete/', views.QueueDeleteView.as_view(), name='queue_delete'),
+    # Sidebar fragment
+    path('sidebar/', views.SidebarFragmentView.as_view(), name='sidebar_fragment'),
+    # Reports
+    path('reports/', views.ReportsView.as_view(), name='reports'),
+    path('reports/csv/<str:report>/', views.ReportsCSVView.as_view(), name='reports_csv'),
 ]

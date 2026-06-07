@@ -177,7 +177,7 @@
 
 #### Batch 6 — Custom Queues, Reporting & Analytics
 
-- [ ] **Custom Queues / Ticket Views** (#5)
+- ✅ **Custom Queues / Ticket Views** (#5)
   - `TicketQueue` model: name, owner (user FK, null = shared system queue), filter_criteria (JSON), column_list (JSON), sort_field, sort_direction, is_active
   - System queues (admin-created, visible to all agents): e.g., "Overdue Tickets," "Unassigned — New," "All Open"
   - Personal queues (per-user saved filters)
@@ -185,7 +185,7 @@
   - UI to create/edit/delete queues
   - Filter criteria supports: status, assigned_to, help_topic, sla_plan, overdue flag, client, date range, custom fields (once #4 is built)
 
-- [ ] **Persistent sidebar** (visible on all pages except dashboard)
+- ✅ **Persistent sidebar** (visible on all pages except dashboard)
   - Shows current tech's assigned tickets and work orders
   - **Accordion style** — two independently collapsible sections: My Tickets / My Work Orders
   - Section headers show item count (e.g., "My Tickets (5)") so content is visible before expanding
@@ -195,7 +195,7 @@
   - Tech sees own assignments only — keeps sidebar focused and uncluttered
   - Admins see their own assignments in sidebar, same as any tech
 
-- [ ] **Enhanced dashboard**
+- ✅ **Enhanced dashboard**
   - Two tile rows: Tickets (top) and Work Orders (below)
   - **Tech view**: tiles show own assignments — Assigned to Me, Actively Working, Resolved/Completed
   - **Admin view**: tiles show all items — Total, Unassigned, Actively Working, Completed
@@ -203,7 +203,7 @@
   - Fully configurable per tile in admin settings: visible/hidden, label, status filter, link target
   - `DashboardTile` model: row (ticket/workorder), label, status_filter (JSON), link_url, sort_order, is_active, visible_to (all/admin/tech)
 
-- [ ] **Reporting & Analytics** (#13)
+- ✅ **Reporting & Analytics** (#13)
   - Dedicated `/reports/` section, date range filter (default: last 30 days)
   - Reports (each configurable in admin — show/hide, display order, default date range):
     - Ticket volume over time (bar chart by day/week/month)

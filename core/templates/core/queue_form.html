@@ -1,0 +1,67 @@
+{% extends "core/base.html" %}
+
+{% block title %}{{ action }} Queue - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow">
+    <div class="px-6 py-4 flex items-center gap-3">
+        <a href="{% url 'core:queue_list' %}" class="text-gray-500 hover:text-gray-700 text-sm">← Queues</a>
+        <span class="text-gray-300">|</span>
+        <h1 class="text-xl font-bold text-gray-900">{{ action }} Queue</h1>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-xl">
+    <div class="bg-white rounded-lg shadow p-6">
+        <form method="post" class="space-y-5">
+            {% csrf_token %}
+
+            {% for field in form %}
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}
+                <p class="text-xs text-gray-400 mt-1">{{ field.help_text }}</p>
+                {% endif %}
+                {% for error in field.errors %}
+                <p class="text-xs text-red-600 mt-1">{{ error }}</p>
+                {% endfor %}
+            </div>
+            {% endfor %}
+
+            <div class="pt-2">
+                <p class="text-sm font-medium text-gray-700 mb-2">Filter Criteria</p>
+                <p class="text-xs text-gray-400 mb-3">
+                    Queue filters are configured as JSON. Use the admin panel to set advanced filters,
+                    or leave the queue criteria blank and it will show all tickets.
+                    Supported keys: <code class="bg-gray-100 px-1 rounded">status</code> (list),
+                    <code class="bg-gray-100 px-1 rounded">overdue</code> (true/false),
+                    <code class="bg-gray-100 px-1 rounded">client</code> (id).
+                </p>
+            </div>
+
+            <div class="flex gap-3 pt-2 border-t border-gray-100">
+                <button type="submit"
+                        class="px-5 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
+                    {{ action }} Queue
+                </button>
+                <a href="{% url 'core:queue_list' %}"
+                   class="px-5 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">
+                    Cancel
+                </a>
+                {% if queue and queue.pk %}
+                <form method="post" action="{% url 'core:queue_delete' queue.pk %}" class="ml-auto"
+                      onsubmit="return confirm('Delete this queue?')">
+                    {% csrf_token %}
+                    <button type="submit" class="px-4 py-2 bg-red-50 text-red-600 rounded-md hover:bg-red-100 text-sm">
+                        Delete
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
