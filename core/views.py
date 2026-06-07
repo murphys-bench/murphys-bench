@@ -1075,12 +1075,17 @@ class QueueDeleteView(LoginRequiredMixin, View):
 class SidebarFragmentView(LoginRequiredMixin, View):
     """HTMX endpoint: returns sidebar content (my tickets + my WOs)."""
     def get(self, request):
-        my_tickets = Ticket.objects.select_related('client').filter(
-            assigned_to=request.user
-        ).exclude(status__in=['closed', 'resolved', 'converted']).order_by('-updated_at')[:20]
-        my_wos = WorkOrder.objects.select_related('client').filter(
-            assigned_to=request.user
-        ).exclude(status__in=['closed', 'cancelled']).order_by('-updated_at')[:20]
+        my_tickets = list(
+            Ticket.objects.select_related('client').filter(
+                Q(assigned_to=request.user) | Q(created_by=request.user)
+            ).exclude(status__in=['closed', 'resolved', 'converted'])
+            .order_by('-updated_at').distinct()[:20]
+        )
+        my_wos = list(
+            WorkOrder.objects.select_related('client').filter(
+                assigned_to=request.user
+            ).exclude(status__in=['closed', 'cancelled']).order_by('-updated_at')[:20]
+        )
         return render(request, 'core/partials/sidebar_content.html', {
             'my_tickets': my_tickets,
             'my_wos': my_wos,
