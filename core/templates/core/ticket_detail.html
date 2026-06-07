@@ -12,7 +12,7 @@
             <h1 class="text-2xl font-bold text-gray-900 mt-1">{{ ticket.ticket_number }}</h1>
             <p class="text-gray-500 text-sm">{{ ticket.client.name }}{% if ticket.device %} — {{ ticket.device.name }}{% endif %}</p>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-3">
             <span class="px-3 py-1 text-sm font-semibold rounded-full
                 {% if ticket.status == 'new' %}bg-blue-100 text-blue-800
                 {% elif ticket.status == 'open' %}bg-indigo-100 text-indigo-800
@@ -24,6 +24,9 @@
                 {% endif %}">
                 {{ ticket.get_status_display }}
             </span>
+            <div id="overdue-section">
+                {% include "core/partials/overdue_badge.html" %}
+            </div>
             {% if ticket.status != 'converted' and ticket.status != 'closed' %}
                 <a href="{% url 'core:ticket_edit' ticket.pk %}"
                    class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
@@ -197,6 +200,23 @@ window.addEventListener('beforeunload', function() {
                         {% endif %}
                     </dd>
                 </div>
+                {% if ticket.help_topic %}
+                <div>
+                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Help Topic</dt>
+                    <dd class="text-sm text-gray-900 mt-1">{{ ticket.help_topic.name }}</dd>
+                </div>
+                {% endif %}
+                {% if ticket.sla_plan %}
+                <div>
+                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">SLA Plan</dt>
+                    <dd class="text-sm text-gray-900 mt-1">
+                        {{ ticket.sla_plan.name }}
+                        {% if ticket.due_at %}
+                        <span class="block text-xs text-gray-400">Due {{ ticket.due_at|date:"M j, Y g:i A" }}</span>
+                        {% endif %}
+                    </dd>
+                </div>
+                {% endif %}
                 <div>
                     <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Source</dt>
                     <dd class="text-sm text-gray-900 mt-1">{{ ticket.get_source_display }}</dd>
@@ -268,6 +288,10 @@ window.addEventListener('beforeunload', function() {
                     <a href="#replies-list"
                        class="block w-full text-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">
                         Add Reply ↓
+                    </a>
+                    <a href="{% url 'core:kb_list' %}?q={{ ticket.subject|urlencode }}"
+                       class="block w-full text-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">
+                        Search KB
                     </a>
                 {% else %}
                     <p class="text-sm text-gray-400 text-center">

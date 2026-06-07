@@ -1,5 +1,5 @@
 from django import forms
-from .models import WorkOrder, Client, Contact, Device, Ticket, RepairType
+from .models import WorkOrder, Client, Contact, Device, Ticket, RepairType, HelpTopic, SLAPlan, KBCategory, KBArticle
 
 
 class WorkOrderForm(forms.ModelForm):
@@ -103,10 +103,12 @@ TEXTAREA_WIDGET = {'class': 'w-full px-3 py-2 border border-gray-300 rounded-md 
 class TicketForm(forms.ModelForm):
     class Meta:
         model = Ticket
-        fields = ['client', 'device', 'subject', 'description', 'source', 'status']
+        fields = ['client', 'device', 'help_topic', 'sla_plan', 'subject', 'description', 'source', 'status']
         widgets = {
             'client': forms.Select(attrs=SELECT_WIDGET),
             'device': forms.Select(attrs=SELECT_WIDGET),
+            'help_topic': forms.Select(attrs=SELECT_WIDGET),
+            'sla_plan': forms.Select(attrs=SELECT_WIDGET),
             'subject': forms.TextInput(attrs=TEXT_WIDGET),
             'description': forms.Textarea(attrs=TEXTAREA_WIDGET),
             'source': forms.Select(attrs=SELECT_WIDGET),
@@ -117,6 +119,46 @@ class TicketForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields['client'].queryset = Client.objects.filter(is_active=True).order_by('name')
         self.fields['device'].required = False
+        self.fields['help_topic'].queryset = HelpTopic.objects.filter(is_active=True).order_by('sort_order', 'name')
+        self.fields['help_topic'].required = False
+        self.fields['sla_plan'].queryset = SLAPlan.objects.filter(is_active=True).order_by('name')
+        self.fields['sla_plan'].required = False
+
+    def save(self, commit=True):
+        ticket = super().save(commit=False)
+        # If SLA assigned, calculate due_at; if cleared, clear due_at
+        if ticket.sla_plan_id:
+            from django.utils import timezone
+            if not ticket.due_at or 'sla_plan' in self.changed_data:
+                ticket.due_at = (ticket.created_at or timezone.now()) + timezone.timedelta(
+                    hours=ticket.sla_plan.grace_period_hours
+                )
+                ticket.overdue_acknowledged_by = None
+                ticket.overdue_acknowledged_at = None
+        else:
+            ticket.due_at = None
+        if commit:
+            ticket.save()
+        return ticket
+
+
+class KBArticleForm(forms.ModelForm):
+    class Meta:
+        model = KBArticle
+        fields = ['title', 'category', 'article_type', 'content', 'is_active', 'is_restricted']
+        widgets = {
+            'title': forms.TextInput(attrs=TEXT_WIDGET),
+            'category': forms.Select(attrs=SELECT_WIDGET),
+            'article_type': forms.Select(attrs=SELECT_WIDGET),
+            'content': forms.Textarea(attrs={**TEXTAREA_WIDGET, 'rows': 20}),
+            'is_active': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
+            'is_restricted': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['category'].queryset = KBCategory.objects.order_by('sort_order', 'name')
+        self.fields['category'].required = False
 
 
 class TicketConvertForm(forms.Form):

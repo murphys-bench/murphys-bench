@@ -62,6 +62,22 @@
             </div>
         </div>
 
+        <!-- Help Topic & SLA -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-base font-semibold text-gray-900 mb-4">Classification</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Help Topic</label>
+                    {{ form.help_topic }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">SLA Plan</label>
+                    {{ form.sla_plan }}
+                    <p class="text-xs text-gray-400 mt-1">Sets the response deadline for this ticket.</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Source & Status -->
         <div class="bg-white rounded-lg shadow p-6">
             <h2 class="text-base font-semibold text-gray-900 mb-4">Source & Status</h2>

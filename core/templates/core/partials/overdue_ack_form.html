@@ -1,0 +1,25 @@
+<form hx-post="{% url 'core:ticket_acknowledge_overdue' ticket.pk %}"
+      hx-target="#overdue-section"
+      hx-swap="innerHTML"
+      class="mt-2 space-y-2">
+  {% csrf_token %}
+  {% if ack_error %}
+    <p class="text-red-600 text-sm">{{ ack_error }}</p>
+  {% endif %}
+  <label class="block text-sm font-medium text-gray-700">Note (required to acknowledge)</label>
+  <textarea name="note" rows="3" required
+    class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500 text-sm"
+    placeholder="Describe what's being done about this overdue ticket..."></textarea>
+  <div class="flex gap-2">
+    <button type="submit" class="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700">
+      Submit Acknowledgment
+    </button>
+    <button type="button"
+      hx-get="{% url 'core:ticket_acknowledge_overdue' ticket.pk %}"
+      hx-target="#overdue-section"
+      hx-swap="outerHTML"
+      class="px-4 py-2 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300">
+      Cancel
+    </button>
+  </div>
+</form>

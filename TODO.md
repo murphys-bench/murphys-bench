@@ -108,7 +108,7 @@
 
 #### Batch 4 — SLA Plans, Help Topics & KB, Roles & Permissions
 
-- [ ] **SLA Plans** (#1)
+- ✅ **SLA Plans** (#1)
   - `SLAPlan` model: name, grace_period_hours, is_active, is_transient, disable_overdue_alerts
   - `Ticket.sla_plan` FK (optional), `Ticket.due_at` DateTimeField (calculated on assign)
   - `Ticket.is_overdue` property (due_at < now and status not closed/resolved/converted)
@@ -124,7 +124,7 @@
   - In-app only — no email alerts for SLA overdue
   - SLA assigned manually on ticket, or via help topic default (once help topics are built)
 
-- [ ] **Help Topics & Internal Knowledge Base** (#2)
+- ✅ **Help Topics & Internal Knowledge Base** (#2)
   - `HelpTopic` model: name, description, default_sla FK, is_active, sort_order
   - `Ticket.help_topic` FK (optional) — classification only, no auto-routing yet
   - Help topic selector on ticket create/edit form
@@ -139,7 +139,7 @@
   - KB article detail view
   - KB accessible from nav link, from ticket detail ("Search KB"), and from work order detail ("Search KB")
 
-- [ ] **Roles & Permissions** (#3)
+- ✅ **Roles & Permissions** (#3)
   - Replace flat `role` CharField on User with FK to new `Role` model
   - `Role` model: name, description, is_system (locks defaults from deletion), permission flags:
     - `can_create_ticket`, `can_edit_ticket`, `can_close_ticket`, `can_delete_ticket`
