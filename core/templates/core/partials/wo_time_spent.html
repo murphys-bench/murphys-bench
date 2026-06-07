@@ -1,0 +1,6 @@
+<span id="time-spent-display" class="font-semibold text-gray-900">
+  {{ work_order.time_spent_display }}
+  {% if work_order.time_spent_minutes %}
+    <span class="text-xs font-normal text-gray-400">({{ work_order.time_spent_minutes }} min)</span>
+  {% endif %}
+</span>

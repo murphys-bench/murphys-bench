@@ -4,7 +4,7 @@ from django.views.generic import ListView, DetailView, CreateView, UpdateView
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import HttpResponse
 from django.urls import reverse_lazy
-from django.db.models import Q
+from django.db.models import Q, F as models_F
 from django.contrib.contenttypes.models import ContentType
 from django.http import FileResponse, Http404
 from django.utils import timezone
@@ -145,6 +145,23 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         # Linked ticket for overdue badge
         context['linked_ticket'] = getattr(self.object, 'ticket', None)
         return context
+
+
+class WorkOrderAddTimeView(LoginRequiredMixin, View):
+    """Add minutes to a work order's time_spent_minutes. Returns updated display fragment."""
+
+    def post(self, request, pk):
+        wo = get_object_or_404(WorkOrder, pk=pk)
+        try:
+            minutes = max(0, int(request.POST.get('minutes', 0)))
+        except (ValueError, TypeError):
+            minutes = 0
+        if minutes > 0:
+            WorkOrder.objects.filter(pk=pk).update(
+                time_spent_minutes=models_F('time_spent_minutes') + minutes
+            )
+            wo.refresh_from_db(fields=['time_spent_minutes'])
+        return render(request, 'core/partials/wo_time_spent.html', {'work_order': wo})
 
 
 class ClientListView(LoginRequiredMixin, ListView):
