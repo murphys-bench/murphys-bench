@@ -53,10 +53,9 @@ The app is running locally at `http://localhost:8000`. All views require login.
 - `/admin/` — Django admin (full access, staff only)
 
 **What still requires admin panel:**
-- Adding notes to work orders (HTMX form coming next)
 - Logging mileage (no native form yet)
-- Managing tickets (no native views built yet — coming after HTMX notes)
-- Managing checklists and canned responses
+- Managing tickets (no native views built yet — next build)
+- Managing checklists and canned responses (editable via /admin/)
 
 ---
 

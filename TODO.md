@@ -31,9 +31,10 @@
 ⬜ **NEXT — IN ORDER**:
 1. ✅ **Ticketing context locked in** — full-featured ticketing with threaded conversation, ticket→work order conversion, trend analysis
 2. ✅ **HTMX inline notes** — notes added to work orders without page reload
-3. **HTMX checklist toggling** (mark items complete without page reload)
-4. **Ticket views** (list, detail, reply form, convert-to-work-order)
-5. **Mileage create form** (native form, no admin required)
+3. ✅ **HTMX checklist toggling** — items toggle complete/incomplete without page reload
+4. ✅ **Default checklists** — 6 repair types with default checklists (57 items), apply option on WO create/edit
+5. **Ticket views** (list, detail, reply form, convert-to-work-order) ← BUILD NEXT
+6. **Mileage create form** (native form, no admin required)
 6. **Testing suite**
 7. **Deployment** (internal network)
 
@@ -268,8 +269,7 @@ python manage.py runserver
 
 **⚠️ Start next session by**:
 1. Reading CLAUDE.md and docs/ticketing-design.md for full context
-2. Proceed with HTMX inline notes (work order detail page)
-3. Then ticket views
+2. Build ticket views (list, detail, create, inline reply, convert-to-work-order)
 
 **Build next — HTMX Inline Notes**:
 - Add a note form directly on `work_order_detail.html`
