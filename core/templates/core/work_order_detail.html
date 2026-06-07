@@ -109,8 +109,24 @@
         </div>
         {% endif %}
 
+        <!-- Tab bar -->
+        <div class="flex border-b border-gray-200 mb-2">
+            <button onclick="showTab('tab-activity', this)"
+                    class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-blue-600 text-blue-600 -mb-px">
+                Activity
+            </button>
+            <button onclick="showTab('tab-attachments', this)"
+                    class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 -mb-px">
+                Attachments{% if wo_attachments %} ({{ wo_attachments.count }}){% endif %}
+            </button>
+            <button onclick="showTab('tab-history', this)"
+                    class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 -mb-px">
+                History
+            </button>
+        </div>
+
         <!-- Activity Notes -->
-        <div class="bg-white rounded-lg shadow p-6">
+        <div id="tab-activity" class="bg-white rounded-lg shadow p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">Activity</h2>
 
             <!-- Notes list — HTMX appends new notes here -->
@@ -128,6 +144,7 @@
                 <form hx-post="{% url 'core:work_order_note_add' work_order.pk %}"
                       hx-target="#notes-list"
                       hx-swap="beforeend"
+                      hx-encoding="multipart/form-data"
                       hx-on:htmx:after-request="this.reset()">
                     {% csrf_token %}
                     <div class="mb-3">
@@ -144,12 +161,56 @@
                                   class="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                                   required></textarea>
                     </div>
+                    <div class="mb-3">
+                        <input type="file" name="attachments" multiple
+                               class="w-full text-xs text-gray-500 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200">
+                    </div>
                     <button type="submit"
                             class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
                         Add Note
                     </button>
                 </form>
             </div>
+        </div>
+
+        <!-- Attachments Tab -->
+        <div id="tab-attachments" class="hidden bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Attachments</h2>
+            {% if wo_attachments %}
+                {% include "core/partials/attachment_list.html" with attachments=wo_attachments %}
+            {% else %}
+                <p class="text-sm text-gray-400">No attachments on this work order. Files attached to individual notes appear within each note.</p>
+            {% endif %}
+        </div>
+
+        <!-- History Tab -->
+        <div id="tab-history" class="hidden bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">History</h2>
+            {% if audit_log %}
+            <div class="space-y-3">
+                {% for entry in audit_log %}
+                <div class="flex gap-3 text-sm">
+                    <span class="text-gray-400 whitespace-nowrap">{{ entry.timestamp|date:"M d, Y g:i A" }}</span>
+                    <span class="font-medium text-gray-700">{{ entry.actor.get_full_name|default:entry.actor.username|default:"System" }}</span>
+                    <span class="text-gray-500">
+                        {% if entry.action == 0 %}created
+                        {% elif entry.action == 1 %}updated
+                        {% elif entry.action == 2 %}deleted
+                        {% else %}{{ entry.get_action_display }}
+                        {% endif %}
+                        {% if entry.changes_dict %}
+                            —
+                            {% for field, change in entry.changes_dict.items %}
+                                <span class="font-mono text-xs">{{ field }}</span>{% if not forloop.last %}, {% endif %}
+                            {% endfor %}
+                        {% endif %}
+                    </span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+                <p class="text-sm text-gray-400">No history yet.</p>
+            {% endif %}
         </div>
 
     </div>
@@ -188,4 +249,19 @@
 
     </div>
 </div>
+
+{% block extra_js %}
+<script>
+function showTab(id, btn) {
+    document.querySelectorAll('[id^="tab-"]').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('border-blue-600', 'text-blue-600');
+        b.classList.add('border-transparent', 'text-gray-500');
+    });
+    document.getElementById(id).classList.remove('hidden');
+    btn.classList.add('border-blue-600', 'text-blue-600');
+    btn.classList.remove('border-transparent', 'text-gray-500');
+}
+</script>
+{% endblock %}
 {% endblock %}

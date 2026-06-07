@@ -11,4 +11,5 @@
         </span>
     </div>
     <p class="text-sm text-gray-700">{{ note.content }}</p>
+    {% include "core/partials/attachment_list.html" with attachments=note.attachments.all %}
 </div>

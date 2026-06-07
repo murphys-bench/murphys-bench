@@ -12,7 +12,7 @@
 
 {% block content %}
 <div class="max-w-3xl">
-    <form method="post" class="space-y-6">
+    <form method="post" enctype="multipart/form-data" class="space-y-6">
         {% csrf_token %}
 
         {% if form.errors %}
@@ -104,6 +104,15 @@
                 </div>
             </div>
         </div>
+
+        {% if is_create %}
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-base font-semibold text-gray-900 mb-2">Attachments</h2>
+            <input type="file" name="attachments" multiple
+                   class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-4 file:rounded file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200">
+            <p class="text-xs text-gray-400 mt-2">Optional. Additional files can be attached via notes after the work order is created.</p>
+        </div>
+        {% endif %}
 
         <!-- Buttons -->
         <div class="flex gap-3">

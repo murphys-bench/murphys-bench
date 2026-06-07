@@ -1,8 +1,16 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
+from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
 from django.core.validators import MinValueValidator
 import uuid
+import os
+
+
+def attachment_upload_path(instance, filename):
+    ct = instance.content_type
+    return f'attachments/{ct.app_label}/{ct.model}/{instance.object_id}/{filename}'
 
 
 class User(AbstractUser):
@@ -192,6 +200,8 @@ class Ticket(models.Model):
         count = cls.objects.filter(created_at__date=timezone.now().date()).count() + 1
         return f"TKT-{today}-{count:04d}"
 
+    attachments = GenericRelation('Attachment')
+
     def get_linked_tickets(self):
         """Return all tickets linked to this one, regardless of link direction"""
         from django.db.models import Q
@@ -227,6 +237,8 @@ class TicketReply(models.Model):
         indexes = [
             models.Index(fields=['ticket', 'reply_type']),
         ]
+
+    attachments = GenericRelation('Attachment')
 
     def __str__(self):
         return f"Reply on {self.ticket} by {self.created_by}"
@@ -277,6 +289,8 @@ class WorkOrder(models.Model):
             models.Index(fields=['status']),
         ]
 
+    attachments = GenericRelation('Attachment')
+
     def __str__(self):
         return f"{self.work_order_number}: {self.client.name}"
 
@@ -317,6 +331,8 @@ class WorkOrderNote(models.Model):
         indexes = [
             models.Index(fields=['work_order', 'note_type']),
         ]
+
+    attachments = GenericRelation('Attachment')
 
     def __str__(self):
         return f"Note on {self.work_order} ({self.note_type})"
@@ -469,6 +485,100 @@ class TicketLink(models.Model):
         return f"{self.ticket_a.ticket_number} ↔ {self.ticket_b.ticket_number} ({self.link_type})"
 
 
+class SiteSettings(models.Model):
+    """Singleton — site-wide configuration editable from admin."""
+
+    STORAGE_CHOICES = [
+        ('local', 'Local Filesystem'),
+        ('s3', 'S3-Compatible (AWS, B2, MinIO, Wasabi)'),
+    ]
+
+    max_attachment_size_mb = models.IntegerField(
+        default=25,
+        help_text='Maximum file upload size in megabytes.',
+    )
+    blocked_extensions = models.TextField(
+        default='exe,bat,sh,ps1,cmd,vbs,jar,msi,scr,pif',
+        help_text='Comma-separated list of blocked file extensions (without dots).',
+    )
+    storage_backend = models.CharField(
+        max_length=10, choices=STORAGE_CHOICES, default='local',
+        help_text='Changing backends requires updating ATTACHMENT_STORAGE_BACKEND in .env and restarting.',
+    )
+    local_storage_path = models.CharField(
+        max_length=500, blank=True,
+        help_text='Override for local storage path. Leave blank to use MEDIA_ROOT.',
+    )
+    s3_bucket_name = models.CharField(max_length=255, blank=True)
+    s3_access_key = models.CharField(max_length=255, blank=True)
+    s3_secret_key = models.CharField(max_length=255, blank=True)
+    s3_endpoint_url = models.CharField(
+        max_length=255, blank=True,
+        help_text='For B2/MinIO/Wasabi. Leave blank for AWS S3.',
+    )
+    s3_region = models.CharField(max_length=50, blank=True)
+
+    class Meta:
+        db_table = 'site_settings'
+        verbose_name = 'Site Settings'
+        verbose_name_plural = 'Site Settings'
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        pass  # Singleton — prevent deletion
+
+    @classmethod
+    def get(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def get_blocked_extensions(self):
+        return [e.strip().lower().lstrip('.') for e in self.blocked_extensions.split(',') if e.strip()]
+
+
+class Attachment(models.Model):
+    """File attachment linked to any model via GenericForeignKey."""
+
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.PositiveIntegerField()
+    content_object = GenericForeignKey('content_type', 'object_id')
+
+    file = models.FileField(upload_to=attachment_upload_path)
+    original_filename = models.CharField(max_length=255)
+    mime_type = models.CharField(max_length=100, blank=True)
+    size_bytes = models.PositiveIntegerField(default=0)
+    uploaded_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, related_name='attachments',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'attachments'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['content_type', 'object_id']),
+        ]
+
+    def __str__(self):
+        return self.original_filename
+
+    @property
+    def size_display(self):
+        if self.size_bytes < 1024:
+            return f'{self.size_bytes} B'
+        elif self.size_bytes < 1024 ** 2:
+            return f'{self.size_bytes / 1024:.1f} KB'
+        else:
+            return f'{self.size_bytes / 1024 ** 2:.1f} MB'
+
+    @property
+    def extension(self):
+        return os.path.splitext(self.original_filename)[1].lstrip('.').lower()
+
+
 class CannedResponse(models.Model):
     """Template responses for common situations"""
 
@@ -489,3 +599,11 @@ class CannedResponse(models.Model):
 
     def __str__(self):
         return self.title
+
+
+# --- Audit Log Registration ---
+from auditlog.registry import auditlog
+auditlog.register(Ticket)
+auditlog.register(TicketReply)
+auditlog.register(WorkOrder)
+auditlog.register(WorkOrderNote)

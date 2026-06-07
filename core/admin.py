@@ -1,7 +1,8 @@
 from django.contrib import admin
 from .models import (
     User, Client, Contact, Device, Ticket, TicketReply, WorkOrder, WorkOrderNote,
-    WorkOrderItem, Mileage, RepairType, Checklist, ChecklistItem, CannedResponse
+    WorkOrderItem, Mileage, RepairType, Checklist, ChecklistItem, CannedResponse,
+    SiteSettings, Attachment,
 )
 
 
@@ -209,3 +210,35 @@ class CannedResponseAdmin(admin.ModelAdmin):
         ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
     )
     readonly_fields = ['created_at', 'updated_at']
+
+
+# Site Settings (singleton)
+@admin.register(SiteSettings)
+class SiteSettingsAdmin(admin.ModelAdmin):
+    fieldsets = (
+        ('Attachments — Limits', {
+            'fields': ('max_attachment_size_mb', 'blocked_extensions'),
+        }),
+        ('Attachments — Storage', {
+            'fields': ('storage_backend', 'local_storage_path'),
+            'description': 'Changing the storage backend requires updating ATTACHMENT_STORAGE_BACKEND in .env and restarting.',
+        }),
+        ('S3-Compatible Storage Credentials', {
+            'fields': ('s3_bucket_name', 's3_access_key', 's3_secret_key', 's3_endpoint_url', 's3_region'),
+            'classes': ('collapse',),
+        }),
+    )
+
+    def has_add_permission(self, request):
+        return not SiteSettings.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Attachment)
+class AttachmentAdmin(admin.ModelAdmin):
+    list_display = ['original_filename', 'content_type', 'object_id', 'size_bytes', 'uploaded_by', 'created_at']
+    list_filter = ['content_type', 'created_at']
+    search_fields = ['original_filename', 'uploaded_by__username']
+    readonly_fields = ['content_type', 'object_id', 'file', 'original_filename', 'mime_type', 'size_bytes', 'uploaded_by', 'created_at']

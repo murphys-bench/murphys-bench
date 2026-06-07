@@ -23,6 +23,13 @@ isort==5.13.2
 # Security
 django-cors-headers==4.3.1
 
+# Audit log
+django-auditlog==3.3.0
+
+# Attachments / Storage
+django-storages==1.14.6
+boto3==1.42.97
+
 # Utilities
 Pillow==10.1.0
 requests==2.31.0

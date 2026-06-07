@@ -30,6 +30,7 @@
 - Default checklists for 6 repair types (57 items), apply on WO create/edit
 - **Ticket views**: list, detail, create/edit, HTMX inline reply, convert-to-work-order
 - **Batch 1**: Collision Avoidance (TicketLock), WO/Ticket Closure Dependency, Ticket Linking (TicketLink)
+- **Batch 2**: Audit Log (django-auditlog, History tab on ticket/WO), Attachments (GenericFK, local/S3, SiteSettings admin panel)
 
 ---
 
@@ -64,13 +65,13 @@
 
 #### Batch 2 — Audit Log, Attachments
 
-- [ ] **Audit Log** (#14)
+- ✅ **Audit Log** (#14)
   - Add `django-auditlog` package
   - Register: Ticket, TicketReply, WorkOrder, WorkOrderNote models
   - "History" tab on ticket detail and work order detail pages
   - Shows: user, action, timestamp, field-level changes
 
-- [ ] **Attachments** (#11)
+- ✅ **Attachments** (#11)
   - `Attachment` model with `GenericForeignKey`: attaches to Ticket, TicketReply, WorkOrder, WorkOrderNote
   - Fields: file, original_filename, mime_type, size_bytes, uploaded_by, created_at
   - Storage backends (selectable in admin settings):

@@ -30,4 +30,5 @@ urlpatterns = [
     path('tickets/<int:pk>/lock/status/', views.TicketLockStatusView.as_view(), name='ticket_lock_status'),
     path('tickets/<int:pk>/links/add/', views.TicketLinkAddView.as_view(), name='ticket_link_add'),
     path('tickets/<int:pk>/links/remove/', views.TicketLinkRemoveView.as_view(), name='ticket_link_remove'),
+    path('attachments/<int:pk>/download/', views.AttachmentDownloadView.as_view(), name='attachment_download'),
 ]

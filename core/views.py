@@ -5,8 +5,39 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import HttpResponse
 from django.urls import reverse_lazy
 from django.db.models import Q
-from .models import WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist, Ticket, TicketReply, TicketLock, TicketLink
+from django.contrib.contenttypes.models import ContentType
+from django.http import FileResponse, Http404
+from .models import WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist, Ticket, TicketReply, TicketLock, TicketLink, Attachment, SiteSettings
 from .forms import WorkOrderForm, ClientForm, DeviceForm, TicketForm, TicketConvertForm
+
+
+def _save_attachments(request, obj):
+    """Validate and save uploaded files as Attachments linked to obj."""
+    files = request.FILES.getlist('attachments')
+    if not files:
+        return []
+    site = SiteSettings.get()
+    max_bytes = site.max_attachment_size_mb * 1024 * 1024
+    blocked = site.get_blocked_extensions()
+    ct = ContentType.objects.get_for_model(obj)
+    saved = []
+    for f in files:
+        ext = f.name.rsplit('.', 1)[-1].lower() if '.' in f.name else ''
+        if ext in blocked:
+            continue
+        if f.size > max_bytes:
+            continue
+        att = Attachment.objects.create(
+            content_type=ct,
+            object_id=obj.pk,
+            file=f,
+            original_filename=f.name,
+            mime_type=f.content_type or '',
+            size_bytes=f.size,
+            uploaded_by=request.user,
+        )
+        saved.append(att)
+    return saved
 
 
 class DashboardView(LoginRequiredMixin, ListView):
@@ -99,6 +130,14 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         return WorkOrder.objects.select_related(
             'client', 'assigned_to', 'device', 'repair_type', 'ticket'
         ).prefetch_related('notes', 'items', 'notes__created_by')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        from auditlog.models import LogEntry
+        context['audit_log'] = LogEntry.objects.get_for_object(self.object).select_related('actor')[:50]
+        ct = ContentType.objects.get_for_model(WorkOrder)
+        context['wo_attachments'] = Attachment.objects.filter(content_type=ct, object_id=self.object.pk)
+        return context
 
 
 class ClientListView(LoginRequiredMixin, ListView):
@@ -239,6 +278,7 @@ class WorkOrderNoteCreateView(LoginRequiredMixin, View):
             content=content,
             created_by=request.user,
         )
+        _save_attachments(request, note)
         return render(request, 'core/partials/note_item.html', {'note': note})
 
 
@@ -264,6 +304,7 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
     def form_valid(self, form):
         form.instance.work_order_number = WorkOrder.generate_work_order_number()
         response = super().form_valid(form)
+        _save_attachments(self.request, self.object)
 
         # Optionally apply the default checklist for the selected repair type
         if form.cleaned_data.get('apply_checklist') and self.object.repair_type:
@@ -473,6 +514,12 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
             context['wo_is_open'] = wo.status not in ('closed', 'cancelled')
         # Linked tickets
         context['linked_tickets'] = ticket.get_linked_tickets()
+        # Audit history
+        from auditlog.models import LogEntry
+        context['audit_log'] = LogEntry.objects.get_for_object(ticket).select_related('actor')[:50]
+        # Ticket-level attachments
+        ct = ContentType.objects.get_for_model(Ticket)
+        context['ticket_attachments'] = Attachment.objects.filter(content_type=ct, object_id=ticket.pk)
         return context
 
 
@@ -484,7 +531,9 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
     def form_valid(self, form):
         form.instance.ticket_number = Ticket.generate_ticket_number()
         form.instance.created_by = self.request.user
-        return super().form_valid(form)
+        response = super().form_valid(form)
+        _save_attachments(self.request, self.object)
+        return response
 
     def get_success_url(self):
         return reverse_lazy('core:ticket_detail', kwargs={'pk': self.object.pk})
@@ -537,6 +586,7 @@ class TicketReplyCreateView(LoginRequiredMixin, View):
             content=content,
             created_by=request.user,
         )
+        _save_attachments(request, reply)
         return render(request, 'core/partials/ticket_reply_item.html', {'reply': reply})
 
 
@@ -646,6 +696,42 @@ class TicketLinkAddView(LoginRequiredMixin, View):
             'linked_tickets': ticket.get_linked_tickets(),
             'link_error': error,
         })
+
+
+class AttachmentDownloadView(LoginRequiredMixin, View):
+    """Serve an attachment file, enforcing authentication."""
+
+    def get(self, request, pk):
+        attachment = get_object_or_404(Attachment, pk=pk)
+        from django.conf import settings as django_settings
+        if getattr(django_settings, 'ATTACHMENT_STORAGE_BACKEND', 'local') == 's3':
+            import boto3
+            from botocore.config import Config
+            site = SiteSettings.get()
+            client = boto3.client(
+                's3',
+                aws_access_key_id=site.s3_access_key,
+                aws_secret_access_key=site.s3_secret_key,
+                endpoint_url=site.s3_endpoint_url or None,
+                region_name=site.s3_region or None,
+                config=Config(signature_version='s3v4'),
+            )
+            url = client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': site.s3_bucket_name, 'Key': attachment.file.name},
+                ExpiresIn=60,
+            )
+            from django.shortcuts import redirect as dj_redirect
+            return dj_redirect(url)
+        else:
+            try:
+                return FileResponse(
+                    attachment.file.open('rb'),
+                    as_attachment=True,
+                    filename=attachment.original_filename,
+                )
+            except FileNotFoundError:
+                raise Http404
 
 
 class TicketLinkRemoveView(LoginRequiredMixin, View):
