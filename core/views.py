@@ -146,11 +146,11 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
         if status:
             queryset = queryset.filter(status=status)
 
-        # Filter by assigned_to if provided
+        # Filter by assigned_to if provided (admins using 'me' see all WOs)
         assigned_to = self.request.GET.get('assigned_to')
-        if assigned_to == 'me':
+        if assigned_to == 'me' and not _is_admin(self.request.user):
             queryset = queryset.filter(assigned_to=self.request.user)
-        elif assigned_to:
+        elif assigned_to and assigned_to != 'me':
             queryset = queryset.filter(assigned_to_id=assigned_to)
 
         # Search by work order number or client name
@@ -528,9 +528,9 @@ class TicketListView(LoginRequiredMixin, ListView):
             queryset = queryset.filter(status=status)
 
         assigned_to = self.request.GET.get('assigned_to')
-        if assigned_to == 'me':
+        if assigned_to == 'me' and not _is_admin(self.request.user):
             queryset = queryset.filter(assigned_to=self.request.user)
-        elif assigned_to:
+        elif assigned_to and assigned_to != 'me':
             queryset = queryset.filter(assigned_to_id=assigned_to)
 
         overdue = self.request.GET.get('overdue')
