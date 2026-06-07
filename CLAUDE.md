@@ -1,7 +1,7 @@
 # Murphy's Bench
 
 **Status**: Phase 1 Active Development
-**Tech Stack**: Python 3.11 / Django 4.2 / HTMX / Tailwind CSS (CDN)
+**Tech Stack**: Python 3.11 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (not cloud, not SaaS)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
 **Last Updated**: June 7, 2026 (end of session 5)
@@ -138,11 +138,15 @@ murphys-bench/
 │       ├── mileage_list.html
 │       ├── ticket_list.html    # Overdue indicators
 │       ├── ticket_detail.html  # Overdue badge + ack, SLA/HelpTopic display
-│       ├── ticket_form.html    # Includes help_topic + sla_plan fields
+│       ├── ticket_form.html    # Includes help_topic + sla_plan + assigned_to fields
 │       ├── ticket_convert.html
 │       ├── kb_list.html
 │       ├── kb_detail.html
 │       ├── kb_form.html
+│       ├── queue_list.html
+│       ├── queue_detail.html
+│       ├── queue_form.html
+│       ├── reports.html        # 8 reports, Chart.js, date range filter, CSV links
 │       └── partials/
 │           ├── note_item.html
 │           ├── checklist_item.html
@@ -152,7 +156,8 @@ murphys-bench/
 │           ├── attachment_list.html
 │           ├── overdue_badge.html
 │           ├── overdue_ack_form.html
-│           └── wo_time_spent.html
+│           ├── wo_time_spent.html
+│           └── sidebar_content.html  # HTMX sidebar fragment (tickets + WOs)
 ├── accounts/                    # Auth app
 └── docs/
     ├── database-schema.md
@@ -160,7 +165,7 @@ murphys-bench/
     └── next-session-prompt.md
 ```
 
-### Data Models (27 current)
+### Data Models (29 current)
 - **Role** — permission role with 16 boolean flags; seeded: Administrator, Technician
 - **TechSkill** — skill tags M2M on User; captured for future skill-based routing
 - **User** — extended Django user; role CharField (legacy) + role_obj FK to Role + skills M2M
@@ -169,7 +174,7 @@ murphys-bench/
 - **Device** — equipment being serviced
 - **SLAPlan** — response deadline config (grace_period_hours, overdue alerts toggle)
 - **HelpTopic** — ticket classification with optional default SLA
-- **Ticket** — initial service request; statuses: new, open, in_progress, waiting_on_customer, resolved, closed, converted; has sla_plan FK, help_topic FK, due_at, overdue ack fields
+- **Ticket** — initial service request; statuses: new, open, in_progress, waiting_on_customer, resolved, closed, converted; has sla_plan FK, help_topic FK, assigned_to FK, due_at, overdue ack fields
 - **TicketReply** — threaded conversation on a ticket (customer_visible or internal)
 - **WorkOrder** — repair job (main entity); linked back to originating ticket via OneToOne; time_spent_minutes + time_spent_display property
 - **WorkOrderNote** — customer-visible or internal notes on a work order
@@ -253,6 +258,12 @@ Full specs in `todo.md`. Design decisions finalized.
 - **MFA backup codes for admin only** — other users recover via admin reset
 - **SLA overdue alerts are in-app only** — acknowledgment with required note creates audit trail
 - **Attachment storage Phase 1**: local filesystem (configurable path) + S3-compatible (covers B2, MinIO, Wasabi, AWS)
+- **Alpine.js** added in session 5 for sidebar accordion state (localStorage persistence); loaded via CDN in base.html with `defer`
+- **Sidebar**: HTMX-loaded on every page except dashboard; admins see all open tickets/WOs, techs see own assignments (assigned_to or created_by for tickets)
+- **`?assigned_to=me` filter**: works on both `/tickets/` and `/work-orders/`; admins see all (no filter applied), techs see only their own
+- **Audit log gotcha**: `changes_dict` from django-auditlog can contain an `'items'` key (WorkOrderItem relation), which in Django templates shadows `dict.items()` via dictionary lookup priority. Audit log entries are pre-processed in the view via `_audit_entries()` to a list of `{entry, changes}` dicts — never iterate `changes_dict.items` in templates.
+- **Dashboard tiles**: `DashboardTile.link_url` uses relative paths with `?assigned_to=me`; admin users see all items at those URLs (filter is a no-op for admins)
+- **Queue filter_criteria**: JSON dict with optional keys: `status` (list), `assigned_to` (int or null), `overdue` (bool), `client` (int), `help_topic` (int), `sla_plan` (int). The `assigned_to: null` key (explicit null, not absent) means "unassigned only".
 
 ---
 
