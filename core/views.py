@@ -1093,20 +1093,32 @@ class QueueDeleteView(LoginRequiredMixin, View):
 class SidebarFragmentView(LoginRequiredMixin, View):
     """HTMX endpoint: returns sidebar content (my tickets + my WOs)."""
     def get(self, request):
-        my_tickets = list(
-            Ticket.objects.select_related('client').filter(
+        is_admin = _is_admin(request.user)
+
+        ticket_qs = Ticket.objects.select_related('client').exclude(
+            status__in=['closed', 'resolved', 'converted']
+        )
+        if is_admin:
+            # Admins see all open tickets
+            ticket_qs = ticket_qs.order_by('-updated_at')
+        else:
+            ticket_qs = ticket_qs.filter(
                 Q(assigned_to=request.user) | Q(created_by=request.user)
-            ).exclude(status__in=['closed', 'resolved', 'converted'])
-            .order_by('-updated_at').distinct()[:20]
+            ).distinct().order_by('-updated_at')
+
+        wo_qs = WorkOrder.objects.select_related('client').exclude(
+            status__in=['closed', 'cancelled']
         )
-        my_wos = list(
-            WorkOrder.objects.select_related('client').filter(
-                assigned_to=request.user
-            ).exclude(status__in=['closed', 'cancelled']).order_by('-updated_at')[:20]
-        )
+        if is_admin:
+            # Admins see all open work orders
+            wo_qs = wo_qs.order_by('-updated_at')
+        else:
+            wo_qs = wo_qs.filter(assigned_to=request.user).order_by('-updated_at')
+
         return render(request, 'core/partials/sidebar_content.html', {
-            'my_tickets': my_tickets,
-            'my_wos': my_wos,
+            'my_tickets': list(ticket_qs[:20]),
+            'my_wos': list(wo_qs[:20]),
+            'is_admin': is_admin,
         })
 
 
