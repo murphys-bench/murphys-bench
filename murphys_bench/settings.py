@@ -155,6 +155,12 @@ if EMAIL_BACKEND != 'django.core.mail.backends.console.EmailBackend':
     EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
     EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 
+# Ticket locking (collision avoidance)
+TICKET_LOCK_TIMEOUT_MINUTES = config('TICKET_LOCK_TIMEOUT_MINUTES', default=10, cast=int)
+
+# WO/Ticket dependency — auto-resolve ticket when linked WO closes
+AUTO_RESOLVE_TICKET_ON_WO_CLOSE = config('AUTO_RESOLVE_TICKET_ON_WO_CLOSE', default=False, cast=bool)
+
 # Default from email for notifications
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@murphys-bench.local')
 SERVER_EMAIL = config('SERVER_EMAIL', default='noreply@murphys-bench.local')

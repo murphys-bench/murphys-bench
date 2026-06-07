@@ -192,6 +192,18 @@ class Ticket(models.Model):
         count = cls.objects.filter(created_at__date=timezone.now().date()).count() + 1
         return f"TKT-{today}-{count:04d}"
 
+    def get_linked_tickets(self):
+        """Return all tickets linked to this one, regardless of link direction"""
+        from django.db.models import Q
+        links_a = self.links_as_a.select_related('ticket_b', 'created_by').all()
+        links_b = self.links_as_b.select_related('ticket_a', 'created_by').all()
+        results = []
+        for link in links_a:
+            results.append({'ticket': link.ticket_b, 'link_type': link.link_type, 'link_id': link.pk})
+        for link in links_b:
+            results.append({'ticket': link.ticket_a, 'link_type': link.link_type, 'link_id': link.pk})
+        return results
+
 
 class TicketReply(models.Model):
     """Threaded conversation on a ticket (replies, updates, status changes)"""
@@ -414,6 +426,47 @@ class ChecklistItem(models.Model):
 
     def __str__(self):
         return f"{self.checklist.name}: {self.description}"
+
+
+class TicketLock(models.Model):
+    """Tracks who is currently viewing/editing a ticket to prevent collision"""
+
+    ticket = models.OneToOneField(Ticket, on_delete=models.CASCADE, related_name='lock')
+    locked_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ticket_locks')
+    locked_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ticket_locks'
+
+    def __str__(self):
+        return f"{self.ticket.ticket_number} locked by {self.locked_by}"
+
+    def is_expired(self):
+        from django.conf import settings
+        timeout = getattr(settings, 'TICKET_LOCK_TIMEOUT_MINUTES', 10)
+        return (timezone.now() - self.locked_at).total_seconds() > timeout * 60
+
+
+class TicketLink(models.Model):
+    """Links two related or duplicate tickets together"""
+
+    LINK_TYPE_CHOICES = [
+        ('related', 'Related'),
+        ('duplicate', 'Duplicate'),
+    ]
+
+    ticket_a = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='links_as_a')
+    ticket_b = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='links_as_b')
+    link_type = models.CharField(max_length=20, choices=LINK_TYPE_CHOICES, default='related')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='ticket_links_created')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'ticket_links'
+        unique_together = [('ticket_a', 'ticket_b')]
+
+    def __str__(self):
+        return f"{self.ticket_a.ticket_number} ↔ {self.ticket_b.ticket_number} ({self.link_type})"
 
 
 class CannedResponse(models.Model):

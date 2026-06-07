@@ -1,0 +1,63 @@
+{% if link_error %}
+<p class="text-sm text-red-600 mb-2">{{ link_error }}</p>
+{% endif %}
+
+{% if linked_tickets %}
+<ul class="space-y-2 mb-3">
+    {% for item in linked_tickets %}
+    <li class="flex items-center justify-between text-sm">
+        <div>
+            <a href="{% url 'core:ticket_detail' item.ticket.pk %}" class="text-blue-600 hover:underline font-medium">
+                {{ item.ticket.ticket_number }}
+            </a>
+            <span class="text-gray-500 ml-1">{{ item.ticket.subject|truncatechars:30 }}</span>
+            <span class="ml-1 px-1.5 py-0.5 text-xs rounded
+                {% if item.ticket.status == 'new' %}bg-blue-100 text-blue-700
+                {% elif item.ticket.status == 'open' %}bg-indigo-100 text-indigo-700
+                {% elif item.ticket.status == 'in_progress' %}bg-yellow-100 text-yellow-700
+                {% elif item.ticket.status == 'resolved' %}bg-green-100 text-green-700
+                {% elif item.ticket.status == 'closed' %}bg-gray-100 text-gray-600
+                {% else %}bg-purple-100 text-purple-700
+                {% endif %}">
+                {{ item.ticket.get_status_display }}
+            </span>
+            <span class="ml-1 text-xs text-gray-400">({{ item.link_type }})</span>
+        </div>
+        <form hx-post="{% url 'core:ticket_link_remove' ticket.pk %}"
+              hx-target="#linked-tickets-section"
+              hx-swap="innerHTML">
+            {% csrf_token %}
+            <input type="hidden" name="link_id" value="{{ item.link_id }}">
+            <button type="submit" class="text-gray-300 hover:text-red-500 ml-2 text-xs" title="Remove link">✕</button>
+        </form>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p class="text-sm text-gray-400 mb-3">No linked tickets.</p>
+{% endif %}
+
+<!-- Link Ticket Form -->
+<form hx-post="{% url 'core:ticket_link_add' ticket.pk %}"
+      hx-target="#linked-tickets-section"
+      hx-swap="innerHTML"
+      hx-on:htmx:after-request="this.reset()"
+      class="space-y-2">
+    {% csrf_token %}
+    <input type="text"
+           name="ticket_number"
+           placeholder="Ticket number (e.g. TKT-...)"
+           class="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+           required>
+    <div class="flex gap-2">
+        <select name="link_type"
+                class="flex-1 text-xs border border-gray-300 rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="related">Related</option>
+            <option value="duplicate">Duplicate</option>
+        </select>
+        <button type="submit"
+                class="px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded hover:bg-blue-700">
+            Link
+        </button>
+    </div>
+</form>
