@@ -3,94 +3,97 @@
 ## Start by reading these files in order:
 1. `CLAUDE.md` — full project overview, all design decisions, current app state
 2. `todo.md` — complete build roadmap with specs for every planned feature
-3. `docs/ticketing-design.md` — ticketing system design and workflow rules
 
 ---
 
 ## What's already built and working:
 
-- Django 4.2 app, 20+ models, 7 migrations applied
+- Django 4.2 app, 27 models, 10 migrations applied
 - Full CRUD views for work orders, clients, devices, mileage
-- HTMX inline notes on work order detail (with file attachments)
-- HTMX checklist item toggling
+- HTMX inline notes on WO detail, checklist toggling, inline ticket replies
 - Default checklists for 6 repair types
 - **Full ticket views**: list, detail, create/edit, HTMX inline replies, convert-to-work-order
 - Django admin customized for all models including SiteSettings singleton
-- **Batch 1**: Collision avoidance (TicketLock, HTMX polling, lock banner), WO/ticket closure dependency (hard block + warnings), ticket linking (TicketLink, HTMX link/unlink sidebar)
-- **Batch 2**: Audit log (django-auditlog, History tab on ticket + WO detail), file attachments (Attachment model with GenericFK, GenericRelation on all target models, file upload on create forms and HTMX forms, secure download view, SiteSettings controls max size / blocked extensions / storage backend)
-- **Batch 3**: Outbound email (EmailTemplate model, 4 triggers, SMTP config in SiteSettings admin panel), auto-responder on ticket create, three-layer suppression (client flag / pattern blocklist / exact address list), EmailSendLog audit trail
+- **Batch 1**: Collision avoidance (TicketLock, HTMX polling), WO/ticket closure dependency, ticket linking (TicketLink)
+- **Batch 2**: Audit log (django-auditlog, History tab), file attachments (Attachment model with GenericFK, local/S3 storage, SiteSettings controls)
+- **Batch 3**: Outbound email (EmailTemplate, SMTP via SiteSettings), auto-responder on ticket create, three-layer suppression, EmailSendLog
+- **Batch 4**: SLA Plans (overdue badges, HTMX acknowledge workflow with required note), Help Topics (ticket classification), Knowledge Base (KBCategory + KBArticle, search/filter, is_restricted gating, KB link in nav), Roles & Permissions (Role model with 16 flags, seeded Administrator + Technician, TechSkill M2M)
+- **Batch 4 bonus**: Stopwatch timer on WO detail (Start/Pause/Reset, localStorage persistence across page refresh, HTMX "Log X min" endpoint)
+- **Batch 5**: Inbound email — `fetch_inbound_email` management command, IMAP + POP3 (SSL), threading by [TKT-…] in subject → TicketReply, quote stripping, email attachment saving, duplicate guard on Message-ID, InboundEmailLog audit trail, --dry-run flag
 
 ---
 
-## What was decided across all sessions:
+## Your task this session: Build Batch 6
 
-All design decisions are finalized and documented. See `CLAUDE.md` (Planned Phase 1 Features) and `todo.md` (full specs in build order) for complete details.
-
----
-
-## Your task this session: Build Batch 4
-
-Three features, all fully specced in `todo.md`. Read the specs there before starting — they are the authoritative source.
+Four features, all fully specced in `todo.md`. Read the specs there before starting — they are the authoritative source. This is the largest batch yet — take them in order and complete each before starting the next.
 
 ---
 
-### 1. SLA Plans
+### 1. Custom Queues
 
-**Purpose**: Track response/resolution deadlines on tickets and surface overdue alerts in-app.
+**Purpose**: Give techs and admins saved, filterable ticket views beyond the basic list.
 
 **What to build:**
-- `SLAPlan` model: name, grace_period_hours, is_active, is_transient, disable_overdue_alerts
-- `Ticket.sla_plan` FK (optional), `Ticket.due_at` DateTimeField (calculated on assign)
-- `Ticket.is_overdue` property: `due_at < now` and status not in closed/resolved/converted
-- Overdue badge on ticket list row and ticket detail header
-- If ticket has a linked WO: overdue badge on WO detail as well
-- Management command `check_sla_overdue` (run via system cron every 15 min — just build the command, not the cron)
-- **Overdue acknowledgment workflow**:
-  - "Acknowledge Overdue" button on ticket detail (and linked WO detail)
-  - Acknowledging from either side satisfies both
-  - Requires an internal note (stored as TicketReply, reply_type='internal')
-  - Badge changes to "Overdue — Acknowledged [date] by [name]"
-  - New overdue period = new acknowledgment required
-- In-app only — no email alerts for SLA
-- SLA assigned manually on ticket edit form
+- `TicketQueue` model: name, owner (FK to User, null = system queue), filter_criteria (JSONField), sort_field, sort_direction, is_active
+- System queues (owner=null, visible to all) and personal queues (owner=user, visible to that user only)
+- Queue filter criteria supports: status, assigned_to, help_topic, sla_plan, overdue (bool), client
+- Queue list view: `/queues/` — shows system queues + user's personal queues
+- Queue detail view: `/queues/<id>/` — ticket list filtered by queue criteria, with queue name as heading
+- Create/edit/delete queue UI (personal queues only for techs; system queues admin-only)
+- Seed 3 default system queues: "All Open", "Unassigned", "Overdue"
 
 ---
 
-### 2. Help Topics & Internal Knowledge Base
+### 2. Persistent Sidebar
 
-**Purpose**: Classify tickets by topic and give techs a searchable internal KB.
+**Purpose**: Always-visible quick access to the current tech's open work on every page.
 
 **What to build:**
-- `HelpTopic` model: name, description, default_sla FK, is_active, sort_order
-- `Ticket.help_topic` FK (optional) — classification only
-- Help topic selector on ticket create/edit form
-- **Single unified KB** — one knowledge base for tickets and work orders
-- `KBCategory` model: name, description, sort_order
-- `KBArticle` model: title, content (TextField), category FK, article_type (troubleshooting/how_to/vendor/internal), author FK, is_active, is_restricted, created_at, updated_at
-- `is_restricted` — admin-only articles (visible only to staff/admin role)
-- KB list view: search + category filter + article type filter
-- KB article detail view
-- KB link in nav, and "Search KB" link on ticket detail and WO detail sidebars
+- Visible on all pages except dashboard — added to `base.html` layout
+- Two independently collapsible accordion sections: **My Tickets** and **My Work Orders**
+- Each section header shows item count: "My Tickets (5)"
+- Accordion state remembered in localStorage (survives page navigation)
+- Each item: number, client name, truncated subject, color-coded status dot matching badge colors used elsewhere
+- Tech sees only their own assignments; admin sees their own assignments (same as tech)
+- Items link directly to the detail page
+- Sidebar is narrow (fixed width, left or right); main content area adjusts
 
 ---
 
-### 3. Roles & Permissions
+### 3. Enhanced Dashboard
 
-**Purpose**: Replace flat role CharField with a proper permission system.
+**Purpose**: Replace the basic dashboard with role-aware, configurable tiles.
 
 **What to build:**
-- `Role` model: name, description, is_system (protects from deletion), and permission flags:
-  - `can_manage_settings` (admin panel / SiteSettings)
-  - `can_view_all_tickets` (vs. own only)
-  - `can_close_tickets`
-  - `can_manage_users`
-  - `can_view_reports` (placeholder for Batch 6)
-  - `can_view_restricted_kb`
-- Seed two system roles: `Administrator` (all permissions) and `Technician` (standard access)
-- `User.role_obj` FK to Role (nullable for migration safety); keep old `role` CharField temporarily
-- `TechSkill` model: user M2M (via `User.skills`), skill name — for future skill-based routing
-- Permission checks: `is_restricted` KB articles gated on `can_view_restricted_kb`; `can_manage_settings` gates SiteSettings in admin (or just use is_staff for now)
-- Migration: seed Administrator + Technician roles
+- `DashboardTile` model: row (ticket/workorder), label, status_filter (JSONField — list of statuses), link_url, sort_order, is_active, visible_to (all/admin/tech)
+- Two tile rows: Tickets (top) and Work Orders (below)
+- **Tech view**: tiles show counts for own work — "My Open Tickets", "In Progress", "Waiting on Customer"
+- **Admin view**: tiles show counts for all work — "Total Open", "Unassigned", "In Progress"
+- Each tile links to a filtered ticket/WO list showing exactly those items
+- Tiles configurable in admin (show/hide, label, filter, order)
+- Seed sensible default tiles for both rows
+- Replace the current static dashboard with this new one
+
+---
+
+### 4. Reporting & Analytics
+
+**Purpose**: Give admins visibility into volume, workload, and SLA performance.
+
+**What to build:**
+- `/reports/` — dedicated section, date range filter (default: last 30 days), accessible via nav
+- 8 reports (each a separate section on the page or tab):
+  1. Ticket volume over time — bar chart by day/week
+  2. Open tickets by status — donut chart
+  3. Tickets by client — table + bar chart
+  4. Tickets by technician (workload) — table
+  5. Average ticket resolution time — by tech and by client
+  6. SLA compliance rate — % of tickets closed before due_at
+  7. Ticket → WO conversion rate — % of tickets converted, over time
+  8. Mileage by tech and month — table
+- Chart.js via CDN for all charts
+- CSV export for every report (download button per report)
+- No new models — all from existing data via ORM aggregations
 
 ---
 

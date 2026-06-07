@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.11 / Django 4.2 / HTMX / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (not cloud, not SaaS)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 7, 2026 (end of session 3)
+**Last Updated**: June 7, 2026 (end of session 4)
 
 ---
 
@@ -17,8 +17,9 @@ The app is running locally at `http://localhost:8000`. All views require login.
 - `/accounts/login/` — Login page
 - `/work-orders/` — Work order list (search, filter, pagination)
 - `/work-orders/new/` — Create work order (native form)
-- `/work-orders/<id>/` — Work order detail (HTMX inline notes, checklist toggling)
+- `/work-orders/<id>/` — Work order detail (HTMX inline notes, checklist toggling, stopwatch timer)
 - `/work-orders/<id>/edit/` — Edit work order
+- `/work-orders/<id>/add-time/` — HTMX: add minutes to time_spent (stopwatch log)
 - `/clients/` — Client list (search, active filter)
 - `/clients/new/` — Create client
 - `/clients/<id>/` — Client detail (contacts, devices, work history)
@@ -28,16 +29,21 @@ The app is running locally at `http://localhost:8000`. All views require login.
 - `/devices/<id>/` — Device detail (repair history)
 - `/devices/<id>/edit/` — Edit device
 - `/mileage/` — Mileage log (month filter, running total)
-- `/tickets/` — Ticket list (search, status filter, pagination)
-- `/tickets/new/` — Create ticket (native form)
-- `/tickets/<id>/` — Ticket detail (HTMX inline replies, convert-to-WO)
+- `/tickets/` — Ticket list (search, status filter, overdue indicator)
+- `/tickets/new/` — Create ticket (with help topic + SLA plan selectors)
+- `/tickets/<id>/` — Ticket detail (HTMX inline replies, convert-to-WO, overdue badge + ack)
 - `/tickets/<id>/edit/` — Edit ticket
 - `/tickets/<id>/convert/` — Convert ticket to work order
 - `/tickets/<id>/lock/release/` — Release ticket lock (called via JS beforeunload)
 - `/tickets/<id>/lock/status/` — Lock status fragment (HTMX polled every 30s)
 - `/tickets/<id>/links/add/` — Link two tickets (HTMX)
 - `/tickets/<id>/links/remove/` — Unlink tickets (HTMX)
+- `/tickets/<id>/acknowledge-overdue/` — Acknowledge overdue with required note (HTMX)
 - `/attachments/<id>/download/` — Secure authenticated file download
+- `/kb/` — Knowledge base list (search, category + type filters)
+- `/kb/new/` — Create KB article (staff/can_manage_kb only)
+- `/kb/<id>/` — KB article detail
+- `/kb/<id>/edit/` — Edit KB article
 - `/admin/` — Django admin (full access, staff only)
 
 **What still requires admin panel:**
@@ -45,8 +51,11 @@ The app is running locally at `http://localhost:8000`. All views require login.
 - Managing checklists and canned responses
 - Email template editing (EmailTemplate model)
 - Suppressed address management (SuppressedAddress model)
-- Email send log review (EmailSendLog model, read-only)
-- Site settings: SMTP config, attachment limits, storage backend
+- Email send/receive log review (EmailSendLog, InboundEmailLog — read-only)
+- Site settings: SMTP, inbound email, attachment limits, storage backend
+- SLA Plans, Help Topics, KB Categories (admin-managed)
+- Roles and TechSkills management
+- Admin UI needs a descriptive polish pass (deferred — noted in .claude/notes/admin_cleanup.md)
 
 ---
 
@@ -99,16 +108,20 @@ murphys-bench/
 │   ├── settings.py
 │   └── urls.py
 ├── core/                        # Main app
-│   ├── models.py               # All 14 data models
+│   ├── models.py               # All 27 data models
 │   ├── views.py                # All views
 │   ├── urls.py                 # Core URL patterns
 │   ├── forms.py                # All forms
 │   ├── admin.py                # Admin customization
+│   ├── email_utils.py          # Outbound email helpers
+│   ├── management/commands/
+│   │   ├── check_sla_overdue.py    # Cron: flag overdue tickets
+│   │   └── fetch_inbound_email.py  # Cron: poll IMAP/POP3 mailbox
 │   └── templates/core/
-│       ├── base.html           # Shared layout + nav
+│       ├── base.html           # Shared layout + nav (includes KB link)
 │       ├── dashboard.html
 │       ├── work_order_list.html
-│       ├── work_order_detail.html
+│       ├── work_order_detail.html  # Includes stopwatch timer
 │       ├── work_order_form.html
 │       ├── client_list.html
 │       ├── client_detail.html
@@ -117,28 +130,42 @@ murphys-bench/
 │       ├── device_detail.html
 │       ├── device_form.html
 │       ├── mileage_list.html
-│       ├── ticket_list.html
-│       ├── ticket_detail.html
-│       ├── ticket_form.html
+│       ├── ticket_list.html    # Overdue indicators
+│       ├── ticket_detail.html  # Overdue badge + ack, SLA/HelpTopic display
+│       ├── ticket_form.html    # Includes help_topic + sla_plan fields
 │       ├── ticket_convert.html
+│       ├── kb_list.html
+│       ├── kb_detail.html
+│       ├── kb_form.html
 │       └── partials/
 │           ├── note_item.html
 │           ├── checklist_item.html
-│           └── ticket_reply_item.html
+│           ├── ticket_reply_item.html
+│           ├── ticket_lock_banner.html
+│           ├── ticket_linked_list.html
+│           ├── attachment_list.html
+│           ├── overdue_badge.html
+│           ├── overdue_ack_form.html
+│           └── wo_time_spent.html
 ├── accounts/                    # Auth app
 └── docs/
     ├── database-schema.md
-    └── ticketing-design.md
+    ├── ticketing-design.md
+    └── next-session-prompt.md
 ```
 
-### Data Models (22 current)
-- **User** — extended Django user with role (transitioning to Role FK — see Planned Features)
+### Data Models (27 current)
+- **Role** — permission role with 16 boolean flags; seeded: Administrator, Technician
+- **TechSkill** — skill tags M2M on User; captured for future skill-based routing
+- **User** — extended Django user; role CharField (legacy) + role_obj FK to Role + skills M2M
 - **Client** — company/customer
 - **Contact** — person at a client company
 - **Device** — equipment being serviced
-- **Ticket** — initial service request; statuses: new, open, in_progress, waiting_on_customer, resolved, closed, converted
+- **SLAPlan** — response deadline config (grace_period_hours, overdue alerts toggle)
+- **HelpTopic** — ticket classification with optional default SLA
+- **Ticket** — initial service request; statuses: new, open, in_progress, waiting_on_customer, resolved, closed, converted; has sla_plan FK, help_topic FK, due_at, overdue ack fields
 - **TicketReply** — threaded conversation on a ticket (customer_visible or internal)
-- **WorkOrder** — repair job (main entity); linked back to originating ticket via OneToOne
+- **WorkOrder** — repair job (main entity); linked back to originating ticket via OneToOne; time_spent_minutes + time_spent_display property
 - **WorkOrderNote** — customer-visible or internal notes on a work order
 - **WorkOrderItem** — checklist items, parts, time entries
 - **Mileage** — travel logging
@@ -148,11 +175,14 @@ murphys-bench/
 - **CannedResponse** — template notes for common situations
 - **TicketLock** — collision avoidance; OneToOne on Ticket, 10-min expiry
 - **TicketLink** — links related/duplicate tickets; unique_together on (ticket_a, ticket_b)
-- **SiteSettings** — singleton; SMTP config, attachment limits/storage, suppression patterns
+- **SiteSettings** — singleton; outbound SMTP, inbound IMAP/POP3, attachment limits/storage, suppression patterns
 - **Attachment** — GenericFK to Ticket/TicketReply/WorkOrder/WorkOrderNote; local or S3 storage
 - **EmailTemplate** — trigger-based outbound email templates (4 triggers, seeded with defaults)
 - **SuppressedAddress** — exact email addresses that never receive automated email
-- **EmailSendLog** — audit trail for every send attempt (sent / suppressed / failed)
+- **EmailSendLog** — audit trail for every outbound send attempt (sent / suppressed / failed)
+- **InboundEmailLog** — audit trail for every inbound message fetched (new_ticket / reply / duplicate / error)
+- **KBCategory** — knowledge base category (admin-managed)
+- **KBArticle** — KB article; types: troubleshooting / how_to / vendor / internal; is_restricted flag
 
 ---
 
@@ -172,32 +202,18 @@ Also: `converted` (converted to Work Order — read-only after this point)
 
 ---
 
-## Planned Phase 1 Features
+## Phase 1 Feature Status
 
-All design decisions have been finalized. Build order and full specs in `todo.md`.
+Full specs in `todo.md`. Design decisions finalized.
 
-### Batch 1 — Collision Avoidance, WO/Ticket Dependency, Ticket Linking
-- **Collision Avoidance**: `TicketLock` model, 10-min expiry, non-blocking banner, HTMX polling
-- **WO/Ticket Dependency**: Hard block on ticket close while WO open; prompt when WO closes; manual resolution only
-- **Ticket Linking**: `TicketLink` model, link types: `related` and `duplicate` only
+### ✅ Batch 1 — Collision Avoidance, WO/Ticket Dependency, Ticket Linking
+### ✅ Batch 2 — Audit Log, Attachments
+### ✅ Batch 3 — Outbound Email, Auto-Responder
+### ✅ Batch 4 — SLA Plans, Help Topics/KB, Roles & Permissions
+- Bonus: Stopwatch timer on WO detail (localStorage, HTMX log-time)
+### ✅ Batch 5 — Inbound Email (IMAP/POP3, threading, quote strip, attachments)
 
-### Batch 2 — Audit Log, Attachments
-- **Audit Log**: `django-auditlog` package, History tab on ticket and WO detail
-- **Attachments**: GenericForeignKey to Ticket/TicketReply/WorkOrder/WorkOrderNote; local filesystem + S3-compatible storage (both Phase 1); 25 MB default max; all settings editable in admin
-
-### Batch 3 — Outbound Email, Auto-Responder
-- **Outbound Email**: SMTP config, `EmailTemplate` model with trigger-based sending, synchronous
-- **Auto-Responder + Filtering**: Three-layer suppression — pattern blocklist + exact address list + per-client suppress flag; suppression is logged not silent
-
-### Batch 4 — SLA, Help Topics/KB, Roles & Permissions
-- **SLA Plans**: Grace period, overdue badges on ticket + linked WO, acknowledgment workflow (requires note), in-app only
-- **Knowledge Base**: Single unified KB (not split ticket/WO), `KBCategory` + `KBArticle`, article types (troubleshooting/how_to/vendor/internal), `is_restricted` for admin-only articles, accessible from ticket and WO detail
-- **Roles & Permissions**: Replace flat role field with `Role` model + permission flags; seed Administrator + Technician; `TechSkill` M2M on User for future skill-based routing
-
-### Batch 5 — Inbound Email
-- **Email Piping**: IMAP + POP3 (both selectable in admin), cPanel/standard mail, no OAuth2 needed; threading by ticket number in subject; attachments on inbound emails saved automatically
-
-### Batch 6 — Queues, Sidebar, Dashboard, Reporting
+### Batch 6 — Queues, Sidebar, Dashboard, Reporting ← NEXT
 - **Custom Queues**: System queues (admin-created) + personal queues (per-user); left sidebar on ticket list/detail
 - **Persistent Sidebar**: Visible on all pages except dashboard; accordion with My Tickets / My Work Orders sections; color-coded by status; tech sees own assignments only
 - **Enhanced Dashboard**: Two tile rows (Tickets + WOs); tech sees own work, admin sees everything; fully configurable tiles in admin (`DashboardTile` model)
