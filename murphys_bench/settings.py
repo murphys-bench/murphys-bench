@@ -38,6 +38,7 @@ INSTALLED_APPS = [
 
     # Third-party
     'django_extensions',
+    'auditlog',
 
     # Murphy's Bench apps
     'accounts.apps.AccountsConfig',
@@ -50,6 +51,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'auditlog.middleware.AuditlogMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -154,6 +156,19 @@ if EMAIL_BACKEND != 'django.core.mail.backends.console.EmailBackend':
     EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
     EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
     EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+
+# Attachments
+ATTACHMENT_STORAGE_BACKEND = config('ATTACHMENT_STORAGE_BACKEND', default='local')
+
+if ATTACHMENT_STORAGE_BACKEND == 's3':
+    DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+    AWS_STORAGE_BUCKET_NAME = config('S3_BUCKET_NAME', default='')
+    AWS_ACCESS_KEY_ID = config('S3_ACCESS_KEY', default='')
+    AWS_SECRET_ACCESS_KEY = config('S3_SECRET_KEY', default='')
+    AWS_S3_ENDPOINT_URL = config('S3_ENDPOINT_URL', default='') or None
+    AWS_S3_REGION_NAME = config('S3_REGION', default='') or None
+    AWS_DEFAULT_ACL = 'private'
+    AWS_QUERYSTRING_AUTH = True
 
 # Ticket locking (collision avoidance)
 TICKET_LOCK_TIMEOUT_MINUTES = config('TICKET_LOCK_TIMEOUT_MINUTES', default=10, cast=int)

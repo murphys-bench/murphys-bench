@@ -11,4 +11,5 @@
         </span>
     </div>
     <p class="text-sm text-gray-700">{{ reply.content }}</p>
+    {% include "core/partials/attachment_list.html" with attachments=reply.attachments.all %}
 </div>
