@@ -148,7 +148,9 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
 
         # Filter by assigned_to if provided
         assigned_to = self.request.GET.get('assigned_to')
-        if assigned_to:
+        if assigned_to == 'me':
+            queryset = queryset.filter(assigned_to=self.request.user)
+        elif assigned_to:
             queryset = queryset.filter(assigned_to_id=assigned_to)
 
         # Search by work order number or client name
