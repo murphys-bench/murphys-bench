@@ -189,20 +189,20 @@
             <h2 class="text-lg font-semibold text-gray-900 mb-4">History</h2>
             {% if audit_log %}
             <div class="space-y-3">
-                {% for entry in audit_log %}
+                {% for row in audit_log %}
                 <div class="flex gap-3 text-sm">
-                    <span class="text-gray-400 whitespace-nowrap">{{ entry.timestamp|date:"M d, Y g:i A" }}</span>
-                    <span class="font-medium text-gray-700">{{ entry.actor.get_full_name|default:entry.actor.username|default:"System" }}</span>
+                    <span class="text-gray-400 whitespace-nowrap">{{ row.entry.timestamp|date:"M d, Y g:i A" }}</span>
+                    <span class="font-medium text-gray-700">{{ row.entry.actor.get_full_name|default:row.entry.actor.username|default:"System" }}</span>
                     <span class="text-gray-500">
-                        {% if entry.action == 0 %}created
-                        {% elif entry.action == 1 %}updated
-                        {% elif entry.action == 2 %}deleted
-                        {% else %}{{ entry.get_action_display }}
+                        {% if row.entry.action == 0 %}created
+                        {% elif row.entry.action == 1 %}updated
+                        {% elif row.entry.action == 2 %}deleted
+                        {% else %}{{ row.entry.get_action_display }}
                         {% endif %}
-                        {% if entry.changes_dict %}
+                        {% if row.changes %}
                             —
-                            {% for field, change in entry.changes_dict.items %}
-                                <span class="font-mono text-xs">{{ field }}</span>{% if not forloop.last %}, {% endif %}
+                            {% for change in row.changes %}
+                                <span class="font-mono text-xs">{{ change.field }}</span>{% if not forloop.last %}, {% endif %}
                             {% endfor %}
                         {% endif %}
                     </span>

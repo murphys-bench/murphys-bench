@@ -16,6 +16,25 @@ from .models import (
 from .forms import WorkOrderForm, ClientForm, DeviceForm, TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm
 
 
+def _audit_entries(obj):
+    """Return audit log entries with changes pre-converted to a list of (field, old, new) tuples.
+
+    Avoids Django template dict-key-vs-method collision when changes_dict contains
+    keys like 'items' that shadow dict.items().
+    """
+    from auditlog.models import LogEntry
+    entries = LogEntry.objects.get_for_object(obj).select_related('actor')[:50]
+    result = []
+    for entry in entries:
+        changes = []
+        for field, values in (entry.changes or {}).items():
+            old_val = values[0] if len(values) > 0 else ''
+            new_val = values[1] if len(values) > 1 else ''
+            changes.append({'field': field, 'old': old_val, 'new': new_val})
+        result.append({'entry': entry, 'changes': changes})
+    return result
+
+
 def _save_attachments(request, obj):
     """Validate and save uploaded files as Attachments linked to obj."""
     files = request.FILES.getlist('attachments')
@@ -162,8 +181,7 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        from auditlog.models import LogEntry
-        context['audit_log'] = LogEntry.objects.get_for_object(self.object).select_related('actor')[:50]
+        context['audit_log'] = _audit_entries(self.object)
         ct = ContentType.objects.get_for_model(WorkOrder)
         context['wo_attachments'] = Attachment.objects.filter(content_type=ct, object_id=self.object.pk)
         # Linked ticket for overdue badge
@@ -572,9 +590,7 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
             context['wo_is_open'] = wo.status not in ('closed', 'cancelled')
         # Linked tickets
         context['linked_tickets'] = ticket.get_linked_tickets()
-        # Audit history
-        from auditlog.models import LogEntry
-        context['audit_log'] = LogEntry.objects.get_for_object(ticket).select_related('actor')[:50]
+        context['audit_log'] = _audit_entries(ticket)
         # Ticket-level attachments
         ct = ContentType.objects.get_for_model(Ticket)
         context['ticket_attachments'] = Attachment.objects.filter(content_type=ct, object_id=ticket.pk)
