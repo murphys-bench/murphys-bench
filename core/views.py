@@ -5,7 +5,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import HttpResponse
 from django.urls import reverse_lazy
 from django.db.models import Q
-from .models import WorkOrder, WorkOrderNote, Client, Device, Mileage
+from .models import WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage
 from .forms import WorkOrderForm, ClientForm, DeviceForm
 
 
@@ -240,6 +240,18 @@ class WorkOrderNoteCreateView(LoginRequiredMixin, View):
             created_by=request.user,
         )
         return render(request, 'core/partials/note_item.html', {'note': note})
+
+
+# --- Work Order Item Toggle (HTMX) ---
+
+class WorkOrderItemToggleView(LoginRequiredMixin, View):
+    """Toggle a checklist item complete/incomplete — returns updated <li> fragment"""
+
+    def post(self, request, pk):
+        item = get_object_or_404(WorkOrderItem, pk=pk)
+        item.is_completed = not item.is_completed
+        item.save()
+        return render(request, 'core/partials/checklist_item.html', {'item': item})
 
 
 # --- Work Order Create / Edit ---
