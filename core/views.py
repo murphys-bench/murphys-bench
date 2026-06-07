@@ -298,6 +298,26 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
     form_class = WorkOrderForm
     template_name = 'core/work_order_form.html'
 
+    def form_valid(self, form):
+        response = super().form_valid(form)
+
+        # Optionally append the default checklist for the selected repair type
+        if form.cleaned_data.get('apply_checklist') and self.object.repair_type:
+            checklist = self.object.repair_type.checklists.filter(
+                is_default=True, is_active=True
+            ).first()
+            if checklist:
+                for item in checklist.items.filter(is_active=True).order_by('sort_order'):
+                    WorkOrderItem.objects.create(
+                        work_order=self.object,
+                        item_type='checklist',
+                        description=item.description,
+                        quantity=1,
+                        is_completed=False,
+                    )
+
+        return response
+
     def get_success_url(self):
         return reverse_lazy('core:work_order_detail', kwargs={'pk': self.object.pk})
 
