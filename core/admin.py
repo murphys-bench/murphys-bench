@@ -4,6 +4,7 @@ from .models import (
     WorkOrderItem, Mileage, RepairType, Checklist, ChecklistItem, CannedResponse,
     SiteSettings, Attachment, EmailTemplate, SuppressedAddress, EmailSendLog,
     Role, TechSkill, SLAPlan, HelpTopic, KBCategory, KBArticle,
+    InboundEmailLog,
 )
 
 
@@ -262,6 +263,19 @@ class SiteSettingsAdmin(admin.ModelAdmin):
             'fields': ('s3_bucket_name', 's3_access_key', 's3_secret_key', 's3_endpoint_url', 's3_region'),
             'classes': ('collapse',),
         }),
+        ('Inbound Email', {
+            'fields': (
+                'inbound_email_enabled', 'inbound_protocol',
+                'inbound_host', 'inbound_port', 'inbound_ssl',
+                'inbound_username', 'inbound_password',
+                'inbound_folder', 'inbound_delete_after_fetch',
+                'strip_quoted_replies', 'inbound_default_client_name',
+            ),
+            'description': (
+                'Polling command: python manage.py fetch_inbound_email — run every 1-5 minutes via cron. '
+                'New emails create tickets; replies matching [TKT-…] thread into existing tickets.'
+            ),
+        }),
     )
 
     def has_add_permission(self, request):
@@ -308,6 +322,20 @@ class EmailSendLogAdmin(admin.ModelAdmin):
     list_filter = ['status', 'trigger', 'created_at']
     search_fields = ['to_email', 'ticket__ticket_number']
     readonly_fields = ['ticket', 'to_email', 'trigger', 'status', 'reason', 'detail', 'created_at']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(InboundEmailLog)
+class InboundEmailLogAdmin(admin.ModelAdmin):
+    list_display = ['created_at', 'status', 'from_email', 'subject', 'ticket', 'detail']
+    list_filter = ['status', 'created_at']
+    search_fields = ['from_email', 'subject', 'ticket__ticket_number', 'message_id']
+    readonly_fields = ['message_id', 'from_email', 'subject', 'ticket', 'status', 'detail', 'created_at']
 
     def has_add_permission(self, request):
         return False
