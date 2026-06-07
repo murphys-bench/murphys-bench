@@ -478,6 +478,18 @@ class WorkOrder(models.Model):
         count = cls.objects.filter(created_at__date=timezone.now().date()).count() + 1
         return f"WO-{today}-{count:04d}"
 
+    @property
+    def time_spent_display(self):
+        m = self.time_spent_minutes or 0
+        if m == 0:
+            return '—'
+        h, rem = divmod(m, 60)
+        if h and rem:
+            return f'{h}h {rem}m'
+        elif h:
+            return f'{h}h'
+        return f'{rem}m'
+
     def mark_completed(self):
         """Mark work order as completed with timestamp"""
         self.status = 'completed'

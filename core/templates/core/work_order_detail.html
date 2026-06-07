@@ -77,12 +77,8 @@
                 </div>
                 <div>
                     <dt class="text-sm font-medium text-gray-500">Time Spent</dt>
-                    <dd class="text-sm text-gray-900 mt-1">
-                        {% if work_order.time_spent_minutes %}
-                            {{ work_order.time_spent_minutes }} min
-                        {% else %}
-                            —
-                        {% endif %}
+                    <dd class="text-sm text-gray-900 mt-1" id="time-spent-wrapper">
+                        {% include "core/partials/wo_time_spent.html" %}
                     </dd>
                 </div>
                 <div>
@@ -237,6 +233,40 @@
             {% endif %}
         </div>
 
+        <!-- Timer -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-3">Timer</h2>
+            <div class="text-center">
+                <div id="timer-display" class="text-4xl font-mono font-semibold text-gray-800 mb-3 tracking-wider">00:00:00</div>
+                <div class="flex justify-center gap-2 mb-4">
+                    <button id="timer-start" onclick="timerStart()"
+                        class="px-4 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 font-medium">
+                        Start
+                    </button>
+                    <button id="timer-pause" onclick="timerPause()" disabled
+                        class="px-4 py-1.5 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600 font-medium disabled:opacity-40 disabled:cursor-not-allowed">
+                        Pause
+                    </button>
+                    <button onclick="timerReset()"
+                        class="px-4 py-1.5 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300 font-medium">
+                        Reset
+                    </button>
+                </div>
+                <form id="timer-log-form"
+                      hx-post="{% url 'core:work_order_add_time' work_order.pk %}"
+                      hx-target="#time-spent-wrapper"
+                      hx-swap="innerHTML"
+                      hx-on:htmx:after-request="timerAfterLog()">
+                    {% csrf_token %}
+                    <input type="hidden" name="minutes" id="timer-minutes-input" value="0">
+                    <button type="submit" id="timer-log-btn" disabled
+                        class="w-full px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 font-medium disabled:opacity-40 disabled:cursor-not-allowed">
+                        Log <span id="timer-log-label">0</span> min
+                    </button>
+                </form>
+            </div>
+        </div>
+
         <!-- Quick Actions -->
         <div class="bg-white rounded-lg shadow p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
@@ -271,6 +301,88 @@ function showTab(id, btn) {
     btn.classList.add('border-blue-600', 'text-blue-600');
     btn.classList.remove('border-transparent', 'text-gray-500');
 }
+
+// ── Timer ──────────────────────────────────────────────────────────────────
+const TIMER_KEY = 'wo_timer_{{ work_order.pk }}';
+let timerInterval = null;
+
+function timerLoad() {
+    const raw = localStorage.getItem(TIMER_KEY);
+    return raw ? JSON.parse(raw) : { accumulated: 0, startedAt: null };
+}
+
+function timerSave(state) {
+    localStorage.setItem(TIMER_KEY, JSON.stringify(state));
+}
+
+function timerElapsedMs(state) {
+    let ms = state.accumulated;
+    if (state.startedAt) ms += Date.now() - state.startedAt;
+    return ms;
+}
+
+function timerFormat(ms) {
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    return [h, m, s].map(n => String(n).padStart(2, '0')).join(':');
+}
+
+function timerUpdateUI() {
+    const state = timerLoad();
+    const ms = timerElapsedMs(state);
+    const totalMin = Math.floor(ms / 60000);
+    document.getElementById('timer-display').textContent = timerFormat(ms);
+    document.getElementById('timer-minutes-input').value = totalMin;
+    document.getElementById('timer-log-label').textContent = totalMin;
+    const running = !!state.startedAt;
+    document.getElementById('timer-start').disabled = running;
+    document.getElementById('timer-pause').disabled = !running;
+    document.getElementById('timer-log-btn').disabled = totalMin === 0;
+}
+
+function timerStart() {
+    const state = timerLoad();
+    if (!state.startedAt) {
+        state.startedAt = Date.now();
+        timerSave(state);
+    }
+    clearInterval(timerInterval);
+    timerInterval = setInterval(timerUpdateUI, 1000);
+    timerUpdateUI();
+}
+
+function timerPause() {
+    const state = timerLoad();
+    if (state.startedAt) {
+        state.accumulated += Date.now() - state.startedAt;
+        state.startedAt = null;
+        timerSave(state);
+    }
+    clearInterval(timerInterval);
+    timerUpdateUI();
+}
+
+function timerReset() {
+    clearInterval(timerInterval);
+    timerSave({ accumulated: 0, startedAt: null });
+    timerUpdateUI();
+}
+
+function timerAfterLog() {
+    timerReset();
+}
+
+// Restore state on load
+(function() {
+    const state = timerLoad();
+    if (state.startedAt) {
+        timerStart();  // resume if was running
+    } else {
+        timerUpdateUI();
+    }
+})();
 </script>
 {% endblock %}
 {% endblock %}
