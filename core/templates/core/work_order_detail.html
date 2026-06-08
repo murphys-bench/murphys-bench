@@ -23,16 +23,16 @@
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">🖨 Repair Report</a>
             <a href="{% url 'core:work_order_print' work_order.pk %}?type=claim" target="_blank"
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Claim Ticket</a>
-            <!-- Status inline update -->
-            <form method="post" action="{% url 'core:work_order_edit' work_order.pk %}" class="ml-auto flex items-center">
+            <!-- Quick status update -->
+            <form method="post" action="{% url 'core:work_order_quick_update' work_order.pk %}" class="ml-auto flex items-center">
                 {% csrf_token %}
-                <input type="hidden" name="client" value="{{ work_order.client_id }}">
-                <input type="hidden" name="contact" value="{{ work_order.contact_id|default:'' }}">
-                <input type="hidden" name="device" value="{{ work_order.device_id|default:'' }}">
-                <input type="hidden" name="repair_type" value="{{ work_order.repair_type_id|default:'' }}">
-                <input type="hidden" name="assigned_to" value="{{ work_order.assigned_to_id|default:'' }}">
-                <input type="hidden" name="service_type" value="{{ work_order.service_type }}">
                 <input type="hidden" name="priority" value="{{ work_order.priority }}">
+                <input type="hidden" name="service_type" value="{{ work_order.service_type }}">
+                <input type="hidden" name="assigned_to" value="{{ work_order.assigned_to_id|default:'' }}">
+                <input type="hidden" name="contact" value="{{ work_order.contact_id|default:'' }}">
+                <input type="hidden" name="repair_type" value="{{ work_order.repair_type_id|default:'' }}">
+                <input type="hidden" name="scheduled_date" value="{{ work_order.scheduled_date|date:'Y-m-d'|default:'' }}">
+                <input type="hidden" name="invoice_ninja_ref" value="{{ work_order.invoice_ninja_ref }}">
                 <select name="status" onchange="this.form.submit()"
                         class="bg-gray-800 text-white text-sm border border-gray-600 rounded px-2 py-1.5 mx-3 focus:outline-none focus:ring-1 focus:ring-gray-400">
                     {% for val, label in work_order.STATUS_CHOICES %}
@@ -381,6 +381,93 @@
 
     <!-- Right Column -->
     <div class="space-y-6">
+
+        <!-- Update Work Order -->
+        <div class="bg-white rounded-lg shadow p-5">
+            <h2 class="text-base font-semibold text-gray-900 mb-4">Update Work Order</h2>
+            <form method="post" action="{% url 'core:work_order_quick_update' work_order.pk %}" class="space-y-3">
+                {% csrf_token %}
+
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Status</label>
+                    <select name="status" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        {% for val, label in work_order.STATUS_CHOICES %}
+                        <option value="{{ val }}" {% if work_order.status == val %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Service Type</label>
+                    <select name="service_type" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        {% for val, label in work_order.SERVICE_TYPE_CHOICES %}
+                        <option value="{{ val }}" {% if work_order.service_type == val %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Priority</label>
+                    <select name="priority" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        {% for val, label in work_order.PRIORITY_CHOICES %}
+                        <option value="{{ val }}" {% if work_order.priority == val %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Assigned To</label>
+                    <select name="assigned_to" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        <option value="">— Unassigned —</option>
+                        {% for u in all_users %}
+                        <option value="{{ u.pk }}" {% if work_order.assigned_to_id == u.pk %}selected{% endif %}>{{ u.get_full_name|default:u.username }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Contact</label>
+                    <select name="contact" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        <option value="">— None —</option>
+                        {% for c in client_contacts %}
+                        <option value="{{ c.pk }}" {% if work_order.contact_id == c.pk %}selected{% endif %}>{{ c.first_name }} {{ c.last_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Repair Type</label>
+                    <select name="repair_type" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        <option value="">— None —</option>
+                        {% for rt in all_repair_types %}
+                        <option value="{{ rt.pk }}" {% if work_order.repair_type_id == rt.pk %}selected{% endif %}>{{ rt.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Scheduled Date</label>
+                    <input type="date" name="scheduled_date"
+                           value="{{ work_order.scheduled_date|date:'Y-m-d'|default:'' }}"
+                           class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Invoice Ninja Ref #</label>
+                    <input type="text" name="invoice_ninja_ref"
+                           value="{{ work_order.invoice_ninja_ref }}"
+                           placeholder="Invoice reference"
+                           class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                </div>
+
+                <div class="pt-1">
+                    <button type="submit"
+                            class="w-full px-4 py-2 bg-green-600 text-white text-sm font-medium rounded hover:bg-green-700">
+                        Save Changes
+                    </button>
+                </div>
+            </form>
+        </div>
 
         <!-- Device Credentials -->
         <div class="bg-white rounded-lg shadow p-5">

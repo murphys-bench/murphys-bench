@@ -287,6 +287,10 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
             cat = entry.labor_item.category
             wp_categories.setdefault(cat, []).append(entry)
         context['wp_categories'] = wp_categories
+        # Inline update form data
+        context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
+        context['all_repair_types'] = RepairType.objects.filter(is_active=True).order_by('name')
+        context['client_contacts'] = Contact.objects.filter(client=wo.client).order_by('last_name', 'first_name')
         return context
 
 
@@ -305,6 +309,42 @@ class WorkOrderAddTimeView(LoginRequiredMixin, View):
             )
             wo.refresh_from_db(fields=['time_spent_minutes'])
         return render(request, 'core/partials/wo_time_spent.html', {'work_order': wo})
+
+
+class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
+    """Inline update of key WO fields from the detail page sidebar panel."""
+
+    def post(self, request, pk):
+        wo = get_object_or_404(WorkOrder, pk=pk)
+        p = request.POST
+
+        wo.status       = p.get('status', wo.status)
+        wo.priority     = p.get('priority', wo.priority)
+        wo.service_type = p.get('service_type', wo.service_type)
+
+        assigned_to_id = p.get('assigned_to')
+        wo.assigned_to_id = assigned_to_id if assigned_to_id else None
+
+        contact_id = p.get('contact')
+        wo.contact_id = contact_id if contact_id else None
+
+        repair_type_id = p.get('repair_type')
+        wo.repair_type_id = repair_type_id if repair_type_id else None
+
+        scheduled_date = p.get('scheduled_date')
+        wo.scheduled_date = scheduled_date if scheduled_date else None
+
+        wo.invoice_ninja_ref = p.get('invoice_ninja_ref', wo.invoice_ninja_ref)
+
+        # Auto-set completed_date when status flips to completed
+        if wo.status == 'completed' and not wo.completed_date:
+            from django.utils import timezone as tz
+            wo.completed_date = tz.now()
+        elif wo.status not in ('completed', 'closed') and wo.completed_date:
+            wo.completed_date = None
+
+        wo.save()
+        return redirect('core:work_order_detail', pk=pk)
 
 
 class ClientListView(LoginRequiredMixin, ListView):
