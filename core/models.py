@@ -119,7 +119,8 @@ class Client(models.Model):
     client_type = models.CharField(max_length=20, choices=CLIENT_TYPE_CHOICES, default='residential')
     email = models.EmailField(blank=True)
     phone = models.CharField(max_length=20, blank=True)
-    address_street = models.CharField(max_length=255, blank=True)
+    address_line1 = models.CharField(max_length=255, blank=True)
+    address_line2 = models.CharField(max_length=255, blank=True)
     address_city = models.CharField(max_length=100, blank=True)
     address_state = models.CharField(max_length=2, blank=True)
     address_zip = models.CharField(max_length=10, blank=True)
@@ -903,8 +904,10 @@ class SiteSettings(models.Model):
     # Company Info (used in repair report header and nav)
     company_name = models.CharField(max_length=255, blank=True, default='',
         help_text='Your business name. Appears on repair reports and the nav bar.')
-    company_address = models.CharField(max_length=500, blank=True, default='',
-        help_text='Full address, e.g. 235 Coolidge St., Silverton, OR 97381')
+    company_address_line1 = models.CharField(max_length=255, blank=True, default='',
+        help_text='Street address, e.g. 235 Coolidge St.')
+    company_address_line2 = models.CharField(max_length=255, blank=True, default='',
+        help_text='City, State ZIP, e.g. Silverton, OR 97381')
     company_phone = models.CharField(max_length=50, blank=True, default='')
     company_email = models.EmailField(blank=True, default='')
     company_logo = models.ImageField(

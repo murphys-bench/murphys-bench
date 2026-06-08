@@ -105,9 +105,9 @@
                 {% endif %}
                 {% if work_order.client.phone %}<p class="text-sm text-gray-600 mt-1">{{ work_order.client.phone }}</p>{% endif %}
                 {% if work_order.client.email %}<p class="text-sm text-gray-600">{{ work_order.client.email }}</p>{% endif %}
-                {% if work_order.client.address_street %}
+                {% if work_order.client.address_line1 %}
                 <p class="text-xs text-gray-500 mt-1">
-                    {{ work_order.client.address_street }},
+                    {{ work_order.client.address_line1 }}{% if work_order.client.address_line2 %}, {{ work_order.client.address_line2 }}{% endif %},
                     {{ work_order.client.address_city }}{% if work_order.client.address_state %}, {{ work_order.client.address_state }}{% endif %} {{ work_order.client.address_zip }}
                 </p>
                 {% endif %}

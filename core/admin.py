@@ -87,7 +87,7 @@ class ClientAdmin(admin.ModelAdmin):
     inlines = [ContactInline]
     fieldsets = (
         ('Company Info', {'fields': ('name', 'email', 'phone')}),
-        ('Address', {'fields': ('address_street', 'address_city', 'address_state', 'address_zip')}),
+        ('Address', {'fields': ('address_line1', 'address_line2', 'address_city', 'address_state', 'address_zip')}),
         ('Status', {'fields': ('is_active', 'suppress_emails')}),
         ('Notes', {'fields': ('notes',), 'classes': ('collapse',)}),
         ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
@@ -265,7 +265,7 @@ class CannedResponseAdmin(admin.ModelAdmin):
 class SiteSettingsAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Company Info', {
-            'fields': ('company_name', 'company_address', 'company_phone', 'company_email', 'company_logo'),
+            'fields': ('company_name', 'company_address_line1', 'company_address_line2', 'company_phone', 'company_email', 'company_logo'),
             'description': 'Appears on repair reports and the nav bar.',
         }),
         ('Outbound Email', {
