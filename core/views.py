@@ -587,6 +587,11 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         client_id = self.request.GET.get('client') or self.request.POST.get('client')
+        if not client_id and self.request.GET.get('device'):
+            try:
+                client_id = Device.objects.values_list('client_id', flat=True).get(pk=self.request.GET['device'])
+            except Device.DoesNotExist:
+                pass
         if client_id:
             kwargs['client_id'] = client_id
         return kwargs
@@ -622,11 +627,13 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
         initial = super().get_initial()
         if self.request.GET.get('client'):
             initial['client'] = self.request.GET['client']
+        if self.request.GET.get('contact'):
+            initial['contact'] = self.request.GET['contact']
         if self.request.GET.get('device'):
             initial['device'] = self.request.GET['device']
             try:
                 device = Device.objects.select_related('assigned_contact').get(pk=self.request.GET['device'])
-                if device.assigned_contact_id:
+                if device.assigned_contact_id and not initial.get('contact'):
                     initial['contact'] = device.assigned_contact_id
                 if not initial.get('client'):
                     initial['client'] = device.client_id
@@ -1855,19 +1862,29 @@ class ContactDeleteView(LoginRequiredMixin, View):
 
 
 def _save_contact_phones(request, contact):
-    """Save phone numbers POSTed as phone_number_X / phone_type_X arrays."""
-    # Delete existing and re-save from POST
+    """Save phone numbers POSTed as phone_number[] / phone_type[] / phone_label[] arrays."""
     contact.phone_numbers.all().delete()
     numbers = request.POST.getlist('phone_number')
     types = request.POST.getlist('phone_type')
-    for number, phone_type in zip(numbers, types):
+    labels = request.POST.getlist('phone_label')
+    for i, number in enumerate(numbers):
         number = number.strip()
         if number:
             ContactPhone.objects.create(
                 contact=contact,
                 number=number,
-                phone_type=phone_type or 'cell',
+                phone_type=types[i] if i < len(types) else 'cell',
+                label=labels[i].strip() if i < len(labels) else '',
             )
+
+
+class ContactSetPrimaryView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        contact = get_object_or_404(Contact, pk=pk)
+        Contact.objects.filter(client=contact.client).update(is_primary=False)
+        contact.is_primary = True
+        contact.save(update_fields=['is_primary'])
+        return redirect('core:client_detail', pk=contact.client_id)
 
 
 # ---------------------------------------------------------------------------
