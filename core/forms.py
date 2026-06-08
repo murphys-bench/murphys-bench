@@ -64,14 +64,15 @@ class ClientForm(forms.ModelForm):
         model = Client
         fields = [
             'name', 'client_type', 'email', 'phone',
-            'address_street', 'address_city', 'address_state', 'address_zip',
+            'address_line1', 'address_line2', 'address_city', 'address_state', 'address_zip',
             'notes', 'is_active',
         ]
         widgets = {
             'name': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'email': forms.EmailInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'phone': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
-            'address_street': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
+            'address_line1': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'Street address'}),
+            'address_line2': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'Apt, Suite, etc. (optional)'}),
             'address_city': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'address_state': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'maxlength': '2', 'placeholder': 'OR'}),
             'address_zip': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
@@ -321,10 +322,11 @@ _SS_SELECT = 'px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outlin
 class CompanySettingsForm(forms.ModelForm):
     class Meta:
         model = SiteSettings
-        fields = ['company_name', 'company_address', 'company_phone', 'company_email', 'company_logo']
+        fields = ['company_name', 'company_address_line1', 'company_address_line2', 'company_phone', 'company_email', 'company_logo']
         widgets = {
             'company_name': forms.TextInput(attrs={'class': _SS_INPUT}),
-            'company_address': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': '235 Coolidge St., Silverton, OR 97381'}),
+            'company_address_line1': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': '235 Coolidge St.'}),
+            'company_address_line2': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'Silverton, OR 97381'}),
             'company_phone': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': '503-555-0100'}),
             'company_email': forms.EmailInput(attrs={'class': _SS_INPUT}),
         }

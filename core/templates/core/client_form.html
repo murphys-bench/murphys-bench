@@ -57,8 +57,12 @@
             <h2 class="text-base font-semibold text-gray-900 mb-4">Address</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Street</label>
-                    {{ form.address_street }}
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Address Line 1</label>
+                    {{ form.address_line1 }}
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Address Line 2 <span class="text-gray-400 font-normal">(optional)</span></label>
+                    {{ form.address_line2 }}
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">City</label>

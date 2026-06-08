@@ -47,8 +47,9 @@
             <div>
                 <dt class="text-xs font-medium text-gray-500 uppercase mb-1">Address</dt>
                 <dd class="text-gray-900">
-                    {% if client.address_street %}
-                        {{ client.address_street }}<br>
+                    {% if client.address_line1 %}
+                        {{ client.address_line1 }}<br>
+                        {% if client.address_line2 %}{{ client.address_line2 }}<br>{% endif %}
                         {{ client.address_city }}{% if client.address_state %}, {{ client.address_state }}{% endif %} {{ client.address_zip }}
                     {% else %}—{% endif %}
                 </dd>

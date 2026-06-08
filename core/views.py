@@ -475,7 +475,7 @@ class WorkOrderMileageCreateView(LoginRequiredMixin, View):
         client = work_order.client
         # Build client full address for destination pre-fill
         parts = [
-            client.address_street, client.address_city,
+            client.address_line1, client.address_city,
             client.address_state, client.address_zip,
         ]
         client_address = ', '.join(p for p in parts if p)
@@ -491,7 +491,7 @@ class WorkOrderMileageCreateView(LoginRequiredMixin, View):
         work_order = get_object_or_404(WorkOrder, pk=pk)
         settings = SiteSettings.get()
         client = work_order.client
-        parts = [client.address_street, client.address_city, client.address_state, client.address_zip]
+        parts = [client.address_line1, client.address_city, client.address_state, client.address_zip]
         client_address = ', '.join(p for p in parts if p)
         form = MileageForm(initial={
             'trip_date': timezone.now().date(),
