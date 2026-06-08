@@ -37,7 +37,7 @@
         <div class="bg-white rounded-lg shadow overflow-hidden">
             <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
                 <h2 class="text-lg font-semibold text-gray-900">Work Orders</h2>
-                <a href="/admin/core/workorder/add/?client={{ client.pk }}"
+                <a href="{% url 'core:work_order_create' %}?client={{ client.pk }}"
                    class="text-sm text-blue-600 hover:underline">+ New</a>
             </div>
             {% if client.work_orders.all %}
@@ -84,7 +84,7 @@
         <div class="bg-white rounded-lg shadow overflow-hidden">
             <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
                 <h2 class="text-lg font-semibold text-gray-900">Devices</h2>
-                <a href="/admin/core/device/add/?client={{ client.pk }}"
+                <a href="{% url 'core:device_create' %}?client={{ client.pk }}&next={{ request.path }}"
                    class="text-sm text-blue-600 hover:underline">+ New</a>
             </div>
             {% if client.devices.all %}

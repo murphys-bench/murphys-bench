@@ -37,7 +37,7 @@
         <div class="bg-white rounded-lg shadow overflow-hidden">
             <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
                 <h2 class="text-lg font-semibold text-gray-900">Repair History</h2>
-                <a href="/admin/core/workorder/add/?device={{ device.pk }}"
+                <a href="{% url 'core:work_order_create' %}?device={{ device.pk }}"
                    class="text-sm text-blue-600 hover:underline">+ New Work Order</a>
             </div>
             {% if device.work_orders.all %}

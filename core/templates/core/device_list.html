@@ -6,7 +6,7 @@
 <div class="bg-white shadow">
     <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex items-center justify-between">
         <h1 class="text-2xl font-bold text-gray-900">Devices</h1>
-        <a href="/admin/core/device/add/"
+        <a href="{% url 'core:device_create' %}"
            class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">
             + New Device
         </a>
@@ -115,7 +115,7 @@
         {% else %}
             <div class="px-6 py-16 text-center">
                 <p class="text-gray-400 text-lg mb-2">No devices found.</p>
-                <p class="text-gray-400 text-sm">Try clearing your filters or <a href="/admin/core/device/add/" class="text-blue-600 hover:underline">add a new device</a>.</p>
+                <p class="text-gray-400 text-sm">Try clearing your filters or <a href="{% url 'core:device_create' %}" class="text-blue-600 hover:underline">add a new device</a>.</p>
             </div>
         {% endif %}
     </div>
