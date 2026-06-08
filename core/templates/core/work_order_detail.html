@@ -402,12 +402,13 @@
                       hx-encoding="multipart/form-data"
                       hx-on:htmx:after-request="this.reset(); noteType = 'internal'; pickerOpen = false;">
                     {% csrf_token %}
-                    <div class="mb-3">
-                        <select name="note_type" x-model="noteType"
-                                class="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="internal">🔒 Internal Only</option>
-                            <option value="customer_visible">👤 Customer Visible</option>
-                        </select>
+                    <div class="mb-3 flex gap-4">
+                        <label class="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
+                            <input type="radio" name="note_type" value="internal" x-model="noteType" class="accent-blue-600"> 🔒 Internal Only
+                        </label>
+                        <label class="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
+                            <input type="radio" name="note_type" value="customer_visible" x-model="noteType" class="accent-blue-600"> 👤 Customer Visible
+                        </label>
                     </div>
 
                     <!-- Canned response picker -->
