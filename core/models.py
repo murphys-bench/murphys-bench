@@ -109,8 +109,14 @@ class User(AbstractUser):
 class Client(models.Model):
     """Companies/customers requesting service"""
 
+    CLIENT_TYPE_CHOICES = [
+        ('residential', 'Residential'),
+        ('business', 'Business'),
+    ]
+
     id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=255, unique=True)
+    client_type = models.CharField(max_length=20, choices=CLIENT_TYPE_CHOICES, default='residential')
     email = models.EmailField(blank=True)
     phone = models.CharField(max_length=20, blank=True)
     address_street = models.CharField(max_length=255, blank=True)
@@ -150,6 +156,11 @@ class Contact(models.Model):
     title = models.CharField(max_length=100, blank=True)
     is_primary = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+    receives_email = models.BooleanField(
+        default=True,
+        help_text='Uncheck to suppress automated emails to this contact.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -164,6 +175,28 @@ class Contact(models.Model):
 
     def __str__(self):
         return f"{self.first_name} {self.last_name} ({self.client.name})"
+
+
+class ContactPhone(models.Model):
+    """Additional phone numbers for a contact (beyond the primary phone field)."""
+
+    PHONE_TYPE_CHOICES = [
+        ('cell', 'Cell'),
+        ('home', 'Home'),
+        ('work', 'Work'),
+        ('other', 'Other'),
+    ]
+
+    contact = models.ForeignKey(Contact, on_delete=models.CASCADE, related_name='phone_numbers')
+    number = models.CharField(max_length=30)
+    phone_type = models.CharField(max_length=10, choices=PHONE_TYPE_CHOICES, default='cell')
+
+    class Meta:
+        db_table = 'contact_phones'
+        ordering = ['phone_type', 'number']
+
+    def __str__(self):
+        return f"{self.number} ({self.get_phone_type_display()})"
 
 
 class RepairType(models.Model):
@@ -468,6 +501,10 @@ class WorkOrder(models.Model):
     completed_date = models.DateTimeField(null=True, blank=True)
     notes_internal = models.TextField(blank=True, help_text="Technician-only notes")
     notes_customer_visible = models.TextField(blank=True, help_text="What the customer sees")
+    # Device credentials (never shown on printed reports)
+    device_username = models.CharField(max_length=255, blank=True)
+    device_password = models.CharField(max_length=255, blank=True)
+    device_pin = models.CharField(max_length=50, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
