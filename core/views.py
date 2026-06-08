@@ -1958,6 +1958,7 @@ SETTINGS_TABS = [
     ('quick_labor',      'Quick Labor',      None),
     ('checklist_items',  'Checklist Items',  None),
     ('colors',           'Colors',           ColorSettingsForm),
+    ('display',          'Display',          None),
 ]
 
 SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS]
@@ -2009,6 +2010,8 @@ class SettingsView(LoginRequiredMixin, View):
             ctx.update(_checklist_items_context())
         if active_tab == 'colors':
             ctx.update(_colors_context(forms_map.get('colors')))
+        if active_tab == 'display':
+            ctx.update(_display_context())
         return render(request, 'core/settings.html', ctx)
 
     def post(self, request):
@@ -2046,6 +2049,8 @@ class SettingsView(LoginRequiredMixin, View):
             ctx.update(_checklist_items_context())
         if tab == 'colors':
             ctx.update(_colors_context(forms_map.get('colors') or form))
+        if tab == 'display':
+            ctx.update(_display_context())
         return render(request, 'core/settings.html', ctx)
 
 # ---------------------------------------------------------------------------
@@ -2371,6 +2376,13 @@ def _colors_context(form):
             current = default_hex
         rows.append((status_key, status_label, field_name, current))
     return {'color_status_rows': rows}
+
+
+def _display_context():
+    return {
+        'display_font_sizes': [('sm', 'Small'), ('md', 'Medium'), ('lg', 'Large')],
+        'display_nav_sizes':  [('sm', 'Small'), ('md', 'Medium'), ('lg', 'Large')],
+    }
 
 
 class ChecklistItemCreateView(LoginRequiredMixin, View):
