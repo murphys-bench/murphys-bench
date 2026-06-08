@@ -6,7 +6,7 @@
 
 ---
 
-## What's already built and working:
+## What's already built and working (as of session 8):
 
 - Django 4.2 app, 34 models, 18 migrations applied
 - Full CRUD views for work orders, clients, devices, mileage, contacts
@@ -21,6 +21,7 @@
   - Multiple phones per Contact (ContactPhone model, Alpine.js dynamic rows on client detail inline form)
   - Contact notes + receives_email fields, full inline add/edit/delete on client detail
   - Native Settings UI at `/settings/` — 6 tabs: Company, Outbound Email, Inbound Email, Attachments, Security, Mileage
+  - All admin panel links replaced with native app URLs; Django admin is now staff config/reference only
 
 ---
 
@@ -33,6 +34,7 @@
 - **two_factor template overrides**: Live in root `templates/two_factor/` (DIRS), NOT `core/templates/`.
 - **`_is_admin` + anonymous users**: Check `request.user.is_authenticated` before calling — AnonymousUser has no `has_perm_flag`.
 - **Google Maps mileage**: Works in architecture but fails from localhost (no outbound internet in dev). Verify after deploying to internal server.
+- **DeviceCreateView ?next=**: Pass `next` in both GET (for cancel link) and POST (hidden field in device_form.html). Used when launching "New Device" from a client detail page so the user returns there after save.
 - **WorkOrderNote customer filter**: Use `note_type='customer_visible'` NOT `is_internal=False` — the field is a CharField.
 - **ContactPhone phones in Alpine edit form**: Pre-populated via Django template loop into Alpine `phones` array. Phones saved as `phone_number[]` / `phone_type[]` POST arrays via `_save_contact_phones()`.
 

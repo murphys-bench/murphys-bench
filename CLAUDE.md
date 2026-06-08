@@ -75,9 +75,11 @@ The app is running locally at `http://localhost:8000`. All views require login.
 - Email template editing (EmailTemplate model)
 - Suppressed address management (SuppressedAddress model)
 - Email send/receive log review (EmailSendLog, InboundEmailLog — read-only)
-- Site settings: SMTP, inbound email, attachment limits, storage backend, Google Maps API key + shop address
 - SLA Plans, Help Topics, KB Categories (admin-managed)
 - Roles and TechSkills management
+- QuickLaborItem management (add/edit/retire quick labor buttons)
+
+**Note**: All routine workflow actions (create client, work order, device, contact) now use native app pages. The Django admin is staff-only config/reference only.
 
 ---
 
