@@ -39,6 +39,10 @@ INSTALLED_APPS = [
     # Third-party
     'django_extensions',
     'auditlog',
+    'django_otp',
+    'django_otp.plugins.otp_totp',
+    'django_otp.plugins.otp_static',
+    'two_factor',
 
     # Murphy's Bench apps
     'accounts.apps.AccountsConfig',
@@ -51,7 +55,9 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django_otp.middleware.OTPMiddleware',
     'auditlog.middleware.AuditlogMiddleware',
+    'core.middleware.MFAEnforcementMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -249,9 +255,12 @@ LOGGING = {
 }
 
 # Authentication
-LOGIN_URL = '/accounts/login/'
+LOGIN_URL = '/account/login/'
 LOGIN_REDIRECT_URL = '/'
-LOGOUT_REDIRECT_URL = '/accounts/login/'
+LOGOUT_REDIRECT_URL = '/account/login/'
+
+# Two-factor auth
+TWO_FACTOR_REMEMBER_COOKIE_AGE = None  # Don't remember — always ask on new session
 
 # Application Settings
 COMPANY_NAME = config('COMPANY_NAME', default='Shamrock Computer Services')

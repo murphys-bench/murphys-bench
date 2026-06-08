@@ -447,6 +447,12 @@ class WorkOrder(models.Model):
         ('urgent', 'Urgent'),
     ]
 
+    SERVICE_TYPE_CHOICES = [
+        ('in_shop', 'In-Shop'),
+        ('onsite', 'Onsite'),
+        ('remote', 'Remote'),
+    ]
+
     id = models.AutoField(primary_key=True)
     work_order_number = models.CharField(max_length=20, unique=True, db_index=True)
     ticket = models.OneToOneField(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_order_created')
@@ -454,6 +460,7 @@ class WorkOrder(models.Model):
     device = models.ForeignKey(Device, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
     repair_type = models.ForeignKey(RepairType, on_delete=models.SET_NULL, null=True, related_name='work_orders')
     assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders_assigned')
+    service_type = models.CharField(max_length=20, choices=SERVICE_TYPE_CHOICES, default='in_shop')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='new', db_index=True)
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='normal')
     time_spent_minutes = models.IntegerField(default=0, validators=[MinValueValidator(0)])
@@ -576,7 +583,9 @@ class Mileage(models.Model):
     trip_date = models.DateField(db_index=True)
     from_location = models.CharField(max_length=255, blank=True)
     to_location = models.CharField(max_length=255, blank=True)
+    TRIP_TYPE_CHOICES = [('one_way', 'One-Way'), ('round_trip', 'Round Trip')]
     miles = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    trip_type = models.CharField(max_length=12, choices=TRIP_TYPE_CHOICES, default='round_trip')
     purpose = models.CharField(max_length=255, blank=True)
     work_order = models.ForeignKey(WorkOrder, on_delete=models.SET_NULL, null=True, blank=True, related_name='mileage')
     notes = models.TextField(blank=True)
@@ -758,9 +767,26 @@ class SiteSettings(models.Model):
         default=True,
         help_text='Strip quoted reply text (> lines, On … wrote: blocks) from inbound replies.',
     )
+
+    # MFA enforcement
+    require_mfa = models.BooleanField(
+        default=False,
+        help_text='Force all users to enroll in TOTP two-factor authentication before accessing the app.',
+    )
+
     inbound_default_client_name = models.CharField(
         max_length=255, blank=True, default='',
         help_text='When no client matches the sender email, new tickets are filed under a new client. Leave blank to auto-name from the sender email domain.',
+    )
+
+    # Mileage / Google Maps
+    google_maps_api_key = models.CharField(
+        max_length=255, blank=True,
+        help_text='Google Maps API key with Distance Matrix API enabled. Restrict to Distance Matrix API in Google Cloud Console.',
+    )
+    shop_address = models.CharField(
+        max_length=255, blank=True,
+        help_text='Shop address used as the origin for onsite mileage calculations (e.g. 235 Coolidge St. Silverton Oregon 97381).',
     )
 
     class Meta:

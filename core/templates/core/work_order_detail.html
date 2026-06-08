@@ -68,6 +68,18 @@
                     <dd class="text-sm text-gray-900 mt-1">{{ work_order.repair_type|default:"—" }}</dd>
                 </div>
                 <div>
+                    <dt class="text-sm font-medium text-gray-500">Service Type</dt>
+                    <dd class="text-sm text-gray-900 mt-1 flex items-center gap-2">
+                        {{ work_order.get_service_type_display }}
+                        {% if work_order.service_type == 'onsite' %}
+                            <a href="{% url 'core:wo_mileage_create' work_order.pk %}"
+                               class="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded hover:bg-green-200">
+                                + Mileage
+                            </a>
+                        {% endif %}
+                    </dd>
+                </div>
+                <div>
                     <dt class="text-sm font-medium text-gray-500">Assigned To</dt>
                     <dd class="text-sm text-gray-900 mt-1">{{ work_order.assigned_to.get_full_name|default:"Unassigned" }}</dd>
                 </div>

@@ -2,7 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.views import View
 from django.views.generic import ListView, DetailView, CreateView, UpdateView
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.urls import reverse_lazy
 from django.db.models import Q, F as models_F
 from django.contrib.contenttypes.models import ContentType
@@ -359,6 +359,48 @@ class DeviceDetailView(LoginRequiredMixin, DetailView):
         )
 
 
+class MileageDistanceView(LoginRequiredMixin, View):
+    """Server-side proxy to Google Distance Matrix API — keeps API key out of browser."""
+
+    def post(self, request):
+        import json, urllib.request, urllib.parse
+        try:
+            data = json.loads(request.body)
+            origin = data.get('origin', '').strip()
+            destination = data.get('destination', '').strip()
+        except (json.JSONDecodeError, AttributeError):
+            return JsonResponse({'error': 'Invalid request'}, status=400)
+
+        api_key = SiteSettings.get().google_maps_api_key
+        if not api_key:
+            return JsonResponse({'error': 'Google Maps API key not configured in Site Settings.'}, status=400)
+        if not origin or not destination:
+            return JsonResponse({'error': 'Origin and destination are required.'}, status=400)
+
+        url = 'https://maps.googleapis.com/maps/api/distancematrix/json?' + urllib.parse.urlencode({
+            'origins': origin,
+            'destinations': destination,
+            'units': 'imperial',
+            'key': api_key,
+        })
+        try:
+            with urllib.request.urlopen(url, timeout=10) as resp:
+                result = json.loads(resp.read())
+        except Exception as e:
+            return JsonResponse({'error': f'Distance Matrix request failed: {e}'}, status=502)
+
+        try:
+            element = result['rows'][0]['elements'][0]
+            if element['status'] != 'OK':
+                return JsonResponse({'error': f"Google returned: {element['status']}"}, status=400)
+            meters = element['distance']['value']
+            miles_one_way = round(meters / 1609.344, 1)
+            miles_round_trip = round(miles_one_way * 2, 1)
+            return JsonResponse({'one_way': miles_one_way, 'round_trip': miles_round_trip})
+        except (KeyError, IndexError):
+            return JsonResponse({'error': 'Could not parse Distance Matrix response.'}, status=502)
+
+
 class MileageCreateView(LoginRequiredMixin, View):
     def get(self, request):
         form = MileageForm(initial={'trip_date': timezone.now().date()})
@@ -393,6 +435,53 @@ class MileageUpdateView(LoginRequiredMixin, View):
             form.save()
             return redirect('core:mileage_list')
         return render(request, 'core/mileage_form.html', {'form': form, 'entry': entry})
+
+
+class WorkOrderMileageCreateView(LoginRequiredMixin, View):
+    """Mileage entry form launched from a Work Order detail page."""
+
+    def _context(self, work_order, form):
+        settings = SiteSettings.get()
+        client = work_order.client
+        # Build client full address for destination pre-fill
+        parts = [
+            client.address_street, client.address_city,
+            client.address_state, client.address_zip,
+        ]
+        client_address = ', '.join(p for p in parts if p)
+        return {
+            'form': form,
+            'work_order': work_order,
+            'shop_address': settings.shop_address,
+            'client_address': client_address,
+            'has_maps_key': bool(settings.google_maps_api_key),
+        }
+
+    def get(self, request, pk):
+        work_order = get_object_or_404(WorkOrder, pk=pk)
+        settings = SiteSettings.get()
+        client = work_order.client
+        parts = [client.address_street, client.address_city, client.address_state, client.address_zip]
+        client_address = ', '.join(p for p in parts if p)
+        form = MileageForm(initial={
+            'trip_date': timezone.now().date(),
+            'from_location': settings.shop_address,
+            'to_location': client_address,
+            'purpose': 'Onsite service call',
+            'work_order': work_order,
+            'trip_type': 'round_trip',
+        })
+        return render(request, 'core/mileage_wo_form.html', self._context(work_order, form))
+
+    def post(self, request, pk):
+        work_order = get_object_or_404(WorkOrder, pk=pk)
+        form = MileageForm(request.POST)
+        if form.is_valid():
+            entry = form.save(commit=False)
+            entry.technician = request.user
+            entry.save()
+            return redirect('core:work_order_detail', pk=work_order.pk)
+        return render(request, 'core/mileage_wo_form.html', self._context(work_order, form))
 
 
 class MileageListView(LoginRequiredMixin, ListView):

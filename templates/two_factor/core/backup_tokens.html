@@ -11,7 +11,7 @@
     </p>
 
     {% if device.token_set.count %}
-        <div class="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+        <div class="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-lg" id="token-list">
             <div class="grid grid-cols-2 gap-2">
                 {% for token in device.token_set.all %}
                     <code class="text-sm font-mono text-gray-800 bg-white border border-gray-200 rounded px-2 py-1 text-center">
@@ -20,10 +20,39 @@
                 {% endfor %}
             </div>
         </div>
-        <p class="text-xs text-gray-500 mb-4">
-            You have {{ device.token_set.count }} backup token{{ device.token_set.count|pluralize }} remaining.
-            Generating new tokens will invalidate these.
-        </p>
+        <div class="flex items-center justify-between mb-4">
+            <p class="text-xs text-gray-500">
+                You have {{ device.token_set.count }} backup token{{ device.token_set.count|pluralize }} remaining.
+                Generating new tokens will invalidate these.
+            </p>
+            <button onclick="printTokens()" type="button"
+                    class="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 flex items-center gap-1">
+                🖨 Print
+            </button>
+        </div>
+        <style>
+            @media print {
+                body * { visibility: hidden; }
+                #print-area, #print-area * { visibility: visible; }
+                #print-area { position: fixed; top: 0; left: 0; width: 100%; padding: 2rem; }
+            }
+        </style>
+        <div id="print-area" style="display:none">
+            <h2 style="font-size:1.1rem;font-weight:bold;margin-bottom:0.5rem">Murphy's Bench — Backup Tokens</h2>
+            <p style="font-size:0.8rem;color:#555;margin-bottom:1rem">Each token can only be used once. Keep this page somewhere safe.</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;font-family:monospace">
+                {% for token in device.token_set.all %}
+                    <div style="border:1px solid #ccc;border-radius:4px;padding:0.4rem 0.6rem;text-align:center">{{ token.token }}</div>
+                {% endfor %}
+            </div>
+        </div>
+        <script>
+            function printTokens() {
+                document.getElementById('print-area').style.display = 'block';
+                window.print();
+                document.getElementById('print-area').style.display = 'none';
+            }
+        </script>
     {% else %}
         <div class="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
             <p class="text-sm text-yellow-800">You have no backup tokens. Generate some in case you lose access to your authenticator.</p>

@@ -1,0 +1,180 @@
+{% extends "core/base.html" %}
+
+{% block title %}Add Mileage — {{ work_order.work_order_number }}{% endblock %}
+
+{% block page_header %}
+<div class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+    <div>
+        <h1 class="text-xl font-semibold text-gray-900">Add Mileage Entry</h1>
+        <p class="text-sm text-gray-500 mt-0.5">{{ work_order.work_order_number }} — {{ work_order.client.name }}</p>
+    </div>
+    <a href="{% url 'core:work_order_detail' work_order.pk %}" class="text-sm text-gray-500 hover:text-gray-700">← Back to Work Order</a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="p-6 max-w-2xl">
+    <form method="post" id="mileage-form">
+        {% csrf_token %}
+        <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <div class="p-6 space-y-4">
+
+                <!-- Date and WO -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Date <span class="text-red-500">*</span></label>
+                        {{ form.trip_date }}
+                        {% for e in form.trip_date.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Work Order</label>
+                        {{ form.work_order }}
+                    </div>
+                </div>
+
+                <!-- Origin -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Origin (Shop Address)</label>
+                    {{ form.from_location }}
+                </div>
+
+                <!-- Destination + Calculate -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Destination Address</label>
+                    <div class="flex gap-2">
+                        <div class="flex-1">{{ form.to_location }}</div>
+                        {% if has_maps_key %}
+                        <button type="button" id="calc-btn"
+                                class="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 whitespace-nowrap flex items-center gap-1.5">
+                            📍 Calculate
+                        </button>
+                        {% endif %}
+                    </div>
+                    {% if not has_maps_key %}
+                        <p class="mt-1 text-xs text-amber-600">Google Maps API key not configured — enter miles manually.</p>
+                    {% endif %}
+                </div>
+
+                <!-- One-way / Round-trip display -->
+                <div class="grid grid-cols-3 gap-4" id="distance-row">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">One-Way Miles</label>
+                        <input type="number" id="one-way-display" step="0.1" min="0" readonly
+                               class="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50 text-sm text-gray-700" placeholder="—" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Round-Trip Miles</label>
+                        <input type="number" id="round-trip-display" step="0.1" min="0" readonly
+                               class="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50 text-sm text-gray-700" placeholder="—" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Trip Type <span class="text-red-500">*</span></label>
+                        {{ form.trip_type }}
+                    </div>
+                </div>
+
+                <!-- Miles (submitted value) -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Miles to Log <span class="text-red-500">*</span></label>
+                    {{ form.miles }}
+                    <p class="mt-1 text-xs text-gray-500" id="miles-hint">Enter manually, or use Calculate above to auto-fill.</p>
+                    {% for e in form.miles.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                </div>
+
+                <!-- Purpose -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Purpose</label>
+                    {{ form.purpose }}
+                </div>
+
+                <!-- Notes -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Notes (Internal)</label>
+                    {{ form.notes }}
+                </div>
+
+            </div>
+            <div class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-between items-center">
+                <p class="text-xs text-gray-400" id="distance-summary"></p>
+                <div class="flex gap-3">
+                    <a href="{% url 'core:work_order_detail' work_order.pk %}"
+                       class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+                        Cancel
+                    </a>
+                    <button type="submit"
+                            class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">
+                        Save Entry
+                    </button>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+{% if has_maps_key %}
+<script>
+(function() {
+    const calcBtn = document.getElementById('calc-btn');
+    const originInput = document.querySelector('[name="from_location"]');
+    const destInput = document.querySelector('[name="to_location"]');
+    const tripTypeSelect = document.querySelector('[name="trip_type"]');
+    const milesInput = document.querySelector('[name="miles"]');
+    const oneWayDisplay = document.getElementById('one-way-display');
+    const roundTripDisplay = document.getElementById('round-trip-display');
+    const summary = document.getElementById('distance-summary');
+    const hint = document.getElementById('miles-hint');
+
+    let oneWay = null, roundTrip = null;
+
+    function syncMiles() {
+        if (oneWay === null) return;
+        const val = tripTypeSelect.value === 'one_way' ? oneWay : roundTrip;
+        milesInput.value = val;
+        hint.textContent = tripTypeSelect.value === 'one_way'
+            ? `${oneWay} miles one-way selected.`
+            : `${roundTrip} miles round trip selected.`;
+    }
+
+    tripTypeSelect.addEventListener('change', syncMiles);
+
+    calcBtn.addEventListener('click', function() {
+        const origin = originInput.value.trim();
+        const dest = destInput.value.trim();
+        if (!origin || !dest) {
+            alert('Enter both origin and destination before calculating.');
+            return;
+        }
+        calcBtn.disabled = true;
+        calcBtn.textContent = 'Calculating…';
+
+        fetch('{% url "core:mileage_calculate" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '',
+            },
+            body: JSON.stringify({ origin, destination: dest }),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                alert('Error: ' + data.error);
+                return;
+            }
+            oneWay = data.one_way;
+            roundTrip = data.round_trip;
+            oneWayDisplay.value = oneWay;
+            roundTripDisplay.value = roundTrip;
+            summary.textContent = `Distance: ${oneWay} miles one-way, ${roundTrip} miles round trip.`;
+            syncMiles();
+        })
+        .catch(() => alert('Network error — could not calculate distance.'))
+        .finally(() => {
+            calcBtn.disabled = false;
+            calcBtn.innerHTML = '📍 Calculate';
+        });
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}
