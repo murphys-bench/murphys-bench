@@ -282,18 +282,51 @@
         {% endif %}
 
         <!-- Work Performed -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-3">Work Performed</h2>
-            <div id="work-performed-section" class="mb-4">
-                {% include "core/partials/work_performed.html" with categories=wp_categories work_order=work_order %}
+        <div class="bg-white rounded-lg shadow p-6"
+             x-data="{ logOpen: false, customOpen: false }">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-lg font-semibold text-gray-900">Work Performed</h2>
+                <div class="flex gap-2">
+                    <button type="button" @click="customOpen = !customOpen; if(customOpen) logOpen = false"
+                            class="text-xs px-2 py-1 rounded border"
+                            :class="customOpen ? 'bg-blue-600 text-white border-blue-600' : 'text-blue-600 border-blue-300 hover:bg-blue-50'">
+                        + Custom
+                    </button>
+                    {% if labor_by_category %}
+                    <button type="button" @click="logOpen = !logOpen; if(logOpen) customOpen = false"
+                            class="text-xs px-2 py-1 rounded border"
+                            :class="logOpen ? 'bg-gray-700 text-white border-gray-700' : 'text-gray-600 border-gray-300 hover:bg-gray-50'">
+                        + Log Work
+                    </button>
+                    {% endif %}
+                </div>
             </div>
-            {% if labor_by_category %}
-            <div class="border-t border-gray-100 pt-4">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Log Work</p>
+
+            <!-- Custom entry form -->
+            <div x-show="customOpen" x-cloak class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-100">
+                <form method="post" action="{% url 'core:work_performed_custom' work_order.pk %}"
+                      hx-post="{% url 'core:work_performed_custom' work_order.pk %}"
+                      hx-target="#work-performed-section"
+                      hx-swap="innerHTML"
+                      hx-on:htmx:after-request="customOpen = false"
+                      class="space-y-2">
+                    {% csrf_token %}
+                    <input type="text" name="custom_label" placeholder="What was done…"
+                           class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                           required>
+                    <textarea name="notes" rows="2" placeholder="Details (optional)"
+                              class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"></textarea>
+                    <button type="submit"
+                            class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Log</button>
+                </form>
+            </div>
+
+            <!-- Quick labor buttons -->
+            <div x-show="logOpen" x-cloak class="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
                 {% for category, items in labor_by_category.items %}
-                <div class="mb-3">
-                    <p class="text-xs text-gray-400 mb-1">{{ category }}</p>
-                    <div class="flex flex-wrap gap-2">
+                <div class="mb-3 last:mb-0">
+                    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">{{ category }}</p>
+                    <div class="flex flex-wrap gap-1.5">
                         {% for item in items %}
                         <form method="post"
                               action="{% url 'core:work_performed_log' work_order.pk item.pk %}"
@@ -303,7 +336,7 @@
                               class="inline">
                             {% csrf_token %}
                             <button type="submit"
-                                    class="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-blue-50 hover:text-blue-700 border border-gray-200 hover:border-blue-300 transition-colors">
+                                    class="px-2.5 py-1 text-xs bg-white text-gray-700 rounded border border-gray-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 transition-colors">
                                 {{ item.label }}
                             </button>
                         </form>
@@ -312,9 +345,11 @@
                 </div>
                 {% endfor %}
             </div>
-            {% else %}
-            <p class="text-xs text-gray-400 mt-2">No Quick Labor items configured.</p>
-            {% endif %}
+
+            <!-- Logged entries -->
+            <div id="work-performed-section">
+                {% include "core/partials/work_performed.html" with entries=wp_entries work_order=work_order %}
+            </div>
         </div>
 
         <!-- Activity Tabs -->

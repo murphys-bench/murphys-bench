@@ -797,19 +797,27 @@ class QuickLaborItem(models.Model):
 
 
 class WorkPerformed(models.Model):
-    """Records a quick labor item logged against a work order."""
+    """Records work logged against a work order — from quick labor bank or custom entry."""
 
     work_order = models.ForeignKey('WorkOrder', on_delete=models.CASCADE, related_name='work_performed')
-    labor_item = models.ForeignKey(QuickLaborItem, on_delete=models.PROTECT, related_name='logged_entries')
+    labor_item = models.ForeignKey(QuickLaborItem, on_delete=models.PROTECT, null=True, blank=True, related_name='logged_entries')
+    custom_label = models.CharField(max_length=200, blank=True)
+    notes = models.TextField(blank=True)
     logged_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='work_performed_logged')
     logged_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = 'work_performed'
-        ordering = ['labor_item__category', 'labor_item__label']
+        ordering = ['logged_at']
+
+    def label(self):
+        return self.custom_label or (self.labor_item.label if self.labor_item else '—')
+
+    def description(self):
+        return self.notes or (self.labor_item.print_description if self.labor_item else '')
 
     def __str__(self):
-        return f"{self.work_order.work_order_number} — {self.labor_item.label}"
+        return f"{self.work_order.work_order_number} — {self.label()}"
 
 
 class SiteSettings(models.Model):
