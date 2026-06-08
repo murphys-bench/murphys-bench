@@ -3,68 +3,43 @@
 ## Start by reading these files in order:
 1. `CLAUDE.md` — full project overview, all design decisions, current app state
 2. `TODO.md` — complete build roadmap with specs for every planned feature
-3. `docs/batch-11-plan.md` — full spec for the Batch 11 foundational rebuild
 
 ---
 
-## What's already built and working (as of session 10):
+## What's already built and working (as of session 11):
 
-- Django 4.2 app, 36 models, 23 migrations applied
+- Django 4.2 app, 36+ models, 27 migrations applied
 - Full CRUD views for work orders, clients, devices, mileage, contacts
 - HTMX inline notes, checklist toggling, inline ticket replies, Quick Labor logging, device credentials
-- **Batch 1–10**: See CLAUDE.md for full list
-- **Batch 11 — Priority 1 + 2 complete (session 10)**:
-  - Device: `os`, `os_version`, `condition_at_intake`, `assigned_contact` FK; "Save & Create WO →" button; removed from nav
-  - WorkOrder: `contact` FK (nullable); pre-filled from device's assigned_contact
-  - Client detail: hub layout — Account Info → Contacts → Devices → WO History; per-contact +WO/Set Primary; phone label field; Set Primary Contact
-  - Client edit: Deactivate (Status section) + Permanently Delete (type-to-confirm Danger Zone, blocked if WOs exist)
-  - WO detail: black unified toolbar; client/device info cards; Days Open; Invoice Ninja Ref #; credential notes; Work Performed with description+timestamp; collapsible checklist
-  - Repair Report/Claim Ticket: OS/version/condition; note timestamps; signature lines; footer; `?type=claim` title switch
-  - **Batch 11 Priority 3 Step 7**: Settings › Repair Types native CRUD (RepairTypeCategory model, collapsible categories, ▲/▼ reorder, inline edit/delete per type)
+- **Batch 11 — COMPLETE (sessions 10–11)**:
+  - Device: `os`, `os_version`, `condition_at_intake`, `assigned_contact` FK; "Save & Create WO →"
+  - WorkOrder: `contact` FK; Invoice Ninja Ref #; credential_notes
+  - Client detail: hub layout with Contacts / Devices / WO History
+  - Client edit: Deactivate + Permanently Delete (type-to-confirm, blocked if WOs exist)
+  - WO detail: black toolbar; client/device cards; Days Open; Work Performed with timestamps; collapsible checklist; canned response picker
+  - Repair Report / Claim Ticket: OS/condition; note timestamps; signature lines; `?type=claim` switch
+  - Settings › Repair Types: RepairTypeCategory model, collapsible categories, ▲/▼ reorder
+  - Settings › Canned Responses: two streams (Customer/Internal), categories, CRUD, WO detail picker
+  - Settings › Quick Labor: native CRUD grouped by category, inline edit, active toggle
+  - Settings › Checklist Items: flat bank by device type (migration 0025), inline add/edit, device type checkboxes
+  - Settings › Colors: per-status hex colors + site palette (nav bg, accent); CSS variables in base.html; status badges on list/detail/dashboard
+  - Settings › Company: address_line1 + address_line2 split (migration 0027); Report Header Preview
+  - Settings › Display: localStorage font size (content + nav) + table density; applied via inline script before first paint
 
 ---
 
-## What's next: Batch 11 Priority 3 (remaining)
+## What's next: choose from TODO.md
 
-Continue step by step through the remaining Settings UI items:
+Batch 11 is fully complete. Candidates for Batch 12 based on TODO.md priority order:
 
-**Step 8 — Settings: Canned Responses**
-- Two Note Streams: "Customer Notes" and "Tech Notes (Internal)"
-- Each stream has user-defined, reorderable Categories
-- Per-response: stream, category, label, body text
-- CRUD: add/edit/delete per response; add/reorder categories per stream
-- Canned response picker on WO detail note forms (insert text into the note textarea)
-- New models required: `CannedResponseStream`, `CannedResponseCategory`, `CannedResponse`
+1. **Testing suite** — model tests, view tests, form validation
+2. **Client Portal** — read-only ticket/WO status view for clients (separate login)
+3. **Ticket ↔ WO linking improvements** — auto-close ticket when WO closes; show linked WO on ticket detail
+4. **Reporting enhancements** — revenue by period, technician productivity, device type breakdown
+5. **Email templates UI** — native CRUD for EmailTemplate (trigger-based outbound emails)
+6. Any other items in TODO.md
 
-**Step 9 — Settings: Quick Labor native CRUD**
-- QuickLaborItem model already exists (Batch 10); currently admin-only
-- Native UI grouped by category (Software/Hardware/Data/Maintenance/General)
-- Per item: Button Label, Category, Print Description, Active toggle
-- Add/edit/delete — no new models needed
-
-**Step 10 — Settings: Checklist Items — model change**
-- Currently: ChecklistItem tied to RepairType via Checklist template
-- Required: flat item bank scoped by device type (not per-repair-type)
-- New `ChecklistItem` fields: `name`, `device_types` (store as comma-sep or JSON), `is_active`
-- Migration + data migration (migrate existing items to flat bank, assign device types from legacy list)
-- WO checklist: filter items by WO's device type instead of repair type
-- Native UI: flat list, per-item device type tags, add/retire
-
-**Step 11 — Settings: Status Colors + Site Colors**
-- New fields on SiteSettings for per-status colors (bg/text/border hex) + site palette
-- Rendered as CSS variables in a `<style>` block in base.html
-- Settings UI: hex inputs + live preview badges
-
-**Step 12 — Settings: Company Info address split**
-- Split `company_address` → `address_line_1` + `address_line_2` on SiteSettings (migration)
-- Also split `address_street` → `address_line_1` + `address_line_2` on Client model (migration)
-- Migrate existing data to Line 1; user cleans up manually
-- Report Header Preview in Settings › Company
-
-**Step 13 — Settings: Display Settings**
-- Browser-local only (localStorage, no server round-trip)
-- Nav font size, sidebar font size + width, content font size, card density
-- Applied on page load via `<script>` in `<head>` to avoid flash
+Ask the user what they want to tackle next.
 
 ---
 
@@ -72,10 +47,10 @@ Continue step by step through the remaining Settings UI items:
 
 - Permanently Delete blocks if client has WOs; message offers Deactivate instead
 - Address: 5 fields — Line 1, Line 2 (optional), City, State, Zip. No country.
-- Existing address data migrates to Line 1; user cleans up manually
 - Colors: stored in SiteSettings, rendered as CSS variables in `<style>` block in base.html
-- RepairTypeCategory: created ✅
-- Assigned Contact queryset: server-side filter via client_id URL param
+- ChecklistItem is a flat bank by device type — no repair-type template chain
+- Display settings: localStorage only, no DB, applied as data attributes on `<html>` before paint
+- CannedResponse: stream (customer/internal) + optional category FK
 
 ---
 
@@ -86,17 +61,20 @@ Continue step by step through the remaining Settings UI items:
 - **Alpine.js**: CDN with `defer` in base.html. HTMX-swapped content may need `Alpine.initTree(el)` in htmx:afterSwap if it uses Alpine.
 - **Queue filter_criteria JSON**: `assigned_to: null` (explicit null) means "unassigned only" in `_apply_queue_filters()`.
 - **two_factor template overrides**: Live in root `templates/two_factor/` (DIRS), NOT `core/templates/`.
-- **`_is_admin` + anonymous users**: Check `request.user.is_authenticated` before calling — AnonymousUser has no `has_perm_flag`.
-- **Google Maps mileage**: Works in architecture but fails from localhost. Verify after deploying to internal server.
-- **DeviceCreateView ?next=**: Pass `next` in both GET and POST. Used when launching "New Device" from client detail.
+- **`_is_admin` + anonymous users**: Check `request.user.is_authenticated` before calling.
+- **Google Maps mileage**: Works in architecture but fails from localhost. Verify after deploying.
 - **WorkOrderNote customer filter**: Use `note_type='customer_visible'` NOT `is_internal=False`.
 - **ContactPhone phones in Alpine edit form**: Pre-populated via Django template loop into Alpine `phones` array. Saved as `phone_number[]` / `phone_type[]` / `phone_label[]` POST arrays via `_save_contact_phones()`.
-- **Settings tabs**: `repair_types` tab is a special case — no SiteSettings form. Uses `_repair_types_context()` helper. `SETTINGS_TABS` list has `None` for the FormClass on special tabs; `SETTINGS_NAV_TABS` is used for rendering the sidebar nav.
-- **WorkOrderForm contact queryset**: filtered by `client_id` kwarg passed from `get_form_kwargs()`. If client comes via `?device=`, the view resolves client_id from the device.
+- **Settings tabs**: Special tabs (repair_types, canned_responses, quick_labor, checklist_items, colors, display) use `None` FormClass and inject context via `_*_context()` helpers. `SETTINGS_NAV_TABS` drives the sidebar.
+- **WorkOrderForm contact queryset**: filtered by `client_id` kwarg. If client comes via `?device=`, resolved from device.
+- **Checklist apply**: `_apply_checklist_items(work_order)` pulls from flat `ChecklistItem` bank filtered by device type. Uses `get_or_create` to avoid duplicates.
+- **Status badges**: Use `wo-status-badge status-{key}` classes — driven by CSS variables from SiteSettings, not hardcoded Tailwind.
+- **site_settings context processor**: `core.context_processors.site_settings` injects `site_settings` into every template. Registered in `TEMPLATES` in settings.py.
+- **Display settings**: Inline script in `<head>` of base.html reads localStorage keys `mb_font_size`, `mb_nav_size`, `mb_density` and sets data attributes on `<html>`. CSS rules in base.html respond to those attributes.
 
 ---
 
-## General rules for this session:
+## General rules for this project:
 
 - All views use `LoginRequiredMixin`
 - HTMX loaded in `base.html` with global CSRF header on `<body>`

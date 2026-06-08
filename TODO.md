@@ -325,17 +325,17 @@
 
 - ✅ **Settings: Repair Types** — RepairTypeCategory model (migration 0023). Native CRUD: collapsible category sections with counts, ▲/▼ reorder, inline edit per type, delete category (orphans types), add type per category, uncategorised bucket.
 
-- [ ] **Settings: Canned Responses** — two Note Streams (Customer Notes / Tech Notes Internal), each with user-defined reorderable categories. Per-response: stream, category, label, body text. CRUD. Canned response picker on WO detail note forms.
+- ✅ **Settings: Canned Responses** — two Note Streams (Customer Notes / Tech Notes Internal), each with user-defined reorderable categories. Per-response: stream, category, label, body text. CRUD. Canned response picker on WO detail note forms.
 
-- [ ] **Settings: Quick Labor** — native CRUD UI (currently Django admin only): grouped by category (Software/Hardware/Data/Maintenance/General), add/edit/delete per item (label, category, print description).
+- ✅ **Settings: Quick Labor** — native CRUD UI (currently Django admin only): grouped by category (Software/Hardware/Data/Maintenance/General), add/edit/delete per item (label, category, print description).
 
-- [ ] **Settings: Checklist Items** — model change: flat item bank scoped by device type (remove repair-type association). `ChecklistItem`: name + device_types (multi-select). WO checklist filtered by device type. Native UI: flat list, per-item device type tags, add/retire. Migration + data migration required.
+- ✅ **Settings: Checklist Items** — model change: flat item bank scoped by device type (remove repair-type association). `ChecklistItem`: name + device_types (multi-select). WO checklist filtered by device type. Native UI: flat list, per-item device type tags, add/retire. Migration + data migration required.
 
-- [ ] **Settings: Status Colors + Site Colors** — Status Colors: per-status (Intake/In Progress/Waiting-Parts/Waiting-Client/Complete/Closed) bg/text/border hex inputs + live preview badge. Site Colors: Buttons, Navigation, Page, Sidebar color groups with hex inputs. Stored in SiteSettings; rendered as CSS variables in base.html.
+- ✅ **Settings: Status Colors + Site Colors** — per-status hex color fields + site palette (nav bg, accent). Stored in SiteSettings; rendered as CSS variables in base.html. Status badges on WO list/detail/dashboard use CSS variable classes.
 
-- [ ] **Settings: Company Info additions** — split `company_address` into `address_line_1` + `address_line_2`. Add Report Header Preview (live-rendered preview of print header below the form). Migration required.
+- ✅ **Settings: Company Info additions** — split `company_address` → `company_address_line1` + `company_address_line2`; split Client `address_street` → `address_line1` + `address_line2`. Report Header Preview in Settings › Company. Migration with data migration.
 
-- [ ] **Settings: Display Settings** — browser-local UI preferences (localStorage, no server round-trip). Nav font size, sidebar font size + width, main content font size, card density (Compact/Normal/Comfortable). Reset to Defaults. Applied as CSS variables or body data-attributes on page load.
+- ✅ **Settings: Display Settings** — browser-local UI preferences (localStorage, no server round-trip). Content font size, nav font size, table density. Applied via inline script in `<head>` as data attributes before first paint. Reset to Defaults.
 
 ---
 
