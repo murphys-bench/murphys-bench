@@ -114,64 +114,149 @@
             </div>
 
             <!-- Device card -->
-            <div class="bg-white rounded-lg shadow p-4">
+            <div class="bg-white rounded-lg shadow p-4" x-data="{ editing: false }">
                 <div class="flex items-center justify-between mb-2">
                     <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Device</h3>
+                    <div class="flex gap-2">
+                        {% if work_order.device %}
+                        <a href="{% url 'core:device_edit' work_order.device.pk %}" class="text-xs text-blue-600 hover:underline">Edit Device →</a>
+                        {% endif %}
+                        <button type="button" @click="editing = !editing" class="text-xs text-blue-600 hover:underline" x-text="editing ? 'Cancel' : 'Change'"></button>
+                    </div>
+                </div>
+                <!-- Display mode -->
+                <div x-show="!editing">
                     {% if work_order.device %}
-                    <a href="{% url 'core:device_edit' work_order.device.pk %}" class="text-xs text-blue-600 hover:underline">Edit →</a>
+                    <p class="text-sm font-semibold text-gray-900">{{ work_order.device.name }}</p>
+                    {% if work_order.device.manufacturer or work_order.device.model %}
+                    <p class="text-sm text-gray-600 mt-0.5">{{ work_order.device.manufacturer }} {{ work_order.device.model }}</p>
+                    {% endif %}
+                    <dl class="mt-2 space-y-1 text-xs text-gray-600">
+                        {% if work_order.device.serial_number %}
+                        <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">Serial</dt><dd class="font-mono">{{ work_order.device.serial_number }}</dd></div>
+                        {% endif %}
+                        {% if work_order.device.os %}
+                        <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">OS</dt><dd>{{ work_order.device.get_os_display }}{% if work_order.device.os_version %} {{ work_order.device.os_version }}{% endif %}</dd></div>
+                        {% endif %}
+                        {% if work_order.device.condition_at_intake %}
+                        <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">Condition</dt><dd>{{ work_order.device.get_condition_at_intake_display }}</dd></div>
+                        {% endif %}
+                    </dl>
+                    {% else %}
+                    <p class="text-sm text-gray-400 italic">No device assigned.</p>
                     {% endif %}
                 </div>
-                {% if work_order.device %}
-                <p class="text-sm font-semibold text-gray-900">{{ work_order.device.name }}</p>
-                {% if work_order.device.manufacturer or work_order.device.model %}
-                <p class="text-sm text-gray-600 mt-0.5">{{ work_order.device.manufacturer }} {{ work_order.device.model }}</p>
-                {% endif %}
-                <dl class="mt-2 space-y-1 text-xs text-gray-600">
-                    {% if work_order.device.serial_number %}
-                    <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">Serial</dt><dd class="font-mono">{{ work_order.device.serial_number }}</dd></div>
-                    {% endif %}
-                    {% if work_order.device.os %}
-                    <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">OS</dt><dd>{{ work_order.device.get_os_display }}{% if work_order.device.os_version %} {{ work_order.device.os_version }}{% endif %}</dd></div>
-                    {% endif %}
-                    {% if work_order.device.condition_at_intake %}
-                    <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">Condition</dt><dd>{{ work_order.device.get_condition_at_intake_display }}</dd></div>
-                    {% endif %}
-                </dl>
-                {% else %}
-                <p class="text-sm text-gray-400 italic">No device assigned.</p>
-                {% endif %}
+                <!-- Edit mode: assign device -->
+                <div x-show="editing" x-cloak>
+                    <form method="post" action="{% url 'core:work_order_quick_update' work_order.pk %}" class="mt-2 space-y-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="status" value="{{ work_order.status }}">
+                        <input type="hidden" name="priority" value="{{ work_order.priority }}">
+                        <input type="hidden" name="service_type" value="{{ work_order.service_type }}">
+                        <input type="hidden" name="assigned_to" value="{{ work_order.assigned_to_id|default:'' }}">
+                        <input type="hidden" name="contact" value="{{ work_order.contact_id|default:'' }}">
+                        <input type="hidden" name="repair_type" value="{{ work_order.repair_type_id|default:'' }}">
+                        <input type="hidden" name="scheduled_date" value="{{ work_order.scheduled_date|date:'Y-m-d'|default:'' }}">
+                        <input type="hidden" name="invoice_ninja_ref" value="{{ work_order.invoice_ninja_ref }}">
+                        <label class="block text-xs text-gray-500 mb-1">Assign Device</label>
+                        <select name="device" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            <option value="">— No device —</option>
+                            {% for d in client_devices %}
+                            <option value="{{ d.pk }}" {% if work_order.device_id == d.pk %}selected{% endif %}>{{ d.name }}{% if d.serial_number %} ({{ d.serial_number }}){% endif %}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="w-full px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Save</button>
+                    </form>
+                </div>
             </div>
         </div>
 
-        <!-- WO Details -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-base font-semibold text-gray-900 mb-4">Details</h2>
-            <dl class="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                    <dt class="text-xs font-medium text-gray-500 uppercase">Repair Type</dt>
-                    <dd class="text-gray-900 mt-1">{{ work_order.repair_type|default:"—" }}</dd>
-                </div>
-                <div>
-                    <dt class="text-xs font-medium text-gray-500 uppercase">Assigned To</dt>
-                    <dd class="text-gray-900 mt-1">{{ work_order.assigned_to.get_full_name|default:"Unassigned" }}</dd>
-                </div>
-                <div>
-                    <dt class="text-xs font-medium text-gray-500 uppercase">Scheduled Date</dt>
-                    <dd class="text-gray-900 mt-1">{{ work_order.scheduled_date|date:"M d, Y"|default:"—" }}</dd>
-                </div>
-                <div>
-                    <dt class="text-xs font-medium text-gray-500 uppercase">Time Spent</dt>
-                    <dd class="text-gray-900 mt-1" id="time-spent-wrapper">
-                        {% include "core/partials/wo_time_spent.html" %}
-                    </dd>
-                </div>
-                {% if work_order.invoice_ninja_ref %}
-                <div>
-                    <dt class="text-xs font-medium text-gray-500 uppercase">Invoice Ninja Ref</dt>
-                    <dd class="text-gray-900 mt-1 font-mono">{{ work_order.invoice_ninja_ref }}</dd>
-                </div>
-                {% endif %}
-            </dl>
+        <!-- WO Details (inline editable) -->
+        <div class="bg-white rounded-lg shadow p-6" x-data="{ editing: false }">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-base font-semibold text-gray-900">Details</h2>
+                <button type="button" @click="editing = !editing"
+                        class="text-xs text-blue-600 hover:underline" x-text="editing ? 'Cancel' : 'Edit'"></button>
+            </div>
+            <!-- Read view -->
+            <div x-show="!editing">
+                <dl class="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <dt class="text-xs font-medium text-gray-500 uppercase">Repair Type</dt>
+                        <dd class="text-gray-900 mt-1">{{ work_order.repair_type|default:"—" }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium text-gray-500 uppercase">Assigned To</dt>
+                        <dd class="text-gray-900 mt-1">{{ work_order.assigned_to.get_full_name|default:"Unassigned" }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium text-gray-500 uppercase">Scheduled Date</dt>
+                        <dd class="text-gray-900 mt-1">{{ work_order.scheduled_date|date:"M d, Y"|default:"—" }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium text-gray-500 uppercase">Time Spent</dt>
+                        <dd class="text-gray-900 mt-1" id="time-spent-wrapper">
+                            {% include "core/partials/wo_time_spent.html" %}
+                        </dd>
+                    </div>
+                    {% if work_order.invoice_ninja_ref %}
+                    <div>
+                        <dt class="text-xs font-medium text-gray-500 uppercase">Invoice Ninja Ref</dt>
+                        <dd class="text-gray-900 mt-1 font-mono">{{ work_order.invoice_ninja_ref }}</dd>
+                    </div>
+                    {% endif %}
+                </dl>
+            </div>
+            <!-- Edit view -->
+            <div x-show="editing" x-cloak>
+                <form method="post" action="{% url 'core:work_order_quick_update' work_order.pk %}" class="grid grid-cols-2 gap-4">
+                    {% csrf_token %}
+                    <input type="hidden" name="status" value="{{ work_order.status }}">
+                    <input type="hidden" name="priority" value="{{ work_order.priority }}">
+                    <input type="hidden" name="service_type" value="{{ work_order.service_type }}">
+                    <input type="hidden" name="device" value="{{ work_order.device_id|default:'' }}">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Repair Type</label>
+                        <select name="repair_type" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            <option value="">— None —</option>
+                            {% for rt in all_repair_types %}
+                            <option value="{{ rt.pk }}" {% if work_order.repair_type_id == rt.pk %}selected{% endif %}>{{ rt.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Assigned To</label>
+                        <select name="assigned_to" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            <option value="">— Unassigned —</option>
+                            {% for u in all_users %}
+                            <option value="{{ u.pk }}" {% if work_order.assigned_to_id == u.pk %}selected{% endif %}>{{ u.get_full_name|default:u.username }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Scheduled Date</label>
+                        <input type="date" name="scheduled_date" value="{{ work_order.scheduled_date|date:'Y-m-d'|default:'' }}"
+                               class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Contact</label>
+                        <select name="contact" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            <option value="">— None —</option>
+                            {% for c in client_contacts %}
+                            <option value="{{ c.pk }}" {% if work_order.contact_id == c.pk %}selected{% endif %}>{{ c.first_name }} {{ c.last_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Invoice Ninja Ref</label>
+                        <input type="text" name="invoice_ninja_ref" value="{{ work_order.invoice_ninja_ref }}"
+                               class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    <div class="col-span-2 flex justify-end">
+                        <button type="submit" class="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">Save Changes</button>
+                    </div>
+                </form>
+            </div>
         </div>
 
         {% if custom_field_values %}
@@ -240,8 +325,6 @@
                     class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 -mb-px">
                 Attachments{% if wo_attachments %} ({{ wo_attachments.count }}){% endif %}
             </button>
-            <button onclick="showTab('tab-history', this)"
-                    class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 -mb-px">History</button>
         </div>
 
         <!-- Activity -->
@@ -344,37 +427,17 @@
             <h2 class="text-lg font-semibold text-gray-900 mb-4">Attachments</h2>
             {% if wo_attachments %}
                 {% include "core/partials/attachment_list.html" with attachments=wo_attachments %}
-            {% else %}
-                <p class="text-sm text-gray-400">No attachments on this work order. Files attached to individual notes appear within each note.</p>
+                <div class="border-t border-gray-100 mt-4 pt-4"></div>
             {% endif %}
-        </div>
-
-        <!-- History Tab -->
-        <div id="tab-history" class="hidden bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4">History</h2>
-            {% if audit_log %}
-            <div class="space-y-3">
-                {% for row in audit_log %}
-                <div class="flex gap-3 text-sm">
-                    <span class="text-gray-400 whitespace-nowrap">{{ row.entry.timestamp|date:"M d, Y g:i A" }}</span>
-                    <span class="font-medium text-gray-700">{{ row.entry.actor.get_full_name|default:row.entry.actor.username|default:"System" }}</span>
-                    <span class="text-gray-500">
-                        {% if row.entry.action == 0 %}created
-                        {% elif row.entry.action == 1 %}updated
-                        {% elif row.entry.action == 2 %}deleted
-                        {% else %}{{ row.entry.get_action_display }}{% endif %}
-                        {% if row.changes %} —
-                            {% for change in row.changes %}
-                                <span class="font-mono text-xs">{{ change.field }}</span>{% if not forloop.last %}, {% endif %}
-                            {% endfor %}
-                        {% endif %}
-                    </span>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-                <p class="text-sm text-gray-400">No history yet.</p>
-            {% endif %}
+            <form method="post" action="{% url 'core:work_order_upload' work_order.pk %}"
+                  enctype="multipart/form-data" class="space-y-3">
+                {% csrf_token %}
+                <label class="block text-sm font-medium text-gray-700">Upload Files</label>
+                <input type="file" name="attachments" multiple required
+                       class="block w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                <button type="submit"
+                        class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700">Upload</button>
+            </form>
         </div>
 
     </div>
@@ -504,7 +567,11 @@
                         {% endfor %}
                     </ul>
                 {% else %}
-                    <p class="text-gray-400 text-sm mt-3">No items yet.</p>
+                    <div class="mt-3 text-sm text-gray-400">
+                        <p>No checklist items yet. Click <strong>↺ Apply Checklist</strong> above to load items, or go to
+                        <a href="{% url 'core:settings' %}#checklist" class="text-blue-500 hover:underline">Settings › Checklist Items</a>
+                        to define items first.</p>
+                    </div>
                 {% endif %}
             </div>
         </div>

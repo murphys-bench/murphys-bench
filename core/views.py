@@ -291,6 +291,7 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
         context['all_repair_types'] = RepairType.objects.filter(is_active=True).order_by('name')
         context['client_contacts'] = Contact.objects.filter(client=wo.client).order_by('last_name', 'first_name')
+        context['client_devices'] = Device.objects.filter(client=wo.client).order_by('name')
         return context
 
 
@@ -328,6 +329,9 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
         contact_id = p.get('contact')
         wo.contact_id = contact_id if contact_id else None
 
+        device_id = p.get('device')
+        wo.device_id = device_id if device_id else None
+
         repair_type_id = p.get('repair_type')
         wo.repair_type_id = repair_type_id if repair_type_id else None
 
@@ -344,6 +348,15 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
             wo.completed_date = None
 
         wo.save()
+        return redirect('core:work_order_detail', pk=pk)
+
+
+class WorkOrderAttachmentUploadView(LoginRequiredMixin, View):
+    """Upload files directly to a work order (not tied to a note)."""
+
+    def post(self, request, pk):
+        wo = get_object_or_404(WorkOrder, pk=pk)
+        _save_attachments(request, wo)
         return redirect('core:work_order_detail', pk=pk)
 
 
