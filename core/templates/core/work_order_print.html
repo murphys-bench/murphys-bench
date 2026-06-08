@@ -3,9 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Repair Report — {{ work_order.work_order_number }}</title>
+    <title>{% if report_type == 'claim' %}Claim Ticket{% else %}Repair Report{% endif %} — {{ work_order.work_order_number }}</title>
     <style>
-        /* Base styles */
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -36,7 +35,8 @@
         .company-name { font-weight: 700; font-size: 15px; color: #1a1a1a; }
         .report-meta { text-align: right; }
         .wo-number { font-size: 22px; font-weight: 700; color: #2d6a4f; }
-        .report-label { font-size: 12px; color: #666; margin-top: 2px; }
+        .report-label { font-size: 13px; font-weight: 600; color: #374151; margin-top: 2px; }
+        .report-sub { font-size: 12px; color: #666; margin-top: 2px; }
         .status-badge {
             display: inline-block;
             margin-top: 6px;
@@ -64,10 +64,11 @@
         .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
         .field-label { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px; }
         .field-value { font-size: 14px; color: #1a1a1a; font-weight: 500; }
-        .field-sub { font-size: 12px; color: #6b7280; }
+        .field-sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+        .field-row { margin-bottom: 6px; }
 
         /* Tags */
-        .tag-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .tag-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
         .tag {
             display: inline-block;
             padding: 3px 10px;
@@ -80,26 +81,47 @@
         }
 
         /* Work performed */
-        .work-category { margin-bottom: 12px; }
+        .work-category { margin-bottom: 14px; }
         .work-category-name {
             font-size: 11px;
             font-weight: 700;
             color: #6b7280;
             text-transform: uppercase;
             letter-spacing: 0.06em;
-            margin-bottom: 4px;
+            margin-bottom: 6px;
         }
-        .work-item { font-size: 13px; color: #1a1a1a; padding: 3px 0; }
-        .work-item-desc { font-size: 12px; color: #6b7280; padding-left: 12px; }
+        .work-item { font-size: 13px; font-weight: 600; color: #1a1a1a; padding: 2px 0; }
+        .work-item-desc { font-size: 12px; color: #6b7280; padding-left: 12px; margin-bottom: 4px; }
 
         /* Notes */
         .note { padding: 8px 0; border-bottom: 1px solid #f3f4f6; }
         .note:last-child { border-bottom: none; }
-        .note-date { font-size: 11px; color: #9ca3af; margin-bottom: 2px; }
+        .note-date { font-size: 11px; color: #9ca3af; margin-bottom: 3px; }
         .note-text { font-size: 13px; color: #374151; line-height: 1.5; white-space: pre-line; }
 
         /* Resolution */
         .resolution-text { font-size: 14px; color: #374151; line-height: 1.6; white-space: pre-line; }
+
+        /* Signature lines */
+        .sig-section { padding: 24px 32px; border-top: 1px solid #e5e7eb; }
+        .sig-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+        .sig-block { }
+        .sig-line {
+            border-bottom: 1px solid #374151;
+            margin-bottom: 6px;
+            height: 40px;
+        }
+        .sig-label { font-size: 11px; color: #6b7280; }
+
+        /* Footer (print only) */
+        .report-footer {
+            display: none;
+            padding: 8px 32px;
+            border-top: 1px solid #e5e7eb;
+            font-size: 11px;
+            color: #9ca3af;
+            text-align: center;
+        }
 
         /* Print controls (screen only) */
         .print-controls {
@@ -138,6 +160,8 @@
             .print-controls { display: none; }
             .section { padding: 14px 24px; }
             .report-header { padding: 16px 24px 12px; }
+            .sig-section { padding: 16px 24px; }
+            .report-footer { display: block; }
         }
     </style>
 </head>
@@ -145,7 +169,7 @@
 
 <!-- Screen-only controls -->
 <div class="print-controls">
-    <button class="btn-print" onclick="window.print()">🖨 Print Report</button>
+    <button class="btn-print" onclick="window.print()">🖨 Print</button>
     <a class="btn-back" href="{% url 'core:work_order_detail' work_order.pk %}">← Back to Work Order</a>
 </div>
 
@@ -166,8 +190,11 @@
         </div>
         <div class="report-meta">
             <div class="wo-number">{{ work_order.work_order_number }}</div>
-            <div class="report-label">Repair Report</div>
-            <div class="report-label">Intake: {{ work_order.created_at|date:"Y-m-d" }}</div>
+            <div class="report-label">{% if report_type == 'claim' %}Claim Ticket{% else %}Repair Report{% endif %}</div>
+            <div class="report-sub">Intake: {{ work_order.created_at|date:"M d, Y" }}</div>
+            {% if work_order.completed_date %}
+            <div class="report-sub">Completed: {{ work_order.completed_date|date:"M d, Y" }}</div>
+            {% endif %}
             <div class="status-badge">{{ work_order.get_status_display }}</div>
         </div>
     </div>
@@ -175,26 +202,52 @@
     <!-- Client & Device -->
     <div class="section">
         <div class="two-col">
+            <!-- Client -->
             <div>
                 <div class="section-title">Client</div>
                 <div class="field-value">{{ work_order.client.name }}</div>
-                {% if work_order.client.contacts.exists %}
-                    {% with work_order.client.contacts.first as contact %}
-                    <div class="field-sub">{{ contact.name }}{% if contact.phone %} &middot; {{ contact.phone }}{% endif %}</div>
-                    {% endwith %}
+                {% if contact %}
+                <div class="field-sub">{{ contact.first_name }} {{ contact.last_name }}</div>
+                {% for phone in contact.phone_numbers.all %}
+                <div class="field-sub">{{ phone.number }}{% if phone.label %} ({{ phone.label }}){% else %} ({{ phone.get_phone_type_display }}){% endif %}</div>
+                {% endfor %}
+                {% if contact.email %}<div class="field-sub">{{ contact.email }}</div>{% endif %}
+                {% endif %}
+                {% if work_order.client.address_street %}
+                <div class="field-sub" style="margin-top:4px;">
+                    {{ work_order.client.address_street }},
+                    {{ work_order.client.address_city }}{% if work_order.client.address_state %}, {{ work_order.client.address_state }}{% endif %} {{ work_order.client.address_zip }}
+                </div>
                 {% endif %}
             </div>
+            <!-- Device -->
             <div>
                 <div class="section-title">Device</div>
                 {% if work_order.device %}
-                    <div class="field-value">{{ work_order.device.make }} {{ work_order.device.model }}</div>
-                    <div class="field-sub">
-                        {{ work_order.device.device_type|capfirst }}
-                        {% if work_order.device.os %} &middot; {{ work_order.device.os }}{% endif %}
-                        {% if work_order.device.serial_number %} &middot; S/N: {{ work_order.device.serial_number }}{% endif %}
-                    </div>
+                <div class="field-value">{{ work_order.device.name }}</div>
+                {% if work_order.device.manufacturer or work_order.device.model %}
+                <div class="field-sub">{{ work_order.device.manufacturer }} {{ work_order.device.model }}</div>
+                {% endif %}
+                {% if work_order.device.serial_number %}
+                <div class="field-row">
+                    <span class="field-label">Serial: </span>
+                    <span style="font-family:monospace; font-size:13px;">{{ work_order.device.serial_number }}</span>
+                </div>
+                {% endif %}
+                {% if work_order.device.os %}
+                <div class="field-row">
+                    <span class="field-label">OS: </span>
+                    <span>{{ work_order.device.get_os_display }}{% if work_order.device.os_version %} {{ work_order.device.os_version }}{% endif %}</span>
+                </div>
+                {% endif %}
+                {% if work_order.device.condition_at_intake %}
+                <div class="field-row">
+                    <span class="field-label">Condition: </span>
+                    <span>{{ work_order.device.get_condition_at_intake_display }}</span>
+                </div>
+                {% endif %}
                 {% else %}
-                    <div class="field-sub">No device on file</div>
+                <div class="field-sub">No device on file</div>
                 {% endif %}
             </div>
         </div>
@@ -211,7 +264,7 @@
         </div>
         {% endif %}
         {% if work_order.notes_customer_visible %}
-        <div style="line-height:1.5; white-space:pre-line; margin-top:6px;">{{ work_order.notes_customer_visible }}</div>
+        <div style="line-height:1.5; white-space:pre-line; margin-top:6px; font-size:13px;">{{ work_order.notes_customer_visible }}</div>
         {% endif %}
     </div>
 
@@ -233,26 +286,41 @@
     </div>
     {% endif %}
 
-    <!-- Resolution Summary -->
-    {% if work_order.notes_internal %}
-    <div class="section">
-        <div class="section-title">Resolution Summary</div>
-        <div class="resolution-text">{{ work_order.notes_internal }}</div>
-    </div>
-    {% endif %}
-
-    <!-- Customer Notes -->
+    <!-- Customer Notes (with timestamps) -->
     {% if notes %}
     <div class="section">
         <div class="section-title">Notes</div>
         {% for note in notes %}
         <div class="note">
-            <div class="note-date">{{ note.created_at|date:"N j, Y g:i a" }}</div>
+            <div class="note-date">{{ note.created_at|date:"M j, Y g:i a" }}{% if note.created_by %} — {{ note.created_by.get_full_name|default:note.created_by.username }}{% endif %}</div>
             <div class="note-text">{{ note.content }}</div>
         </div>
         {% endfor %}
     </div>
     {% endif %}
+
+    <!-- Signature Lines -->
+    <div class="sig-section">
+        <div class="sig-grid">
+            <div class="sig-block">
+                <div class="sig-line"></div>
+                <div class="sig-label">Technician Signature &amp; Date</div>
+            </div>
+            <div class="sig-block">
+                <div class="sig-line"></div>
+                <div class="sig-label">Client Signature &amp; Date</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer (print only) -->
+    <div class="report-footer">
+        {{ site.company_name|default:"Murphy's Bench" }}
+        &nbsp;&bull;&nbsp;
+        {{ work_order.work_order_number }}
+        &nbsp;&bull;&nbsp;
+        {{ print_date|date:"M d, Y" }}
+    </div>
 
 </div>
 </body>
