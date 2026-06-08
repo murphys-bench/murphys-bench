@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.11 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (not cloud, not SaaS)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 8, 2026 (end of session 6)
+**Last Updated**: June 7, 2026 (end of session 7)
 
 ---
 
@@ -251,6 +251,11 @@ Also: `converted` (converted to Work Order — read-only after this point)
 ### ✅ Batch 7 — Custom Fields (EAV, scoped to HelpTopic/RepairType, all field types)
 ### ✅ Batch 8 — MFA (TOTP, enforcement toggle, backup tokens, admin reset, user management panel)
 ### ✅ Batch 9 — Mileage native form, service_type on WO, Google Maps auto-calculate
+
+### 🔲 Batch 10 — Legacy App Gap Closure (in progress)
+- **P1**: Repair Report (`/work-orders/<id>/print/`), Company Info in SiteSettings, Quick Labor / Work Performed
+- **P2**: Credentials on WO, Client Type (Residential/Business), Multiple phones per Contact, Contact notes + receives_email, Invoice Ninja Ref # on WO
+- **P3**: Native Settings UI (`/settings/`) replacing Django admin for common tasks
 
 ### Remaining Before Deployment
 - **Testing suite** (deferred — will write after real-world use surfaces actual edge cases)

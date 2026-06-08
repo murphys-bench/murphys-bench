@@ -41,16 +41,26 @@
 
 ## What's next:
 
-**Deployment** is the primary remaining task. The app is feature-complete for Phase 1.
+**Batch 10 — Legacy App Gap Closure** (identified in session 7 via full audit of legacy PHP app at 10.58.58.235).
 
-1. **Get on the internal network** (10.58.58.x)
-   - Copy repo to server, set up venv, apply migrations
-   - Switch to PostgreSQL (update DB_ENGINE in .env)
-   - Configure ALLOWED_HOSTS, HTTPS, static files
-   - Set up cron for `check_sla_overdue` and `fetch_inbound_email`
-   - Verify Google Maps mileage calculate works from the server
+### Priority 1 — Build first (repair report is the critical missing piece)
+1. **Company Info** — add to SiteSettings: `company_name`, `company_address`, `company_phone`, `company_email`, `company_logo` (ImageField). Needed for report header.
+2. **Quick Labor / Work Performed** — `QuickLaborItem` model (label, category, print_description, is_active) + `WorkPerformed` model (work_order FK, labor_item FK, logged_by, logged_at). Categorized HTMX buttons on WO detail → logs entry. Shows as grouped tags on WO detail. Appears on repair report.
+3. **Repair Report** (`/work-orders/<id>/print/`) — print-optimized page: logo + company header, client + device, problem/task + repair type tags, Work Performed, Resolution Summary, customer notes. `@media print` CSS. "Print Report" button on WO detail.
 
-2. **Testing suite** (deferred — write after real-world use surfaces actual edge cases)
+### Priority 2 — Data model changes (clean up before deployment)
+4. **Credentials on WO** — add `device_username`, `device_password`, `device_pin` to WorkOrder. Display on WO detail (password masked, click to reveal). Never on report.
+5. **Client Type** — add `client_type` (residential/business) to Client. Badge on list + detail. Residential/Business filter buttons on client list.
+6. **Multiple phones per Contact** — new `ContactPhone` model (contact FK, number, phone_type: cell/home/work/other). HTMX inline add/remove on client detail.
+7. **Contact enhancements** — add `notes` TextField and `receives_email` BooleanField (default True) to Contact.
+8. **Invoice Ninja Ref #** — add `invoice_ref` CharField (blank=True) to WorkOrder. Show on WO detail + client WO history table.
+
+### Priority 3 — Native Settings UI
+9. **`/settings/` panel** — side-nav with: Company Info, Email Settings, Repair Types, Canned Responses, Quick Labor, Checklist Items, Colors (status + site palette), Display Settings (localStorage). Admin-only. Link from nav.
+
+### After Batch 10
+- **Deployment** to internal network (10.58.58.x) — PostgreSQL, HTTPS, static files, cron
+- **Testing suite** (deferred — write after real-world use surfaces edge cases)
 
 ---
 

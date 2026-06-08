@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 8, 2026
+**Last Updated**: June 7, 2026 (session 7)
 **Current Phase**: Phase 1 — SCS Internal
 
 ---
@@ -266,6 +266,78 @@
 ---
 
 ### Remaining Phase 1 Items
+
+---
+
+#### Batch 10 — Legacy App Gap Closure (Pre-Deployment)
+
+*Identified by full audit of legacy PHP app (session 7). Prioritized by workflow impact.*
+
+##### 🔴 Priority 1 — Can't replace the legacy app without these
+
+- [ ] **Repair Report** (`/work-orders/<id>/print/`)
+  - Print-optimized page: logo + company info header, client & device, problem/task + repair type tags, Work Performed (Quick Labor items), Resolution Summary, customer-visible notes
+  - Pulls company info from SiteSettings (name, address, phone, email, logo)
+  - `@media print` CSS — no nav, no sidebar, clean layout
+  - "Print Report" button on WO detail toolbar
+
+- [ ] **Company Info in SiteSettings**
+  - Add fields: `company_name`, `company_address`, `company_phone`, `company_email`, `company_logo` (ImageField)
+  - Used in: Repair Report header, nav bar logo
+  - Native settings UI page (see Priority 3)
+
+- [ ] **Quick Labor / Work Performed**
+  - New model: `QuickLaborItem` — label, category, print_description, is_active, sort_order
+  - New model: `WorkPerformed` — work_order FK, labor_item FK, logged_by, logged_at
+  - WO detail: categorized one-click buttons → logs a WorkPerformed entry (HTMX)
+  - WO detail: "Work Performed" section shows logged items as category-grouped tags
+  - Repair Report: "Work Performed" section lists all logged items with print_description
+  - Admin: manage QuickLaborItems via native settings UI (Priority 3)
+
+##### 🟡 Priority 2 — Needed for smooth day-1 operation
+
+- [ ] **Credentials on Work Order**
+  - Add fields to WorkOrder: `device_username`, `device_password`, `device_pin`
+  - Displayed on WO detail (password masked, click to reveal)
+  - Never shown on Repair Report
+
+- [ ] **Client Type (Residential / Business)**
+  - Add `client_type` CharField to Client model (choices: residential/business, default: residential)
+  - Color-coded badge on client list and client detail header
+  - Filter buttons on client list (Residential / Business / Show Inactive)
+
+- [ ] **Multiple Phone Numbers per Contact**
+  - New model: `ContactPhone` — contact FK, number, phone_type (cell/home/work/other)
+  - Replace single `phone` field on Contact with M2M via ContactPhone
+  - Inline add/remove on client detail page (HTMX)
+  - `+ Add Number` button per contact card
+
+- [ ] **Contact enhancements**
+  - Add `notes` field to Contact model
+  - Add `receives_email` BooleanField (default True) — per-contact email suppression
+  - Display on contact card on client detail
+
+- [ ] **Invoice Ninja Ref # on Work Order**
+  - Add `invoice_ref` CharField (blank=True) to WorkOrder
+  - Display on WO detail and in client WO history table
+  - Editable in Update WO section on detail page
+
+##### 🟢 Priority 3 — Native Settings UI
+
+- [ ] **Native Settings Panel** (`/settings/`) — replaces Django admin for common tasks
+  - Side-nav with sections:
+    - **Company Info** — name, address, phone, email, logo upload, report header preview
+    - **Email Settings** — SMTP, Google Maps / shop address, Send Test Email button
+    - **Repair Types** — categorized inline edit/retire, add type, add/reorder categories
+    - **Canned Responses** — grouped by note stream + category, inline edit/retire
+    - **Quick Labor** — same pattern as Repair Types (inline edit, categories)
+    - **Checklist Items** — global item bank, device type scoping, inline edit/retire
+    - **Colors** — status badge colors (bg/text/border + preview), site palette
+    - **Display Settings** — per-browser: font size sliders, sidebar width, card density (localStorage only)
+  - Admin-only access (`_is_admin` guard)
+  - Link from nav bar "Admin" menu item
+
+---
 
 - [ ] **Testing suite**
   - Model tests (validation, relationships)
