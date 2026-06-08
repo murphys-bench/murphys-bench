@@ -25,6 +25,7 @@ urlpatterns = [
     path('work-orders/items/<int:pk>/toggle/', views.WorkOrderItemToggleView.as_view(), name='work_order_item_toggle'),
     path('clients/new/', views.ClientCreateView.as_view(), name='client_create'),
     path('clients/<int:pk>/edit/', views.ClientUpdateView.as_view(), name='client_edit'),
+    path('clients/<int:pk>/delete/', views.ClientDeleteView.as_view(), name='client_delete'),
     path('tickets/', views.TicketListView.as_view(), name='ticket_list'),
     path('tickets/new/', views.TicketCreateView.as_view(), name='ticket_create'),
     path('tickets/<int:pk>/', views.TicketDetailView.as_view(), name='ticket_detail'),

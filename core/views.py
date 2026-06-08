@@ -736,7 +736,29 @@ class ClientUpdateView(LoginRequiredMixin, UpdateView):
         context = super().get_context_data(**kwargs)
         context['title'] = f'Edit {self.object.name}'
         context['cancel_url'] = reverse_lazy('core:client_detail', kwargs={'pk': self.object.pk})
+        context['client'] = self.object
+        context['wo_count'] = self.object.work_orders.count()
         return context
+
+
+class ClientDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        client = get_object_or_404(Client, pk=pk)
+        wo_count = client.work_orders.count()
+        if wo_count > 0:
+            messages.error(
+                request,
+                f'Cannot delete {client.name} — this client has {wo_count} work order'
+                f'{"s" if wo_count != 1 else ""}. Deactivate the client instead.'
+            )
+            return redirect('core:client_edit', pk=pk)
+        confirm_name = request.POST.get('confirm_name', '').strip()
+        if confirm_name != client.name:
+            messages.error(request, 'Name did not match. Client was not deleted.')
+            return redirect('core:client_edit', pk=pk)
+        client.delete()
+        messages.success(request, f'{client.name} has been permanently deleted.')
+        return redirect('core:client_list')
 
 
 # --- Device Create / Edit ---
