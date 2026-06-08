@@ -9,7 +9,7 @@
             <h1 class="text-2xl font-bold text-gray-900">Mileage Log</h1>
             <p class="text-gray-500 text-sm mt-1">Total: <span class="font-semibold text-gray-900">{{ total_miles }} miles</span></p>
         </div>
-        <a href="/admin/core/mileage/add/"
+        <a href="{% url 'core:mileage_create' %}"
            class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">
             + Log Mileage
         </a>
@@ -55,6 +55,7 @@
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Miles</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Purpose</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Work Order</th>
+                        <th class="px-6 py-3"></th>
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-200">
@@ -87,6 +88,11 @@
                                     <span class="text-gray-400">—</span>
                                 {% endif %}
                             </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
+                                {% if entry.technician == request.user or request.user.is_staff %}
+                                    <a href="{% url 'core:mileage_edit' entry.pk %}" class="text-gray-400 hover:text-blue-600">Edit</a>
+                                {% endif %}
+                            </td>
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -95,7 +101,7 @@
                     <tr>
                         <td colspan="4" class="px-6 py-3 text-sm font-semibold text-gray-700 text-right">Total Miles:</td>
                         <td class="px-6 py-3 text-sm font-bold text-gray-900">{{ total_miles }}</td>
-                        <td colspan="2"></td>
+                        <td colspan="3"></td>
                     </tr>
                 </tfoot>
             </table>
@@ -120,7 +126,7 @@
         {% else %}
             <div class="px-6 py-16 text-center">
                 <p class="text-gray-400 text-lg mb-2">No mileage entries yet.</p>
-                <p class="text-gray-400 text-sm"><a href="/admin/core/mileage/add/" class="text-blue-600 hover:underline">Log your first trip</a>.</p>
+                <p class="text-gray-400 text-sm"><a href="{% url 'core:mileage_create' %}" class="text-blue-600 hover:underline">Log your first trip</a>.</p>
             </div>
         {% endif %}
     </div>

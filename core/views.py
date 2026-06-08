@@ -14,7 +14,7 @@ from .models import (
     KBCategory, KBArticle, TicketQueue, DashboardTile, User,
     CustomField, CustomFieldValue,
 )
-from .forms import WorkOrderForm, ClientForm, DeviceForm, TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm
+from .forms import WorkOrderForm, ClientForm, DeviceForm, TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm
 
 
 def _audit_entries(obj):
@@ -357,6 +357,42 @@ class DeviceDetailView(LoginRequiredMixin, DetailView):
         ).prefetch_related(
             'work_orders', 'work_orders__assigned_to'
         )
+
+
+class MileageCreateView(LoginRequiredMixin, View):
+    def get(self, request):
+        form = MileageForm(initial={'trip_date': timezone.now().date()})
+        return render(request, 'core/mileage_form.html', {'form': form})
+
+    def post(self, request):
+        form = MileageForm(request.POST)
+        if form.is_valid():
+            entry = form.save(commit=False)
+            entry.technician = request.user
+            entry.save()
+            return redirect('core:mileage_list')
+        return render(request, 'core/mileage_form.html', {'form': form})
+
+
+class MileageUpdateView(LoginRequiredMixin, View):
+    def get(self, request, pk):
+        entry = get_object_or_404(Mileage, pk=pk)
+        if not _is_admin(request.user) and entry.technician != request.user:
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        form = MileageForm(instance=entry)
+        return render(request, 'core/mileage_form.html', {'form': form, 'entry': entry})
+
+    def post(self, request, pk):
+        entry = get_object_or_404(Mileage, pk=pk)
+        if not _is_admin(request.user) and entry.technician != request.user:
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        form = MileageForm(request.POST, instance=entry)
+        if form.is_valid():
+            form.save()
+            return redirect('core:mileage_list')
+        return render(request, 'core/mileage_form.html', {'form': form, 'entry': entry})
 
 
 class MileageListView(LoginRequiredMixin, ListView):

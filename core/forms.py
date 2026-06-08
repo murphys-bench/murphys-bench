@@ -1,5 +1,5 @@
 from django import forms
-from .models import WorkOrder, Client, Contact, Device, Ticket, RepairType, HelpTopic, SLAPlan, KBCategory, KBArticle
+from .models import WorkOrder, Client, Contact, Device, Ticket, RepairType, HelpTopic, SLAPlan, KBCategory, KBArticle, Mileage
 
 
 class WorkOrderForm(forms.ModelForm):
@@ -213,3 +213,28 @@ class TicketQueueForm(forms.ModelForm):
                 label='Owner (leave blank for system queue)',
             )
             self.Meta.fields = ['name', 'owner', 'sort_field', 'sort_direction', 'is_active']
+
+
+class MileageForm(forms.ModelForm):
+    class Meta:
+        model = Mileage
+        fields = ['trip_date', 'miles', 'from_location', 'to_location', 'purpose', 'work_order', 'notes']
+        widgets = {
+            'trip_date': forms.DateInput(attrs={**TEXT_WIDGET, 'type': 'date'}),
+            'miles': forms.NumberInput(attrs={**TEXT_WIDGET, 'step': '0.1', 'min': '0'}),
+            'from_location': forms.TextInput(attrs=TEXT_WIDGET),
+            'to_location': forms.TextInput(attrs=TEXT_WIDGET),
+            'purpose': forms.TextInput(attrs=TEXT_WIDGET),
+            'work_order': forms.Select(attrs=SELECT_WIDGET),
+            'notes': forms.Textarea(attrs={**TEXTAREA_WIDGET, 'rows': 3}),
+        }
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['from_location'].required = False
+        self.fields['to_location'].required = False
+        self.fields['purpose'].required = False
+        self.fields['work_order'].required = False
+        self.fields['notes'].required = False
+        self.fields['work_order'].queryset = WorkOrder.objects.select_related('client').order_by('-created_at')
+        self.fields['work_order'].label_from_instance = lambda wo: f'{wo.work_order_number} — {wo.client.name}'

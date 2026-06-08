@@ -1,0 +1,79 @@
+{% extends "core/base.html" %}
+
+{% block title %}{% if entry %}Edit Mileage{% else %}Log Mileage{% endif %} — Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+    <h1 class="text-xl font-semibold text-gray-900">
+        {% if entry %}Edit Mileage Entry{% else %}Log Mileage{% endif %}
+    </h1>
+    <a href="{% url 'core:mileage_list' %}" class="text-sm text-gray-500 hover:text-gray-700">← Back to Mileage Log</a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="p-6 max-w-2xl">
+    <form method="post">
+        {% csrf_token %}
+        <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <div class="p-6 space-y-4">
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">
+                            Date <span class="text-red-500">*</span>
+                        </label>
+                        {{ form.trip_date }}
+                        {% for e in form.trip_date.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">
+                            Miles <span class="text-red-500">*</span>
+                        </label>
+                        {{ form.miles }}
+                        {% for e in form.miles.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">From</label>
+                        {{ form.from_location }}
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">To</label>
+                        {{ form.to_location }}
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Purpose</label>
+                    {{ form.purpose }}
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Work Order</label>
+                    {{ form.work_order }}
+                    <p class="mt-1 text-xs text-gray-500">Optional — link this trip to a work order.</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                    {{ form.notes }}
+                </div>
+
+            </div>
+            <div class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end gap-3">
+                <a href="{% url 'core:mileage_list' %}"
+                   class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+                    Cancel
+                </a>
+                <button type="submit"
+                        class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">
+                    {% if entry %}Save Changes{% else %}Log Mileage{% endif %}
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}
