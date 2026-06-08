@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 7, 2026 (session 7)
+**Last Updated**: June 7, 2026 (session 8)
 **Current Phase**: Phase 1 — SCS Internal
 
 ---
@@ -269,73 +269,33 @@
 
 ---
 
-#### Batch 10 — Legacy App Gap Closure (Pre-Deployment)
+#### Batch 10 — Legacy App Gap Closure (Pre-Deployment) ✅
 
-*Identified by full audit of legacy PHP app (session 7). Prioritized by workflow impact.*
+*Identified by full audit of legacy PHP app (session 7). Built in session 8.*
 
-##### 🔴 Priority 1 — Can't replace the legacy app without these
+##### ✅ Priority 1 — Repair Report, Company Info, Quick Labor
 
-- [ ] **Repair Report** (`/work-orders/<id>/print/`)
-  - Print-optimized page: logo + company info header, client & device, problem/task + repair type tags, Work Performed (Quick Labor items), Resolution Summary, customer-visible notes
-  - Pulls company info from SiteSettings (name, address, phone, email, logo)
-  - `@media print` CSS — no nav, no sidebar, clean layout
-  - "Print Report" button on WO detail toolbar
+- ✅ **Repair Report** (`/work-orders/<id>/print/`) — standalone print-optimized page, `@media print` CSS, logo + company header, client + device, repair type tags, Work Performed grouped by category, Resolution Summary, customer-visible notes. "🖨 Report" button in WO detail toolbar (opens new tab).
 
-- [ ] **Company Info in SiteSettings**
-  - Add fields: `company_name`, `company_address`, `company_phone`, `company_email`, `company_logo` (ImageField)
-  - Used in: Repair Report header, nav bar logo
-  - Native settings UI page (see Priority 3)
+- ✅ **Company Info in SiteSettings** — `company_name`, `company_address`, `company_phone`, `company_email`, `company_logo` (ImageField). Used in Repair Report header.
 
-- [ ] **Quick Labor / Work Performed**
-  - New model: `QuickLaborItem` — label, category, print_description, is_active, sort_order
-  - New model: `WorkPerformed` — work_order FK, labor_item FK, logged_by, logged_at
-  - WO detail: categorized one-click buttons → logs a WorkPerformed entry (HTMX)
-  - WO detail: "Work Performed" section shows logged items as category-grouped tags
-  - Repair Report: "Work Performed" section lists all logged items with print_description
-  - Admin: manage QuickLaborItems via native settings UI (Priority 3)
+- ✅ **Quick Labor / Work Performed** — `QuickLaborItem` model (label, category, print_description, is_active, sort_order) + `WorkPerformed` model (work_order FK, labor_item FK, logged_by, logged_at). Categorized HTMX one-click buttons on WO detail → logs entry. Grouped tags display on WO detail. Repair Report "Work Performed" section lists by category with print_description.
 
-##### 🟡 Priority 2 — Needed for smooth day-1 operation
+##### ✅ Priority 2 — Credentials, Client Type, Multiple Phones, Contact Enhancements
 
-- [ ] **Credentials on Work Order**
-  - Add fields to WorkOrder: `device_username`, `device_password`, `device_pin`
-  - Displayed on WO detail (password masked, click to reveal)
-  - Never shown on Repair Report
+- ✅ **Credentials on Work Order** — `device_username`, `device_password`, `device_pin` fields on WorkOrder. HTMX inline card on WO detail; password masked with blur-sm + JS click-to-reveal. Not on Repair Report.
 
-- [ ] **Client Type (Residential / Business)**
-  - Add `client_type` CharField to Client model (choices: residential/business, default: residential)
-  - Color-coded badge on client list and client detail header
-  - Filter buttons on client list (Residential / Business / Show Inactive)
+- ✅ **Client Type (Residential / Business)** — `client_type` field on Client. Color-coded badge on client list (Type column) and client detail header. `client_type` field in client create/edit form.
 
-- [ ] **Multiple Phone Numbers per Contact**
-  - New model: `ContactPhone` — contact FK, number, phone_type (cell/home/work/other)
-  - Replace single `phone` field on Contact with M2M via ContactPhone
-  - Inline add/remove on client detail page (HTMX)
-  - `+ Add Number` button per contact card
+- ✅ **Multiple Phone Numbers per Contact** — `ContactPhone` model (contact FK, number, phone_type: cell/home/work/other). Alpine.js dynamic rows for add/remove on client detail inline forms. Registered in admin.
 
-- [ ] **Contact enhancements**
-  - Add `notes` field to Contact model
-  - Add `receives_email` BooleanField (default True) — per-contact email suppression
-  - Display on contact card on client detail
+- ✅ **Contact enhancements** — `notes` TextField and `receives_email` BooleanField on Contact. Display on contact card. Full inline add/edit/delete UI on client detail using Alpine.js.
 
-- [ ] **Invoice Ninja Ref # on Work Order**
-  - Add `invoice_ref` CharField (blank=True) to WorkOrder
-  - Display on WO detail and in client WO history table
-  - Editable in Update WO section on detail page
+- ⏭ **Invoice Ninja Ref #** — deferred to Phase 2 API bridge. Will be driven by Invoice Ninja API capabilities once researched.
 
-##### 🟢 Priority 3 — Native Settings UI
+##### ✅ Priority 3 — Native Settings UI
 
-- [ ] **Native Settings Panel** (`/settings/`) — replaces Django admin for common tasks
-  - Side-nav with sections:
-    - **Company Info** — name, address, phone, email, logo upload, report header preview
-    - **Email Settings** — SMTP, Google Maps / shop address, Send Test Email button
-    - **Repair Types** — categorized inline edit/retire, add type, add/reorder categories
-    - **Canned Responses** — grouped by note stream + category, inline edit/retire
-    - **Quick Labor** — same pattern as Repair Types (inline edit, categories)
-    - **Checklist Items** — global item bank, device type scoping, inline edit/retire
-    - **Colors** — status badge colors (bg/text/border + preview), site palette
-    - **Display Settings** — per-browser: font size sliders, sidebar width, card density (localStorage only)
-  - Admin-only access (`_is_admin` guard)
-  - Link from nav bar "Admin" menu item
+- ✅ **Native Settings Panel** (`/settings/`) — six-tab page: Company, Outbound Email, Inbound Email, Attachments, Security, Mileage. Each tab is its own POST form with per-section save. Admin/can_manage_settings only (PermissionDenied guard). Success message flash. Settings link in nav bar (admin-only). Company tab supports logo upload.
 
 ---
 

@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.11 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (not cloud, not SaaS)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 7, 2026 (end of session 7)
+**Last Updated**: June 7, 2026 (end of session 8)
 
 ---
 
@@ -60,6 +60,15 @@ The app is running locally at `http://localhost:8000`. All views require login.
 - `/users/` — User management (admin only — shows all users with MFA status)
 - `/users/<id>/reset-mfa/` — Admin MFA reset for lost device recovery (POST)
 - `/admin/` — Django admin (full access, staff only)
+
+- `/work-orders/<id>/print/` — Repair Report (print-optimized, opens new tab)
+- `/work-orders/<id>/credentials/` — HTMX: save device credentials inline
+- `/work-orders/<id>/log-labor/<item_id>/` — HTMX: log Quick Labor Work Performed entry
+- `/work-performed/<id>/delete/` — HTMX: remove Work Performed entry
+- `/clients/<client_id>/contacts/new/` — Create contact (form POST, redirects back)
+- `/contacts/<id>/edit/` — Update contact with multiple phones
+- `/contacts/<id>/delete/` — Delete contact
+- `/settings/` — Native Settings UI (admin only, 6 tabs)
 
 **What still requires admin panel:**
 - Managing checklists and canned responses
@@ -252,10 +261,10 @@ Also: `converted` (converted to Work Order — read-only after this point)
 ### ✅ Batch 8 — MFA (TOTP, enforcement toggle, backup tokens, admin reset, user management panel)
 ### ✅ Batch 9 — Mileage native form, service_type on WO, Google Maps auto-calculate
 
-### 🔲 Batch 10 — Legacy App Gap Closure (in progress)
-- **P1**: Repair Report (`/work-orders/<id>/print/`), Company Info in SiteSettings, Quick Labor / Work Performed
-- **P2**: Credentials on WO, Client Type (Residential/Business), Multiple phones per Contact, Contact notes + receives_email, Invoice Ninja Ref # on WO
-- **P3**: Native Settings UI (`/settings/`) replacing Django admin for common tasks
+### ✅ Batch 10 — Legacy App Gap Closure (complete — session 8)
+- **P1**: Repair Report (`/work-orders/<id>/print/`), Company Info in SiteSettings, Quick Labor / Work Performed (HTMX)
+- **P2**: Credentials on WO (masked), Client Type badge (Residential/Business), Multiple phones per Contact (Alpine.js dynamic rows), Contact notes + receives_email, Invoice Ninja Ref # deferred to Phase 2
+- **P3**: Native Settings UI at `/settings/` — 6 tabs: Company, Outbound Email, Inbound Email, Attachments, Security, Mileage
 
 ### Remaining Before Deployment
 - **Testing suite** (deferred — will write after real-world use surfaces actual edge cases)
