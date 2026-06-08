@@ -5,6 +5,7 @@ from .models import (
     SiteSettings, Attachment, EmailTemplate, SuppressedAddress, EmailSendLog,
     Role, TechSkill, SLAPlan, HelpTopic, KBCategory, KBArticle,
     InboundEmailLog, TicketQueue, DashboardTile,
+    CustomField, CustomFieldChoice, CustomFieldValue,
 )
 
 
@@ -398,3 +399,34 @@ class DashboardTileAdmin(admin.ModelAdmin):
     list_filter = ['row', 'visible_to', 'is_active']
     list_editable = ['sort_order', 'is_active']
     ordering = ['row', 'sort_order']
+
+
+class CustomFieldChoiceInline(admin.TabularInline):
+    model = CustomFieldChoice
+    extra = 3
+    fields = ['label', 'sort_order']
+    ordering = ['sort_order']
+
+
+@admin.register(CustomField)
+class CustomFieldAdmin(admin.ModelAdmin):
+    list_display = ['label', 'field_type', 'applies_to', 'scoped_to_help_topic', 'scoped_to_repair_type', 'is_required', 'sort_order', 'is_active']
+    list_filter = ['applies_to', 'field_type', 'is_required', 'is_active']
+    list_editable = ['sort_order', 'is_active']
+    search_fields = ['label']
+    inlines = [CustomFieldChoiceInline]
+    fieldsets = (
+        (None, {'fields': ('label', 'field_type', 'applies_to', 'is_required', 'help_text', 'sort_order', 'is_active')}),
+        ('Scope (optional)', {
+            'description': 'Leave blank to apply to all items of the selected type.',
+            'fields': ('scoped_to_help_topic', 'scoped_to_repair_type'),
+        }),
+    )
+
+
+@admin.register(CustomFieldValue)
+class CustomFieldValueAdmin(admin.ModelAdmin):
+    list_display = ['field', 'content_type', 'object_id', 'value']
+    list_filter = ['field', 'content_type']
+    search_fields = ['value']
+    readonly_fields = ['content_type', 'object_id', 'field']

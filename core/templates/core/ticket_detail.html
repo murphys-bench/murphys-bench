@@ -236,6 +236,29 @@ window.addEventListener('beforeunload', function() {
             </dl>
         </div>
 
+        {% if custom_field_values %}
+        <!-- Custom Fields -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-base font-semibold text-gray-900 mb-3">Additional Information</h2>
+            <dl class="grid grid-cols-1 gap-3">
+                {% for entry in custom_field_values %}
+                <div>
+                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">{{ entry.field.label }}</dt>
+                    <dd class="text-sm text-gray-900 mt-1">
+                        {% if entry.field.field_type == 'checkbox' %}
+                            {% if entry.value == '1' %}Yes{% else %}No{% endif %}
+                        {% elif entry.value %}
+                            {{ entry.value }}
+                        {% else %}
+                            <span class="text-gray-400">—</span>
+                        {% endif %}
+                    </dd>
+                </div>
+                {% endfor %}
+            </dl>
+        </div>
+        {% endif %}
+
         <!-- Linked Work Order (if converted) -->
         {% if ticket.status == 'converted' %}
         <div class="bg-purple-50 border border-purple-200 rounded-lg shadow p-6">
