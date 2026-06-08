@@ -719,18 +719,29 @@ class DeviceCreateView(LoginRequiredMixin, CreateView):
     form_class = DeviceForm
     template_name = 'core/device_form.html'
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        client_id = self.request.GET.get('client') or self.request.POST.get('client')
+        if client_id:
+            kwargs['client_id'] = client_id
+        return kwargs
+
     def get_initial(self):
         initial = super().get_initial()
         if self.request.GET.get('client'):
             initial['client'] = self.request.GET['client']
         return initial
 
-    def get_success_url(self):
-        # If launched from a client page, go back there after saving
+    def form_valid(self, form):
+        self.object = form.save()
+        if self.request.POST.get('save_and_create_wo'):
+            return redirect(
+                reverse_lazy('core:workorder_create') + f'?device={self.object.pk}'
+            )
         next_url = self.request.POST.get('next') or self.request.GET.get('next')
         if next_url:
-            return next_url
-        return reverse_lazy('core:device_detail', kwargs={'pk': self.object.pk})
+            return redirect(next_url)
+        return redirect(reverse_lazy('core:device_detail', kwargs={'pk': self.object.pk}))
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -746,8 +757,18 @@ class DeviceUpdateView(LoginRequiredMixin, UpdateView):
     form_class = DeviceForm
     template_name = 'core/device_form.html'
 
-    def get_success_url(self):
-        return reverse_lazy('core:device_detail', kwargs={'pk': self.object.pk})
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['client_id'] = self.object.client_id
+        return kwargs
+
+    def form_valid(self, form):
+        self.object = form.save()
+        if self.request.POST.get('save_and_create_wo'):
+            return redirect(
+                reverse_lazy('core:workorder_create') + f'?device={self.object.pk}'
+            )
+        return redirect(reverse_lazy('core:device_detail', kwargs={'pk': self.object.pk}))
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
