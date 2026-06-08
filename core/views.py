@@ -2,6 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.views import View
 from django.views.generic import ListView, DetailView, CreateView, UpdateView
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
 from django.urls import reverse_lazy
 from django.db.models import Q, F as models_F
@@ -13,9 +14,12 @@ from .models import (
     Ticket, TicketReply, TicketLock, TicketLink, Attachment, SiteSettings,
     KBCategory, KBArticle, TicketQueue, DashboardTile, User,
     CustomField, CustomFieldValue,
-    QuickLaborItem, WorkPerformed,
+    QuickLaborItem, WorkPerformed, ContactPhone,
 )
-from .forms import WorkOrderForm, ClientForm, DeviceForm, TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm
+from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm,
+                    TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
+                    CompanySettingsForm, OutboundEmailSettingsForm, InboundEmailSettingsForm,
+                    AttachmentSettingsForm, SecuritySettingsForm, MileageSettingsForm)
 
 
 def _audit_entries(obj):
@@ -1751,4 +1755,137 @@ class WorkOrderPrintView(LoginRequiredMixin, View):
             'notes': notes,
             'wp_categories': categories,
             'repair_types': repair_types,
+        })
+
+
+# ---------------------------------------------------------------------------
+# Contact management (HTMX inline on client detail)
+# ---------------------------------------------------------------------------
+
+class ContactCreateView(LoginRequiredMixin, View):
+    def post(self, request, client_pk):
+        client = get_object_or_404(Client, pk=client_pk)
+        form = ContactForm(request.POST)
+        if form.is_valid():
+            contact = form.save(commit=False)
+            contact.client = client
+            contact.save()
+            # Handle extra phone numbers
+            _save_contact_phones(request, contact)
+        return redirect('core:client_detail', pk=client_pk)
+
+
+class ContactUpdateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        contact = get_object_or_404(Contact, pk=pk)
+        form = ContactForm(request.POST, instance=contact)
+        if form.is_valid():
+            form.save()
+            _save_contact_phones(request, contact)
+        return redirect('core:client_detail', pk=contact.client_id)
+
+
+class ContactDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        contact = get_object_or_404(Contact, pk=pk)
+        client_pk = contact.client_id
+        contact.delete()
+        return redirect('core:client_detail', pk=client_pk)
+
+
+def _save_contact_phones(request, contact):
+    """Save phone numbers POSTed as phone_number_X / phone_type_X arrays."""
+    # Delete existing and re-save from POST
+    contact.phone_numbers.all().delete()
+    numbers = request.POST.getlist('phone_number')
+    types = request.POST.getlist('phone_type')
+    for number, phone_type in zip(numbers, types):
+        number = number.strip()
+        if number:
+            ContactPhone.objects.create(
+                contact=contact,
+                number=number,
+                phone_type=phone_type or 'cell',
+            )
+
+
+# ---------------------------------------------------------------------------
+# Credentials (HTMX on WO detail)
+# ---------------------------------------------------------------------------
+
+class WorkOrderCredentialsSaveView(LoginRequiredMixin, View):
+    """Save device credentials inline on WO detail."""
+
+    def post(self, request, pk):
+        wo = get_object_or_404(WorkOrder, pk=pk)
+        wo.device_username = request.POST.get('device_username', '').strip()
+        wo.device_password = request.POST.get('device_password', '').strip()
+        wo.device_pin = request.POST.get('device_pin', '').strip()
+        wo.save(update_fields=['device_username', 'device_password', 'device_pin'])
+        return render(request, 'core/partials/credentials_display.html', {'work_order': wo})
+
+
+# ---------------------------------------------------------------------------
+# Native Settings UI (/settings/)
+# ---------------------------------------------------------------------------
+
+SETTINGS_TABS = [
+    ('company',  'Company',        CompanySettingsForm),
+    ('outbound', 'Outbound Email', OutboundEmailSettingsForm),
+    ('inbound',  'Inbound Email',  InboundEmailSettingsForm),
+    ('attachments', 'Attachments', AttachmentSettingsForm),
+    ('security', 'Security',       SecuritySettingsForm),
+    ('mileage',  'Mileage',        MileageSettingsForm),
+]
+
+
+class SettingsView(LoginRequiredMixin, View):
+    """Native settings UI — admin/can_manage_settings only."""
+
+    def _check_permission(self, request):
+        if not (request.user.is_staff or (
+            hasattr(request.user, 'role_obj') and request.user.role_obj and
+            request.user.role_obj.can_manage_settings
+        )):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+
+    def get(self, request):
+        self._check_permission(request)
+        settings = SiteSettings.get()
+        active_tab = request.GET.get('tab', 'company')
+        forms_map = {key: FormClass(instance=settings, prefix=key) for key, _, FormClass in SETTINGS_TABS}
+        return render(request, 'core/settings.html', {
+            'settings': settings,
+            'active_tab': active_tab,
+            'tabs': [(key, label) for key, label, _ in SETTINGS_TABS],
+            'forms': forms_map,
+        })
+
+    def post(self, request):
+        self._check_permission(request)
+        settings = SiteSettings.get()
+        tab = request.POST.get('tab', 'company')
+        FormClass = next((fc for key, _, fc in SETTINGS_TABS if key == tab), None)
+        if FormClass is None:
+            return redirect('core:settings')
+
+        form = FormClass(request.POST, request.FILES, instance=settings, prefix=tab)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Settings saved.')
+            return redirect(f"{request.path}?tab={tab}")
+
+        # Re-render with errors
+        forms_map = {}
+        for key, _, FC in SETTINGS_TABS:
+            if key == tab:
+                forms_map[key] = form
+            else:
+                forms_map[key] = FC(instance=settings, prefix=key)
+        return render(request, 'core/settings.html', {
+            'settings': settings,
+            'active_tab': tab,
+            'tabs': [(key, label) for key, label, _ in SETTINGS_TABS],
+            'forms': forms_map,
         })
