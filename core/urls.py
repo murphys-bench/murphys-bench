@@ -66,7 +66,9 @@ urlpatterns = [
 
     # Quick Labor / Work Performed (HTMX)
     path('work-orders/<int:wo_pk>/log-labor/<int:item_pk>/', views.WorkPerformedLogView.as_view(), name='work_performed_log'),
+    path('work-orders/<int:wo_pk>/log-custom/', views.WorkPerformedCustomLogView.as_view(), name='work_performed_custom'),
     path('work-performed/<int:pk>/delete/', views.WorkPerformedDeleteView.as_view(), name='work_performed_delete'),
+    path('work-performed/<int:pk>/update/', views.WorkPerformedUpdateView.as_view(), name='work_performed_update'),
 
     # Repair Report (print view)
     path('work-orders/<int:pk>/print/', views.WorkOrderPrintView.as_view(), name='work_order_print'),

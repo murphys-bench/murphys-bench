@@ -275,18 +275,7 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         for item in labor_items:
             labor_by_category.setdefault(item.category, []).append(item)
         context['labor_by_category'] = labor_by_category
-        # Work Performed entries grouped by category
-        wp_entries = (
-            WorkPerformed.objects
-            .filter(work_order=self.object)
-            .select_related('labor_item')
-            .order_by('labor_item__category', 'labor_item__label')
-        )
-        wp_categories = {}
-        for entry in wp_entries:
-            cat = entry.labor_item.category
-            wp_categories.setdefault(cat, []).append(entry)
-        context['wp_categories'] = wp_categories
+        context['wp_entries'] = _wp_entries_for(self.object)
         # Inline update form data
         context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
         context['all_repair_types'] = RepairType.objects.filter(is_active=True).order_by('name')
@@ -1832,6 +1821,15 @@ class AdminMFAResetView(LoginRequiredMixin, View):
 # Quick Labor / Work Performed
 # ---------------------------------------------------------------------------
 
+def _wp_entries_for(work_order):
+    return (
+        WorkPerformed.objects
+        .filter(work_order=work_order)
+        .select_related('labor_item', 'logged_by')
+        .order_by('logged_at')
+    )
+
+
 class WorkPerformedLogView(LoginRequiredMixin, View):
     """HTMX: log a QuickLaborItem against a WorkOrder."""
 
@@ -1843,20 +1841,9 @@ class WorkPerformedLogView(LoginRequiredMixin, View):
             labor_item=item,
             logged_by=request.user,
         )
-        # Return updated work-performed partial
-        entries = (
-            WorkPerformed.objects
-            .filter(work_order=work_order)
-            .select_related('labor_item', 'logged_by')
-            .order_by('labor_item__category', 'labor_item__label')
-        )
-        categories = {}
-        for entry in entries:
-            cat = entry.labor_item.category
-            categories.setdefault(cat, []).append(entry)
         return render(request, 'core/partials/work_performed.html', {
             'work_order': work_order,
-            'categories': categories,
+            'entries': _wp_entries_for(work_order),
         })
 
 
@@ -1867,19 +1854,44 @@ class WorkPerformedDeleteView(LoginRequiredMixin, View):
         entry = get_object_or_404(WorkPerformed, pk=pk)
         work_order = entry.work_order
         entry.delete()
-        entries = (
-            WorkPerformed.objects
-            .filter(work_order=work_order)
-            .select_related('labor_item', 'logged_by')
-            .order_by('labor_item__category', 'labor_item__label')
-        )
-        categories = {}
-        for entry in entries:
-            cat = entry.labor_item.category
-            categories.setdefault(cat, []).append(entry)
         return render(request, 'core/partials/work_performed.html', {
             'work_order': work_order,
-            'categories': categories,
+            'entries': _wp_entries_for(work_order),
+        })
+
+
+class WorkPerformedUpdateView(LoginRequiredMixin, View):
+    """HTMX: update label and notes on a logged WorkPerformed entry."""
+
+    def post(self, request, pk):
+        entry = get_object_or_404(WorkPerformed, pk=pk)
+        entry.custom_label = request.POST.get('custom_label', '').strip()
+        entry.notes = request.POST.get('notes', '').strip()
+        entry.save()
+        return render(request, 'core/partials/work_performed.html', {
+            'work_order': entry.work_order,
+            'entries': _wp_entries_for(entry.work_order),
+        })
+
+
+class WorkPerformedCustomLogView(LoginRequiredMixin, View):
+    """HTMX: log a fully custom (free-text) work entry."""
+
+    def post(self, request, wo_pk):
+        work_order = get_object_or_404(WorkOrder, pk=wo_pk)
+        label = request.POST.get('custom_label', '').strip()
+        notes = request.POST.get('notes', '').strip()
+        if label:
+            WorkPerformed.objects.create(
+                work_order=work_order,
+                labor_item=None,
+                custom_label=label,
+                notes=notes,
+                logged_by=request.user,
+            )
+        return render(request, 'core/partials/work_performed.html', {
+            'work_order': work_order,
+            'entries': _wp_entries_for(work_order),
         })
 
 
