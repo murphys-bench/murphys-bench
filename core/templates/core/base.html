@@ -39,6 +39,7 @@
                     {% if user.is_authenticated %}
                         <span class="text-sm text-gray-400">{{ user.get_full_name|default:user.username }}</span>
                         <a href="{% url 'two_factor:profile' %}" class="text-sm text-gray-400 hover:text-white">Security</a>
+                        {% if user.is_staff %}<a href="{% url 'core:settings' %}" class="text-sm text-gray-400 hover:text-white">Settings</a>{% endif %}
                         {% if user.is_staff %}<a href="/admin/" class="text-sm text-gray-400 hover:text-white">Admin</a>{% endif %}
                         <a href="{% url 'accounts:logout' %}" class="text-sm text-gray-400 hover:text-white">Log Out</a>
                     {% endif %}

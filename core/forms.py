@@ -1,5 +1,5 @@
 from django import forms
-from .models import WorkOrder, Client, Contact, Device, Ticket, RepairType, HelpTopic, SLAPlan, KBCategory, KBArticle, Mileage
+from .models import WorkOrder, Client, Contact, ContactPhone, Device, Ticket, RepairType, HelpTopic, SLAPlan, KBCategory, KBArticle, Mileage, SiteSettings
 
 
 class WorkOrderForm(forms.ModelForm):
@@ -49,7 +49,7 @@ class ClientForm(forms.ModelForm):
     class Meta:
         model = Client
         fields = [
-            'name', 'email', 'phone',
+            'name', 'client_type', 'email', 'phone',
             'address_street', 'address_city', 'address_state', 'address_zip',
             'notes', 'is_active',
         ]
@@ -62,6 +62,7 @@ class ClientForm(forms.ModelForm):
             'address_state': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'maxlength': '2', 'placeholder': 'OR'}),
             'address_zip': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'notes': forms.Textarea(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'rows': 3}),
+            'client_type': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'is_active': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
         }
 
@@ -240,3 +241,139 @@ class MileageForm(forms.ModelForm):
         self.fields['notes'].required = False
         self.fields['work_order'].queryset = WorkOrder.objects.select_related('client').order_by('-created_at')
         self.fields['work_order'].label_from_instance = lambda wo: f'{wo.work_order_number} — {wo.client.name}'
+
+
+_INPUT = 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'
+_TEXTAREA = _INPUT
+_CHECK = 'h-4 w-4 text-blue-600 border-gray-300 rounded'
+
+
+class ContactForm(forms.ModelForm):
+    class Meta:
+        model = Contact
+        fields = ['first_name', 'last_name', 'email', 'phone', 'title', 'is_primary', 'receives_email', 'notes']
+        widgets = {
+            'first_name': forms.TextInput(attrs={'class': _INPUT}),
+            'last_name': forms.TextInput(attrs={'class': _INPUT}),
+            'email': forms.EmailInput(attrs={'class': _INPUT}),
+            'phone': forms.TextInput(attrs={'class': _INPUT}),
+            'title': forms.TextInput(attrs={'class': _INPUT}),
+            'is_primary': forms.CheckboxInput(attrs={'class': _CHECK}),
+            'receives_email': forms.CheckboxInput(attrs={'class': _CHECK}),
+            'notes': forms.Textarea(attrs={'class': _TEXTAREA, 'rows': 2}),
+        }
+
+
+class ContactPhoneForm(forms.ModelForm):
+    class Meta:
+        model = ContactPhone
+        fields = ['number', 'phone_type']
+        widgets = {
+            'number': forms.TextInput(attrs={'class': _INPUT, 'placeholder': '503-555-1234'}),
+            'phone_type': forms.Select(attrs={'class': 'px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Site Settings — per-tab forms
+# ---------------------------------------------------------------------------
+
+_SS_INPUT = 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm'
+_SS_CHECK = 'h-4 w-4 text-blue-600 border-gray-300 rounded'
+_SS_SELECT = 'px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm'
+
+
+class CompanySettingsForm(forms.ModelForm):
+    class Meta:
+        model = SiteSettings
+        fields = ['company_name', 'company_address', 'company_phone', 'company_email', 'company_logo']
+        widgets = {
+            'company_name': forms.TextInput(attrs={'class': _SS_INPUT}),
+            'company_address': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': '235 Coolidge St., Silverton, OR 97381'}),
+            'company_phone': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': '503-555-0100'}),
+            'company_email': forms.EmailInput(attrs={'class': _SS_INPUT}),
+        }
+
+
+class OutboundEmailSettingsForm(forms.ModelForm):
+    class Meta:
+        model = SiteSettings
+        fields = [
+            'email_enabled', 'email_host', 'email_port', 'email_use_tls',
+            'email_username', 'email_password', 'email_from',
+            'email_suppression_patterns',
+        ]
+        widgets = {
+            'email_enabled': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
+            'email_host': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'mail.yourdomain.com'}),
+            'email_port': forms.NumberInput(attrs={'class': _SS_INPUT}),
+            'email_use_tls': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
+            'email_username': forms.TextInput(attrs={'class': _SS_INPUT}),
+            'email_password': forms.PasswordInput(attrs={'class': _SS_INPUT}, render_value=True),
+            'email_from': forms.EmailInput(attrs={'class': _SS_INPUT, 'placeholder': 'support@yourdomain.com'}),
+            'email_suppression_patterns': forms.Textarea(attrs={'class': _SS_INPUT, 'rows': 5}),
+        }
+
+
+class InboundEmailSettingsForm(forms.ModelForm):
+    class Meta:
+        model = SiteSettings
+        fields = [
+            'inbound_email_enabled', 'inbound_protocol', 'inbound_host', 'inbound_port',
+            'inbound_ssl', 'inbound_username', 'inbound_password', 'inbound_folder',
+            'inbound_delete_after_fetch', 'strip_quoted_replies',
+            'inbound_default_client_name',
+        ]
+        widgets = {
+            'inbound_email_enabled': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
+            'inbound_protocol': forms.Select(attrs={'class': _SS_SELECT}),
+            'inbound_host': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'mail.yourdomain.com'}),
+            'inbound_port': forms.NumberInput(attrs={'class': _SS_INPUT}),
+            'inbound_ssl': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
+            'inbound_username': forms.TextInput(attrs={'class': _SS_INPUT}),
+            'inbound_password': forms.PasswordInput(attrs={'class': _SS_INPUT}, render_value=True),
+            'inbound_folder': forms.TextInput(attrs={'class': _SS_INPUT}),
+            'inbound_delete_after_fetch': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
+            'strip_quoted_replies': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
+            'inbound_default_client_name': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'Walk-in / Unknown'}),
+        }
+
+
+class AttachmentSettingsForm(forms.ModelForm):
+    class Meta:
+        model = SiteSettings
+        fields = [
+            'max_attachment_size_mb', 'blocked_extensions', 'storage_backend',
+            'local_storage_path', 's3_bucket_name', 's3_access_key', 's3_secret_key',
+            's3_endpoint_url', 's3_region',
+        ]
+        widgets = {
+            'max_attachment_size_mb': forms.NumberInput(attrs={'class': _SS_INPUT}),
+            'blocked_extensions': forms.TextInput(attrs={'class': _SS_INPUT}),
+            'storage_backend': forms.Select(attrs={'class': _SS_SELECT}),
+            'local_storage_path': forms.TextInput(attrs={'class': _SS_INPUT}),
+            's3_bucket_name': forms.TextInput(attrs={'class': _SS_INPUT}),
+            's3_access_key': forms.TextInput(attrs={'class': _SS_INPUT}),
+            's3_secret_key': forms.PasswordInput(attrs={'class': _SS_INPUT}, render_value=True),
+            's3_endpoint_url': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'https://s3.us-west-001.backblazeb2.com'}),
+            's3_region': forms.TextInput(attrs={'class': _SS_INPUT}),
+        }
+
+
+class SecuritySettingsForm(forms.ModelForm):
+    class Meta:
+        model = SiteSettings
+        fields = ['require_mfa']
+        widgets = {
+            'require_mfa': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
+        }
+
+
+class MileageSettingsForm(forms.ModelForm):
+    class Meta:
+        model = SiteSettings
+        fields = ['google_maps_api_key', 'shop_address']
+        widgets = {
+            'google_maps_api_key': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'AIza...'}),
+            'shop_address': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': '235 Coolidge St. Silverton Oregon 97381'}),
+        }
