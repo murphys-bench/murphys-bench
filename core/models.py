@@ -640,6 +640,9 @@ class WorkOrderItem(models.Model):
     unit = models.CharField(max_length=20, blank=True, help_text="e.g., 'hours', 'each', 'qty'")
     unit_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(0)])
     is_completed = models.BooleanField(default=False, db_index=True)
+    CHECK_CHOICES = [('', '—'), ('pass', 'Pass'), ('fail', 'Fail'), ('na', 'N/A')]
+    pre_check = models.CharField(max_length=10, choices=CHECK_CHOICES, blank=True, default='')
+    post_check = models.CharField(max_length=10, choices=CHECK_CHOICES, blank=True, default='')
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

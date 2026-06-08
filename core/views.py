@@ -281,6 +281,9 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         context['all_repair_types'] = RepairType.objects.filter(is_active=True).order_by('name')
         context['client_contacts'] = Contact.objects.filter(client=wo.client).order_by('last_name', 'first_name')
         context['client_devices'] = Device.objects.filter(client=wo.client).order_by('name')
+        checklist_items = list(self.object.items.filter(item_type='checklist').order_by('created_at'))
+        context['checklist_items'] = checklist_items
+        context['checklist_checked_count'] = sum(1 for i in checklist_items if i.pre_check or i.post_check)
         return context
 
 
@@ -643,14 +646,26 @@ class WorkOrderNoteCreateView(LoginRequiredMixin, View):
 
 # --- Work Order Item Toggle (HTMX) ---
 
-class WorkOrderItemToggleView(LoginRequiredMixin, View):
-    """Toggle a checklist item complete/incomplete — returns updated <li> fragment"""
+class WorkOrderItemCheckView(LoginRequiredMixin, View):
+    """HTMX: update pre_check or post_check on a checklist item, return full checklist."""
 
     def post(self, request, pk):
         item = get_object_or_404(WorkOrderItem, pk=pk)
-        item.is_completed = not item.is_completed
-        item.save()
-        return render(request, 'core/partials/checklist_item.html', {'item': item})
+        field = request.POST.get('field')
+        value = request.POST.get('value', '')
+        if field in ('pre_check', 'post_check'):
+            setattr(item, field, value)
+            # Mark completed when post_check is set to pass or fail
+            if field == 'post_check':
+                item.is_completed = value in ('pass', 'fail', 'na')
+            item.save()
+        items = item.work_order.items.filter(item_type='checklist').order_by('created_at')
+        checked = sum(1 for i in items if i.pre_check or i.post_check)
+        return render(request, 'core/partials/checklist_list.html', {
+            'items': items,
+            'checked_count': checked,
+            'work_order': item.work_order,
+        })
 
 
 def _apply_checklist_items(work_order):
