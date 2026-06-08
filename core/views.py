@@ -5,7 +5,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
 from django.urls import reverse_lazy
-from django.db.models import Q, F as models_F
+from django.db.models import Q, F as models_F, Max as models_Max
 from django.contrib.contenttypes.models import ContentType
 from django.http import FileResponse, Http404
 from django.utils import timezone
@@ -1949,13 +1949,27 @@ class WorkOrderCredentialsSaveView(LoginRequiredMixin, View):
 # ---------------------------------------------------------------------------
 
 SETTINGS_TABS = [
-    ('company',  'Company',        CompanySettingsForm),
-    ('outbound', 'Outbound Email', OutboundEmailSettingsForm),
-    ('inbound',  'Inbound Email',  InboundEmailSettingsForm),
-    ('attachments', 'Attachments', AttachmentSettingsForm),
-    ('security', 'Security',       SecuritySettingsForm),
-    ('mileage',  'Mileage',        MileageSettingsForm),
+    ('company',      'Company',        CompanySettingsForm),
+    ('outbound',     'Outbound Email', OutboundEmailSettingsForm),
+    ('inbound',      'Inbound Email',  InboundEmailSettingsForm),
+    ('attachments',  'Attachments',    AttachmentSettingsForm),
+    ('security',     'Security',       SecuritySettingsForm),
+    ('mileage',      'Mileage',        MileageSettingsForm),
+    ('repair_types', 'Repair Types',   None),
 ]
+
+SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS]
+
+
+def _repair_types_context():
+    from .models import RepairTypeCategory
+    categories = RepairTypeCategory.objects.prefetch_related(
+        'repair_types'
+    ).order_by('sort_order', 'name')
+    uncategorised = RepairType.objects.filter(
+        category__isnull=True, is_active=True
+    ).order_by('sort_order', 'name')
+    return {'rt_categories': categories, 'rt_uncategorised': uncategorised}
 
 
 class SettingsView(LoginRequiredMixin, View):
@@ -1971,40 +1985,129 @@ class SettingsView(LoginRequiredMixin, View):
 
     def get(self, request):
         self._check_permission(request)
-        settings = SiteSettings.get()
+        site = SiteSettings.get()
         active_tab = request.GET.get('tab', 'company')
-        forms_map = {key: FormClass(instance=settings, prefix=key) for key, _, FormClass in SETTINGS_TABS}
-        return render(request, 'core/settings.html', {
-            'settings': settings,
+        forms_map = {
+            key: FormClass(instance=site, prefix=key)
+            for key, _, FormClass in SETTINGS_TABS if FormClass
+        }
+        ctx = {
+            'settings': site,
             'active_tab': active_tab,
-            'tabs': [(key, label) for key, label, _ in SETTINGS_TABS],
+            'tabs': SETTINGS_NAV_TABS,
             'forms': forms_map,
-        })
+        }
+        if active_tab == 'repair_types':
+            ctx.update(_repair_types_context())
+        return render(request, 'core/settings.html', ctx)
 
     def post(self, request):
         self._check_permission(request)
-        settings = SiteSettings.get()
+        site = SiteSettings.get()
         tab = request.POST.get('tab', 'company')
         FormClass = next((fc for key, _, fc in SETTINGS_TABS if key == tab), None)
         if FormClass is None:
-            return redirect('core:settings')
+            return redirect(f"{request.path}?tab={tab}")
 
-        form = FormClass(request.POST, request.FILES, instance=settings, prefix=tab)
+        form = FormClass(request.POST, request.FILES, instance=site, prefix=tab)
         if form.is_valid():
             form.save()
             messages.success(request, 'Settings saved.')
             return redirect(f"{request.path}?tab={tab}")
 
-        # Re-render with errors
         forms_map = {}
         for key, _, FC in SETTINGS_TABS:
-            if key == tab:
-                forms_map[key] = form
-            else:
-                forms_map[key] = FC(instance=settings, prefix=key)
-        return render(request, 'core/settings.html', {
-            'settings': settings,
+            if not FC:
+                continue
+            forms_map[key] = form if key == tab else FC(instance=site, prefix=key)
+        ctx = {
+            'settings': site,
             'active_tab': tab,
-            'tabs': [(key, label) for key, label, _ in SETTINGS_TABS],
+            'tabs': SETTINGS_NAV_TABS,
             'forms': forms_map,
-        })
+        }
+        if tab == 'repair_types':
+            ctx.update(_repair_types_context())
+        return render(request, 'core/settings.html', ctx)
+
+# ---------------------------------------------------------------------------
+# Settings — Repair Types CRUD
+# ---------------------------------------------------------------------------
+
+REPAIR_TYPES_REDIRECT = 'core:settings'
+REPAIR_TYPES_TAB = '?tab=repair_types'
+
+
+class RepairTypeCategoryCreateView(LoginRequiredMixin, View):
+    def post(self, request):
+        name = request.POST.get('name', '').strip()
+        if name:
+            from .models import RepairTypeCategory
+            max_order = RepairTypeCategory.objects.aggregate(
+                m=models_Max('sort_order')
+            )['m'] or 0
+            RepairTypeCategory.objects.get_or_create(
+                name=name, defaults={'sort_order': max_order + 10}
+            )
+        return redirect(reverse_lazy(REPAIR_TYPES_REDIRECT) + REPAIR_TYPES_TAB)
+
+
+class RepairTypeCategoryDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        from .models import RepairTypeCategory
+        cat = get_object_or_404(RepairTypeCategory, pk=pk)
+        RepairType.objects.filter(category=cat).update(category=None)
+        cat.delete()
+        return redirect(reverse_lazy(REPAIR_TYPES_REDIRECT) + REPAIR_TYPES_TAB)
+
+
+class RepairTypeCategoryReorderView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        from .models import RepairTypeCategory
+        direction = request.POST.get('direction')
+        cat = get_object_or_404(RepairTypeCategory, pk=pk)
+        cats = list(RepairTypeCategory.objects.order_by('sort_order', 'name'))
+        idx = next((i for i, c in enumerate(cats) if c.pk == cat.pk), None)
+        if idx is None:
+            return redirect(reverse_lazy(REPAIR_TYPES_REDIRECT) + REPAIR_TYPES_TAB)
+        swap = idx - 1 if direction == 'up' else idx + 1
+        if 0 <= swap < len(cats):
+            cats[idx].sort_order, cats[swap].sort_order = cats[swap].sort_order, cats[idx].sort_order
+            if cats[idx].sort_order == cats[swap].sort_order:
+                cats[idx].sort_order = swap * 10
+                cats[swap].sort_order = idx * 10
+            cats[idx].save(update_fields=['sort_order'])
+            cats[swap].save(update_fields=['sort_order'])
+        return redirect(reverse_lazy(REPAIR_TYPES_REDIRECT) + REPAIR_TYPES_TAB)
+
+
+class RepairTypeCreateView(LoginRequiredMixin, View):
+    def post(self, request):
+        from .models import RepairTypeCategory
+        name = request.POST.get('name', '').strip()
+        cat_id = request.POST.get('category_id') or None
+        if name:
+            cat = RepairTypeCategory.objects.filter(pk=cat_id).first() if cat_id else None
+            RepairType.objects.get_or_create(name=name, defaults={'category': cat, 'is_active': True})
+        return redirect(reverse_lazy(REPAIR_TYPES_REDIRECT) + REPAIR_TYPES_TAB)
+
+
+class RepairTypeUpdateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        from .models import RepairTypeCategory
+        rt = get_object_or_404(RepairType, pk=pk)
+        name = request.POST.get('name', '').strip()
+        cat_id = request.POST.get('category_id') or None
+        if name:
+            rt.name = name
+            rt.category = RepairTypeCategory.objects.filter(pk=cat_id).first() if cat_id else None
+            rt.is_active = request.POST.get('is_active') == '1'
+            rt.save(update_fields=['name', 'category', 'is_active'])
+        return redirect(reverse_lazy(REPAIR_TYPES_REDIRECT) + REPAIR_TYPES_TAB)
+
+
+class RepairTypeDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        rt = get_object_or_404(RepairType, pk=pk)
+        rt.delete()
+        return redirect(reverse_lazy(REPAIR_TYPES_REDIRECT) + REPAIR_TYPES_TAB)

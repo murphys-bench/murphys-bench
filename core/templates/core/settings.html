@@ -399,6 +399,160 @@
 
         {% endif %}
 
+        <!-- ── Repair Types ────────────────────────────────────────── -->
+        {% if active_tab == 'repair_types' %}
+        <div class="space-y-6">
+
+            <!-- Add Category -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-1">Repair Types</h2>
+                <p class="text-sm text-gray-500 mb-4">Group repair types into categories. Types can be added inside each category or left uncategorised.</p>
+
+                <form method="post" action="{% url 'core:rt_category_create' %}" class="flex gap-2 mb-2">
+                    {% csrf_token %}
+                    <input type="text" name="name" placeholder="New category name"
+                           class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    <button type="submit"
+                            class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+                        Add Category
+                    </button>
+                </form>
+            </div>
+
+            <!-- Categories + their repair types -->
+            {% for cat in rt_categories %}
+            <div class="bg-white rounded-lg shadow overflow-hidden" x-data="{ open: true }">
+                <div class="px-6 py-3 bg-gray-50 border-b border-gray-200 flex items-center gap-3">
+                    <button @click="open = !open" class="text-gray-400 hover:text-gray-600 text-xs font-mono w-4">
+                        <span x-text="open ? '▼' : '▶'"></span>
+                    </button>
+                    <span class="text-sm font-semibold text-gray-800 flex-1">
+                        {{ cat.name }}
+                        <span class="text-xs font-normal text-gray-400 ml-1">({{ cat.repair_types.count }})</span>
+                    </span>
+                    <!-- Reorder buttons -->
+                    <form method="post" action="{% url 'core:rt_category_reorder' cat.pk %}" class="inline">
+                        {% csrf_token %}<input type="hidden" name="direction" value="up">
+                        <button type="submit" class="text-gray-400 hover:text-gray-600 text-xs px-1" title="Move up">▲</button>
+                    </form>
+                    <form method="post" action="{% url 'core:rt_category_reorder' cat.pk %}" class="inline">
+                        {% csrf_token %}<input type="hidden" name="direction" value="down">
+                        <button type="submit" class="text-gray-400 hover:text-gray-600 text-xs px-1" title="Move down">▼</button>
+                    </form>
+                    <form method="post" action="{% url 'core:rt_category_delete' cat.pk %}" class="inline"
+                          onsubmit="return confirm('Delete category {{ cat.name|escapejs }}? Repair types will become uncategorised.')">
+                        {% csrf_token %}
+                        <button type="submit" class="text-red-400 hover:text-red-600 text-xs px-1" title="Delete category">✕</button>
+                    </form>
+                </div>
+
+                <div x-show="open" class="divide-y divide-gray-100">
+                    {% for rt in cat.repair_types.all %}
+                    <div class="px-6 py-2 flex items-center gap-3" x-data="{ editing: false }">
+                        <div x-show="!editing" class="flex-1 flex items-center gap-3">
+                            <span class="text-sm text-gray-800">{{ rt.name }}</span>
+                            {% if not rt.is_active %}<span class="text-xs text-gray-400">(inactive)</span>{% endif %}
+                        </div>
+                        <div x-show="editing" x-cloak class="flex-1">
+                            <form method="post" action="{% url 'core:rt_update' rt.pk %}" class="flex gap-2 items-center">
+                                {% csrf_token %}
+                                <input type="hidden" name="category_id" value="{{ cat.pk }}">
+                                <input type="text" name="name" value="{{ rt.name }}"
+                                       class="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                <label class="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                                    <input type="checkbox" name="is_active" value="1" {% if rt.is_active %}checked{% endif %}> Active
+                                </label>
+                                <button type="submit" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">Save</button>
+                                <button type="button" @click="editing = false" class="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded hover:bg-gray-200">Cancel</button>
+                            </form>
+                        </div>
+                        <div x-show="!editing" class="flex gap-2 shrink-0">
+                            <button @click="editing = true" class="text-xs text-blue-600 hover:underline">Edit</button>
+                            <form method="post" action="{% url 'core:rt_delete' rt.pk %}" class="inline"
+                                  onsubmit="return confirm('Delete {{ rt.name|escapejs }}?')">
+                                {% csrf_token %}
+                                <button type="submit" class="text-xs text-red-500 hover:underline">Delete</button>
+                            </form>
+                        </div>
+                    </div>
+                    {% endfor %}
+
+                    <!-- Add repair type to this category -->
+                    <div class="px-6 py-3 bg-gray-50">
+                        <form method="post" action="{% url 'core:rt_create' %}" class="flex gap-2">
+                            {% csrf_token %}
+                            <input type="hidden" name="category_id" value="{{ cat.pk }}">
+                            <input type="text" name="name" placeholder="New repair type"
+                                   class="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                            <button type="submit"
+                                    class="px-3 py-1.5 bg-gray-200 text-gray-700 text-sm rounded-md hover:bg-gray-300 font-medium">
+                                + Add
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+
+            <!-- Uncategorised repair types -->
+            {% if rt_uncategorised %}
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <div class="px-6 py-3 bg-gray-50 border-b border-gray-200">
+                    <span class="text-sm font-semibold text-gray-500">Uncategorised
+                        <span class="text-xs font-normal text-gray-400 ml-1">({{ rt_uncategorised|length }})</span>
+                    </span>
+                </div>
+                <div class="divide-y divide-gray-100">
+                    {% for rt in rt_uncategorised %}
+                    <div class="px-6 py-2 flex items-center gap-3" x-data="{ editing: false }">
+                        <div x-show="!editing" class="flex-1">
+                            <span class="text-sm text-gray-800">{{ rt.name }}</span>
+                            {% if not rt.is_active %}<span class="text-xs text-gray-400 ml-1">(inactive)</span>{% endif %}
+                        </div>
+                        <div x-show="editing" x-cloak class="flex-1">
+                            <form method="post" action="{% url 'core:rt_update' rt.pk %}" class="flex gap-2 items-center">
+                                {% csrf_token %}
+                                <input type="hidden" name="category_id" value="">
+                                <input type="text" name="name" value="{{ rt.name }}"
+                                       class="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                <label class="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                                    <input type="checkbox" name="is_active" value="1" {% if rt.is_active %}checked{% endif %}> Active
+                                </label>
+                                <button type="submit" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">Save</button>
+                                <button type="button" @click="editing = false" class="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded hover:bg-gray-200">Cancel</button>
+                            </form>
+                        </div>
+                        <div x-show="!editing" class="flex gap-2 shrink-0">
+                            <button @click="editing = true" class="text-xs text-blue-600 hover:underline">Edit</button>
+                            <form method="post" action="{% url 'core:rt_delete' rt.pk %}" class="inline"
+                                  onsubmit="return confirm('Delete {{ rt.name|escapejs }}?')">
+                                {% csrf_token %}
+                                <button type="submit" class="text-xs text-red-500 hover:underline">Delete</button>
+                            </form>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Add uncategorised repair type -->
+            <div class="bg-white rounded-lg shadow p-4">
+                <form method="post" action="{% url 'core:rt_create' %}" class="flex gap-2">
+                    {% csrf_token %}
+                    <input type="hidden" name="category_id" value="">
+                    <input type="text" name="name" placeholder="Add uncategorised repair type"
+                           class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    <button type="submit"
+                            class="px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-300">
+                        + Add
+                    </button>
+                </form>
+            </div>
+
+        </div>
+        {% endif %}
+
     </div>
 </div>
 {% endblock %}

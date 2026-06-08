@@ -200,19 +200,38 @@ class ContactPhone(models.Model):
         return f"{self.number} ({self.get_phone_type_display()})"
 
 
+class RepairTypeCategory(models.Model):
+    """Grouping for repair types, e.g. Hardware, Software, Networking."""
+
+    name = models.CharField(max_length=100, unique=True)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = 'repair_type_categories'
+        ordering = ['sort_order', 'name']
+
+    def __str__(self):
+        return self.name
+
+
 class RepairType(models.Model):
     """Categories of repairs (e.g., Laptop Repair, Desktop Repair)"""
 
     id = models.AutoField(primary_key=True)
+    category = models.ForeignKey(
+        RepairTypeCategory, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='repair_types'
+    )
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True)
+    sort_order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'repair_types'
-        ordering = ['name']
+        ordering = ['category__sort_order', 'sort_order', 'name']
         indexes = [
             models.Index(fields=['is_active']),
         ]

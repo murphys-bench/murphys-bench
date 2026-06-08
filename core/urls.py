@@ -79,4 +79,12 @@ urlpatterns = [
 
     # Native Settings UI
     path('settings/', views.SettingsView.as_view(), name='settings'),
+
+    # Settings — Repair Types CRUD
+    path('settings/repair-type-categories/new/', views.RepairTypeCategoryCreateView.as_view(), name='rt_category_create'),
+    path('settings/repair-type-categories/<int:pk>/delete/', views.RepairTypeCategoryDeleteView.as_view(), name='rt_category_delete'),
+    path('settings/repair-type-categories/<int:pk>/reorder/', views.RepairTypeCategoryReorderView.as_view(), name='rt_category_reorder'),
+    path('settings/repair-types/new/', views.RepairTypeCreateView.as_view(), name='rt_create'),
+    path('settings/repair-types/<int:pk>/edit/', views.RepairTypeUpdateView.as_view(), name='rt_update'),
+    path('settings/repair-types/<int:pk>/delete/', views.RepairTypeDeleteView.as_view(), name='rt_delete'),
 ]
