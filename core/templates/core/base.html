@@ -29,6 +29,38 @@
         .wo-status-badge.status-cancelled    { background-color: var(--color-status-cancelled); }
     </style>
     {% endif %}{% endwith %}
+
+    <!-- Display Settings — applied before first paint to avoid flash -->
+    <script>
+    (function() {
+        var fs  = localStorage.getItem('mb_font_size')  || 'md';
+        var nfs = localStorage.getItem('mb_nav_size')   || 'md';
+        var den = localStorage.getItem('mb_density')    || 'comfortable';
+        var el  = document.documentElement;
+        el.setAttribute('data-font-size', fs);
+        el.setAttribute('data-nav-size',  nfs);
+        el.setAttribute('data-density',   den);
+    })();
+    </script>
+    <style>
+        /* Content font size */
+        html[data-font-size="sm"] .mb-content { font-size: 13px; }
+        html[data-font-size="md"] .mb-content { font-size: 14px; }
+        html[data-font-size="lg"] .mb-content { font-size: 16px; }
+
+        /* Nav font size */
+        html[data-nav-size="sm"] nav.app-nav a,
+        html[data-nav-size="sm"] nav.app-nav span { font-size: 12px; }
+        html[data-nav-size="md"] nav.app-nav a,
+        html[data-nav-size="md"] nav.app-nav span { font-size: 13px; }
+        html[data-nav-size="lg"] nav.app-nav a,
+        html[data-nav-size="lg"] nav.app-nav span { font-size: 15px; }
+
+        /* Compact density — tighter table rows and card padding */
+        html[data-density="compact"] td,
+        html[data-density="compact"] th { padding-top: 4px !important; padding-bottom: 4px !important; }
+        html[data-density="compact"] .density-card { padding: 12px !important; }
+    </style>
 </head>
 <body class="bg-gray-100 min-h-screen" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
 
@@ -94,7 +126,7 @@
 
         <!-- Main content -->
         <div class="flex-1 min-w-0">
-            <main class="{% if request.resolver_match.url_name == 'dashboard' %}max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8{% else %}px-6 py-6{% endif %}">
+            <main class="mb-content {% if request.resolver_match.url_name == 'dashboard' %}max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8{% else %}px-6 py-6{% endif %}">
                 {% block content %}{% endblock %}
             </main>
         </div>
