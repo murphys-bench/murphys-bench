@@ -50,11 +50,11 @@ class WorkOrderForm(forms.ModelForm):
         if client_id:
             self.fields['contact'].queryset = Contact.objects.filter(
                 client_id=client_id
-            ).order_by('name')
+            ).order_by('last_name', 'first_name')
         elif self.instance and self.instance.pk:
             self.fields['contact'].queryset = Contact.objects.filter(
                 client=self.instance.client
-            ).order_by('name')
+            ).order_by('last_name', 'first_name')
         else:
             self.fields['contact'].queryset = Contact.objects.none()
 
@@ -124,11 +124,11 @@ class DeviceForm(forms.ModelForm):
         if client_id:
             self.fields['assigned_contact'].queryset = Contact.objects.filter(
                 client_id=client_id
-            ).order_by('name')
+            ).order_by('last_name', 'first_name')
         elif self.instance and self.instance.pk:
             self.fields['assigned_contact'].queryset = Contact.objects.filter(
                 client=self.instance.client
-            ).order_by('name')
+            ).order_by('last_name', 'first_name')
         else:
             self.fields['assigned_contact'].queryset = Contact.objects.none()
 
