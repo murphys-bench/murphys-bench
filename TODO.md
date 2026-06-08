@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 8, 2026 (session 9)
+**Last Updated**: June 8, 2026 (session 10)
 **Current Phase**: Phase 1 — SCS Internal
 
 ---
@@ -303,27 +303,27 @@
 
 *Identified by full legacy app audit (session 9, June 8 2026). Full spec in `docs/batch-11-plan.md`.*
 
-##### Priority 1 — Device Model + Client Hub
+##### Priority 1 — Device Model + Client Hub ✅
 
-- [ ] **Device model additions** — `os`, `os_version`, `condition_at_intake` (CharField), `assigned_contact` (FK to Contact, null/blank). Migration required. Form: assigned_contact queryset filtered to client's contacts; "Save & Create Work Order →" button. Remove Device from top-level nav.
+- ✅ **Device model additions** — `os`, `os_version`, `condition_at_intake` (CharField), `assigned_contact` (FK to Contact, null/blank). Migration 0019. Form: assigned_contact queryset filtered to client's contacts; "Save & Create Work Order →" button. Removed Device from top-level nav.
 
-- [ ] **Client detail as hub** — single-column layout; Contacts → Devices → WO History as primary sections. Per-contact "+ WO" button. Inline device add pre-assigned to client. Phone numbers: add free-text custom label field alongside existing type dropdown. Inline client type edit (dropdown in place, not just in edit form). Set Primary Contact.
+- ✅ **WorkOrder — Contact association** — `contact` FK (nullable) added to WorkOrder. Migration 0020. Shown as Contact column in WO History. Settable on WO create/edit. Pre-filled from device's assigned_contact on "Save & Create WO."
 
-- [ ] **Client edit — deactivate + delete** — Deactivate toggle with explanatory text (hidden from default list, history preserved). Permanently Delete: type-to-confirm, danger zone section.
+- ✅ **Client detail as hub** — single-column layout; Account Info → Contacts → Devices → WO History. Per-contact Edit | +WO | Set Primary | Delete. Phone label field (ContactPhone.label, migration 0021). ContactSetPrimaryView. Devices table with OS + assigned contact + View/+WO per row.
 
-##### Priority 2 — WO Detail + Print
+- ✅ **Client edit — deactivate + delete** — Status section with explanatory text. Danger Zone (collapsed Alpine accordion): blocked with WO count message when WOs exist; type-to-confirm delete when clear.
 
-- [ ] **WorkOrder — Contact association** — add `contact` FK (nullable) to WorkOrder model. "Whose WO is this?" Shown as Contact column in WO History on client detail. Settable on WO create/edit (dropdown filtered to client's contacts). Pre-filled from device's assigned_contact when using "Save & Create WO." Displayed in WO detail header. Migration required.
+##### Priority 2 — WO Detail + Print ✅
 
-- [ ] **WO detail — unified action toolbar** — black bar: View Client | Edit Client | Edit Device | Edit WO | WO History | 🖨 Repair Report | Claim Ticket | 📧 Email Report | Status ▼
+- ✅ **WO detail — unified action toolbar** — black bar: View Client | Edit Client | Edit Device | Edit WO | WO History | 🖨 Repair Report | Claim Ticket | inline Status dropdown.
 
-- [ ] **WO detail — content additions** — Client info card (name, phone, email, address). Device info card (serial, OS, OS version, condition). Days Open counter. Completed Date field. Invoice Ninja Ref # field. Work Performed entries show bold label + description + timestamp (not just tag chips). Pre/Post Checklist collapsed by default. Credentials "+ Add note" field.
+- ✅ **WO detail — content additions** — Client info card + Device info card (serial, OS, version, condition). Days Open counter. Completed Date in header. Invoice Ninja Ref # field (migration 0022). Work Performed: bold label + print_description + timestamp. Checklist collapsed by default. Credential Notes field.
 
-- [ ] **Repair Report / Claim Ticket** — Add OS, OS Version, Condition at Intake to device section. Add timestamps to customer notes. Add Technician Signature & Date + Client Signature & Date lines. Add footer (Company • WO# • Date). Claim Ticket = same template, `?type=claim` changes title only.
+- ✅ **Repair Report / Claim Ticket** — OS/version/condition in device section. Note timestamps + author. Technician + Client signature lines. Footer (Company • WO# • Date). `?type=claim` switches title.
 
 ##### Priority 3 — Native Settings UI Expansion
 
-- [ ] **Settings: Repair Types** — native CRUD UI: types grouped by category, collapsible category headers with counts, add/edit/delete per type, add category, ▲/▼ reorder categories.
+- ✅ **Settings: Repair Types** — RepairTypeCategory model (migration 0023). Native CRUD: collapsible category sections with counts, ▲/▼ reorder, inline edit per type, delete category (orphans types), add type per category, uncategorised bucket.
 
 - [ ] **Settings: Canned Responses** — two Note Streams (Customer Notes / Tech Notes Internal), each with user-defined reorderable categories. Per-response: stream, category, label, body text. CRUD. Canned response picker on WO detail note forms.
 

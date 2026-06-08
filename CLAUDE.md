@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.11 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (not cloud, not SaaS)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 8, 2026 (end of session 9)
+**Last Updated**: June 8, 2026 (end of session 10)
 
 ---
 
@@ -268,7 +268,7 @@ Also: `converted` (converted to Work Order — read-only after this point)
 - **P2**: Credentials on WO (masked), Client Type badge (Residential/Business), Multiple phones per Contact (Alpine.js dynamic rows), Contact notes + receives_email, Invoice Ninja Ref # deferred to Phase 2
 - **P3**: Native Settings UI at `/settings/` — 6 tabs: Company, Outbound Email, Inbound Email, Attachments, Security, Mileage
 
-### 🔜 Batch 11 — Foundational Client-Centric Rebuild (session 9 — planned, not yet built)
+### ✅ Batch 11 — Foundational Client-Centric Rebuild (session 10 — Priority 1 + 2 complete; Priority 3 in progress)
 
 Full spec in `docs/batch-11-plan.md`. Identified by complete side-by-side audit of the legacy
 PHP app (SCS Repair Tracker) vs Murphy's Bench. Core problem: Murphy's Bench treats Clients,

@@ -7,64 +7,75 @@
 
 ---
 
-## What's already built and working (as of session 9):
+## What's already built and working (as of session 10):
 
-- Django 4.2 app, 34 models, 18 migrations applied
+- Django 4.2 app, 36 models, 23 migrations applied
 - Full CRUD views for work orders, clients, devices, mileage, contacts
 - HTMX inline notes, checklist toggling, inline ticket replies, Quick Labor logging, device credentials
-- **Batch 1–9**: See CLAUDE.md for full list
-- **Batch 10 — Complete (session 8)**:
-  - Repair Report at `/work-orders/<id>/print/`
-  - Company Info fields on SiteSettings
-  - Quick Labor (QuickLaborItem + WorkPerformed models, HTMX one-click logging)
-  - Device Credentials on WO (masked display, HTMX inline save)
-  - Client Type (Residential/Business)
-  - Multiple phones per Contact (ContactPhone model, Alpine.js dynamic rows)
-  - Contact notes + receives_email fields
-  - Native Settings UI at `/settings/` — 6 tabs
+- **Batch 1–10**: See CLAUDE.md for full list
+- **Batch 11 — Priority 1 + 2 complete (session 10)**:
+  - Device: `os`, `os_version`, `condition_at_intake`, `assigned_contact` FK; "Save & Create WO →" button; removed from nav
+  - WorkOrder: `contact` FK (nullable); pre-filled from device's assigned_contact
+  - Client detail: hub layout — Account Info → Contacts → Devices → WO History; per-contact +WO/Set Primary; phone label field; Set Primary Contact
+  - Client edit: Deactivate (Status section) + Permanently Delete (type-to-confirm Danger Zone, blocked if WOs exist)
+  - WO detail: black unified toolbar; client/device info cards; Days Open; Invoice Ninja Ref #; credential notes; Work Performed with description+timestamp; collapsible checklist
+  - Repair Report/Claim Ticket: OS/version/condition; note timestamps; signature lines; footer; `?type=claim` title switch
+  - **Batch 11 Priority 3 Step 7**: Settings › Repair Types native CRUD (RepairTypeCategory model, collapsible categories, ▲/▼ reorder, inline edit/delete per type)
 
 ---
 
-## What's next: Batch 11 — Foundational Client-Centric Rebuild
+## What's next: Batch 11 Priority 3 (remaining)
 
-**Read `docs/batch-11-plan.md` before writing any code.** The full spec is there.
+Continue step by step through the remaining Settings UI items:
 
-This is a foundational rebuild. The core problem: Murphy's Bench treats Clients, Contacts,
-Devices, and Work Orders as peer objects. The correct model is client-centric — everything
-flows through the client.
+**Step 8 — Settings: Canned Responses**
+- Two Note Streams: "Customer Notes" and "Tech Notes (Internal)"
+- Each stream has user-defined, reorderable Categories
+- Per-response: stream, category, label, body text
+- CRUD: add/edit/delete per response; add/reorder categories per stream
+- Canned response picker on WO detail note forms (insert text into the note textarea)
+- New models required: `CannedResponseStream`, `CannedResponseCategory`, `CannedResponse`
 
-### Build order (Priority 1 first):
+**Step 9 — Settings: Quick Labor native CRUD**
+- QuickLaborItem model already exists (Batch 10); currently admin-only
+- Native UI grouped by category (Software/Hardware/Data/Maintenance/General)
+- Per item: Button Label, Category, Print Description, Active toggle
+- Add/edit/delete — no new models needed
 
-**Priority 1:**
-1. Device model: add `os`, `os_version`, `condition_at_intake`, `assigned_contact` FK — migration required. "Save & Create WO" button. Remove Device from top-level nav.
-2. WorkOrder: add `contact` FK (nullable) — migration required.
-3. Client detail page: hub layout, per-contact "+ WO", inline device add, phone custom label field, inline client type, Set Primary Contact.
-4. Client edit: Deactivate + Permanently Delete (type-to-confirm, block if WOs exist).
+**Step 10 — Settings: Checklist Items — model change**
+- Currently: ChecklistItem tied to RepairType via Checklist template
+- Required: flat item bank scoped by device type (not per-repair-type)
+- New `ChecklistItem` fields: `name`, `device_types` (store as comma-sep or JSON), `is_active`
+- Migration + data migration (migrate existing items to flat bank, assign device types from legacy list)
+- WO checklist: filter items by WO's device type instead of repair type
+- Native UI: flat list, per-item device type tags, add/retire
 
-**Priority 2:**
-5. WO detail: unified action toolbar, client/device info cards, Days Open, Completed Date, Invoice Ninja Ref #, Work Performed with description+timestamp, collapsible checklist, credentials add-note.
-6. Repair Report / Claim Ticket: OS/version/condition, note timestamps, signature lines, footer, Claim Ticket via `?type=claim`.
+**Step 11 — Settings: Status Colors + Site Colors**
+- New fields on SiteSettings for per-status colors (bg/text/border hex) + site palette
+- Rendered as CSS variables in a `<style>` block in base.html
+- Settings UI: hex inputs + live preview badges
 
-**Priority 3:**
-7. Settings: Repair Types native UI (new RepairTypeCategory model with sort_order).
-8. Settings: Canned Responses (two note streams + categories + WO detail picker).
-9. Settings: Quick Labor native CRUD.
-10. Settings: Checklist Items — model change to flat bank by device type (migration required).
-11. Settings: Status Colors + Site Colors (SiteSettings fields → CSS variables in base.html).
-12. Settings: Company Info — address split to Line 1/2/City/State/Zip (migration required). Report Header Preview.
-13. Settings: Display Settings (localStorage — font size, card density).
+**Step 12 — Settings: Company Info address split**
+- Split `company_address` → `address_line_1` + `address_line_2` on SiteSettings (migration)
+- Also split `address_street` → `address_line_1` + `address_line_2` on Client model (migration)
+- Migrate existing data to Line 1; user cleans up manually
+- Report Header Preview in Settings › Company
+
+**Step 13 — Settings: Display Settings**
+- Browser-local only (localStorage, no server round-trip)
+- Nav font size, sidebar font size + width, content font size, card density
+- Applied on page load via `<script>` in `<head>` to avoid flash
 
 ---
 
 ## Key decisions locked (do not re-litigate):
 
 - Permanently Delete blocks if client has WOs; message offers Deactivate instead
-- Address: 5 fields — Line 1, Line 2 (optional), City, State, Zip. No country. Applies to both SiteSettings (Company Info) and Client model.
+- Address: 5 fields — Line 1, Line 2 (optional), City, State, Zip. No country.
 - Existing address data migrates to Line 1; user cleans up manually
 - Colors: stored in SiteSettings, rendered as CSS variables in `<style>` block in base.html
-- RepairTypeCategory: new model needed, with sort_order field
-- Assigned Contact queryset: server-side filter via client_id URL param; no HTMX cascade
-- WO Contact association: FK on WorkOrder, filtered to client's contacts, pre-filled from device's assigned_contact on "Save & Create WO"
+- RepairTypeCategory: created ✅
+- Assigned Contact queryset: server-side filter via client_id URL param
 
 ---
 
@@ -79,7 +90,9 @@ flows through the client.
 - **Google Maps mileage**: Works in architecture but fails from localhost. Verify after deploying to internal server.
 - **DeviceCreateView ?next=**: Pass `next` in both GET and POST. Used when launching "New Device" from client detail.
 - **WorkOrderNote customer filter**: Use `note_type='customer_visible'` NOT `is_internal=False`.
-- **ContactPhone phones in Alpine edit form**: Pre-populated via Django template loop into Alpine `phones` array. Saved as `phone_number[]` / `phone_type[]` POST arrays via `_save_contact_phones()`.
+- **ContactPhone phones in Alpine edit form**: Pre-populated via Django template loop into Alpine `phones` array. Saved as `phone_number[]` / `phone_type[]` / `phone_label[]` POST arrays via `_save_contact_phones()`.
+- **Settings tabs**: `repair_types` tab is a special case — no SiteSettings form. Uses `_repair_types_context()` helper. `SETTINGS_TABS` list has `None` for the FormClass on special tabs; `SETTINGS_NAV_TABS` is used for rendering the sidebar nav.
+- **WorkOrderForm contact queryset**: filtered by `client_id` kwarg passed from `get_form_kwargs()`. If client comes via `?device=`, the view resolves client_id from the device.
 
 ---
 
