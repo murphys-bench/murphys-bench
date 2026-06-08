@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     User, Client, Contact, Device, Ticket, TicketReply, WorkOrder, WorkOrderNote,
-    WorkOrderItem, Mileage, RepairType, Checklist, ChecklistItem, CannedResponse,
+    WorkOrderItem, Mileage, RepairType, Checklist, ChecklistItem, CannedResponse, CannedResponseCategory,
     SiteSettings, Attachment, EmailTemplate, SuppressedAddress, EmailSendLog,
     Role, TechSkill, SLAPlan, HelpTopic, KBCategory, KBArticle,
     InboundEmailLog, TicketQueue, DashboardTile,
@@ -251,17 +251,18 @@ class ChecklistAdmin(admin.ModelAdmin):
 
 
 # Canned Response Admin
+@admin.register(CannedResponseCategory)
+class CannedResponseCategoryAdmin(admin.ModelAdmin):
+    list_display = ['name', 'stream', 'sort_order']
+    list_filter = ['stream']
+
+
 @admin.register(CannedResponse)
 class CannedResponseAdmin(admin.ModelAdmin):
-    list_display = ['title', 'repair_type', 'is_active']
-    list_filter = ['repair_type', 'is_active']
-    search_fields = ['title', 'content']
-    fieldsets = (
-        ('Response Info', {'fields': ('title', 'repair_type', 'is_active')}),
-        ('Content', {'fields': ('content',)}),
-        ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
-    )
-    readonly_fields = ['created_at', 'updated_at']
+    list_display = ['label', 'stream', 'category']
+    list_filter = ['stream', 'category']
+    search_fields = ['label', 'body']
+    readonly_fields = ['created_at']
 
 
 # Site Settings (singleton)

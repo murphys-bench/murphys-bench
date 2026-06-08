@@ -1955,7 +1955,8 @@ SETTINGS_TABS = [
     ('attachments',  'Attachments',    AttachmentSettingsForm),
     ('security',     'Security',       SecuritySettingsForm),
     ('mileage',      'Mileage',        MileageSettingsForm),
-    ('repair_types', 'Repair Types',   None),
+    ('repair_types',     'Repair Types',     None),
+    ('canned_responses', 'Canned Responses', None),
 ]
 
 SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS]
@@ -1999,6 +2000,8 @@ class SettingsView(LoginRequiredMixin, View):
         }
         if active_tab == 'repair_types':
             ctx.update(_repair_types_context())
+        if active_tab == 'canned_responses':
+            ctx.update(_canned_responses_context())
         return render(request, 'core/settings.html', ctx)
 
     def post(self, request):
@@ -2028,6 +2031,8 @@ class SettingsView(LoginRequiredMixin, View):
         }
         if tab == 'repair_types':
             ctx.update(_repair_types_context())
+        if tab == 'canned_responses':
+            ctx.update(_canned_responses_context())
         return render(request, 'core/settings.html', ctx)
 
 # ---------------------------------------------------------------------------
@@ -2111,3 +2116,132 @@ class RepairTypeDeleteView(LoginRequiredMixin, View):
         rt = get_object_or_404(RepairType, pk=pk)
         rt.delete()
         return redirect(reverse_lazy(REPAIR_TYPES_REDIRECT) + REPAIR_TYPES_TAB)
+
+# ---------------------------------------------------------------------------
+# Settings — Canned Responses CRUD
+# ---------------------------------------------------------------------------
+
+CANNED_REDIRECT = 'core:settings'
+CANNED_TAB = '?tab=canned_responses'
+
+
+def _canned_responses_context():
+    from .models import CannedResponseCategory, CannedResponse
+    cr_streams = []
+    for stream_key, stream_label in [('customer', 'Customer Notes'), ('internal', 'Tech Notes (Internal)')]:
+        cats = CannedResponseCategory.objects.filter(
+            stream=stream_key
+        ).prefetch_related('responses').order_by('sort_order', 'name')
+        uncategorised = CannedResponse.objects.filter(
+            stream=stream_key, category__isnull=True
+        ).order_by('sort_order', 'label')
+        cr_streams.append((stream_key, stream_label, cats, uncategorised))
+    return {'cr_streams': cr_streams}
+
+
+class CannedResponseCategoryCreateView(LoginRequiredMixin, View):
+    def post(self, request):
+        from .models import CannedResponseCategory
+        stream = request.POST.get('stream', 'customer')
+        name = request.POST.get('name', '').strip()
+        if name and stream in ('customer', 'internal'):
+            CannedResponseCategory.objects.create(stream=stream, name=name)
+        return redirect(reverse_lazy(CANNED_REDIRECT) + CANNED_TAB)
+
+
+class CannedResponseCategoryDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        from .models import CannedResponseCategory
+        cat = get_object_or_404(CannedResponseCategory, pk=pk)
+        # reassign orphaned responses to no category before deleting
+        cat.responses.update(category=None)
+        cat.delete()
+        return redirect(reverse_lazy(CANNED_REDIRECT) + CANNED_TAB)
+
+
+class CannedResponseCategoryReorderView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        from .models import CannedResponseCategory
+        direction = request.POST.get('direction')
+        cat = get_object_or_404(CannedResponseCategory, pk=pk)
+        siblings = list(
+            CannedResponseCategory.objects.filter(stream=cat.stream).order_by('sort_order', 'name')
+        )
+        idx = next((i for i, c in enumerate(siblings) if c.pk == cat.pk), None)
+        if direction == 'up' and idx and idx > 0:
+            siblings[idx - 1], siblings[idx] = siblings[idx], siblings[idx - 1]
+        elif direction == 'down' and idx is not None and idx < len(siblings) - 1:
+            siblings[idx + 1], siblings[idx] = siblings[idx], siblings[idx + 1]
+        for i, c in enumerate(siblings):
+            c.sort_order = i
+            c.save(update_fields=['sort_order'])
+        return redirect(reverse_lazy(CANNED_REDIRECT) + CANNED_TAB)
+
+
+class CannedResponseCreateView(LoginRequiredMixin, View):
+    def post(self, request):
+        from .models import CannedResponseCategory, CannedResponse
+        stream = request.POST.get('stream', 'customer')
+        label = request.POST.get('label', '').strip()
+        body = request.POST.get('body', '').strip()
+        cat_id = request.POST.get('category_id') or None
+        category = None
+        if cat_id:
+            category = CannedResponseCategory.objects.filter(pk=cat_id, stream=stream).first()
+        if label and body and stream in ('customer', 'internal'):
+            CannedResponse.objects.create(
+                stream=stream, label=label, body=body, category=category
+            )
+        return redirect(reverse_lazy(CANNED_REDIRECT) + CANNED_TAB)
+
+
+class CannedResponseUpdateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        from .models import CannedResponseCategory, CannedResponse
+        cr = get_object_or_404(CannedResponse, pk=pk)
+        label = request.POST.get('label', '').strip()
+        body = request.POST.get('body', '').strip()
+        cat_id = request.POST.get('category_id') or None
+        category = None
+        if cat_id:
+            category = CannedResponseCategory.objects.filter(pk=cat_id, stream=cr.stream).first()
+        if label and body:
+            cr.label = label
+            cr.body = body
+            cr.category = category
+            cr.save(update_fields=['label', 'body', 'category'])
+        return redirect(reverse_lazy(CANNED_REDIRECT) + CANNED_TAB)
+
+
+class CannedResponseDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        from .models import CannedResponse
+        cr = get_object_or_404(CannedResponse, pk=pk)
+        cr.delete()
+        return redirect(reverse_lazy(CANNED_REDIRECT) + CANNED_TAB)
+
+
+class CannedResponsePickerView(LoginRequiredMixin, View):
+    """Returns JSON list of canned responses for a given stream (HTMX/fetch)."""
+    def get(self, request):
+        from .models import CannedResponseCategory, CannedResponse
+        from django.http import JsonResponse
+        stream = request.GET.get('stream', 'customer')
+        cats = CannedResponseCategory.objects.filter(
+            stream=stream
+        ).prefetch_related('responses').order_by('sort_order', 'name')
+        uncategorised = CannedResponse.objects.filter(
+            stream=stream, category__isnull=True
+        ).order_by('sort_order', 'label')
+
+        result = []
+        for cat in cats:
+            items = list(cat.responses.order_by('sort_order', 'label').values('id', 'label', 'body'))
+            if items:
+                result.append({'category': cat.name, 'items': items})
+        if uncategorised.exists():
+            result.append({
+                'category': 'Uncategorised',
+                'items': list(uncategorised.values('id', 'label', 'body'))
+            })
+        return JsonResponse({'groups': result})

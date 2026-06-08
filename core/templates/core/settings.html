@@ -553,6 +553,176 @@
         </div>
         {% endif %}
 
+        <!-- ── Canned Responses ──────────────────────────────────────── -->
+        {% if active_tab == 'canned_responses' %}
+        <div class="space-y-8">
+
+            {% for stream_key, stream_label, cr_cats, cr_uncategorised in cr_streams %}
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-1">{{ stream_label }}</h2>
+                <p class="text-sm text-gray-500 mb-4">
+                    Canned responses for the <strong>{{ stream_label }}</strong> note form on work orders.
+                </p>
+
+                <!-- Add Category -->
+                <form method="post" action="{% url 'core:cr_category_create' %}" class="flex gap-2 mb-6">
+                    {% csrf_token %}
+                    <input type="hidden" name="stream" value="{{ stream_key }}">
+                    <input type="text" name="name" placeholder="New category name…"
+                           class="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    <button type="submit"
+                            class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-1.5 rounded">
+                        + Add Category
+                    </button>
+                </form>
+
+                <!-- Categories -->
+                {% for cat in cr_cats %}
+                <div class="border border-gray-200 rounded-lg mb-4" x-data="{ open: true }">
+                    <div class="flex items-center gap-2 px-4 py-2 bg-gray-50 rounded-t-lg">
+                        <button @click="open = !open" class="text-gray-500 hover:text-gray-700 text-xs font-mono w-4">
+                            <span x-show="open">▾</span><span x-show="!open">▸</span>
+                        </button>
+                        <span class="font-medium text-sm text-gray-700 flex-1">{{ cat.name }}</span>
+                        <form method="post" action="{% url 'core:cr_category_reorder' cat.pk %}" class="inline">
+                            {% csrf_token %}<input type="hidden" name="direction" value="up">
+                            <button type="submit" class="text-gray-400 hover:text-gray-600 text-xs px-1">▲</button>
+                        </form>
+                        <form method="post" action="{% url 'core:cr_category_reorder' cat.pk %}" class="inline">
+                            {% csrf_token %}<input type="hidden" name="direction" value="down">
+                            <button type="submit" class="text-gray-400 hover:text-gray-600 text-xs px-1">▼</button>
+                        </form>
+                        <form method="post" action="{% url 'core:cr_category_delete' cat.pk %}"
+                              onsubmit="return confirm('Delete this category? Responses will become uncategorised.')">
+                            {% csrf_token %}
+                            <button type="submit" class="text-red-400 hover:text-red-600 text-xs ml-1">✕</button>
+                        </form>
+                    </div>
+
+                    <div x-show="open" class="p-4 space-y-2">
+                        {% for cr in cat.responses.all %}
+                        <div class="border border-gray-100 rounded p-3" x-data="{ editing: false }">
+                            <div x-show="!editing" class="flex items-start gap-2">
+                                <div class="flex-1">
+                                    <p class="text-sm font-medium text-gray-800">{{ cr.label }}</p>
+                                    <p class="text-xs text-gray-500 mt-0.5 whitespace-pre-wrap">{{ cr.body }}</p>
+                                </div>
+                                <button @click="editing = true"
+                                        class="text-blue-500 hover:text-blue-700 text-xs shrink-0">Edit</button>
+                                <form method="post" action="{% url 'core:cr_delete' cr.pk %}"
+                                      onsubmit="return confirm('Delete this canned response?')">
+                                    {% csrf_token %}
+                                    <button type="submit" class="text-red-400 hover:text-red-600 text-xs">Delete</button>
+                                </form>
+                            </div>
+                            <form x-show="editing" method="post" action="{% url 'core:cr_update' cr.pk %}" class="space-y-2">
+                                {% csrf_token %}
+                                <input type="hidden" name="category_id" value="{{ cat.pk }}">
+                                <input type="text" name="label" value="{{ cr.label }}"
+                                       class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                                <textarea name="body" rows="3"
+                                          class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ cr.body }}</textarea>
+                                <div class="flex gap-2">
+                                    <button type="submit"
+                                            class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-1 rounded">Save</button>
+                                    <button type="button" @click="editing = false"
+                                            class="text-gray-500 hover:text-gray-700 text-xs px-2 py-1">Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+                        {% empty %}
+                        <p class="text-sm text-gray-400 italic">No responses yet.</p>
+                        {% endfor %}
+
+                        <div x-data="{ adding: false }" class="pt-1">
+                            <button @click="adding = true" x-show="!adding"
+                                    class="text-sm text-blue-600 hover:text-blue-800">+ Add Response</button>
+                            <form x-show="adding" method="post" action="{% url 'core:cr_create' %}" class="space-y-2 mt-2">
+                                {% csrf_token %}
+                                <input type="hidden" name="stream" value="{{ stream_key }}">
+                                <input type="hidden" name="category_id" value="{{ cat.pk }}">
+                                <input type="text" name="label" placeholder="Label (shown in picker)…"
+                                       class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                                <textarea name="body" rows="3" placeholder="Response body…"
+                                          class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono"></textarea>
+                                <div class="flex gap-2">
+                                    <button type="submit"
+                                            class="bg-green-600 hover:bg-green-700 text-white text-xs font-medium px-3 py-1 rounded">Add</button>
+                                    <button type="button" @click="adding = false"
+                                            class="text-gray-500 hover:text-gray-700 text-xs px-2 py-1">Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                {% empty %}
+                <p class="text-sm text-gray-400 italic mb-4">No categories yet. Add one above.</p>
+                {% endfor %}
+
+                <!-- Uncategorised -->
+                {% if cr_uncategorised %}
+                <div class="border border-dashed border-gray-200 rounded-lg p-4 mb-4">
+                    <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Uncategorised</p>
+                    <div class="space-y-2">
+                        {% for cr in cr_uncategorised %}
+                        <div class="flex items-start gap-2 border border-gray-100 rounded p-2" x-data="{ editing: false }">
+                            <div x-show="!editing" class="flex-1 flex items-start gap-2">
+                                <div class="flex-1">
+                                    <p class="text-sm font-medium text-gray-800">{{ cr.label }}</p>
+                                    <p class="text-xs text-gray-500 mt-0.5 whitespace-pre-wrap">{{ cr.body }}</p>
+                                </div>
+                                <button @click="editing = true" class="text-blue-500 hover:text-blue-700 text-xs shrink-0">Edit</button>
+                                <form method="post" action="{% url 'core:cr_delete' cr.pk %}"
+                                      onsubmit="return confirm('Delete?')">
+                                    {% csrf_token %}
+                                    <button type="submit" class="text-red-400 hover:text-red-600 text-xs">Delete</button>
+                                </form>
+                            </div>
+                            <form x-show="editing" method="post" action="{% url 'core:cr_update' cr.pk %}" class="w-full space-y-2">
+                                {% csrf_token %}
+                                <input type="text" name="label" value="{{ cr.label }}"
+                                       class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                                <textarea name="body" rows="3"
+                                          class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ cr.body }}</textarea>
+                                <div class="flex gap-2">
+                                    <button type="submit"
+                                            class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-1 rounded">Save</button>
+                                    <button type="button" @click="editing = false"
+                                            class="text-gray-500 hover:text-gray-700 text-xs px-2 py-1">Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Add uncategorised response -->
+                <div x-data="{ adding: false }">
+                    <button @click="adding = true" x-show="!adding"
+                            class="text-sm text-gray-500 hover:text-gray-700">+ Add Uncategorised Response</button>
+                    <form x-show="adding" method="post" action="{% url 'core:cr_create' %}" class="space-y-2 mt-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="stream" value="{{ stream_key }}">
+                        <input type="text" name="label" placeholder="Label…"
+                               class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                        <textarea name="body" rows="3" placeholder="Response body…"
+                                  class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono"></textarea>
+                        <div class="flex gap-2">
+                            <button type="submit"
+                                    class="bg-green-600 hover:bg-green-700 text-white text-xs font-medium px-3 py-1 rounded">Add</button>
+                            <button type="button" @click="adding = false"
+                                    class="text-gray-500 hover:text-gray-700 text-xs px-2 py-1">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+
+            </div>
+            {% endfor %}
+
+        </div>
+        {% endif %}
+
     </div>
 </div>
 {% endblock %}

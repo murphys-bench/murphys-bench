@@ -981,26 +981,50 @@ class Attachment(models.Model):
         return os.path.splitext(self.original_filename)[1].lstrip('.').lower()
 
 
-class CannedResponse(models.Model):
-    """Template responses for common situations"""
+class CannedResponseCategory(models.Model):
+    STREAM_CUSTOMER = 'customer'
+    STREAM_INTERNAL = 'internal'
+    STREAM_CHOICES = [
+        (STREAM_CUSTOMER, 'Customer Notes'),
+        (STREAM_INTERNAL, 'Tech Notes (Internal)'),
+    ]
 
-    id = models.AutoField(primary_key=True)
-    repair_type = models.ForeignKey(RepairType, on_delete=models.SET_NULL, null=True, blank=True, related_name='canned_responses')
-    title = models.CharField(max_length=100)
-    content = models.TextField()
-    is_active = models.BooleanField(default=True)
+    stream = models.CharField(max_length=20, choices=STREAM_CHOICES)
+    name = models.CharField(max_length=100)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = 'canned_response_categories'
+        ordering = ['stream', 'sort_order', 'name']
+
+    def __str__(self):
+        return self.name
+
+
+class CannedResponse(models.Model):
+    STREAM_CUSTOMER = 'customer'
+    STREAM_INTERNAL = 'internal'
+    STREAM_CHOICES = [
+        (STREAM_CUSTOMER, 'Customer Notes'),
+        (STREAM_INTERNAL, 'Tech Notes (Internal)'),
+    ]
+
+    stream = models.CharField(max_length=20, choices=STREAM_CHOICES)
+    category = models.ForeignKey(
+        CannedResponseCategory, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='responses'
+    )
+    label = models.CharField(max_length=100)
+    body = models.TextField()
+    sort_order = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'canned_responses'
-        ordering = ['repair_type', 'title']
-        indexes = [
-            models.Index(fields=['repair_type', 'is_active']),
-        ]
+        ordering = ['stream', 'category__sort_order', 'sort_order', 'label']
 
     def __str__(self):
-        return self.title
+        return self.label
 
 
 class EmailTemplate(models.Model):
