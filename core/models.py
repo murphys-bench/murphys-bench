@@ -1078,6 +1078,99 @@ class DashboardTile(models.Model):
         return f'{self.get_row_display()} — {self.label}'
 
 
+class CustomField(models.Model):
+    """Admin-defined extra fields for Tickets or Work Orders."""
+
+    FIELD_TYPE_CHOICES = [
+        ('text', 'Text (single line)'),
+        ('textarea', 'Text Area (multi-line)'),
+        ('select', 'Dropdown Select'),
+        ('checkbox', 'Checkbox (yes/no)'),
+        ('date', 'Date'),
+    ]
+
+    APPLIES_TO_CHOICES = [
+        ('ticket', 'Tickets'),
+        ('workorder', 'Work Orders'),
+        ('both', 'Both'),
+    ]
+
+    label = models.CharField(max_length=100)
+    field_type = models.CharField(max_length=20, choices=FIELD_TYPE_CHOICES, default='text')
+    applies_to = models.CharField(max_length=10, choices=APPLIES_TO_CHOICES, default='ticket')
+    is_required = models.BooleanField(default=False)
+    help_text = models.CharField(max_length=255, blank=True)
+    sort_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    # Optional scope — if set, field only appears when this topic/type is selected
+    scoped_to_help_topic = models.ForeignKey(
+        HelpTopic,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='custom_fields',
+        help_text='Only show on tickets with this help topic. Leave blank for all tickets.',
+    )
+    scoped_to_repair_type = models.ForeignKey(
+        RepairType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='custom_fields',
+        help_text='Only show on work orders with this repair type. Leave blank for all work orders.',
+    )
+
+    class Meta:
+        db_table = 'custom_fields'
+        ordering = ['applies_to', 'sort_order', 'label']
+
+    def __str__(self):
+        return f'{self.label} ({self.get_applies_to_display()})'
+
+    def applies_to_tickets(self):
+        return self.applies_to in ('ticket', 'both')
+
+    def applies_to_workorders(self):
+        return self.applies_to in ('workorder', 'both')
+
+
+class CustomFieldChoice(models.Model):
+    """Options for select-type CustomFields."""
+
+    field = models.ForeignKey(CustomField, on_delete=models.CASCADE, related_name='choices')
+    label = models.CharField(max_length=100)
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = 'custom_field_choices'
+        ordering = ['sort_order', 'label']
+
+    def __str__(self):
+        return f'{self.field.label}: {self.label}'
+
+
+class CustomFieldValue(models.Model):
+    """EAV storage — one row per (object, field) pair."""
+
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.PositiveIntegerField()
+    content_object = GenericForeignKey('content_type', 'object_id')
+
+    field = models.ForeignKey(CustomField, on_delete=models.CASCADE, related_name='values')
+    value = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'custom_field_values'
+        unique_together = [('content_type', 'object_id', 'field')]
+        indexes = [
+            models.Index(fields=['content_type', 'object_id']),
+        ]
+
+    def __str__(self):
+        return f'{self.field.label}={self.value}'
+
+
 # --- Audit Log Registration ---
 from auditlog.registry import auditlog
 auditlog.register(Ticket)

@@ -12,6 +12,7 @@ from .models import (
     WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist,
     Ticket, TicketReply, TicketLock, TicketLink, Attachment, SiteSettings,
     KBCategory, KBArticle, TicketQueue, DashboardTile, User,
+    CustomField, CustomFieldValue,
 )
 from .forms import WorkOrderForm, ClientForm, DeviceForm, TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm
 
@@ -66,6 +67,69 @@ def _save_attachments(request, obj):
 
 def _is_admin(user):
     return user.is_staff or user.has_perm_flag('can_manage_settings')
+
+
+def _get_custom_fields_for_ticket(ticket_or_none):
+    """Return active CustomFields applicable to a ticket (and its help topic if set)."""
+    help_topic = getattr(ticket_or_none, 'help_topic', None) if ticket_or_none else None
+    from django.db.models import Q as DQ
+    qs = CustomField.objects.filter(is_active=True).filter(
+        DQ(applies_to='ticket') | DQ(applies_to='both')
+    ).filter(
+        DQ(scoped_to_help_topic__isnull=True) |
+        DQ(scoped_to_help_topic=help_topic) if help_topic else DQ(scoped_to_help_topic__isnull=True)
+    ).prefetch_related('choices').order_by('sort_order', 'label')
+    return list(qs)
+
+
+def _get_custom_fields_for_workorder(wo_or_none):
+    """Return active CustomFields applicable to a work order (and its repair type if set)."""
+    repair_type = getattr(wo_or_none, 'repair_type', None) if wo_or_none else None
+    from django.db.models import Q as DQ
+    qs = CustomField.objects.filter(is_active=True).filter(
+        DQ(applies_to='workorder') | DQ(applies_to='both')
+    ).filter(
+        DQ(scoped_to_repair_type__isnull=True) |
+        DQ(scoped_to_repair_type=repair_type) if repair_type else DQ(scoped_to_repair_type__isnull=True)
+    ).prefetch_related('choices').order_by('sort_order', 'label')
+    return list(qs)
+
+
+def _get_custom_field_values(obj):
+    """Return dict of {field_id: value_str} for an existing object."""
+    ct = ContentType.objects.get_for_model(obj)
+    values = CustomFieldValue.objects.filter(content_type=ct, object_id=obj.pk).select_related('field')
+    return {v.field_id: v.value for v in values}
+
+
+def _save_custom_field_values(request, obj, fields):
+    """Save POSTed custom field values for obj. fields = list of CustomField instances."""
+    if not fields:
+        return
+    ct = ContentType.objects.get_for_model(obj)
+    for field in fields:
+        key = f'cf_{field.pk}'
+        if field.field_type == 'checkbox':
+            value = '1' if request.POST.get(key) else '0'
+        else:
+            value = request.POST.get(key, '').strip()
+        CustomFieldValue.objects.update_or_create(
+            content_type=ct,
+            object_id=obj.pk,
+            field=field,
+            defaults={'value': value},
+        )
+
+
+def _custom_fields_with_values(fields, obj):
+    """Return list of {field, value} dicts for display on detail views."""
+    values = _get_custom_field_values(obj)
+    result = []
+    for field in fields:
+        value = values.get(field.pk, '')
+        if value or field.is_required:
+            result.append({'field': field, 'value': value})
+    return result
 
 
 def _tile_count(tile, user, is_admin):
@@ -188,6 +252,9 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         context['wo_attachments'] = Attachment.objects.filter(content_type=ct, object_id=self.object.pk)
         # Linked ticket for overdue badge
         context['linked_ticket'] = getattr(self.object, 'ticket', None)
+        # Custom fields
+        fields = _get_custom_fields_for_workorder(self.object)
+        context['custom_field_values'] = _custom_fields_with_values(fields, self.object)
         return context
 
 
@@ -389,6 +456,8 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
                         is_completed=False,
                     )
 
+        fields = _get_custom_fields_for_workorder(self.object)
+        _save_custom_field_values(self.request, self.object, fields)
         return response
 
     def get_success_url(self):
@@ -399,6 +468,8 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
         context['title'] = 'New Work Order'
         context['cancel_url'] = reverse_lazy('core:work_order_list')
         context['is_create'] = True
+        fields = _get_custom_fields_for_workorder(None)
+        context['custom_field_entries'] = [{'field': f, 'value': ''} for f in fields]
         return context
 
 
@@ -435,6 +506,8 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
                         is_completed=False,
                     )
 
+        fields = _get_custom_fields_for_workorder(self.object)
+        _save_custom_field_values(self.request, self.object, fields)
         return response
 
     def get_success_url(self):
@@ -445,6 +518,9 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
         context['title'] = f'Edit {self.object.work_order_number}'
         context['cancel_url'] = reverse_lazy('core:work_order_detail', kwargs={'pk': self.object.pk})
         context['is_create'] = False
+        fields = _get_custom_fields_for_workorder(self.object)
+        values = _get_custom_field_values(self.object)
+        context['custom_field_entries'] = [{'field': f, 'value': values.get(f.pk, '')} for f in fields]
         return context
 
 
@@ -596,6 +672,9 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         # Ticket-level attachments
         ct = ContentType.objects.get_for_model(Ticket)
         context['ticket_attachments'] = Attachment.objects.filter(content_type=ct, object_id=ticket.pk)
+        # Custom fields
+        fields = _get_custom_fields_for_ticket(ticket)
+        context['custom_field_values'] = _custom_fields_with_values(fields, ticket)
         return context
 
 
@@ -609,6 +688,8 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
         form.instance.created_by = self.request.user
         response = super().form_valid(form)
         _save_attachments(self.request, self.object)
+        fields = _get_custom_fields_for_ticket(self.object)
+        _save_custom_field_values(self.request, self.object, fields)
         from .email_utils import send_ticket_email
         send_ticket_email('ticket_created', self.object)
         return response
@@ -620,6 +701,8 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
         context = super().get_context_data(**kwargs)
         context['title'] = 'New Ticket'
         context['cancel_url'] = reverse_lazy('core:ticket_list')
+        fields = _get_custom_fields_for_ticket(None)
+        context['custom_field_entries'] = [{'field': f, 'value': ''} for f in fields]
         return context
 
 
@@ -637,6 +720,8 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
                 return self.form_invalid(form)
         old_status = self.object.status
         response = super().form_valid(form)
+        fields = _get_custom_fields_for_ticket(self.object)
+        _save_custom_field_values(self.request, self.object, fields)
         from .email_utils import send_ticket_email
         if self.object.status != old_status:
             send_ticket_email('status_changed', self.object, {'old_status': old_status})
@@ -651,6 +736,9 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
         context = super().get_context_data(**kwargs)
         context['title'] = f'Edit {self.object.ticket_number}'
         context['cancel_url'] = reverse_lazy('core:ticket_detail', kwargs={'pk': self.object.pk})
+        fields = _get_custom_fields_for_ticket(self.object)
+        values = _get_custom_field_values(self.object)
+        context['custom_field_entries'] = [{'field': f, 'value': values.get(f.pk, '')} for f in fields]
         return context
 
 
