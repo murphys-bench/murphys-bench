@@ -233,14 +233,34 @@ class Device(models.Model):
         ('other', 'Other'),
     ]
 
+    OS_CHOICES = [
+        ('windows', 'Windows'),
+        ('macos', 'macOS'),
+        ('linux', 'Linux'),
+        ('ios', 'iOS'),
+        ('android', 'Android'),
+        ('chromeos', 'ChromeOS'),
+        ('other', 'Other'),
+    ]
+
+    CONDITION_CHOICES = [
+        ('used', 'Used'),
+        ('new', 'New'),
+        ('damaged', 'Damaged'),
+    ]
+
     id = models.AutoField(primary_key=True)
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='devices')
     repair_type = models.ForeignKey(RepairType, on_delete=models.SET_NULL, null=True, related_name='devices')
+    assigned_contact = models.ForeignKey('Contact', on_delete=models.SET_NULL, null=True, blank=True, related_name='devices')
     name = models.CharField(max_length=255, help_text="e.g., 'Mike\'s Laptop'")
     device_type = models.CharField(max_length=50, choices=DEVICE_TYPE_CHOICES, default='laptop')
     serial_number = models.CharField(max_length=100, blank=True, unique=True)
     model = models.CharField(max_length=100, blank=True)
     manufacturer = models.CharField(max_length=100, blank=True)
+    os = models.CharField(max_length=20, choices=OS_CHOICES, blank=True)
+    os_version = models.CharField(max_length=100, blank=True)
+    condition_at_intake = models.CharField(max_length=20, choices=CONDITION_CHOICES, blank=True)
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

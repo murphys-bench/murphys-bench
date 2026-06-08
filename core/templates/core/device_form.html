@@ -38,6 +38,10 @@
                     {{ form.client }}
                 </div>
                 <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Whose device is this?</label>
+                    {{ form.assigned_contact }}
+                </div>
+                <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Device Name <span class="text-red-500">*</span></label>
                     {{ form.name }}
                 </div>
@@ -48,6 +52,10 @@
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Default Repair Type</label>
                     {{ form.repair_type }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Condition at Intake</label>
+                    {{ form.condition_at_intake }}
                 </div>
             </div>
         </div>
@@ -68,6 +76,14 @@
                     <label class="block text-sm font-medium text-gray-700 mb-1">Serial Number</label>
                     {{ form.serial_number }}
                 </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Operating System</label>
+                    {{ form.os }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">OS Version</label>
+                    {{ form.os_version }}
+                </div>
             </div>
         </div>
 
@@ -87,10 +103,14 @@
         </div>
 
         <!-- Buttons -->
-        <div class="flex gap-3">
+        <div class="flex flex-wrap gap-3">
             <button type="submit"
                     class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium">
                 Save Device
+            </button>
+            <button type="submit" name="save_and_create_wo" value="1"
+                    class="px-6 py-2 bg-green-700 text-white rounded-md hover:bg-green-800 font-medium">
+                Save &amp; Create Work Order →
             </button>
             <a href="{{ cancel_url }}"
                class="px-6 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">

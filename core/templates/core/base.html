@@ -21,9 +21,7 @@
                            class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'work_order' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Work Orders</a>
                         <a href="{% url 'core:client_list' %}"
                            class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'client' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Clients</a>
-                        <a href="{% url 'core:device_list' %}"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'device' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Devices</a>
-                        <a href="{% url 'core:ticket_list' %}"
+<a href="{% url 'core:ticket_list' %}"
                            class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'ticket' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Tickets</a>
                         <a href="{% url 'core:queue_list' %}"
                            class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'queue' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Queues</a>

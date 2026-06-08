@@ -71,30 +71,51 @@ class DeviceForm(forms.ModelForm):
     class Meta:
         model = Device
         fields = [
-            'client', 'name', 'device_type', 'repair_type',
+            'client', 'assigned_contact', 'name', 'device_type', 'repair_type',
             'manufacturer', 'model', 'serial_number',
+            'os', 'os_version', 'condition_at_intake',
             'notes', 'is_active',
         ]
         widgets = {
             'client': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
+            'assigned_contact': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'name': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': "e.g. Mike's Laptop"}),
             'device_type': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'repair_type': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'manufacturer': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'model': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'serial_number': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
+            'os': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
+            'os_version': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'e.g. 11 Pro 10.0.26200.0'}),
+            'condition_at_intake': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'notes': forms.Textarea(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'rows': 3}),
             'is_active': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, client_id=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['client'].queryset = Client.objects.filter(is_active=True).order_by('name')
         self.fields['repair_type'].required = False
+        self.fields['assigned_contact'].required = False
         self.fields['manufacturer'].required = False
         self.fields['model'].required = False
         self.fields['serial_number'].required = False
+        self.fields['os'].required = False
+        self.fields['os_version'].required = False
+        self.fields['condition_at_intake'].required = False
         self.fields['notes'].required = False
+
+        # Filter assigned_contact to the selected client's contacts
+        if client_id:
+            self.fields['assigned_contact'].queryset = Contact.objects.filter(
+                client_id=client_id
+            ).order_by('name')
+        elif self.instance and self.instance.pk:
+            self.fields['assigned_contact'].queryset = Contact.objects.filter(
+                client=self.instance.client
+            ).order_by('name')
+        else:
+            self.fields['assigned_contact'].queryset = Contact.objects.none()
 
 
 SELECT_WIDGET = {'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}
