@@ -77,9 +77,6 @@ window.addEventListener('beforeunload', function() {
                     class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 -mb-px">
                 Attachments{% if ticket_attachments %} ({{ ticket_attachments.count }}){% endif %}
             </button>
-            <button onclick="showTab('tab-history', this)"
-                    class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 -mb-px">
-                History
             </button>
         </div>
 
@@ -141,35 +138,6 @@ window.addEventListener('beforeunload', function() {
             {% endif %}
         </div>
 
-        <!-- History Tab -->
-        <div id="tab-history" class="hidden bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4">History</h2>
-            {% if audit_log %}
-            <div class="space-y-3">
-                {% for row in audit_log %}
-                <div class="flex gap-3 text-sm">
-                    <span class="text-gray-400 whitespace-nowrap">{{ row.entry.timestamp|date:"M d, Y g:i A" }}</span>
-                    <span class="font-medium text-gray-700">{{ row.entry.actor.get_full_name|default:row.entry.actor.username|default:"System" }}</span>
-                    <span class="text-gray-500">
-                        {% if row.entry.action == 0 %}created
-                        {% elif row.entry.action == 1 %}updated
-                        {% elif row.entry.action == 2 %}deleted
-                        {% else %}{{ row.entry.get_action_display }}
-                        {% endif %}
-                        {% if row.changes %}
-                            —
-                            {% for change in row.changes %}
-                                <span class="font-mono text-xs">{{ change.field }}</span>{% if not forloop.last %}, {% endif %}
-                            {% endfor %}
-                        {% endif %}
-                    </span>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-                <p class="text-sm text-gray-400">No history yet.</p>
-            {% endif %}
-        </div>
 
     </div>
 
