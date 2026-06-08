@@ -2,7 +2,8 @@
 <div x-data="{ open: JSON.parse(localStorage.getItem('sidebar_tickets') ?? 'true') }"
      x-init="$watch('open', v => localStorage.setItem('sidebar_tickets', v))">
   <button @click="open = !open"
-          class="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider hover:text-white hover:bg-gray-700 rounded">
+          class="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider rounded hover:opacity-80"
+          style="opacity:0.6">
     <span>{% if is_admin %}All{% else %}My{% endif %} Tickets ({{ my_tickets|length }})</span>
     <svg class="w-3 h-3 transition-transform" :class="open ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
@@ -11,7 +12,7 @@
   <div x-show="open" x-transition>
     {% for ticket in my_tickets %}
     <a href="{% url 'core:ticket_detail' ticket.pk %}"
-       class="flex items-start gap-2 px-3 py-2 hover:bg-gray-700 rounded text-xs group">
+       class="flex items-start gap-2 px-3 py-2 hover:opacity-90 rounded text-xs group" style="opacity:0.85">
       <span class="mt-0.5 flex-shrink-0 w-2 h-2 rounded-full
         {% if ticket.status == 'new' %}bg-blue-400
         {% elif ticket.status == 'open' %}bg-green-400
@@ -20,24 +21,25 @@
         {% elif ticket.status == 'resolved' %}bg-gray-400
         {% else %}bg-gray-500{% endif %}"></span>
       <div class="min-w-0">
-        <div class="text-gray-300 font-medium truncate group-hover:text-white">{{ ticket.ticket_number }}</div>
-        <div class="text-gray-500 truncate">{{ ticket.client.name }}</div>
-        <div class="text-gray-600 truncate">{{ ticket.subject|truncatechars:30 }}</div>
+        <div class="font-medium truncate">{{ ticket.ticket_number }}</div>
+        <div class="truncate" style="opacity:0.7">{{ ticket.client.name }}</div>
+        <div class="truncate" style="opacity:0.55">{{ ticket.subject|truncatechars:30 }}</div>
       </div>
     </a>
     {% empty %}
-    <p class="px-3 py-2 text-xs text-gray-600 italic">No open tickets assigned.</p>
+    <p class="px-3 py-2 text-xs italic" style="opacity:0.45">No open tickets assigned.</p>
     {% endfor %}
   </div>
 </div>
 
-<div class="border-t border-gray-700 my-1"></div>
+<div class="border-t my-1" style="border-color:rgba(255,255,255,0.15)"></div>
 
 <!-- My Work Orders accordion -->
 <div x-data="{ open: JSON.parse(localStorage.getItem('sidebar_wos') ?? 'true') }"
      x-init="$watch('open', v => localStorage.setItem('sidebar_wos', v))">
   <button @click="open = !open"
-          class="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider hover:text-white hover:bg-gray-700 rounded">
+          class="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider rounded hover:opacity-80"
+          style="opacity:0.6">
     <span>{% if is_admin %}All{% else %}My{% endif %} Work Orders ({{ my_wos|length }})</span>
     <svg class="w-3 h-3 transition-transform" :class="open ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
@@ -46,7 +48,7 @@
   <div x-show="open" x-transition>
     {% for wo in my_wos %}
     <a href="{% url 'core:work_order_detail' wo.pk %}"
-       class="flex items-start gap-2 px-3 py-2 hover:bg-gray-700 rounded text-xs group">
+       class="flex items-start gap-2 px-3 py-2 hover:opacity-90 rounded text-xs group" style="opacity:0.85">
       <span class="mt-0.5 flex-shrink-0 w-2 h-2 rounded-full
         {% if wo.status == 'new' %}bg-blue-400
         {% elif wo.status == 'assigned' %}bg-purple-400
@@ -54,13 +56,13 @@
         {% elif wo.status == 'completed' %}bg-green-400
         {% else %}bg-gray-500{% endif %}"></span>
       <div class="min-w-0">
-        <div class="text-gray-300 font-medium truncate group-hover:text-white">{{ wo.work_order_number }}</div>
-        <div class="text-gray-500 truncate">{{ wo.client.name }}</div>
-        <div class="text-gray-600 truncate">{{ wo.description|truncatechars:30 }}</div>
+        <div class="font-medium truncate">{{ wo.work_order_number }}</div>
+        <div class="truncate" style="opacity:0.7">{{ wo.client.name }}</div>
+        <div class="truncate" style="opacity:0.55">{{ wo.description|truncatechars:30 }}</div>
       </div>
     </a>
     {% empty %}
-    <p class="px-3 py-2 text-xs text-gray-600 italic">No open work orders assigned.</p>
+    <p class="px-3 py-2 text-xs italic" style="opacity:0.45">No open work orders assigned.</p>
     {% endfor %}
   </div>
 </div>
