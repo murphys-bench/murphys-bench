@@ -6,7 +6,7 @@ from .models import (
     Role, TechSkill, SLAPlan, HelpTopic, KBCategory, KBArticle,
     InboundEmailLog, TicketQueue, DashboardTile,
     CustomField, CustomFieldChoice, CustomFieldValue,
-    QuickLaborItem, WorkPerformed,
+    QuickLaborItem, WorkPerformed, ContactPhone,
 )
 
 
@@ -482,3 +482,10 @@ class WorkPerformedAdmin(admin.ModelAdmin):
     list_display = ['work_order', 'labor_item', 'logged_by', 'logged_at']
     list_filter = ['labor_item__category']
     readonly_fields = ['logged_at']
+
+
+@admin.register(ContactPhone)
+class ContactPhoneAdmin(admin.ModelAdmin):
+    list_display = ['contact', 'number', 'phone_type']
+    list_filter = ['phone_type']
+    search_fields = ['contact__first_name', 'contact__last_name', 'number']
