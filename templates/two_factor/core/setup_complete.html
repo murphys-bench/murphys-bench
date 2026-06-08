@@ -1,0 +1,19 @@
+{% extends "two_factor/_base_focus.html" %}
+{% load i18n %}
+
+{% block title %}MFA Enabled — Murphy's Bench{% endblock %}
+
+{% block content %}
+    <div class="text-center">
+        <div class="text-4xl mb-4">✅</div>
+        <h2 class="text-xl font-semibold text-gray-900 mb-2">Two-Factor Authentication Enabled</h2>
+        <p class="text-sm text-gray-600 mb-6">
+            Your account is now protected with two-factor authentication.
+            You'll be asked for a code from your authenticator app on each sign-in.
+        </p>
+        <a href="{% url 'two_factor:profile' %}"
+           class="inline-block px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">
+            Back to Account Security
+        </a>
+    </div>
+{% endblock %}
