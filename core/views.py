@@ -322,7 +322,13 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
         wo.device_id = device_id if device_id else None
 
         repair_type_id = p.get('repair_type')
-        wo.repair_type_id = repair_type_id if repair_type_id else None
+        if repair_type_id == 'custom':
+            custom_name = p.get('custom_repair_type', '').strip()
+            if custom_name:
+                rt, _ = RepairType.objects.get_or_create(name=custom_name, defaults={'is_active': True})
+                wo.repair_type_id = rt.pk
+        else:
+            wo.repair_type_id = repair_type_id if repair_type_id else None
 
         scheduled_date = p.get('scheduled_date')
         wo.scheduled_date = scheduled_date if scheduled_date else None
