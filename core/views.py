@@ -281,6 +281,19 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         context['all_repair_types'] = RepairType.objects.filter(is_active=True).order_by('name')
         context['client_contacts'] = Contact.objects.filter(client=wo.client).order_by('last_name', 'first_name')
         context['client_devices'] = Device.objects.filter(client=wo.client).order_by('name')
+        # Open tickets for this client (cross-visibility panel)
+        linked_ticket_pk = getattr(self.object.ticket, 'pk', None) if hasattr(self.object, 'ticket') else None
+        open_tickets = (
+            Ticket.objects
+            .filter(client=wo.client)
+            .exclude(status__in=('resolved', 'closed', 'converted'))
+            .select_related('created_by')
+            .prefetch_related('replies')
+            .order_by('-created_at')
+        )
+        if linked_ticket_pk:
+            open_tickets = open_tickets.exclude(pk=linked_ticket_pk)
+        context['client_open_tickets'] = open_tickets
         checklist_items = list(self.object.items.filter(item_type='checklist').order_by('created_at'))
         context['checklist_items'] = checklist_items
         context['checklist_checked_count'] = sum(1 for i in checklist_items if i.pre_check or i.post_check)
@@ -1001,6 +1014,19 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         # Custom fields
         fields = _get_custom_fields_for_ticket(ticket)
         context['custom_field_values'] = _custom_fields_with_values(fields, ticket)
+        # Open WOs for this client (cross-visibility panel)
+        linked_wo_pk = wo.pk if wo else None
+        open_wos = (
+            WorkOrder.objects
+            .filter(client=ticket.client)
+            .exclude(status__in=('completed', 'closed', 'cancelled'))
+            .select_related('assigned_to', 'repair_type')
+            .prefetch_related('notes')
+            .order_by('-created_at')
+        )
+        if linked_wo_pk:
+            open_wos = open_wos.exclude(pk=linked_wo_pk)
+        context['client_open_wos'] = open_wos
         return context
 
 
