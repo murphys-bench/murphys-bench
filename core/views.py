@@ -1535,22 +1535,20 @@ class SidebarFragmentView(LoginRequiredMixin, View):
     def get(self, request):
         is_admin = _is_admin(request.user)
 
-        ticket_qs = Ticket.objects.select_related('client').exclude(
+        ticket_qs = Ticket.objects.select_related('client').prefetch_related('replies').exclude(
             status__in=['closed', 'resolved']
         )
         if is_admin:
-            # Admins see all open tickets
             ticket_qs = ticket_qs.order_by('-updated_at')
         else:
             ticket_qs = ticket_qs.filter(
                 Q(assigned_to=request.user) | Q(created_by=request.user)
             ).distinct().order_by('-updated_at')
 
-        wo_qs = WorkOrder.objects.select_related('client').exclude(
+        wo_qs = WorkOrder.objects.select_related('client').prefetch_related('notes').exclude(
             status__in=['closed', 'cancelled']
         )
         if is_admin:
-            # Admins see all open work orders
             wo_qs = wo_qs.order_by('-updated_at')
         else:
             wo_qs = wo_qs.filter(assigned_to=request.user).order_by('-updated_at')
