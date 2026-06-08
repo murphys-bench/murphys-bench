@@ -584,6 +584,13 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
     form_class = WorkOrderForm
     template_name = 'core/work_order_form.html'
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        client_id = self.request.GET.get('client') or self.request.POST.get('client')
+        if client_id:
+            kwargs['client_id'] = client_id
+        return kwargs
+
     def form_valid(self, form):
         form.instance.work_order_number = WorkOrder.generate_work_order_number()
         response = super().form_valid(form)
@@ -617,6 +624,14 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
             initial['client'] = self.request.GET['client']
         if self.request.GET.get('device'):
             initial['device'] = self.request.GET['device']
+            try:
+                device = Device.objects.select_related('assigned_contact').get(pk=self.request.GET['device'])
+                if device.assigned_contact_id:
+                    initial['contact'] = device.assigned_contact_id
+                if not initial.get('client'):
+                    initial['client'] = device.client_id
+            except Device.DoesNotExist:
+                pass
         return initial
 
     def get_context_data(self, **kwargs):
@@ -633,6 +648,11 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
     model = WorkOrder
     form_class = WorkOrderForm
     template_name = 'core/work_order_form.html'
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['client_id'] = self.object.client_id
+        return kwargs
 
     def form_valid(self, form):
         old_status = WorkOrder.objects.get(pk=self.object.pk).status
