@@ -48,4 +48,11 @@ urlpatterns = [
     # Reports
     path('reports/', views.ReportsView.as_view(), name='reports'),
     path('reports/csv/<str:report>/', views.ReportsCSVView.as_view(), name='reports_csv'),
+
+    path('profile/security/', views.SecurityProfileView.as_view(), name='security_profile'),
+    path('profile/security/backup-tokens/', views.AdminBackupTokensView.as_view(), name='backup_tokens'),
+
+    # User management (admin only)
+    path('users/', views.UserListView.as_view(), name='user_list'),
+    path('users/<int:pk>/reset-mfa/', views.AdminMFAResetView.as_view(), name='user_mfa_reset'),
 ]

@@ -1,0 +1,61 @@
+{% extends "two_factor/_base_focus.html" %}
+{% load i18n %}
+
+{% block title %}Enable Two-Factor Auth — Murphy's Bench{% endblock %}
+
+{% block content %}
+    <h2 class="text-xl font-semibold text-gray-900 mb-2">Enable Two-Factor Authentication</h2>
+
+    {% if wizard.steps.current == 'welcome' %}
+        <p class="text-sm text-gray-600 mb-6">
+            Two-factor authentication adds a second layer of security to your account.
+            After entering your password, you'll confirm your identity with an authenticator app.
+        </p>
+
+    {% elif wizard.steps.current == 'method' %}
+        <p class="text-sm text-gray-600 mb-6">Select an authentication method to continue.</p>
+
+    {% elif wizard.steps.current == 'generator' %}
+        <p class="text-sm text-gray-600 mb-4">
+            Scan the QR code below with your authenticator app (Google Authenticator, Authy, 1Password, etc.),
+            then enter the 6-digit code it shows.
+        </p>
+        {% if QR_URL %}
+            <div class="flex justify-center mb-4">
+                <div class="bg-white p-3 border border-gray-200 rounded-lg inline-block">
+                    <img src="{{ QR_URL }}" alt="QR Code" class="w-40 h-40" />
+                </div>
+            </div>
+        {% endif %}
+        <details class="mb-4">
+            <summary class="text-sm text-gray-500 cursor-pointer hover:text-gray-700">
+                Can't scan? Enter the key manually
+            </summary>
+            <div class="mt-2 p-3 bg-gray-50 rounded border border-gray-200">
+                <p class="text-xs text-gray-500 mb-1">Secret key:</p>
+                <code class="text-sm font-mono text-gray-800 break-all">{{ secret_key }}</code>
+            </div>
+        </details>
+    {% endif %}
+
+    <form action="" method="post">
+        {% csrf_token %}
+        <style>
+            input[type="text"], input[type="number"], select {
+                display: block; width: 100%;
+                padding: 0.5rem 0.75rem;
+                border: 1px solid #d1d5db; border-radius: 0.375rem;
+                font-size: 0.875rem; color: #111827; background: #fff;
+                margin-top: 0.25rem;
+            }
+            input:focus, select:focus {
+                outline: none; border-color: #3b82f6;
+                box-shadow: 0 0 0 3px rgba(59,130,246,0.25);
+            }
+        </style>
+
+        {% include "two_factor/_wizard_forms.html" %}
+        <input type="submit" value="" hidden />
+        {% include "two_factor/_wizard_actions.html" %}
+    </form>
+{% endblock %}

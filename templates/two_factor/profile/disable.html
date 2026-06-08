@@ -1,0 +1,27 @@
+{% extends "two_factor/_base_focus.html" %}
+{% load i18n %}
+
+{% block title %}Disable Two-Factor Auth — Murphy's Bench{% endblock %}
+
+{% block content %}
+    <h2 class="text-xl font-semibold text-gray-900 mb-2">Disable Two-Factor Authentication</h2>
+    <div class="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+        <p class="text-sm text-yellow-800">
+            Disabling two-factor authentication will make your account less secure.
+            You will only need your password to sign in.
+        </p>
+    </div>
+    <form method="post">
+        {% csrf_token %}
+        {% if form %}{{ form.as_p }}{% endif %}
+        <div class="flex items-center justify-between mt-4">
+            <a href="{% url 'two_factor:profile' %}" class="text-sm text-gray-500 hover:text-gray-700">
+                Cancel
+            </a>
+            <button class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700"
+                    type="submit">
+                Yes, Disable 2FA
+            </button>
+        </div>
+    </form>
+{% endblock %}

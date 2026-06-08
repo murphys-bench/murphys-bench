@@ -1439,3 +1439,74 @@ class ReportsCSVView(LoginRequiredMixin, View):
             writer.writerow(['Error', 'Unknown report'])
 
         return response
+
+
+# --- MFA / Security Profile Views ---
+
+class SecurityProfileView(LoginRequiredMixin, View):
+    """User-facing MFA status and setup links. Redirects to two_factor:profile."""
+
+    def get(self, request):
+        return redirect('two_factor:profile')
+
+
+class AdminBackupTokensView(LoginRequiredMixin, View):
+    """Backup tokens — admin users only. Wraps two_factor.views.BackupTokensView."""
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        if not request.user.is_authenticated:
+            return super().dispatch(request, *args, **kwargs)
+        from two_factor.views import BackupTokensView
+        return BackupTokensView.as_view()(request, *args, **kwargs)
+
+
+class UserListView(LoginRequiredMixin, View):
+    """Admin-only: list all users with MFA status."""
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+    def get(self, request):
+        from django_otp import devices_for_user
+        users = User.objects.select_related('role_obj').order_by('first_name', 'last_name')
+        user_rows = []
+        for u in users:
+            devices = list(devices_for_user(u))
+            user_rows.append({
+                'user': u,
+                'has_mfa': bool(devices),
+                'device_count': len(devices),
+            })
+        return render(request, 'core/user_list.html', {
+            'user_rows': user_rows,
+            'require_mfa': SiteSettings.get().require_mfa,
+        })
+
+
+class AdminMFAResetView(LoginRequiredMixin, View):
+    """Admin-only: clear all OTP devices for a user (lost device recovery)."""
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+    def post(self, request, pk):
+        from django_otp import devices_for_user
+        from django.contrib import messages
+        target = get_object_or_404(User, pk=pk)
+        for device in list(devices_for_user(target)):
+            device.delete()
+        messages.success(
+            request,
+            f'MFA reset for {target.get_full_name() or target.username}. '
+            'They will be prompted to re-enroll on next login.'
+        )
+        return redirect('core:user_list')
