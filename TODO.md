@@ -264,6 +264,7 @@
   - HTTPS with self-signed certificate
   - Database backup strategy
   - Test on internal network (10.58.58.x)
+  - **Verify Google Maps mileage calculation** — works correctly in dev but Google Distance Matrix API call returns "network error" from localhost; likely an outbound connectivity or API key restriction issue. Test after deploying to internal server (10.58.58.x) which should have normal internet access.
 
 ---
 
