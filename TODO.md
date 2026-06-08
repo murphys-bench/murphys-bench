@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 7, 2026
+**Last Updated**: June 8, 2026
 **Current Phase**: Phase 1 — SCS Internal
 
 ---
@@ -251,9 +251,22 @@
 
 ---
 
-### Remaining Phase 1 Items (existing)
+---
 
-- [ ] **Mileage create form** (native form, no admin required)
+#### Batch 9 — Mileage Native Form + Onsite Mileage Auto-Calculate
+
+- ✅ **Mileage native form** — create/edit views, no admin required; tech auto-assigned as technician
+- ✅ **WorkOrder.service_type** — In-Shop / Onsite / Remote; shown on WO detail and form
+- ✅ **Mileage.trip_type** — One-Way / Round Trip stored with each entry
+- ✅ **Google Maps auto-calculate** — server-side Distance Matrix proxy (`/mileage/calculate/`); API key never sent to browser; shop address + client address pre-filled from SiteSettings and Client record
+- ✅ **+ Mileage button** — appears on WO detail when service_type == Onsite; launches pre-populated form with Calculate button
+- ✅ **SiteSettings**: google_maps_api_key + shop_address fields; managed in admin under "Google Maps / Mileage" section
+- ✅ **Backup token print** — Print button on backup tokens page (browser print with clean layout)
+
+---
+
+### Remaining Phase 1 Items
+
 - [ ] **Testing suite**
   - Model tests (validation, relationships)
   - View tests (authentication, permissions, data display)
