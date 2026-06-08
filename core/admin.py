@@ -34,13 +34,19 @@ class TechSkillAdmin(admin.ModelAdmin):
     search_fields = ['name']
 
 
+def _user_mfa_enabled(user):
+    from django_otp import devices_for_user
+    return bool(list(devices_for_user(user, confirmed=True)))
+
+
 # User Admin
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ['username', 'first_name', 'last_name', 'role', 'role_obj', 'is_staff', 'is_active']
+    list_display = ['username', 'first_name', 'last_name', 'role', 'role_obj', 'is_staff', 'is_active', 'mfa_status']
     list_filter = ['role', 'role_obj', 'is_staff', 'is_active', 'date_joined']
     search_fields = ['username', 'first_name', 'last_name', 'email', 'phone']
     filter_horizontal = ['skills']
+    actions = ['reset_mfa']
     fieldsets = (
         ('Login', {'fields': ('username', 'password')}),
         ('Personal Info', {'fields': ('first_name', 'last_name', 'email', 'phone')}),
@@ -48,6 +54,21 @@ class UserAdmin(admin.ModelAdmin):
         ('Permissions', {'fields': ('is_staff', 'is_active', 'groups', 'user_permissions')}),
         ('Important Dates', {'fields': ('last_login', 'date_joined'), 'classes': ('collapse',)}),
     )
+
+    @admin.display(description='MFA', boolean=True)
+    def mfa_status(self, obj):
+        return _user_mfa_enabled(obj)
+
+    @admin.action(description='Reset MFA (remove authenticator device)')
+    def reset_mfa(self, request, queryset):
+        from django_otp.plugins.otp_totp.models import TOTPDevice
+        from django_otp.plugins.otp_static.models import StaticDevice
+        count = 0
+        for user in queryset:
+            deleted_totp, _ = TOTPDevice.objects.filter(user=user).delete()
+            deleted_static, _ = StaticDevice.objects.filter(user=user).delete()
+            count += deleted_totp + deleted_static
+        self.message_user(request, f'MFA reset for {queryset.count()} user(s). {count} device(s) removed.')
 
 
 # Client & Contact Admin
@@ -276,6 +297,16 @@ class SiteSettingsAdmin(admin.ModelAdmin):
                 'Polling command: python manage.py fetch_inbound_email — run every 1-5 minutes via cron. '
                 'New emails create tickets; replies matching [TKT-…] thread into existing tickets.'
             ),
+        }),
+        ('Google Maps / Mileage', {
+            'fields': ('google_maps_api_key', 'shop_address'),
+            'description': (
+                'Used to auto-calculate mileage for onsite visits. '
+                'Restrict your API key to the Distance Matrix API in Google Cloud Console.'
+            ),
+        }),
+        ('Security', {
+            'fields': ('require_mfa',),
         }),
     )
 

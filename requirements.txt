@@ -22,6 +22,10 @@ isort==5.13.2
 
 # Security
 django-cors-headers==4.3.1
+django-two-factor-auth==1.18.1
+django-otp==1.7.0
+qrcode==8.2
+django-formtools==2.6.1
 
 # Audit log
 django-auditlog==3.3.0

@@ -222,7 +222,7 @@
 
 #### Batch 7 — Custom Fields & Forms
 
-- [ ] **Custom Fields & Forms** (#4)
+- ✅ **Custom Fields & Forms** (#4)
   - `CustomField` model: label, field_type (text/textarea/select/checkbox/date), applies_to (ticket/workorder/both), is_required, help_text, sort_order, is_active
   - `CustomFieldChoice` model: field FK, label, sort_order (for select fields)
   - `CustomFieldValue` model: GenericForeignKey (Ticket or WorkOrder), field FK, value (TextField) — EAV storage
@@ -237,7 +237,7 @@
 
 #### Batch 8 — MFA
 
-- [ ] **Multi-Factor Authentication** (#15)
+- ✅ **Multi-Factor Authentication** (#15)
   - Package: `django-two-factor-auth` (TOTP — works with Google Authenticator, Authy, 1Password, etc.)
   - No SMS, no external dependency — fully self-contained
   - **Available to all users** — any user can enroll TOTP from their profile

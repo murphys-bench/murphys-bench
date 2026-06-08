@@ -14,7 +14,7 @@ class WorkOrderForm(forms.ModelForm):
         model = WorkOrder
         fields = [
             'client', 'device', 'repair_type', 'assigned_to',
-            'status', 'priority', 'scheduled_date',
+            'service_type', 'status', 'priority', 'scheduled_date',
             'time_spent_minutes', 'notes_customer_visible', 'notes_internal',
         ]
         widgets = {
@@ -22,6 +22,7 @@ class WorkOrderForm(forms.ModelForm):
             'device': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'repair_type': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'assigned_to': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
+            'service_type': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'status': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'priority': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'scheduled_date': forms.DateInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'type': 'date'}),
@@ -218,9 +219,10 @@ class TicketQueueForm(forms.ModelForm):
 class MileageForm(forms.ModelForm):
     class Meta:
         model = Mileage
-        fields = ['trip_date', 'miles', 'from_location', 'to_location', 'purpose', 'work_order', 'notes']
+        fields = ['trip_date', 'trip_type', 'miles', 'from_location', 'to_location', 'purpose', 'work_order', 'notes']
         widgets = {
             'trip_date': forms.DateInput(attrs={**TEXT_WIDGET, 'type': 'date'}),
+            'trip_type': forms.Select(attrs=SELECT_WIDGET),
             'miles': forms.NumberInput(attrs={**TEXT_WIDGET, 'step': '0.1', 'min': '0'}),
             'from_location': forms.TextInput(attrs=TEXT_WIDGET),
             'to_location': forms.TextInput(attrs=TEXT_WIDGET),
