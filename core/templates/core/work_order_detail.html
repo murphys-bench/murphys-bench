@@ -67,6 +67,10 @@
                    class="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded hover:bg-green-200">+ Mileage</a>
                 {% endif %}
                 {% if linked_ticket %}
+                <a href="{% url 'core:ticket_detail' linked_ticket.pk %}"
+                   class="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded hover:bg-purple-200">
+                    ← {{ linked_ticket.ticket_number }}
+                </a>
                 <div id="overdue-section">
                     {% include "core/partials/overdue_badge.html" with ticket=linked_ticket %}
                 </div>
@@ -643,6 +647,39 @@
                    class="block w-full text-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">Search KB</a>
             </div>
         </div>
+
+        <!-- Other open tickets for this client -->
+        {% if client_open_tickets %}
+        <div class="bg-white rounded-lg shadow p-5">
+            <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Other Open Tickets — {{ work_order.client.name }}</h2>
+            <div class="space-y-3">
+                {% for t in client_open_tickets %}
+                {% with last_reply=t.replies.last %}
+                <a href="{% url 'core:ticket_detail' t.pk %}"
+                   class="block rounded border border-gray-100 hover:border-blue-300 hover:bg-blue-50 p-3 transition-colors">
+                    <div class="flex items-center justify-between gap-2 mb-1">
+                        <span class="text-xs font-mono font-semibold text-gray-700">{{ t.ticket_number }}</span>
+                        <span class="text-xs px-1.5 py-0.5 rounded-full font-medium
+                            {% if t.status == 'new' %}bg-blue-100 text-blue-700
+                            {% elif t.status == 'open' %}bg-green-100 text-green-700
+                            {% elif t.status == 'in_progress' %}bg-yellow-100 text-yellow-700
+                            {% elif t.status == 'waiting_on_customer' %}bg-orange-100 text-orange-700
+                            {% else %}bg-gray-100 text-gray-600{% endif %}">
+                            {{ t.get_status_display }}
+                        </span>
+                    </div>
+                    <p class="text-xs text-gray-700 font-medium truncate">{{ t.subject }}</p>
+                    {% if last_reply %}
+                    <p class="text-xs text-gray-400 mt-1 truncate">{{ last_reply.created_at|date:"M d, g:i A" }} · {{ last_reply.content|truncatechars:60 }}</p>
+                    {% else %}
+                    <p class="text-xs text-gray-400 mt-1">{{ t.created_at|date:"M d, g:i A" }} · No replies yet</p>
+                    {% endif %}
+                </a>
+                {% endwith %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
 
     </div>
 </div>

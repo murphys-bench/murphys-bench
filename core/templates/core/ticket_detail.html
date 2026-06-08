@@ -324,6 +324,43 @@ window.addEventListener('beforeunload', function() {
             </div>
         </div>
 
+        <!-- Other open WOs for this client -->
+        {% if client_open_wos %}
+        <div class="bg-white rounded-lg shadow p-5">
+            <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Open Work Orders — {{ ticket.client.name }}</h2>
+            <div class="space-y-3">
+                {% for wo in client_open_wos %}
+                {% with last_note=wo.notes.last %}
+                <a href="{% url 'core:work_order_detail' wo.pk %}"
+                   class="block rounded border border-gray-100 hover:border-blue-300 hover:bg-blue-50 p-3 transition-colors">
+                    <div class="flex items-center justify-between gap-2 mb-1">
+                        <span class="text-xs font-mono font-semibold text-gray-700">{{ wo.work_order_number }}</span>
+                        <span class="text-xs px-1.5 py-0.5 rounded-full font-medium
+                            {% if wo.status == 'new' %}bg-blue-100 text-blue-700
+                            {% elif wo.status == 'assigned' %}bg-purple-100 text-purple-700
+                            {% elif wo.status == 'in_progress' %}bg-yellow-100 text-yellow-700
+                            {% elif wo.status == 'completed' %}bg-green-100 text-green-700
+                            {% else %}bg-gray-100 text-gray-600{% endif %}">
+                            {{ wo.get_status_display }}
+                        </span>
+                    </div>
+                    <p class="text-xs text-gray-700 font-medium truncate">{{ wo.description|truncatechars:60 }}</p>
+                    <p class="text-xs text-gray-400 mt-0.5">
+                        {% if wo.assigned_to %}{{ wo.assigned_to.get_full_name|default:wo.assigned_to.username }}{% else %}Unassigned{% endif %}
+                        {% if wo.repair_type %} · {{ wo.repair_type.name }}{% endif %}
+                    </p>
+                    {% if last_note %}
+                    <p class="text-xs text-gray-400 mt-1 truncate">{{ last_note.created_at|date:"M d, g:i A" }} · {{ last_note.content|truncatechars:60 }}</p>
+                    {% else %}
+                    <p class="text-xs text-gray-400 mt-1">{{ wo.created_at|date:"M d, g:i A" }} · No notes yet</p>
+                    {% endif %}
+                </a>
+                {% endwith %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
     </div>
 </div>
 
