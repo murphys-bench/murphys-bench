@@ -315,7 +315,10 @@ class ClientListView(LoginRequiredMixin, ListView):
     paginate_by = 25
 
     def get_queryset(self):
-        queryset = Client.objects.all()
+        queryset = Client.objects.annotate(
+            device_count=Count('devices', distinct=True),
+            wo_count=Count('work_orders', distinct=True),
+        )
 
         search = self.request.GET.get('search')
         if search:
@@ -325,13 +328,20 @@ class ClientListView(LoginRequiredMixin, ListView):
                 Q(phone__icontains=search)
             )
 
-        active = self.request.GET.get('active')
-        if active == 'yes':
+        client_type = self.request.GET.get('type')
+        if client_type in ('residential', 'business'):
+            queryset = queryset.filter(client_type=client_type)
+
+        if not self.request.GET.get('show_inactive'):
             queryset = queryset.filter(is_active=True)
-        elif active == 'no':
-            queryset = queryset.filter(is_active=False)
 
         return queryset.order_by('name')
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['show_inactive'] = bool(self.request.GET.get('show_inactive'))
+        ctx['active_type'] = self.request.GET.get('type', '')
+        return ctx
 
 
 class ClientDetailView(LoginRequiredMixin, DetailView):
@@ -2368,9 +2378,11 @@ def _colors_context(form):
 
 
 def _display_context():
+    font_sizes = [('11px','11'), ('12px','12'), ('13px','13'), ('14px','14'), ('15px','15'), ('16px','16'), ('18px','18')]
+    nav_sizes  = [('11px','11'), ('12px','12'), ('13px','13'), ('14px','14'), ('15px','15'), ('16px','16')]
     return {
-        'display_font_sizes': [('sm', 'Small'), ('md', 'Medium'), ('lg', 'Large')],
-        'display_nav_sizes':  [('sm', 'Small'), ('md', 'Medium'), ('lg', 'Large')],
+        'display_font_sizes': font_sizes,
+        'display_nav_sizes':  nav_sizes,
     }
 
 

@@ -933,9 +933,18 @@ class SiteSettings(models.Model):
     color_status_closed      = models.CharField(max_length=7, default='#f3f4f6', blank=True)  # gray-100
     color_status_cancelled   = models.CharField(max_length=7, default='#fee2e2', blank=True)  # red-100
 
+    # Site logo (displayed in nav bar; separate from company_logo on reports)
+    site_logo = models.ImageField(
+        upload_to='site/', blank=True, null=True,
+        help_text='Logo shown in the nav bar. PNG or SVG recommended. Leave blank to show text.',
+    )
+
     # Site palette
-    color_primary = models.CharField(max_length=7, default='#111827', blank=True)  # gray-900 — nav/toolbar bg
-    color_accent  = models.CharField(max_length=7, default='#2563eb', blank=True)  # blue-600 — links, buttons
+    color_primary     = models.CharField(max_length=7, default='#111827', blank=True)  # gray-900 — nav/toolbar bg
+    color_nav_text    = models.CharField(max_length=7, default='#ffffff', blank=True)  # white — nav link text
+    color_accent      = models.CharField(max_length=7, default='#2563eb', blank=True)  # blue-600 — links, buttons
+    color_sidebar_bg  = models.CharField(max_length=7, default='#1f2937', blank=True)  # gray-800 — sidebar bg
+    color_sidebar_text = models.CharField(max_length=7, default='#ffffff', blank=True)  # white — sidebar text
 
     class Meta:
         db_table = 'site_settings'

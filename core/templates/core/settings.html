@@ -1050,44 +1050,113 @@
         <!-- ── Colors ────────────────────────────────────────────────── -->
         {% if active_tab == 'colors' %}
         {% with form=forms.colors %}
-        <form method="post">
+        <form method="post" enctype="multipart/form-data">
             {% csrf_token %}
             <input type="hidden" name="tab" value="colors">
             <div class="space-y-6">
 
+                <!-- Nav Logo -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-lg font-semibold text-gray-900 mb-1">Nav Bar Logo</h2>
+                    <p class="text-sm text-gray-500 mb-4">Displayed in the top-left of the nav bar. PNG or SVG recommended. Leave blank to show your company name as text.</p>
+                    {% if settings.site_logo %}
+                    <div class="mb-3 flex items-center gap-4">
+                        <img src="{{ settings.site_logo.url }}" alt="Current logo" class="h-10 object-contain border border-gray-200 rounded p-1">
+                        <label class="flex items-center gap-1 text-sm text-red-600 cursor-pointer">
+                            <input type="checkbox" name="colors-site_logo-clear"> Remove logo
+                        </label>
+                    </div>
+                    {% endif %}
+                    <input type="file" name="colors-site_logo" accept="image/*"
+                           class="text-sm text-gray-600 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200">
+                </div>
+
                 <!-- Site Palette -->
                 <div class="bg-white rounded-lg shadow p-6">
-                    <h2 class="text-lg font-semibold text-gray-900 mb-1">Site Palette</h2>
-                    <p class="text-sm text-gray-500 mb-5">Nav bar background and primary accent color (buttons, links).</p>
+                    <h2 class="text-lg font-semibold text-gray-900 mb-1">Nav Bar Colors</h2>
+                    <p class="text-sm text-gray-500 mb-5">Background, text, and accent colors for the top navigation bar.</p>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-6">
+                        {% with field=form.color_primary default="#111827" ref="nav_bg" label="Nav Background" preview_text="Nav Bar" preview_fg="#ffffff" %}
+                        <div x-data="{ val: '{{ field.value|default:default }}' }">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">{{ label }}</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" :value="val" @input="val=$event.target.value; $refs.{{ ref }}.value=$event.target.value"
+                                       class="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0.5">
+                                <input type="text" name="colors-color_primary" x-ref="{{ ref }}" :value="val" @input="val=$event.target.value"
+                                       maxlength="7" placeholder="{{ default }}"
+                                       class="w-24 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            </div>
+                            <div class="mt-2 h-8 rounded text-xs flex items-center px-3 font-medium"
+                                 :style="'background:'+val+';color:{{ preview_fg }}'">{{ preview_text }}</div>
+                        </div>
+                        {% endwith %}
+
+                        {% with field=form.color_nav_text default="#ffffff" ref="nav_text" label="Nav Text Color" preview_text="Links" preview_bg="#111827" %}
+                        <div x-data="{ val: '{{ field.value|default:default }}' }">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">{{ label }}</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" :value="val" @input="val=$event.target.value; $refs.{{ ref }}.value=$event.target.value"
+                                       class="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0.5">
+                                <input type="text" name="colors-color_nav_text" x-ref="{{ ref }}" :value="val" @input="val=$event.target.value"
+                                       maxlength="7" placeholder="{{ default }}"
+                                       class="w-24 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            </div>
+                            <div class="mt-2 h-8 rounded text-xs flex items-center px-3 font-medium bg-gray-900"
+                                 :style="'color:'+val">{{ preview_text }}</div>
+                        </div>
+                        {% endwith %}
+
+                        {% with field=form.color_accent default="#2563eb" ref="accent" label="Accent (Buttons / Links)" preview_text="Save Changes" %}
+                        <div x-data="{ val: '{{ field.value|default:default }}' }">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">{{ label }}</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" :value="val" @input="val=$event.target.value; $refs.{{ ref }}.value=$event.target.value"
+                                       class="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0.5">
+                                <input type="text" name="colors-color_accent" x-ref="{{ ref }}" :value="val" @input="val=$event.target.value"
+                                       maxlength="7" placeholder="{{ default }}"
+                                       class="w-24 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            </div>
+                            <div class="mt-2 h-8 rounded text-white text-xs flex items-center px-3 font-medium"
+                                 :style="'background:'+val">{{ preview_text }}</div>
+                        </div>
+                        {% endwith %}
+                    </div>
+                </div>
+
+                <!-- Sidebar Colors -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-lg font-semibold text-gray-900 mb-1">Sidebar Colors</h2>
+                    <p class="text-sm text-gray-500 mb-5">Background and text colors for the left sidebar.</p>
                     <div class="grid grid-cols-2 gap-6 max-w-sm">
-                        <div x-data="{ val: '{{ form.color_primary.value|default:'#111827' }}' }">
-                            <label class="block text-xs font-medium text-gray-600 mb-1">Nav / Toolbar Background</label>
+                        {% with field=form.color_sidebar_bg default="#1f2937" ref="sb_bg" label="Sidebar Background" %}
+                        <div x-data="{ val: '{{ field.value|default:default }}' }">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">{{ label }}</label>
                             <div class="flex items-center gap-2">
-                                <input type="color" :value="val" @input="val = $event.target.value"
-                                       class="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0.5"
-                                       @change="$refs.primary_hex.value = $event.target.value">
-                                <input type="text" name="colors-color_primary" x-ref="primary_hex"
-                                       :value="val" @input="val = $event.target.value"
-                                       maxlength="7" placeholder="#111827"
+                                <input type="color" :value="val" @input="val=$event.target.value; $refs.{{ ref }}.value=$event.target.value"
+                                       class="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0.5">
+                                <input type="text" name="colors-color_sidebar_bg" x-ref="{{ ref }}" :value="val" @input="val=$event.target.value"
+                                       maxlength="7" placeholder="{{ default }}"
                                        class="w-24 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
                             </div>
                             <div class="mt-2 h-8 rounded text-white text-xs flex items-center px-3 font-medium"
-                                 :style="'background:' + val">Murphy's Bench</div>
+                                 :style="'background:'+val">Sidebar</div>
                         </div>
-                        <div x-data="{ val: '{{ form.color_accent.value|default:'#2563eb' }}' }">
-                            <label class="block text-xs font-medium text-gray-600 mb-1">Accent (Buttons / Links)</label>
+                        {% endwith %}
+
+                        {% with field=form.color_sidebar_text default="#ffffff" ref="sb_text" label="Sidebar Text" %}
+                        <div x-data="{ val: '{{ field.value|default:default }}' }">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">{{ label }}</label>
                             <div class="flex items-center gap-2">
-                                <input type="color" :value="val" @input="val = $event.target.value"
-                                       class="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0.5"
-                                       @change="$refs.accent_hex.value = $event.target.value">
-                                <input type="text" name="colors-color_accent" x-ref="accent_hex"
-                                       :value="val" @input="val = $event.target.value"
-                                       maxlength="7" placeholder="#2563eb"
+                                <input type="color" :value="val" @input="val=$event.target.value; $refs.{{ ref }}.value=$event.target.value"
+                                       class="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0.5">
+                                <input type="text" name="colors-color_sidebar_text" x-ref="{{ ref }}" :value="val" @input="val=$event.target.value"
+                                       maxlength="7" placeholder="{{ default }}"
                                        class="w-24 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
                             </div>
-                            <div class="mt-2 h-8 rounded text-white text-xs flex items-center px-3 font-medium"
-                                 :style="'background:' + val">Save Changes</div>
+                            <div class="mt-2 h-8 rounded text-xs flex items-center px-3 font-medium bg-gray-800"
+                                 :style="'color:'+val">My Work</div>
                         </div>
+                        {% endwith %}
                     </div>
                 </div>
 
@@ -1131,21 +1200,20 @@
         {% if active_tab == 'display' %}
         <div class="bg-white rounded-lg shadow p-6"
              x-data="{
-                 fontSize:  localStorage.getItem('mb_font_size')  || 'md',
-                 navSize:   localStorage.getItem('mb_nav_size')   || 'md',
-                 density:   localStorage.getItem('mb_density')    || 'comfortable',
+                 fontSize: localStorage.getItem('mb_font_size') || '14px',
+                 navSize:  localStorage.getItem('mb_nav_size')  || '13px',
+                 density:  localStorage.getItem('mb_density')   || 'comfortable',
                  apply() {
                      localStorage.setItem('mb_font_size', this.fontSize);
                      localStorage.setItem('mb_nav_size',  this.navSize);
                      localStorage.setItem('mb_density',   this.density);
-                     var el = document.documentElement;
-                     el.setAttribute('data-font-size', this.fontSize);
-                     el.setAttribute('data-nav-size',  this.navSize);
-                     el.setAttribute('data-density',   this.density);
+                     document.documentElement.style.setProperty('--mb-font-size', this.fontSize);
+                     document.documentElement.style.setProperty('--mb-nav-size',  this.navSize);
+                     document.documentElement.setAttribute('data-density', this.density);
                  },
                  reset() {
-                     this.fontSize = 'md';
-                     this.navSize  = 'md';
+                     this.fontSize = '14px';
+                     this.navSize  = '13px';
                      this.density  = 'comfortable';
                      this.apply();
                  }
@@ -1157,31 +1225,25 @@
 
                 <!-- Content Font Size -->
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Content Text Size</label>
-                    <div class="flex gap-3">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Content Text Size (px)</label>
+                    <select x-model="fontSize" @change="apply()"
+                            class="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                         {% for val, label in display_font_sizes %}
-                        <label class="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" :value="'{{ val }}'" x-model="fontSize" @change="apply()"
-                                   class="text-blue-600 border-gray-300">
-                            <span class="text-sm text-gray-700">{{ label }}</span>
-                        </label>
+                        <option value="{{ val }}">{{ label }} px</option>
                         {% endfor %}
-                    </div>
+                    </select>
                     <p class="text-xs text-gray-400 mt-1">Applies to the main content area of every page.</p>
                 </div>
 
                 <!-- Nav Font Size -->
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Nav Bar Text Size</label>
-                    <div class="flex gap-3">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Nav Bar Text Size (px)</label>
+                    <select x-model="navSize" @change="apply()"
+                            class="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                         {% for val, label in display_nav_sizes %}
-                        <label class="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" :value="'{{ val }}'" x-model="navSize" @change="apply()"
-                                   class="text-blue-600 border-gray-300">
-                            <span class="text-sm text-gray-700">{{ label }}</span>
-                        </label>
+                        <option value="{{ val }}">{{ label }} px</option>
                         {% endfor %}
-                    </div>
+                    </select>
                 </div>
 
                 <!-- Density -->

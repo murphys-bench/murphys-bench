@@ -423,9 +423,17 @@ class ColorSettingsForm(forms.ModelForm):
     class Meta:
         model = SiteSettings
         fields = [
-            'color_primary', 'color_accent',
+            'site_logo',
+            'color_primary', 'color_nav_text', 'color_accent',
+            'color_sidebar_bg', 'color_sidebar_text',
+            'color_status_new', 'color_status_assigned', 'color_status_in_progress',
+            'color_status_completed', 'color_status_closed', 'color_status_cancelled',
+        ]
+        _hex_fields = [
+            'color_primary', 'color_nav_text', 'color_accent',
+            'color_sidebar_bg', 'color_sidebar_text',
             'color_status_new', 'color_status_assigned', 'color_status_in_progress',
             'color_status_completed', 'color_status_closed', 'color_status_cancelled',
         ]
         widgets = {f: forms.TextInput(attrs={'class': _HEX_INPUT, 'maxlength': 7, 'placeholder': '#rrggbb'})
-                   for f in fields}
+                   for f in _hex_fields}
