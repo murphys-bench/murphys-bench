@@ -151,7 +151,7 @@ def _tile_count(tile, user, is_admin):
             qs = qs.filter(status__in=statuses)
         if '/overdue' in tile.link_url or 'overdue=1' in tile.link_url:
             from django.utils import timezone as tz
-            qs = qs.filter(due_at__lt=tz.now()).exclude(status__in=['closed', 'resolved', 'converted'])
+            qs = qs.filter(due_at__lt=tz.now()).exclude(status__in=['closed', 'resolved'])
     else:
         qs = WorkOrder.objects.all()
         if not is_admin:
@@ -286,7 +286,7 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         open_tickets = (
             Ticket.objects
             .filter(client=wo.client)
-            .exclude(status__in=('resolved', 'closed', 'converted'))
+            .exclude(status__in=('resolved', 'closed'))
             .select_related('created_by')
             .prefetch_related('replies')
             .order_by('-created_at')
@@ -1536,7 +1536,7 @@ class SidebarFragmentView(LoginRequiredMixin, View):
         is_admin = _is_admin(request.user)
 
         ticket_qs = Ticket.objects.select_related('client').exclude(
-            status__in=['closed', 'resolved', 'converted']
+            status__in=['closed', 'resolved']
         )
         if is_admin:
             # Admins see all open tickets
