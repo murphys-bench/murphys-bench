@@ -23,6 +23,7 @@ urlpatterns = [
     path('work-orders/<int:pk>/notes/add/', views.WorkOrderNoteCreateView.as_view(), name='work_order_note_add'),
     path('work-orders/<int:pk>/add-time/', views.WorkOrderAddTimeView.as_view(), name='work_order_add_time'),
     path('work-orders/<int:pk>/quick-update/', views.WorkOrderQuickUpdateView.as_view(), name='work_order_quick_update'),
+    path('work-orders/<int:pk>/apply-checklist/', views.WorkOrderApplyChecklistView.as_view(), name='work_order_apply_checklist'),
     path('work-orders/items/<int:pk>/toggle/', views.WorkOrderItemToggleView.as_view(), name='work_order_item_toggle'),
     path('clients/new/', views.ClientCreateView.as_view(), name='client_create'),
     path('clients/<int:pk>/edit/', views.ClientUpdateView.as_view(), name='client_edit'),

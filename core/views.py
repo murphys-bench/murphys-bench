@@ -347,6 +347,15 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
         return redirect('core:work_order_detail', pk=pk)
 
 
+class WorkOrderApplyChecklistView(LoginRequiredMixin, View):
+    """Re-apply checklist items from the flat bank to an existing WO."""
+
+    def post(self, request, pk):
+        wo = get_object_or_404(WorkOrder, pk=pk)
+        _apply_checklist_items(wo)
+        return redirect('core:work_order_detail', pk=pk)
+
+
 class ClientListView(LoginRequiredMixin, ListView):
     """Display list of all clients"""
     model = Client

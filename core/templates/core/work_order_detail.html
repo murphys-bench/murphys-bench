@@ -477,18 +477,25 @@
 
         <!-- Checklist (collapsed by default) -->
         <div class="bg-white rounded-lg shadow overflow-hidden" x-data="{ open: false }">
-            <button type="button" @click="open = !open"
-                    class="w-full px-5 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
-                <span class="text-base font-semibold text-gray-900">Items &amp; Checklist
-                    {% if work_order.items.all %}
-                    <span class="ml-1 text-xs font-normal text-gray-400">({{ work_order.items.count }})</span>
-                    {% endif %}
-                </span>
-                <svg class="w-4 h-4 text-gray-400 transition-transform" :class="open && 'rotate-180'"
-                     fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-                </svg>
-            </button>
+            <div class="px-5 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                <button type="button" @click="open = !open" class="flex items-center gap-2 flex-1 text-left">
+                    <span class="text-base font-semibold text-gray-900">Items &amp; Checklist
+                        {% if work_order.items.all %}
+                        <span class="ml-1 text-xs font-normal text-gray-400">({{ work_order.items.count }})</span>
+                        {% endif %}
+                    </span>
+                    <svg class="w-4 h-4 text-gray-400 transition-transform" :class="open && 'rotate-180'"
+                         fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </button>
+                <form method="post" action="{% url 'core:work_order_apply_checklist' work_order.pk %}">
+                    {% csrf_token %}
+                    <button type="submit" class="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap ml-3">
+                        ↺ Apply Checklist
+                    </button>
+                </form>
+            </div>
             <div x-show="open" x-cloak class="px-5 pb-5 border-t border-gray-100">
                 {% if work_order.items.all %}
                     <ul class="space-y-1 mt-3">
