@@ -1820,10 +1820,13 @@ class WorkOrderPrintView(LoginRequiredMixin, View):
 
     def get(self, request, pk):
         work_order = get_object_or_404(
-            WorkOrder.objects.select_related('client', 'device', 'repair_type', 'assigned_to'),
+            WorkOrder.objects.select_related(
+                'client', 'device', 'repair_type', 'assigned_to', 'contact'
+            ),
             pk=pk,
         )
         site = SiteSettings.get()
+        report_type = request.GET.get('type', 'repair')  # 'repair' or 'claim'
 
         # Customer-visible notes only
         notes = work_order.notes.filter(note_type='customer_visible').order_by('created_at')
@@ -1845,12 +1848,21 @@ class WorkOrderPrintView(LoginRequiredMixin, View):
         if work_order.repair_type:
             repair_types = [work_order.repair_type]
 
+        # Named contact: use WO contact FK, fall back to client's primary contact
+        contact = work_order.contact
+        if not contact:
+            contact = work_order.client.contacts.filter(is_primary=True).first()
+
+        from django.utils import timezone
         return render(request, 'core/work_order_print.html', {
             'work_order': work_order,
             'site': site,
             'notes': notes,
             'wp_categories': categories,
             'repair_types': repair_types,
+            'report_type': report_type,
+            'contact': contact,
+            'print_date': timezone.now(),
         })
 
 
