@@ -209,7 +209,8 @@
             </div>
             <!-- Edit view -->
             <div x-show="editing" x-cloak>
-                <form method="post" action="{% url 'core:work_order_quick_update' work_order.pk %}" class="grid grid-cols-2 gap-4">
+                <form method="post" action="{% url 'core:work_order_quick_update' work_order.pk %}" class="grid grid-cols-2 gap-4"
+                      x-data="{ customRt: false }">
                     {% csrf_token %}
                     <input type="hidden" name="status" value="{{ work_order.status }}">
                     <input type="hidden" name="priority" value="{{ work_order.priority }}">
@@ -217,12 +218,17 @@
                     <input type="hidden" name="device" value="{{ work_order.device_id|default:'' }}">
                     <div>
                         <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Repair Type</label>
-                        <select name="repair_type" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        <select name="repair_type" @change="customRt = $event.target.value === 'custom'"
+                                class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
                             <option value="">— None —</option>
                             {% for rt in all_repair_types %}
                             <option value="{{ rt.pk }}" {% if work_order.repair_type_id == rt.pk %}selected{% endif %}>{{ rt.name }}</option>
                             {% endfor %}
+                            <option value="custom">＋ Custom…</option>
                         </select>
+                        <input type="text" name="custom_repair_type" placeholder="Type custom repair type…"
+                               x-show="customRt" x-cloak
+                               class="mt-1 w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
                     </div>
                     <div>
                         <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Assigned To</label>
