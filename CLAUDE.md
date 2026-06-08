@@ -1,10 +1,10 @@
 # Murphy's Bench
 
-**Status**: Phase 1 Active Development — Ready for Internal Deployment
-**Tech Stack**: Python 3.11 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
-**Deployment Model**: Self-hosted on internal network (not cloud, not SaaS)
+**Status**: Phase 1 Active Development — Deployed Internally (10.58.58.82)
+**Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
+**Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 8, 2026 (end of session 11)
+**Last Updated**: June 8, 2026 (end of session 12)
 
 ---
 
@@ -307,10 +307,34 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - RepairTypeCategory model needs to be created with sort_order field
 - Device assigned_contact: server-side queryset filter (client_id from URL param); no HTMX cascade needed (standalone Device page being removed)
 
-### Remaining Before Deployment
-- **Batch 11** — foundational rebuild (see above + `docs/batch-11-plan.md`)
+### ✅ Batch 12 — Production Deployment + WO Detail Polish (session 12 — COMPLETE)
+
+**Deployment:**
+- Ubuntu 24.04 VM on Proxmox (10.58.58.82), PostgreSQL 16, Gunicorn + Nginx, systemd
+- Python 3.12 (Ubuntu 24.04 default), SSH key auth, config data migrated via dumpdata/loaddata
+
+**WO Detail improvements:**
+- Inline editing: Device card (reassign device), Details card (repair type, assigned to, scheduled date, contact, invoice ref)
+- Custom repair type on the fly (＋ Custom… option in Details edit, get_or_create)
+- Attachment upload form in Attachments tab (WorkOrderAttachmentUploadView)
+- History tab removed from WO detail
+- Work Performed redesign: editable entries (pencil/trash SVG icons), custom log form, collapsible Log Work buttons
+- WorkPerformed model: labor_item nullable, custom_label + notes fields, ordered by logged_at
+- Pre/Post Checklist: pre_check + post_check fields on WorkOrderItem, auto-saving dropdowns, color-coded rows, checked count in header
+- Device Credentials: display-only by default, PIN masked like password, Edit toggle
+- Add Note: radio buttons instead of dropdown for note type
+- Quick Actions: removed redundant Add Note button
+
+**Settings additions:**
+- site_logo (ImageField), color_nav_text, color_sidebar_bg, color_sidebar_text in SiteSettings
+- ColorSettingsForm expanded; base.html CSS variables updated; sidebar uses opacity-based text hierarchy
+- Font size dropdowns (px values stored in localStorage)
+- Client list redesigned to match legacy app layout (ACCOUNT/TYPE/CONTACT/PHONE/EMAIL/DEVICES/WOs)
+
+### Remaining / Future
 - **Testing suite** (deferred — will write after real-world use surfaces actual edge cases)
-- **Deployment** — internal network, HTTPS, PostgreSQL, backup strategy
+- **Cloudflare tunnel** — external access when ready
+- **Site-wide icon audit** — replace remaining text symbols (×, etc.) with SVG icons
 
 ---
 
