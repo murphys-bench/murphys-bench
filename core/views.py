@@ -611,6 +611,14 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
     def get_success_url(self):
         return reverse_lazy('core:work_order_detail', kwargs={'pk': self.object.pk})
 
+    def get_initial(self):
+        initial = super().get_initial()
+        if self.request.GET.get('client'):
+            initial['client'] = self.request.GET['client']
+        if self.request.GET.get('device'):
+            initial['device'] = self.request.GET['device']
+        return initial
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['title'] = 'New Work Order'
@@ -711,13 +719,25 @@ class DeviceCreateView(LoginRequiredMixin, CreateView):
     form_class = DeviceForm
     template_name = 'core/device_form.html'
 
+    def get_initial(self):
+        initial = super().get_initial()
+        if self.request.GET.get('client'):
+            initial['client'] = self.request.GET['client']
+        return initial
+
     def get_success_url(self):
+        # If launched from a client page, go back there after saving
+        next_url = self.request.POST.get('next') or self.request.GET.get('next')
+        if next_url:
+            return next_url
         return reverse_lazy('core:device_detail', kwargs={'pk': self.object.pk})
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['title'] = 'New Device'
-        context['cancel_url'] = reverse_lazy('core:device_list')
+        next_url = self.request.GET.get('next', '')
+        context['cancel_url'] = next_url or str(reverse_lazy('core:device_list'))
+        context['next_url'] = next_url
         return context
 
 

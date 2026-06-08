@@ -6,7 +6,7 @@
 <div class="bg-white shadow">
     <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex items-center justify-between">
         <h1 class="text-2xl font-bold text-gray-900">Clients</h1>
-        <a href="/admin/core/client/add/"
+        <a href="{% url 'core:client_create' %}"
            class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">
             + New Client
         </a>
@@ -58,6 +58,7 @@
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">City</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                     </tr>
                 </thead>
@@ -75,6 +76,13 @@
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                                 {{ client.address_city|default:"—" }}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                {% if client.client_type == 'business' %}
+                                    <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-700">Business</span>
+                                {% else %}
+                                    <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700">Residential</span>
+                                {% endif %}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 {% if client.is_active %}
@@ -108,7 +116,7 @@
         {% else %}
             <div class="px-6 py-16 text-center">
                 <p class="text-gray-400 text-lg mb-2">No clients found.</p>
-                <p class="text-gray-400 text-sm">Try clearing your filters or <a href="/admin/core/client/add/" class="text-blue-600 hover:underline">add a new client</a>.</p>
+                <p class="text-gray-400 text-sm">Try clearing your filters or <a href="{% url 'core:client_create' %}" class="text-blue-600 hover:underline">add a new client</a>.</p>
             </div>
         {% endif %}
     </div>

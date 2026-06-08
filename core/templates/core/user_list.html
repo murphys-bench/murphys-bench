@@ -94,7 +94,7 @@
         MFA enrollment and settings are managed from each user's
         <a href="{% url 'two_factor:profile' %}" class="underline hover:text-gray-700">Account Security</a> page.
         To enforce MFA for all users, enable "Require MFA" in
-        <a href="/admin/core/sitesettings/1/change/" class="underline hover:text-gray-700">Site Settings</a>.
+        <a href="{% url 'core:settings' %}?tab=security" class="underline hover:text-gray-700">Site Settings → Security</a>.
     </div>
 </div>
 {% endblock %}

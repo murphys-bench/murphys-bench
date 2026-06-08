@@ -14,6 +14,7 @@
 <div class="max-w-3xl">
     <form method="post" class="space-y-6">
         {% csrf_token %}
+        {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
 
         {% if form.errors %}
         <div class="bg-red-50 border border-red-200 rounded-md p-4">
