@@ -1,0 +1,28 @@
+{% comment %}
+HTMX partial — rendered by WorkPerformedLogView and WorkPerformedDeleteView.
+Shows logged Quick Labor items grouped by category.
+{% endcomment %}
+{% if categories %}
+    {% for category, entries in categories.items %}
+    <div class="mb-3">
+        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{{ category }}</p>
+        <div class="flex flex-wrap gap-2">
+            {% for entry in entries %}
+            <span class="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 text-blue-800 text-sm rounded-md">
+                {{ entry.labor_item.label }}
+                <form method="post" action="{% url 'core:work_performed_delete' entry.pk %}"
+                      hx-post="{% url 'core:work_performed_delete' entry.pk %}"
+                      hx-target="#work-performed-section"
+                      hx-swap="innerHTML"
+                      class="inline">
+                    {% csrf_token %}
+                    <button type="submit" class="text-blue-400 hover:text-red-500 ml-1 leading-none" title="Remove">&times;</button>
+                </form>
+            </span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <p class="text-sm text-gray-400 italic">No work logged yet. Use the buttons below to log work performed.</p>
+{% endif %}

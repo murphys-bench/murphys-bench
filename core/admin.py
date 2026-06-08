@@ -6,6 +6,7 @@ from .models import (
     Role, TechSkill, SLAPlan, HelpTopic, KBCategory, KBArticle,
     InboundEmailLog, TicketQueue, DashboardTile,
     CustomField, CustomFieldChoice, CustomFieldValue,
+    QuickLaborItem, WorkPerformed,
 )
 
 
@@ -267,6 +268,10 @@ class CannedResponseAdmin(admin.ModelAdmin):
 @admin.register(SiteSettings)
 class SiteSettingsAdmin(admin.ModelAdmin):
     fieldsets = (
+        ('Company Info', {
+            'fields': ('company_name', 'company_address', 'company_phone', 'company_email', 'company_logo'),
+            'description': 'Appears on repair reports and the nav bar.',
+        }),
         ('Outbound Email', {
             'fields': ('email_enabled', 'email_from', 'email_host', 'email_port', 'email_use_tls', 'email_username', 'email_password'),
         }),
@@ -461,3 +466,19 @@ class CustomFieldValueAdmin(admin.ModelAdmin):
     list_filter = ['field', 'content_type']
     search_fields = ['value']
     readonly_fields = ['content_type', 'object_id', 'field']
+
+
+@admin.register(QuickLaborItem)
+class QuickLaborItemAdmin(admin.ModelAdmin):
+    list_display = ['label', 'category', 'is_active', 'sort_order']
+    list_filter = ['category', 'is_active']
+    list_editable = ['is_active', 'sort_order']
+    search_fields = ['label', 'category']
+    ordering = ['category', 'sort_order', 'label']
+
+
+@admin.register(WorkPerformed)
+class WorkPerformedAdmin(admin.ModelAdmin):
+    list_display = ['work_order', 'labor_item', 'logged_by', 'logged_at']
+    list_filter = ['labor_item__category']
+    readonly_fields = ['logged_at']
