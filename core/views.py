@@ -1957,6 +1957,7 @@ SETTINGS_TABS = [
     ('mileage',      'Mileage',        MileageSettingsForm),
     ('repair_types',     'Repair Types',     None),
     ('canned_responses', 'Canned Responses', None),
+    ('quick_labor',      'Quick Labor',      None),
 ]
 
 SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS]
@@ -2002,6 +2003,8 @@ class SettingsView(LoginRequiredMixin, View):
             ctx.update(_repair_types_context())
         if active_tab == 'canned_responses':
             ctx.update(_canned_responses_context())
+        if active_tab == 'quick_labor':
+            ctx.update(_quick_labor_context())
         return render(request, 'core/settings.html', ctx)
 
     def post(self, request):
@@ -2033,6 +2036,8 @@ class SettingsView(LoginRequiredMixin, View):
             ctx.update(_repair_types_context())
         if tab == 'canned_responses':
             ctx.update(_canned_responses_context())
+        if tab == 'quick_labor':
+            ctx.update(_quick_labor_context())
         return render(request, 'core/settings.html', ctx)
 
 # ---------------------------------------------------------------------------
@@ -2245,3 +2250,68 @@ class CannedResponsePickerView(LoginRequiredMixin, View):
                 'items': list(uncategorised.values('id', 'label', 'body'))
             })
         return JsonResponse({'groups': result})
+
+# ---------------------------------------------------------------------------
+# Settings — Quick Labor CRUD
+# ---------------------------------------------------------------------------
+
+QL_REDIRECT = 'core:settings'
+QL_TAB = '?tab=quick_labor'
+
+QUICK_LABOR_CATEGORIES = ['Software', 'Hardware', 'Data', 'Maintenance', 'General']
+
+
+def _quick_labor_context():
+    from .models import QuickLaborItem
+    items = QuickLaborItem.objects.order_by('category', 'sort_order', 'label')
+    grouped = {}
+    for cat in QUICK_LABOR_CATEGORIES:
+        grouped[cat] = [i for i in items if i.category == cat]
+    # catch any items with unknown categories
+    known = set(QUICK_LABOR_CATEGORIES)
+    other = [i for i in items if i.category not in known]
+    return {
+        'ql_grouped': grouped,
+        'ql_categories': QUICK_LABOR_CATEGORIES,
+        'ql_other': other,
+    }
+
+
+class QuickLaborCreateView(LoginRequiredMixin, View):
+    def post(self, request):
+        from .models import QuickLaborItem
+        label = request.POST.get('label', '').strip()
+        category = request.POST.get('category', '').strip()
+        print_description = request.POST.get('print_description', '').strip()
+        if label and category:
+            QuickLaborItem.objects.create(
+                label=label,
+                category=category,
+                print_description=print_description,
+            )
+        return redirect(reverse_lazy(QL_REDIRECT) + QL_TAB)
+
+
+class QuickLaborUpdateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        from .models import QuickLaborItem
+        item = get_object_or_404(QuickLaborItem, pk=pk)
+        label = request.POST.get('label', '').strip()
+        category = request.POST.get('category', '').strip()
+        print_description = request.POST.get('print_description', '').strip()
+        is_active = request.POST.get('is_active') == '1'
+        if label and category:
+            item.label = label
+            item.category = category
+            item.print_description = print_description
+            item.is_active = is_active
+            item.save(update_fields=['label', 'category', 'print_description', 'is_active'])
+        return redirect(reverse_lazy(QL_REDIRECT) + QL_TAB)
+
+
+class QuickLaborDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        from .models import QuickLaborItem
+        item = get_object_or_404(QuickLaborItem, pk=pk)
+        item.delete()
+        return redirect(reverse_lazy(QL_REDIRECT) + QL_TAB)

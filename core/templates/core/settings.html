@@ -723,6 +723,158 @@
         </div>
         {% endif %}
 
+        <!-- ── Quick Labor ───────────────────────────────────────────── -->
+        {% if active_tab == 'quick_labor' %}
+        <div class="space-y-6">
+
+            <!-- Add New Item -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-1">Quick Labor Items</h2>
+                <p class="text-sm text-gray-500 mb-5">Buttons shown on the Work Order detail page. Clicking one logs a Work Performed entry.</p>
+
+                <form method="post" action="{% url 'core:ql_create' %}" class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+                    {% csrf_token %}
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Button Label</label>
+                        <input type="text" name="label" required placeholder="e.g. Virus Removal"
+                               class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Category</label>
+                        <select name="category" required
+                                class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            {% for cat in ql_categories %}
+                            <option value="{{ cat }}">{{ cat }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="sm:col-span-1">
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Print Description <span class="text-gray-400">(optional)</span></label>
+                        <input type="text" name="print_description" placeholder="Client-facing text on report…"
+                               class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <button type="submit"
+                                class="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded">
+                            + Add Item
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Items by Category -->
+            {% for cat_name, items in ql_grouped.items %}
+            <div class="bg-white rounded-lg shadow" x-data="{ open: true }">
+                <div class="flex items-center gap-2 px-5 py-3 border-b border-gray-100 cursor-pointer"
+                     @click="open = !open">
+                    <span class="font-semibold text-sm text-gray-800 flex-1">{{ cat_name }}</span>
+                    <span class="text-xs text-gray-400" x-text="open ? '▾' : '▸'"></span>
+                </div>
+                <div x-show="open">
+                    {% if items %}
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-xs text-gray-500 uppercase tracking-wide bg-gray-50">
+                                <th class="px-5 py-2 text-left font-medium">Label</th>
+                                <th class="px-5 py-2 text-left font-medium">Print Description</th>
+                                <th class="px-4 py-2 text-center font-medium w-20">Active</th>
+                                <th class="px-4 py-2 w-24"></th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-50">
+                            {% for item in items %}
+                            <tr x-data="{ editing: false }" class="hover:bg-gray-50">
+                                <!-- View row -->
+                                <td x-show="!editing" class="px-5 py-2.5 font-medium text-gray-800">
+                                    {{ item.label }}
+                                </td>
+                                <td x-show="!editing" class="px-5 py-2.5 text-gray-500 text-xs">
+                                    {{ item.print_description|default:"—" }}
+                                </td>
+                                <td x-show="!editing" class="px-4 py-2.5 text-center">
+                                    {% if item.is_active %}
+                                    <span class="inline-block w-2 h-2 rounded-full bg-green-500"></span>
+                                    {% else %}
+                                    <span class="inline-block w-2 h-2 rounded-full bg-gray-300"></span>
+                                    {% endif %}
+                                </td>
+                                <td x-show="!editing" class="px-4 py-2.5 text-right space-x-3">
+                                    <button @click="editing = true"
+                                            class="text-blue-500 hover:text-blue-700 text-xs">Edit</button>
+                                    <form method="post" action="{% url 'core:ql_delete' item.pk %}" class="inline"
+                                          onsubmit="return confirm('Delete {{ item.label }}?')">
+                                        {% csrf_token %}
+                                        <button type="submit" class="text-red-400 hover:text-red-600 text-xs">Delete</button>
+                                    </form>
+                                </td>
+
+                                <!-- Edit row (spans all columns) -->
+                                <td x-show="editing" colspan="4" class="px-5 py-3">
+                                    <form method="post" action="{% url 'core:ql_update' item.pk %}"
+                                          class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+                                        {% csrf_token %}
+                                        <div>
+                                            <label class="block text-xs font-medium text-gray-500 mb-1">Label</label>
+                                            <input type="text" name="label" value="{{ item.label }}" required
+                                                   class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-medium text-gray-500 mb-1">Category</label>
+                                            <select name="category"
+                                                    class="w-full border border-gray-300 rounded px-2 py-1 text-sm bg-white">
+                                                {% for cat in ql_categories %}
+                                                <option value="{{ cat }}" {% if item.category == cat %}selected{% endif %}>{{ cat }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-medium text-gray-500 mb-1">Print Description</label>
+                                            <input type="text" name="print_description" value="{{ item.print_description }}"
+                                                   class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                                        </div>
+                                        <div class="flex items-end gap-3">
+                                            <label class="flex items-center gap-1 text-sm text-gray-700 mb-1">
+                                                <input type="checkbox" name="is_active" value="1"
+                                                       {% if item.is_active %}checked{% endif %}
+                                                       class="rounded border-gray-300 text-blue-600">
+                                                Active
+                                            </label>
+                                            <button type="submit"
+                                                    class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-1.5 rounded">Save</button>
+                                            <button type="button" @click="editing = false"
+                                                    class="text-gray-500 hover:text-gray-700 text-xs py-1.5">Cancel</button>
+                                        </div>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <p class="text-sm text-gray-400 italic px-5 py-4">No items in this category.</p>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+
+            {% if ql_other %}
+            <div class="bg-white rounded-lg shadow p-5">
+                <h3 class="text-sm font-semibold text-gray-700 mb-3">Other Categories</h3>
+                <p class="text-xs text-gray-500 mb-3">Items with custom category names. Edit to assign to a standard category.</p>
+                <div class="space-y-1">
+                    {% for item in ql_other %}
+                    <div class="flex items-center gap-3 text-sm py-1 border-b border-gray-50">
+                        <span class="text-gray-500 text-xs w-24 shrink-0">{{ item.category }}</span>
+                        <span class="font-medium text-gray-800 flex-1">{{ item.label }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+        </div>
+        {% endif %}
+
     </div>
 </div>
 {% endblock %}
