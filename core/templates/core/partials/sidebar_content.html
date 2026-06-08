@@ -23,7 +23,9 @@
       <div class="min-w-0">
         <div class="font-medium truncate">{{ ticket.ticket_number }}</div>
         <div class="truncate" style="opacity:0.7">{{ ticket.client.name }}</div>
-        <div class="truncate" style="opacity:0.55">{{ ticket.subject|truncatechars:30 }}</div>
+        {% with last=ticket.replies.last %}
+        <div class="truncate" style="opacity:0.55">{% if last %}{{ last.content|truncatechars:35 }}{% else %}{{ ticket.subject|truncatechars:35 }}{% endif %}</div>
+        {% endwith %}
       </div>
     </a>
     {% empty %}
@@ -58,7 +60,9 @@
       <div class="min-w-0">
         <div class="font-medium truncate">{{ wo.work_order_number }}</div>
         <div class="truncate" style="opacity:0.7">{{ wo.client.name }}</div>
-        <div class="truncate" style="opacity:0.55">{{ wo.description|truncatechars:30 }}</div>
+        {% with last=wo.notes.last %}
+        <div class="truncate" style="opacity:0.55">{% if last %}{{ last.content|truncatechars:35 }}{% else %}{{ wo.description|truncatechars:35 }}{% endif %}</div>
+        {% endwith %}
       </div>
     </a>
     {% empty %}
