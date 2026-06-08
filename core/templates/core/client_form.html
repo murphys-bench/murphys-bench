@@ -11,7 +11,8 @@
 {% endblock %}
 
 {% block content %}
-<div class="max-w-3xl">
+<div class="max-w-3xl space-y-6">
+
     <form method="post" class="space-y-6">
         {% csrf_token %}
 
@@ -76,22 +77,25 @@
             </div>
         </div>
 
-        <!-- Notes & Status -->
+        <!-- Notes -->
         <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-base font-semibold text-gray-900 mb-4">Notes & Status</h2>
-            <div class="space-y-4">
+            <h2 class="text-base font-semibold text-gray-900 mb-4">Notes</h2>
+            {{ form.notes }}
+        </div>
+
+        <!-- Active Status -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-base font-semibold text-gray-900 mb-2">Status</h2>
+            <div class="flex items-start gap-3">
+                <div class="mt-0.5">{{ form.is_active }}</div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                    {{ form.notes }}
-                </div>
-                <div class="flex items-center gap-2">
-                    {{ form.is_active }}
                     <label class="text-sm font-medium text-gray-700">Active client</label>
+                    <p class="text-xs text-gray-500 mt-0.5">Inactive clients are hidden from the default client list but their full history is preserved.</p>
                 </div>
             </div>
         </div>
 
-        <!-- Buttons -->
+        <!-- Save / Cancel -->
         <div class="flex gap-3">
             <button type="submit"
                     class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium">
@@ -104,5 +108,55 @@
         </div>
 
     </form>
+
+    <!-- ── DANGER ZONE (edit only) ─────────────────────────────────── -->
+    {% if client %}
+    <div class="bg-white rounded-lg shadow border border-red-200 overflow-hidden"
+         x-data="{ open: false, confirmName: '' }">
+        <button type="button"
+                @click="open = !open"
+                class="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-red-50 transition-colors">
+            <span class="text-base font-semibold text-red-700">Danger Zone</span>
+            <svg class="w-4 h-4 text-red-400 transition-transform" :class="open && 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+        </button>
+
+        <div x-show="open" x-cloak class="px-6 pb-6 border-t border-red-100">
+            <p class="text-sm text-gray-600 mt-4 mb-4">
+                Permanently deleting a client removes <strong>all</strong> associated contacts, devices, and records. This cannot be undone.
+            </p>
+
+            {% if wo_count > 0 %}
+                <div class="bg-amber-50 border border-amber-200 rounded-md p-4 mb-4">
+                    <p class="text-sm font-medium text-amber-800">
+                        Cannot delete — this client has {{ wo_count }} work order{{ wo_count|pluralize }}.
+                    </p>
+                    <p class="text-sm text-amber-700 mt-1">
+                        Use the <strong>Status</strong> section above to deactivate this client instead.
+                        Deactivating hides the client from the default view while preserving all history.
+                    </p>
+                </div>
+            {% else %}
+                <form method="post" action="{% url 'core:client_delete' client.pk %}">
+                    {% csrf_token %}
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        Type <span class="font-mono bg-gray-100 px-1 rounded">{{ client.name }}</span> to confirm deletion
+                    </label>
+                    <input type="text" name="confirm_name" x-model="confirmName"
+                           placeholder="{{ client.name }}"
+                           class="w-full px-3 py-2 border border-red-300 rounded-md text-sm mb-3 focus:outline-none focus:ring-red-500 focus:border-red-500">
+                    <button type="submit"
+                            :disabled="confirmName !== '{{ client.name|escapejs }}'"
+                            :class="confirmName === '{{ client.name|escapejs }}' ? 'bg-red-600 hover:bg-red-700 cursor-pointer' : 'bg-red-200 cursor-not-allowed'"
+                            class="px-4 py-2 text-white text-sm font-medium rounded-md transition-colors">
+                        Permanently Delete Client
+                    </button>
+                </form>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
 </div>
 {% endblock %}
