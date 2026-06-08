@@ -19,7 +19,8 @@ from .models import (
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
                     CompanySettingsForm, OutboundEmailSettingsForm, InboundEmailSettingsForm,
-                    AttachmentSettingsForm, SecuritySettingsForm, MileageSettingsForm)
+                    AttachmentSettingsForm, SecuritySettingsForm, MileageSettingsForm,
+                    ColorSettingsForm)
 
 
 def _audit_entries(obj):
@@ -1956,6 +1957,7 @@ SETTINGS_TABS = [
     ('canned_responses', 'Canned Responses', None),
     ('quick_labor',      'Quick Labor',      None),
     ('checklist_items',  'Checklist Items',  None),
+    ('colors',           'Colors',           ColorSettingsForm),
 ]
 
 SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS]
@@ -2005,6 +2007,8 @@ class SettingsView(LoginRequiredMixin, View):
             ctx.update(_quick_labor_context())
         if active_tab == 'checklist_items':
             ctx.update(_checklist_items_context())
+        if active_tab == 'colors':
+            ctx.update(_colors_context(forms_map.get('colors')))
         return render(request, 'core/settings.html', ctx)
 
     def post(self, request):
@@ -2040,6 +2044,8 @@ class SettingsView(LoginRequiredMixin, View):
             ctx.update(_quick_labor_context())
         if tab == 'checklist_items':
             ctx.update(_checklist_items_context())
+        if tab == 'colors':
+            ctx.update(_colors_context(forms_map.get('colors') or form))
         return render(request, 'core/settings.html', ctx)
 
 # ---------------------------------------------------------------------------
@@ -2342,6 +2348,29 @@ def _checklist_items_context():
         'cli_items': items,
         'cli_device_types': DEVICE_TYPE_CHOICES,
     }
+
+
+_STATUS_COLOR_ROWS = [
+    ('new',         'New',         'color_status_new',         '#dbeafe'),
+    ('assigned',    'Assigned',    'color_status_assigned',    '#ede9fe'),
+    ('in_progress', 'In Progress', 'color_status_in_progress', '#fef9c3'),
+    ('completed',   'Completed',   'color_status_completed',   '#dcfce7'),
+    ('closed',      'Closed',      'color_status_closed',      '#f3f4f6'),
+    ('cancelled',   'Cancelled',   'color_status_cancelled',   '#fee2e2'),
+]
+
+
+def _colors_context(form):
+    """Build color_status_rows with current values from the bound/unbound form."""
+    rows = []
+    for status_key, status_label, field_name, default_hex in _STATUS_COLOR_ROWS:
+        if form:
+            field = form[field_name]
+            current = field.value() or default_hex
+        else:
+            current = default_hex
+        rows.append((status_key, status_label, field_name, current))
+    return {'color_status_rows': rows}
 
 
 class ChecklistItemCreateView(LoginRequiredMixin, View):

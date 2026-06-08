@@ -412,3 +412,18 @@ class MileageSettingsForm(forms.ModelForm):
             'google_maps_api_key': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'AIza...'}),
             'shop_address': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': '235 Coolidge St. Silverton Oregon 97381'}),
         }
+
+
+_HEX_INPUT = 'w-20 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500'
+
+
+class ColorSettingsForm(forms.ModelForm):
+    class Meta:
+        model = SiteSettings
+        fields = [
+            'color_primary', 'color_accent',
+            'color_status_new', 'color_status_assigned', 'color_status_in_progress',
+            'color_status_completed', 'color_status_closed', 'color_status_cancelled',
+        ]
+        widgets = {f: forms.TextInput(attrs={'class': _HEX_INPUT, 'maxlength': 7, 'placeholder': '#rrggbb'})
+                   for f in fields}

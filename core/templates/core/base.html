@@ -7,11 +7,33 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
     <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    {% with s=site_settings %}{% if s %}
+    <style>
+        :root {
+            --color-primary: {{ s.color_primary|default:"#111827" }};
+            --color-accent:  {{ s.color_accent|default:"#2563eb" }};
+            --color-status-new:          {{ s.color_status_new|default:"#dbeafe" }};
+            --color-status-assigned:     {{ s.color_status_assigned|default:"#ede9fe" }};
+            --color-status-in-progress:  {{ s.color_status_in_progress|default:"#fef9c3" }};
+            --color-status-completed:    {{ s.color_status_completed|default:"#dcfce7" }};
+            --color-status-closed:       {{ s.color_status_closed|default:"#f3f4f6" }};
+            --color-status-cancelled:    {{ s.color_status_cancelled|default:"#fee2e2" }};
+        }
+        nav.app-nav { background-color: var(--color-primary) !important; }
+        .wo-status-badge { background-color: var(--color-status-new); }
+        .wo-status-badge.status-new          { background-color: var(--color-status-new); }
+        .wo-status-badge.status-assigned     { background-color: var(--color-status-assigned); }
+        .wo-status-badge.status-in_progress  { background-color: var(--color-status-in-progress); }
+        .wo-status-badge.status-completed    { background-color: var(--color-status-completed); }
+        .wo-status-badge.status-closed       { background-color: var(--color-status-closed); }
+        .wo-status-badge.status-cancelled    { background-color: var(--color-status-cancelled); }
+    </style>
+    {% endif %}{% endwith %}
 </head>
 <body class="bg-gray-100 min-h-screen" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
 
     <!-- Top Navigation Bar -->
-    <nav class="bg-gray-900 text-white fixed top-0 left-0 right-0 z-30">
+    <nav class="app-nav bg-gray-900 text-white fixed top-0 left-0 right-0 z-30">
         <div class="px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-14">
                 <div class="flex items-center gap-6">

@@ -922,6 +922,18 @@ class SiteSettings(models.Model):
         help_text='Shop address used as the origin for onsite mileage calculations (e.g. 235 Coolidge St. Silverton Oregon 97381).',
     )
 
+    # Status badge colors — hex values rendered as CSS variables
+    color_status_new         = models.CharField(max_length=7, default='#dbeafe', blank=True)  # blue-100
+    color_status_assigned    = models.CharField(max_length=7, default='#ede9fe', blank=True)  # violet-100
+    color_status_in_progress = models.CharField(max_length=7, default='#fef9c3', blank=True)  # yellow-100
+    color_status_completed   = models.CharField(max_length=7, default='#dcfce7', blank=True)  # green-100
+    color_status_closed      = models.CharField(max_length=7, default='#f3f4f6', blank=True)  # gray-100
+    color_status_cancelled   = models.CharField(max_length=7, default='#fee2e2', blank=True)  # red-100
+
+    # Site palette
+    color_primary = models.CharField(max_length=7, default='#111827', blank=True)  # gray-900 — nav/toolbar bg
+    color_accent  = models.CharField(max_length=7, default='#2563eb', blank=True)  # blue-600 — links, buttons
+
     class Meta:
         db_table = 'site_settings'
         verbose_name = 'Site Settings'

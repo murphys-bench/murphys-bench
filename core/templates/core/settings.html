@@ -1018,6 +1018,86 @@
         </div>
         {% endif %}
 
+        <!-- ── Colors ────────────────────────────────────────────────── -->
+        {% if active_tab == 'colors' %}
+        {% with form=forms.colors %}
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="tab" value="colors">
+            <div class="space-y-6">
+
+                <!-- Site Palette -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-lg font-semibold text-gray-900 mb-1">Site Palette</h2>
+                    <p class="text-sm text-gray-500 mb-5">Nav bar background and primary accent color (buttons, links).</p>
+                    <div class="grid grid-cols-2 gap-6 max-w-sm">
+                        <div x-data="{ val: '{{ form.color_primary.value|default:'#111827' }}' }">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Nav / Toolbar Background</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" :value="val" @input="val = $event.target.value"
+                                       class="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0.5"
+                                       @change="$refs.primary_hex.value = $event.target.value">
+                                <input type="text" name="colors-color_primary" x-ref="primary_hex"
+                                       :value="val" @input="val = $event.target.value"
+                                       maxlength="7" placeholder="#111827"
+                                       class="w-24 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            </div>
+                            <div class="mt-2 h-8 rounded text-white text-xs flex items-center px-3 font-medium"
+                                 :style="'background:' + val">Murphy's Bench</div>
+                        </div>
+                        <div x-data="{ val: '{{ form.color_accent.value|default:'#2563eb' }}' }">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Accent (Buttons / Links)</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" :value="val" @input="val = $event.target.value"
+                                       class="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0.5"
+                                       @change="$refs.accent_hex.value = $event.target.value">
+                                <input type="text" name="colors-color_accent" x-ref="accent_hex"
+                                       :value="val" @input="val = $event.target.value"
+                                       maxlength="7" placeholder="#2563eb"
+                                       class="w-24 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            </div>
+                            <div class="mt-2 h-8 rounded text-white text-xs flex items-center px-3 font-medium"
+                                 :style="'background:' + val">Save Changes</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Status Colors -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-lg font-semibold text-gray-900 mb-1">Work Order Status Colors</h2>
+                    <p class="text-sm text-gray-500 mb-5">Background color for status badges on WO lists and detail pages.</p>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-5">
+                        {% for status_key, status_label, field_name, current_val in color_status_rows %}
+                        <div x-data="{ val: '{{ current_val }}' }">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">{{ status_label }}</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" :value="val" @input="val = $event.target.value"
+                                       class="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0.5"
+                                       @change="$refs.hex_{{ status_key }}.value = $event.target.value">
+                                <input type="text" name="colors-{{ field_name }}" x-ref="hex_{{ status_key }}"
+                                       :value="val" @input="val = $event.target.value"
+                                       maxlength="7" placeholder="{{ default_hex }}"
+                                       class="w-24 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            </div>
+                            <div class="mt-2 inline-block px-3 py-1 rounded-full text-xs font-medium text-gray-700"
+                                 :style="'background:' + val">{{ status_label }}</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div>
+                    <button type="submit"
+                            class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-5 py-2 rounded shadow">
+                        Save Colors
+                    </button>
+                </div>
+
+            </div>
+        </form>
+        {% endwith %}
+        {% endif %}
+
     </div>
 </div>
 {% endblock %}

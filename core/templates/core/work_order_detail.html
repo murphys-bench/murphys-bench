@@ -51,13 +51,7 @@
             <p class="text-xs text-gray-400 uppercase tracking-wide">Work Order</p>
             <h1 class="text-2xl font-bold text-gray-900">{{ work_order.work_order_number }}</h1>
             <div class="flex flex-wrap items-center gap-2 mt-1">
-                <span class="px-2 py-0.5 text-xs font-semibold rounded-full
-                    {% if work_order.status == 'new' %}bg-blue-100 text-blue-800
-                    {% elif work_order.status == 'assigned' %}bg-purple-100 text-purple-800
-                    {% elif work_order.status == 'in_progress' %}bg-yellow-100 text-yellow-800
-                    {% elif work_order.status == 'completed' %}bg-green-100 text-green-800
-                    {% elif work_order.status == 'closed' %}bg-gray-100 text-gray-800
-                    {% else %}bg-red-100 text-red-800{% endif %}">
+                <span class="wo-status-badge status-{{ work_order.status }} px-2 py-0.5 text-xs font-semibold rounded-full text-gray-700">
                     {{ work_order.get_status_display }}
                 </span>
                 <span class="px-2 py-0.5 text-xs font-semibold rounded-full
