@@ -59,4 +59,11 @@ urlpatterns = [
     # User management (admin only)
     path('users/', views.UserListView.as_view(), name='user_list'),
     path('users/<int:pk>/reset-mfa/', views.AdminMFAResetView.as_view(), name='user_mfa_reset'),
+
+    # Quick Labor / Work Performed (HTMX)
+    path('work-orders/<int:wo_pk>/log-labor/<int:item_pk>/', views.WorkPerformedLogView.as_view(), name='work_performed_log'),
+    path('work-performed/<int:pk>/delete/', views.WorkPerformedDeleteView.as_view(), name='work_performed_delete'),
+
+    # Repair Report (print view)
+    path('work-orders/<int:pk>/print/', views.WorkOrderPrintView.as_view(), name='work_order_print'),
 ]

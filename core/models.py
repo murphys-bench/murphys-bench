@@ -690,6 +690,45 @@ class TicketLink(models.Model):
         return f"{self.ticket_a.ticket_number} ↔ {self.ticket_b.ticket_number} ({self.link_type})"
 
 
+class QuickLaborItem(models.Model):
+    """Admin-managed labor buttons shown on WO detail. Clicking one logs a WorkPerformed entry."""
+
+    label = models.CharField(max_length=100, help_text='Button label shown to techs, e.g. "Virus / Malware Removal"')
+    category = models.CharField(max_length=100, help_text='Groups buttons by category, e.g. "Software"')
+    print_description = models.TextField(
+        blank=True,
+        help_text='Client-facing description printed on the repair report. Leave blank to use the label.',
+    )
+    is_active = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = 'quick_labor_items'
+        ordering = ['category', 'sort_order', 'label']
+
+    def __str__(self):
+        return f"{self.category} / {self.label}"
+
+    def get_print_description(self):
+        return self.print_description.strip() if self.print_description.strip() else self.label
+
+
+class WorkPerformed(models.Model):
+    """Records a quick labor item logged against a work order."""
+
+    work_order = models.ForeignKey('WorkOrder', on_delete=models.CASCADE, related_name='work_performed')
+    labor_item = models.ForeignKey(QuickLaborItem, on_delete=models.PROTECT, related_name='logged_entries')
+    logged_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='work_performed_logged')
+    logged_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'work_performed'
+        ordering = ['labor_item__category', 'labor_item__label']
+
+    def __str__(self):
+        return f"{self.work_order.work_order_number} — {self.labor_item.label}"
+
+
 class SiteSettings(models.Model):
     """Singleton — site-wide configuration editable from admin."""
 
@@ -777,6 +816,18 @@ class SiteSettings(models.Model):
     inbound_default_client_name = models.CharField(
         max_length=255, blank=True, default='',
         help_text='When no client matches the sender email, new tickets are filed under a new client. Leave blank to auto-name from the sender email domain.',
+    )
+
+    # Company Info (used in repair report header and nav)
+    company_name = models.CharField(max_length=255, blank=True, default='',
+        help_text='Your business name. Appears on repair reports and the nav bar.')
+    company_address = models.CharField(max_length=500, blank=True, default='',
+        help_text='Full address, e.g. 235 Coolidge St., Silverton, OR 97381')
+    company_phone = models.CharField(max_length=50, blank=True, default='')
+    company_email = models.EmailField(blank=True, default='')
+    company_logo = models.ImageField(
+        upload_to='company/', blank=True, null=True,
+        help_text='PNG, JPG, or SVG. Displayed on repair reports and the nav bar.',
     )
 
     # Mileage / Google Maps

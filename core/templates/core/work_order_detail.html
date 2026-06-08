@@ -36,6 +36,10 @@
                 {% include "core/partials/overdue_badge.html" with ticket=linked_ticket %}
             </div>
             {% endif %}
+            <a href="{% url 'core:work_order_print' work_order.pk %}" target="_blank"
+               class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">
+                🖨 Report
+            </a>
             <a href="{% url 'core:work_order_edit' work_order.pk %}"
                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
                 Edit
@@ -144,6 +148,44 @@
             <p class="text-sm text-yellow-800 whitespace-pre-wrap">{{ work_order.notes_internal }}</p>
         </div>
         {% endif %}
+
+        <!-- Work Performed / Quick Labor -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-3">Work Performed</h2>
+            <!-- Logged entries (HTMX target) -->
+            <div id="work-performed-section" class="mb-4">
+                {% include "core/partials/work_performed.html" with categories=wp_categories work_order=work_order %}
+            </div>
+            <!-- Quick Labor buttons -->
+            {% if labor_by_category %}
+            <div class="border-t border-gray-100 pt-4">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Log Work</p>
+                {% for category, items in labor_by_category.items %}
+                <div class="mb-3">
+                    <p class="text-xs text-gray-400 mb-1">{{ category }}</p>
+                    <div class="flex flex-wrap gap-2">
+                        {% for item in items %}
+                        <form method="post"
+                              action="{% url 'core:work_performed_log' work_order.pk item.pk %}"
+                              hx-post="{% url 'core:work_performed_log' work_order.pk item.pk %}"
+                              hx-target="#work-performed-section"
+                              hx-swap="innerHTML"
+                              class="inline">
+                            {% csrf_token %}
+                            <button type="submit"
+                                    class="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-blue-50 hover:text-blue-700 border border-gray-200 hover:border-blue-300 transition-colors">
+                                {{ item.label }}
+                            </button>
+                        </form>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-xs text-gray-400 mt-2">No Quick Labor items configured. Add them in the admin panel.</p>
+            {% endif %}
+        </div>
 
         <!-- Tab bar -->
         <div class="flex border-b border-gray-200 mb-2">
