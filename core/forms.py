@@ -15,7 +15,8 @@ class WorkOrderForm(forms.ModelForm):
         fields = [
             'client', 'contact', 'device', 'repair_type', 'assigned_to',
             'service_type', 'status', 'priority', 'scheduled_date',
-            'time_spent_minutes', 'notes_customer_visible', 'notes_internal',
+            'time_spent_minutes', 'invoice_ninja_ref',
+            'notes_customer_visible', 'notes_internal',
         ]
         widgets = {
             'client': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
@@ -28,6 +29,7 @@ class WorkOrderForm(forms.ModelForm):
             'priority': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'scheduled_date': forms.DateInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'type': 'date'}),
             'time_spent_minutes': forms.NumberInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
+            'invoice_ninja_ref': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'e.g. INV-0042'}),
             'notes_customer_visible': forms.Textarea(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'rows': 4}),
             'notes_internal': forms.Textarea(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'rows': 4}),
         }
@@ -43,6 +45,7 @@ class WorkOrderForm(forms.ModelForm):
         self.fields['repair_type'].required = False
         self.fields['scheduled_date'].required = False
         self.fields['time_spent_minutes'].required = False
+        self.fields['invoice_ninja_ref'].required = False
 
         if client_id:
             self.fields['contact'].queryset = Contact.objects.filter(
