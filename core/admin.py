@@ -230,24 +230,19 @@ class MileageAdmin(admin.ModelAdmin):
 
 
 # Checklist & Items Inlines
-class ChecklistItemInline(admin.TabularInline):
-    model = ChecklistItem
-    extra = 1
-    fields = ['description', 'sort_order', 'is_active']
-
-
 @admin.register(Checklist)
 class ChecklistAdmin(admin.ModelAdmin):
     list_display = ['name', 'repair_type', 'is_default', 'is_active']
     list_filter = ['repair_type', 'is_default', 'is_active']
-    search_fields = ['name', 'description']
-    inlines = [ChecklistItemInline]
-    fieldsets = (
-        ('Checklist Info', {'fields': ('name', 'repair_type', 'is_default', 'is_active')}),
-        ('Description', {'fields': ('description',), 'classes': ('collapse',)}),
-        ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
-    )
+    search_fields = ['name']
     readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(ChecklistItem)
+class ChecklistItemAdmin(admin.ModelAdmin):
+    list_display = ['name', 'device_types', 'sort_order', 'is_active']
+    list_filter = ['is_active']
+    search_fields = ['name']
 
 
 # Canned Response Admin
