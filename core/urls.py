@@ -74,6 +74,7 @@ urlpatterns = [
     path('clients/<int:client_pk>/contacts/new/', views.ContactCreateView.as_view(), name='contact_create'),
     path('contacts/<int:pk>/edit/', views.ContactUpdateView.as_view(), name='contact_edit'),
     path('contacts/<int:pk>/delete/', views.ContactDeleteView.as_view(), name='contact_delete'),
+    path('contacts/<int:pk>/set-primary/', views.ContactSetPrimaryView.as_view(), name='contact_set_primary'),
 
     # Native Settings UI
     path('settings/', views.SettingsView.as_view(), name='settings'),

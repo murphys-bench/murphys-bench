@@ -190,6 +190,7 @@ class ContactPhone(models.Model):
     contact = models.ForeignKey(Contact, on_delete=models.CASCADE, related_name='phone_numbers')
     number = models.CharField(max_length=30)
     phone_type = models.CharField(max_length=10, choices=PHONE_TYPE_CHOICES, default='cell')
+    label = models.CharField(max_length=50, blank=True, help_text="Optional custom label, e.g. 'Mom's cell'")
 
     class Meta:
         db_table = 'contact_phones'
