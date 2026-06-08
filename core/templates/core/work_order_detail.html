@@ -3,47 +3,88 @@
 {% block title %}{{ work_order.work_order_number }} - Murphy's Bench{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow">
-    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex items-center justify-between">
-        <div>
-            <div class="flex items-center gap-3">
-                <a href="{% url 'core:work_order_list' %}" class="text-gray-400 hover:text-gray-600 text-sm">← Work Orders</a>
-            </div>
-            <h1 class="text-2xl font-bold text-gray-900 mt-1">{{ work_order.work_order_number }}</h1>
-            <p class="text-gray-500 text-sm">{{ work_order.client.name }}{% if work_order.device %} — {{ work_order.device.name }}{% endif %}</p>
-        </div>
-        <div class="flex items-center gap-3">
-            <span class="px-3 py-1 text-sm font-semibold rounded-full
-                {% if work_order.status == 'new' %}bg-blue-100 text-blue-800
-                {% elif work_order.status == 'assigned' %}bg-purple-100 text-purple-800
-                {% elif work_order.status == 'in_progress' %}bg-yellow-100 text-yellow-800
-                {% elif work_order.status == 'completed' %}bg-green-100 text-green-800
-                {% elif work_order.status == 'closed' %}bg-gray-100 text-gray-800
-                {% else %}bg-red-100 text-red-800
-                {% endif %}">
-                {{ work_order.get_status_display }}
-            </span>
-            <span class="px-3 py-1 text-sm font-semibold rounded-full
-                {% if work_order.priority == 'low' %}bg-gray-100 text-gray-600
-                {% elif work_order.priority == 'normal' %}bg-blue-100 text-blue-800
-                {% elif work_order.priority == 'high' %}bg-orange-100 text-orange-800
-                {% else %}bg-red-100 text-red-800
-                {% endif %}">
-                {{ work_order.get_priority_display }} Priority
-            </span>
-            {% if linked_ticket %}
-            <div id="overdue-section">
-                {% include "core/partials/overdue_badge.html" with ticket=linked_ticket %}
-            </div>
+<!-- Unified black action toolbar -->
+<div class="bg-gray-900 text-white">
+    <div class="max-w-7xl mx-auto px-4 py-0 sm:px-6 lg:px-8">
+        <div class="flex flex-wrap items-center gap-0 text-sm">
+            <a href="{% url 'core:client_detail' work_order.client.pk %}"
+               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">View Client</a>
+            <a href="{% url 'core:client_edit' work_order.client.pk %}"
+               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Edit Client</a>
+            {% if work_order.device %}
+            <a href="{% url 'core:device_edit' work_order.device.pk %}"
+               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Edit Device</a>
             {% endif %}
-            <a href="{% url 'core:work_order_print' work_order.pk %}" target="_blank"
-               class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">
-                🖨 Report
-            </a>
             <a href="{% url 'core:work_order_edit' work_order.pk %}"
-               class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
-                Edit
-            </a>
+               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Edit WO</a>
+            <a href="{% url 'core:client_detail' work_order.client.pk %}#wo-history"
+               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">WO History</a>
+            <a href="{% url 'core:work_order_print' work_order.pk %}" target="_blank"
+               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">🖨 Repair Report</a>
+            <a href="{% url 'core:work_order_print' work_order.pk %}?type=claim" target="_blank"
+               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Claim Ticket</a>
+            <!-- Status inline update -->
+            <form method="post" action="{% url 'core:work_order_edit' work_order.pk %}" class="ml-auto flex items-center">
+                {% csrf_token %}
+                <input type="hidden" name="client" value="{{ work_order.client_id }}">
+                <input type="hidden" name="contact" value="{{ work_order.contact_id|default:'' }}">
+                <input type="hidden" name="device" value="{{ work_order.device_id|default:'' }}">
+                <input type="hidden" name="repair_type" value="{{ work_order.repair_type_id|default:'' }}">
+                <input type="hidden" name="assigned_to" value="{{ work_order.assigned_to_id|default:'' }}">
+                <input type="hidden" name="service_type" value="{{ work_order.service_type }}">
+                <input type="hidden" name="priority" value="{{ work_order.priority }}">
+                <select name="status" onchange="this.form.submit()"
+                        class="bg-gray-800 text-white text-sm border border-gray-600 rounded px-2 py-1.5 mx-3 focus:outline-none focus:ring-1 focus:ring-gray-400">
+                    {% for val, label in work_order.STATUS_CHOICES %}
+                    <option value="{{ val }}" {% if work_order.status == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Page header -->
+<div class="bg-white shadow">
+    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex items-start justify-between">
+        <div>
+            <p class="text-xs text-gray-400 uppercase tracking-wide">Work Order</p>
+            <h1 class="text-2xl font-bold text-gray-900">{{ work_order.work_order_number }}</h1>
+            <div class="flex flex-wrap items-center gap-2 mt-1">
+                <span class="px-2 py-0.5 text-xs font-semibold rounded-full
+                    {% if work_order.status == 'new' %}bg-blue-100 text-blue-800
+                    {% elif work_order.status == 'assigned' %}bg-purple-100 text-purple-800
+                    {% elif work_order.status == 'in_progress' %}bg-yellow-100 text-yellow-800
+                    {% elif work_order.status == 'completed' %}bg-green-100 text-green-800
+                    {% elif work_order.status == 'closed' %}bg-gray-100 text-gray-800
+                    {% else %}bg-red-100 text-red-800{% endif %}">
+                    {{ work_order.get_status_display }}
+                </span>
+                <span class="px-2 py-0.5 text-xs font-semibold rounded-full
+                    {% if work_order.priority == 'low' %}bg-gray-100 text-gray-600
+                    {% elif work_order.priority == 'normal' %}bg-blue-100 text-blue-800
+                    {% elif work_order.priority == 'high' %}bg-orange-100 text-orange-800
+                    {% else %}bg-red-100 text-red-800{% endif %}">
+                    {{ work_order.get_priority_display }} Priority
+                </span>
+                <span class="text-xs text-gray-500">{{ work_order.get_service_type_display }}</span>
+                {% if work_order.service_type == 'onsite' %}
+                <a href="{% url 'core:wo_mileage_create' work_order.pk %}"
+                   class="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded hover:bg-green-200">+ Mileage</a>
+                {% endif %}
+                {% if linked_ticket %}
+                <div id="overdue-section">
+                    {% include "core/partials/overdue_badge.html" with ticket=linked_ticket %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="text-right text-sm text-gray-500 shrink-0 ml-4">
+            <p class="text-2xl font-bold text-gray-700">{{ days_open }}<span class="text-sm font-normal ml-1">day{{ days_open|pluralize }} open</span></p>
+            <p class="text-xs mt-1">Opened {{ work_order.created_at|date:"M d, Y" }}</p>
+            {% if work_order.completed_date %}
+            <p class="text-xs text-green-600">Completed {{ work_order.completed_date|date:"M d, Y" }}</p>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -52,66 +93,94 @@
 {% block content %}
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-    <!-- Left Column: Main Info -->
+    <!-- Left Column: Main content -->
     <div class="lg:col-span-2 space-y-6">
 
-        <!-- Work Order Info -->
+        <!-- Client + Device info cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+            <!-- Client card -->
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Client</h3>
+                    <a href="{% url 'core:client_detail' work_order.client.pk %}" class="text-xs text-blue-600 hover:underline">View →</a>
+                </div>
+                <p class="text-sm font-semibold text-gray-900">{{ work_order.client.name }}</p>
+                {% if work_order.contact %}
+                <p class="text-sm text-gray-700 mt-0.5">{{ work_order.contact.first_name }} {{ work_order.contact.last_name }}</p>
+                {% endif %}
+                {% if work_order.client.phone %}<p class="text-sm text-gray-600 mt-1">{{ work_order.client.phone }}</p>{% endif %}
+                {% if work_order.client.email %}<p class="text-sm text-gray-600">{{ work_order.client.email }}</p>{% endif %}
+                {% if work_order.client.address_street %}
+                <p class="text-xs text-gray-500 mt-1">
+                    {{ work_order.client.address_street }},
+                    {{ work_order.client.address_city }}{% if work_order.client.address_state %}, {{ work_order.client.address_state }}{% endif %} {{ work_order.client.address_zip }}
+                </p>
+                {% endif %}
+            </div>
+
+            <!-- Device card -->
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Device</h3>
+                    {% if work_order.device %}
+                    <a href="{% url 'core:device_edit' work_order.device.pk %}" class="text-xs text-blue-600 hover:underline">Edit →</a>
+                    {% endif %}
+                </div>
+                {% if work_order.device %}
+                <p class="text-sm font-semibold text-gray-900">{{ work_order.device.name }}</p>
+                {% if work_order.device.manufacturer or work_order.device.model %}
+                <p class="text-sm text-gray-600 mt-0.5">{{ work_order.device.manufacturer }} {{ work_order.device.model }}</p>
+                {% endif %}
+                <dl class="mt-2 space-y-1 text-xs text-gray-600">
+                    {% if work_order.device.serial_number %}
+                    <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">Serial</dt><dd class="font-mono">{{ work_order.device.serial_number }}</dd></div>
+                    {% endif %}
+                    {% if work_order.device.os %}
+                    <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">OS</dt><dd>{{ work_order.device.get_os_display }}{% if work_order.device.os_version %} {{ work_order.device.os_version }}{% endif %}</dd></div>
+                    {% endif %}
+                    {% if work_order.device.condition_at_intake %}
+                    <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">Condition</dt><dd>{{ work_order.device.get_condition_at_intake_display }}</dd></div>
+                    {% endif %}
+                </dl>
+                {% else %}
+                <p class="text-sm text-gray-400 italic">No device assigned.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- WO Details -->
         <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4">Details</h2>
-            <dl class="grid grid-cols-2 gap-4">
+            <h2 class="text-base font-semibold text-gray-900 mb-4">Details</h2>
+            <dl class="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                    <dt class="text-sm font-medium text-gray-500">Client</dt>
-                    <dd class="text-sm text-gray-900 mt-1">{{ work_order.client.name }}</dd>
+                    <dt class="text-xs font-medium text-gray-500 uppercase">Repair Type</dt>
+                    <dd class="text-gray-900 mt-1">{{ work_order.repair_type|default:"—" }}</dd>
                 </div>
                 <div>
-                    <dt class="text-sm font-medium text-gray-500">Device</dt>
-                    <dd class="text-sm text-gray-900 mt-1">{{ work_order.device.name|default:"—" }}</dd>
+                    <dt class="text-xs font-medium text-gray-500 uppercase">Assigned To</dt>
+                    <dd class="text-gray-900 mt-1">{{ work_order.assigned_to.get_full_name|default:"Unassigned" }}</dd>
                 </div>
                 <div>
-                    <dt class="text-sm font-medium text-gray-500">Repair Type</dt>
-                    <dd class="text-sm text-gray-900 mt-1">{{ work_order.repair_type|default:"—" }}</dd>
+                    <dt class="text-xs font-medium text-gray-500 uppercase">Scheduled Date</dt>
+                    <dd class="text-gray-900 mt-1">{{ work_order.scheduled_date|date:"M d, Y"|default:"—" }}</dd>
                 </div>
                 <div>
-                    <dt class="text-sm font-medium text-gray-500">Service Type</dt>
-                    <dd class="text-sm text-gray-900 mt-1 flex items-center gap-2">
-                        {{ work_order.get_service_type_display }}
-                        {% if work_order.service_type == 'onsite' %}
-                            <a href="{% url 'core:wo_mileage_create' work_order.pk %}"
-                               class="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded hover:bg-green-200">
-                                + Mileage
-                            </a>
-                        {% endif %}
-                    </dd>
-                </div>
-                <div>
-                    <dt class="text-sm font-medium text-gray-500">Assigned To</dt>
-                    <dd class="text-sm text-gray-900 mt-1">{{ work_order.assigned_to.get_full_name|default:"Unassigned" }}</dd>
-                </div>
-                <div>
-                    <dt class="text-sm font-medium text-gray-500">Scheduled Date</dt>
-                    <dd class="text-sm text-gray-900 mt-1">{{ work_order.scheduled_date|date:"M d, Y"|default:"—" }}</dd>
-                </div>
-                <div>
-                    <dt class="text-sm font-medium text-gray-500">Time Spent</dt>
-                    <dd class="text-sm text-gray-900 mt-1" id="time-spent-wrapper">
+                    <dt class="text-xs font-medium text-gray-500 uppercase">Time Spent</dt>
+                    <dd class="text-gray-900 mt-1" id="time-spent-wrapper">
                         {% include "core/partials/wo_time_spent.html" %}
                     </dd>
                 </div>
+                {% if work_order.invoice_ninja_ref %}
                 <div>
-                    <dt class="text-sm font-medium text-gray-500">Created</dt>
-                    <dd class="text-sm text-gray-900 mt-1">{{ work_order.created_at|date:"M d, Y g:i A" }}</dd>
-                </div>
-                {% if work_order.completed_date %}
-                <div>
-                    <dt class="text-sm font-medium text-gray-500">Completed</dt>
-                    <dd class="text-sm text-gray-900 mt-1">{{ work_order.completed_date|date:"M d, Y g:i A" }}</dd>
+                    <dt class="text-xs font-medium text-gray-500 uppercase">Invoice Ninja Ref</dt>
+                    <dd class="text-gray-900 mt-1 font-mono">{{ work_order.invoice_ninja_ref }}</dd>
                 </div>
                 {% endif %}
             </dl>
         </div>
 
         {% if custom_field_values %}
-        <!-- Custom Fields -->
         <div class="bg-white rounded-lg shadow p-6">
             <h2 class="text-base font-semibold text-gray-900 mb-3">Additional Information</h2>
             <dl class="grid grid-cols-1 gap-3">
@@ -133,30 +202,12 @@
         </div>
         {% endif %}
 
-        <!-- Customer-Visible Notes -->
-        {% if work_order.notes_customer_visible %}
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-3">Customer Notes</h2>
-            <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ work_order.notes_customer_visible }}</p>
-        </div>
-        {% endif %}
-
-        <!-- Internal Notes -->
-        {% if work_order.notes_internal %}
-        <div class="bg-yellow-50 border border-yellow-200 rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-yellow-900 mb-3">🔒 Internal Notes</h2>
-            <p class="text-sm text-yellow-800 whitespace-pre-wrap">{{ work_order.notes_internal }}</p>
-        </div>
-        {% endif %}
-
-        <!-- Work Performed / Quick Labor -->
+        <!-- Work Performed -->
         <div class="bg-white rounded-lg shadow p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-3">Work Performed</h2>
-            <!-- Logged entries (HTMX target) -->
             <div id="work-performed-section" class="mb-4">
                 {% include "core/partials/work_performed.html" with categories=wp_categories work_order=work_order %}
             </div>
-            <!-- Quick Labor buttons -->
             {% if labor_by_category %}
             <div class="border-t border-gray-100 pt-4">
                 <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Log Work</p>
@@ -183,31 +234,25 @@
                 {% endfor %}
             </div>
             {% else %}
-            <p class="text-xs text-gray-400 mt-2">No Quick Labor items configured. Add them in the admin panel.</p>
+            <p class="text-xs text-gray-400 mt-2">No Quick Labor items configured.</p>
             {% endif %}
         </div>
 
-        <!-- Tab bar -->
-        <div class="flex border-b border-gray-200 mb-2">
+        <!-- Activity Tabs -->
+        <div class="flex border-b border-gray-200">
             <button onclick="showTab('tab-activity', this)"
-                    class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-blue-600 text-blue-600 -mb-px">
-                Activity
-            </button>
+                    class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-blue-600 text-blue-600 -mb-px">Activity</button>
             <button onclick="showTab('tab-attachments', this)"
                     class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 -mb-px">
                 Attachments{% if wo_attachments %} ({{ wo_attachments.count }}){% endif %}
             </button>
             <button onclick="showTab('tab-history', this)"
-                    class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 -mb-px">
-                History
-            </button>
+                    class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 -mb-px">History</button>
         </div>
 
-        <!-- Activity Notes -->
+        <!-- Activity -->
         <div id="tab-activity" class="bg-white rounded-lg shadow p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">Activity</h2>
-
-            <!-- Notes list — HTMX appends new notes here -->
             <div id="notes-list" class="space-y-4 mb-6">
                 {% for note in work_order.notes.all %}
                     {% include "core/partials/note_item.html" %}
@@ -215,8 +260,6 @@
                     <p class="text-gray-400 text-sm" id="no-notes-msg">No activity notes yet.</p>
                 {% endfor %}
             </div>
-
-            <!-- Add Note Form -->
             <div class="border-t border-gray-100 pt-4">
                 <h3 class="text-sm font-semibold text-gray-700 mb-3">Add Note</h3>
                 <form hx-post="{% url 'core:work_order_note_add' work_order.pk %}"
@@ -233,9 +276,7 @@
                         </select>
                     </div>
                     <div class="mb-3">
-                        <textarea name="content"
-                                  rows="3"
-                                  placeholder="Add a note..."
+                        <textarea name="content" rows="3" placeholder="Add a note..."
                                   class="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                                   required></textarea>
                     </div>
@@ -244,9 +285,7 @@
                                class="w-full text-xs text-gray-500 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200">
                     </div>
                     <button type="submit"
-                            class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        Add Note
-                    </button>
+                            class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">Add Note</button>
                 </form>
             </div>
         </div>
@@ -274,10 +313,8 @@
                         {% if row.entry.action == 0 %}created
                         {% elif row.entry.action == 1 %}updated
                         {% elif row.entry.action == 2 %}deleted
-                        {% else %}{{ row.entry.get_action_display }}
-                        {% endif %}
-                        {% if row.changes %}
-                            —
+                        {% else %}{{ row.entry.get_action_display }}{% endif %}
+                        {% if row.changes %} —
                             {% for change in row.changes %}
                                 <span class="font-mono text-xs">{{ change.field }}</span>{% if not forloop.last %}, {% endif %}
                             {% endfor %}
@@ -293,47 +330,54 @@
 
     </div>
 
-    <!-- Right Column: Sidebar -->
+    <!-- Right Column -->
     <div class="space-y-6">
 
         <!-- Device Credentials -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-3">🔑 Device Credentials</h2>
+        <div class="bg-white rounded-lg shadow p-5">
+            <h2 class="text-base font-semibold text-gray-900 mb-3">🔑 Device Credentials</h2>
             {% include "core/partials/credentials_display.html" %}
         </div>
 
-        <!-- Checklist / Items -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4">Items & Checklist</h2>
-            {% if work_order.items.all %}
-                <ul class="space-y-1">
-                    {% for item in work_order.items.all %}
-                        {% include "core/partials/checklist_item.html" %}
-                    {% endfor %}
-                </ul>
-            {% else %}
-                <p class="text-gray-400 text-sm">No items yet.</p>
-            {% endif %}
+        <!-- Checklist (collapsed by default) -->
+        <div class="bg-white rounded-lg shadow overflow-hidden" x-data="{ open: false }">
+            <button type="button" @click="open = !open"
+                    class="w-full px-5 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                <span class="text-base font-semibold text-gray-900">Items &amp; Checklist
+                    {% if work_order.items.all %}
+                    <span class="ml-1 text-xs font-normal text-gray-400">({{ work_order.items.count }})</span>
+                    {% endif %}
+                </span>
+                <svg class="w-4 h-4 text-gray-400 transition-transform" :class="open && 'rotate-180'"
+                     fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </button>
+            <div x-show="open" x-cloak class="px-5 pb-5 border-t border-gray-100">
+                {% if work_order.items.all %}
+                    <ul class="space-y-1 mt-3">
+                        {% for item in work_order.items.all %}
+                            {% include "core/partials/checklist_item.html" %}
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="text-gray-400 text-sm mt-3">No items yet.</p>
+                {% endif %}
+            </div>
         </div>
 
         <!-- Timer -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-3">Timer</h2>
+        <div class="bg-white rounded-lg shadow p-5">
+            <h2 class="text-base font-semibold text-gray-900 mb-3">Timer</h2>
             <div class="text-center">
                 <div id="timer-display" class="text-4xl font-mono font-semibold text-gray-800 mb-3 tracking-wider">00:00:00</div>
                 <div class="flex justify-center gap-2 mb-4">
                     <button id="timer-start" onclick="timerStart()"
-                        class="px-4 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 font-medium">
-                        Start
-                    </button>
+                        class="px-4 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 font-medium">Start</button>
                     <button id="timer-pause" onclick="timerPause()" disabled
-                        class="px-4 py-1.5 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600 font-medium disabled:opacity-40 disabled:cursor-not-allowed">
-                        Pause
-                    </button>
+                        class="px-4 py-1.5 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600 font-medium disabled:opacity-40 disabled:cursor-not-allowed">Pause</button>
                     <button onclick="timerReset()"
-                        class="px-4 py-1.5 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300 font-medium">
-                        Reset
-                    </button>
+                        class="px-4 py-1.5 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300 font-medium">Reset</button>
                 </div>
                 <form id="timer-log-form"
                       hx-post="{% url 'core:work_order_add_time' work_order.pk %}"
@@ -351,17 +395,13 @@
         </div>
 
         <!-- Quick Actions -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
+        <div class="bg-white rounded-lg shadow p-5">
+            <h2 class="text-base font-semibold text-gray-900 mb-3">Quick Actions</h2>
             <div class="space-y-2">
                 <a href="#notes-list"
-                   class="block w-full text-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">
-                    Add Note ↓
-                </a>
+                   class="block w-full text-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">Add Note ↓</a>
                 <a href="{% url 'core:kb_list' %}"
-                   class="block w-full text-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">
-                    Search KB
-                </a>
+                   class="block w-full text-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">Search KB</a>
             </div>
         </div>
 
@@ -389,25 +429,16 @@ function timerLoad() {
     const raw = localStorage.getItem(TIMER_KEY);
     return raw ? JSON.parse(raw) : { accumulated: 0, startedAt: null };
 }
-
-function timerSave(state) {
-    localStorage.setItem(TIMER_KEY, JSON.stringify(state));
-}
-
+function timerSave(state) { localStorage.setItem(TIMER_KEY, JSON.stringify(state)); }
 function timerElapsedMs(state) {
     let ms = state.accumulated;
     if (state.startedAt) ms += Date.now() - state.startedAt;
     return ms;
 }
-
 function timerFormat(ms) {
-    const totalSec = Math.floor(ms / 1000);
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    return [h, m, s].map(n => String(n).padStart(2, '0')).join(':');
+    const s = Math.floor(ms / 1000);
+    return [Math.floor(s/3600), Math.floor((s%3600)/60), s%60].map(n => String(n).padStart(2,'0')).join(':');
 }
-
 function timerUpdateUI() {
     const state = timerLoad();
     const ms = timerElapsedMs(state);
@@ -420,47 +451,28 @@ function timerUpdateUI() {
     document.getElementById('timer-pause').disabled = !running;
     document.getElementById('timer-log-btn').disabled = totalMin === 0;
 }
-
 function timerStart() {
     const state = timerLoad();
-    if (!state.startedAt) {
-        state.startedAt = Date.now();
-        timerSave(state);
-    }
+    if (!state.startedAt) { state.startedAt = Date.now(); timerSave(state); }
     clearInterval(timerInterval);
     timerInterval = setInterval(timerUpdateUI, 1000);
     timerUpdateUI();
 }
-
 function timerPause() {
     const state = timerLoad();
-    if (state.startedAt) {
-        state.accumulated += Date.now() - state.startedAt;
-        state.startedAt = null;
-        timerSave(state);
-    }
+    if (state.startedAt) { state.accumulated += Date.now() - state.startedAt; state.startedAt = null; timerSave(state); }
     clearInterval(timerInterval);
     timerUpdateUI();
 }
-
 function timerReset() {
     clearInterval(timerInterval);
     timerSave({ accumulated: 0, startedAt: null });
     timerUpdateUI();
 }
-
-function timerAfterLog() {
-    timerReset();
-}
-
-// Restore state on load
+function timerAfterLog() { timerReset(); }
 (function() {
     const state = timerLoad();
-    if (state.startedAt) {
-        timerStart();  // resume if was running
-    } else {
-        timerUpdateUI();
-    }
+    if (state.startedAt) timerStart(); else timerUpdateUI();
 })();
 </script>
 {% endblock %}

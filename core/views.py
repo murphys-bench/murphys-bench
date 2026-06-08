@@ -247,11 +247,17 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
 
     def get_queryset(self):
         return WorkOrder.objects.select_related(
-            'client', 'assigned_to', 'device', 'repair_type', 'ticket'
+            'client', 'assigned_to', 'device', 'device__assigned_contact',
+            'repair_type', 'ticket', 'contact'
         ).prefetch_related('notes', 'items', 'notes__created_by')
 
     def get_context_data(self, **kwargs):
+        from django.utils import timezone
         context = super().get_context_data(**kwargs)
+        wo = self.object
+        # Days open
+        end = wo.completed_date.date() if wo.completed_date else timezone.now().date()
+        context['days_open'] = (end - wo.created_at.date()).days
         context['audit_log'] = _audit_entries(self.object)
         ct = ContentType.objects.get_for_model(WorkOrder)
         context['wo_attachments'] = Attachment.objects.filter(content_type=ct, object_id=self.object.pk)
@@ -1921,7 +1927,8 @@ class WorkOrderCredentialsSaveView(LoginRequiredMixin, View):
         wo.device_username = request.POST.get('device_username', '').strip()
         wo.device_password = request.POST.get('device_password', '').strip()
         wo.device_pin = request.POST.get('device_pin', '').strip()
-        wo.save(update_fields=['device_username', 'device_password', 'device_pin'])
+        wo.credential_notes = request.POST.get('credential_notes', '').strip()
+        wo.save(update_fields=['device_username', 'device_password', 'device_pin', 'credential_notes'])
         return render(request, 'core/partials/credentials_display.html', {'work_order': wo})
 
 

@@ -523,10 +523,12 @@ class WorkOrder(models.Model):
     completed_date = models.DateTimeField(null=True, blank=True)
     notes_internal = models.TextField(blank=True, help_text="Technician-only notes")
     notes_customer_visible = models.TextField(blank=True, help_text="What the customer sees")
+    invoice_ninja_ref = models.CharField(max_length=100, blank=True, help_text='Invoice Ninja invoice reference number')
     # Device credentials (never shown on printed reports)
     device_username = models.CharField(max_length=255, blank=True)
     device_password = models.CharField(max_length=255, blank=True)
     device_pin = models.CharField(max_length=50, blank=True)
+    credential_notes = models.TextField(blank=True, help_text='Freeform credential notes, e.g. recovery email, security question answers')
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 

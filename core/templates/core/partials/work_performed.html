@@ -1,24 +1,30 @@
 {% comment %}
 HTMX partial — rendered by WorkPerformedLogView and WorkPerformedDeleteView.
-Shows logged Quick Labor items grouped by category.
+Shows logged Quick Labor items grouped by category, with description and timestamp.
 {% endcomment %}
 {% if categories %}
     {% for category, entries in categories.items %}
-    <div class="mb-3">
-        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{{ category }}</p>
-        <div class="flex flex-wrap gap-2">
+    <div class="mb-4">
+        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{{ category }}</p>
+        <div class="space-y-2">
             {% for entry in entries %}
-            <span class="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 text-blue-800 text-sm rounded-md">
-                {{ entry.labor_item.label }}
+            <div class="flex items-start justify-between gap-3 py-2 border-b border-gray-50 last:border-0">
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-semibold text-gray-800">{{ entry.labor_item.label }}</p>
+                    {% if entry.labor_item.print_description %}
+                    <p class="text-sm text-gray-600 mt-0.5">{{ entry.labor_item.print_description }}</p>
+                    {% endif %}
+                    <p class="text-xs text-gray-400 mt-0.5">{{ entry.logged_at|date:"M d, Y g:i A" }}{% if entry.logged_by %} · {{ entry.logged_by.get_full_name|default:entry.logged_by.username }}{% endif %}</p>
+                </div>
                 <form method="post" action="{% url 'core:work_performed_delete' entry.pk %}"
                       hx-post="{% url 'core:work_performed_delete' entry.pk %}"
                       hx-target="#work-performed-section"
                       hx-swap="innerHTML"
-                      class="inline">
+                      class="shrink-0">
                     {% csrf_token %}
-                    <button type="submit" class="text-blue-400 hover:text-red-500 ml-1 leading-none" title="Remove">&times;</button>
+                    <button type="submit" class="text-gray-300 hover:text-red-500 text-lg leading-none" title="Remove">&times;</button>
                 </form>
-            </span>
+            </div>
             {% endfor %}
         </div>
     </div>
