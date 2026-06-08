@@ -15,6 +15,8 @@ from .models import (
     KBCategory, KBArticle, TicketQueue, DashboardTile, User,
     CustomField, CustomFieldValue,
     QuickLaborItem, WorkPerformed, ContactPhone,
+    Contact, RepairType, RepairTypeCategory,
+    CannedResponseCategory, CannedResponse,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
@@ -1965,7 +1967,6 @@ SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS]
 
 
 def _repair_types_context():
-    from .models import RepairTypeCategory
     categories = RepairTypeCategory.objects.prefetch_related(
         'repair_types'
     ).order_by('sort_order', 'name')
@@ -2077,7 +2078,6 @@ class RepairTypeCategoryCreateView(LoginRequiredMixin, View):
 
 class RepairTypeCategoryDeleteView(LoginRequiredMixin, View):
     def post(self, request, pk):
-        from .models import RepairTypeCategory
         cat = get_object_or_404(RepairTypeCategory, pk=pk)
         RepairType.objects.filter(category=cat).update(category=None)
         cat.delete()
@@ -2086,7 +2086,6 @@ class RepairTypeCategoryDeleteView(LoginRequiredMixin, View):
 
 class RepairTypeCategoryReorderView(LoginRequiredMixin, View):
     def post(self, request, pk):
-        from .models import RepairTypeCategory
         direction = request.POST.get('direction')
         cat = get_object_or_404(RepairTypeCategory, pk=pk)
         cats = list(RepairTypeCategory.objects.order_by('sort_order', 'name'))
@@ -2106,7 +2105,6 @@ class RepairTypeCategoryReorderView(LoginRequiredMixin, View):
 
 class RepairTypeCreateView(LoginRequiredMixin, View):
     def post(self, request):
-        from .models import RepairTypeCategory
         name = request.POST.get('name', '').strip()
         cat_id = request.POST.get('category_id') or None
         if name:
@@ -2117,7 +2115,6 @@ class RepairTypeCreateView(LoginRequiredMixin, View):
 
 class RepairTypeUpdateView(LoginRequiredMixin, View):
     def post(self, request, pk):
-        from .models import RepairTypeCategory
         rt = get_object_or_404(RepairType, pk=pk)
         name = request.POST.get('name', '').strip()
         cat_id = request.POST.get('category_id') or None
@@ -2144,7 +2141,6 @@ CANNED_TAB = '?tab=canned_responses'
 
 
 def _canned_responses_context():
-    from .models import CannedResponseCategory, CannedResponse
     cr_streams = []
     for stream_key, stream_label in [('customer', 'Customer Notes'), ('internal', 'Tech Notes (Internal)')]:
         cats = CannedResponseCategory.objects.filter(
@@ -2159,7 +2155,6 @@ def _canned_responses_context():
 
 class CannedResponseCategoryCreateView(LoginRequiredMixin, View):
     def post(self, request):
-        from .models import CannedResponseCategory
         stream = request.POST.get('stream', 'customer')
         name = request.POST.get('name', '').strip()
         if name and stream in ('customer', 'internal'):
@@ -2169,7 +2164,6 @@ class CannedResponseCategoryCreateView(LoginRequiredMixin, View):
 
 class CannedResponseCategoryDeleteView(LoginRequiredMixin, View):
     def post(self, request, pk):
-        from .models import CannedResponseCategory
         cat = get_object_or_404(CannedResponseCategory, pk=pk)
         # reassign orphaned responses to no category before deleting
         cat.responses.update(category=None)
@@ -2179,7 +2173,6 @@ class CannedResponseCategoryDeleteView(LoginRequiredMixin, View):
 
 class CannedResponseCategoryReorderView(LoginRequiredMixin, View):
     def post(self, request, pk):
-        from .models import CannedResponseCategory
         direction = request.POST.get('direction')
         cat = get_object_or_404(CannedResponseCategory, pk=pk)
         siblings = list(
@@ -2198,7 +2191,6 @@ class CannedResponseCategoryReorderView(LoginRequiredMixin, View):
 
 class CannedResponseCreateView(LoginRequiredMixin, View):
     def post(self, request):
-        from .models import CannedResponseCategory, CannedResponse
         stream = request.POST.get('stream', 'customer')
         label = request.POST.get('label', '').strip()
         body = request.POST.get('body', '').strip()
@@ -2215,7 +2207,6 @@ class CannedResponseCreateView(LoginRequiredMixin, View):
 
 class CannedResponseUpdateView(LoginRequiredMixin, View):
     def post(self, request, pk):
-        from .models import CannedResponseCategory, CannedResponse
         cr = get_object_or_404(CannedResponse, pk=pk)
         label = request.POST.get('label', '').strip()
         body = request.POST.get('body', '').strip()
@@ -2233,7 +2224,6 @@ class CannedResponseUpdateView(LoginRequiredMixin, View):
 
 class CannedResponseDeleteView(LoginRequiredMixin, View):
     def post(self, request, pk):
-        from .models import CannedResponse
         cr = get_object_or_404(CannedResponse, pk=pk)
         cr.delete()
         return redirect(reverse_lazy(CANNED_REDIRECT) + CANNED_TAB)
@@ -2242,7 +2232,6 @@ class CannedResponseDeleteView(LoginRequiredMixin, View):
 class CannedResponsePickerView(LoginRequiredMixin, View):
     """Returns JSON list of canned responses for a given stream (HTMX/fetch)."""
     def get(self, request):
-        from .models import CannedResponseCategory, CannedResponse
         from django.http import JsonResponse
         stream = request.GET.get('stream', 'customer')
         cats = CannedResponseCategory.objects.filter(
