@@ -87,4 +87,13 @@ urlpatterns = [
     path('settings/repair-types/new/', views.RepairTypeCreateView.as_view(), name='rt_create'),
     path('settings/repair-types/<int:pk>/edit/', views.RepairTypeUpdateView.as_view(), name='rt_update'),
     path('settings/repair-types/<int:pk>/delete/', views.RepairTypeDeleteView.as_view(), name='rt_delete'),
+
+    # Settings — Canned Responses CRUD
+    path('settings/canned-response-categories/new/', views.CannedResponseCategoryCreateView.as_view(), name='cr_category_create'),
+    path('settings/canned-response-categories/<int:pk>/delete/', views.CannedResponseCategoryDeleteView.as_view(), name='cr_category_delete'),
+    path('settings/canned-response-categories/<int:pk>/reorder/', views.CannedResponseCategoryReorderView.as_view(), name='cr_category_reorder'),
+    path('settings/canned-responses/new/', views.CannedResponseCreateView.as_view(), name='cr_create'),
+    path('settings/canned-responses/<int:pk>/edit/', views.CannedResponseUpdateView.as_view(), name='cr_update'),
+    path('settings/canned-responses/<int:pk>/delete/', views.CannedResponseDeleteView.as_view(), name='cr_delete'),
+    path('settings/canned-responses/picker/', views.CannedResponsePickerView.as_view(), name='cr_picker'),
 ]
