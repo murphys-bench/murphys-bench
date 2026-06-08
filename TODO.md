@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 7, 2026 (session 8)
+**Last Updated**: June 8, 2026 (session 9)
 **Current Phase**: Phase 1 — SCS Internal
 
 ---
@@ -296,6 +296,46 @@
 ##### ✅ Priority 3 — Native Settings UI
 
 - ✅ **Native Settings Panel** (`/settings/`) — six-tab page: Company, Outbound Email, Inbound Email, Attachments, Security, Mileage. Each tab is its own POST form with per-section save. Admin/can_manage_settings only (PermissionDenied guard). Success message flash. Settings link in nav bar (admin-only). Company tab supports logo upload.
+
+---
+
+#### Batch 11 — Foundational Client-Centric Rebuild
+
+*Identified by full legacy app audit (session 9, June 8 2026). Full spec in `docs/batch-11-plan.md`.*
+
+##### Priority 1 — Device Model + Client Hub
+
+- [ ] **Device model additions** — `os`, `os_version`, `condition_at_intake` (CharField), `assigned_contact` (FK to Contact, null/blank). Migration required. Form: assigned_contact queryset filtered to client's contacts; "Save & Create Work Order →" button. Remove Device from top-level nav.
+
+- [ ] **Client detail as hub** — single-column layout; Contacts → Devices → WO History as primary sections. Per-contact "+ WO" button. Inline device add pre-assigned to client. Phone numbers: add free-text custom label field alongside existing type dropdown. Inline client type edit (dropdown in place, not just in edit form). Set Primary Contact.
+
+- [ ] **Client edit — deactivate + delete** — Deactivate toggle with explanatory text (hidden from default list, history preserved). Permanently Delete: type-to-confirm, danger zone section.
+
+##### Priority 2 — WO Detail + Print
+
+- [ ] **WorkOrder — Contact association** — add `contact` FK (nullable) to WorkOrder model. "Whose WO is this?" Shown as Contact column in WO History on client detail. Settable on WO create/edit (dropdown filtered to client's contacts). Pre-filled from device's assigned_contact when using "Save & Create WO." Displayed in WO detail header. Migration required.
+
+- [ ] **WO detail — unified action toolbar** — black bar: View Client | Edit Client | Edit Device | Edit WO | WO History | 🖨 Repair Report | Claim Ticket | 📧 Email Report | Status ▼
+
+- [ ] **WO detail — content additions** — Client info card (name, phone, email, address). Device info card (serial, OS, OS version, condition). Days Open counter. Completed Date field. Invoice Ninja Ref # field. Work Performed entries show bold label + description + timestamp (not just tag chips). Pre/Post Checklist collapsed by default. Credentials "+ Add note" field.
+
+- [ ] **Repair Report / Claim Ticket** — Add OS, OS Version, Condition at Intake to device section. Add timestamps to customer notes. Add Technician Signature & Date + Client Signature & Date lines. Add footer (Company • WO# • Date). Claim Ticket = same template, `?type=claim` changes title only.
+
+##### Priority 3 — Native Settings UI Expansion
+
+- [ ] **Settings: Repair Types** — native CRUD UI: types grouped by category, collapsible category headers with counts, add/edit/delete per type, add category, ▲/▼ reorder categories.
+
+- [ ] **Settings: Canned Responses** — two Note Streams (Customer Notes / Tech Notes Internal), each with user-defined reorderable categories. Per-response: stream, category, label, body text. CRUD. Canned response picker on WO detail note forms.
+
+- [ ] **Settings: Quick Labor** — native CRUD UI (currently Django admin only): grouped by category (Software/Hardware/Data/Maintenance/General), add/edit/delete per item (label, category, print description).
+
+- [ ] **Settings: Checklist Items** — model change: flat item bank scoped by device type (remove repair-type association). `ChecklistItem`: name + device_types (multi-select). WO checklist filtered by device type. Native UI: flat list, per-item device type tags, add/retire. Migration + data migration required.
+
+- [ ] **Settings: Status Colors + Site Colors** — Status Colors: per-status (Intake/In Progress/Waiting-Parts/Waiting-Client/Complete/Closed) bg/text/border hex inputs + live preview badge. Site Colors: Buttons, Navigation, Page, Sidebar color groups with hex inputs. Stored in SiteSettings; rendered as CSS variables in base.html.
+
+- [ ] **Settings: Company Info additions** — split `company_address` into `address_line_1` + `address_line_2`. Add Report Header Preview (live-rendered preview of print header below the form). Migration required.
+
+- [ ] **Settings: Display Settings** — browser-local UI preferences (localStorage, no server round-trip). Nav font size, sidebar font size + width, main content font size, card density (Compact/Normal/Comfortable). Reset to Defaults. Applied as CSS variables or body data-attributes on page load.
 
 ---
 

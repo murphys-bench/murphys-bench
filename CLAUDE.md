@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.11 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (not cloud, not SaaS)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 7, 2026 (end of session 8)
+**Last Updated**: June 8, 2026 (end of session 9)
 
 ---
 
@@ -268,7 +268,47 @@ Also: `converted` (converted to Work Order — read-only after this point)
 - **P2**: Credentials on WO (masked), Client Type badge (Residential/Business), Multiple phones per Contact (Alpine.js dynamic rows), Contact notes + receives_email, Invoice Ninja Ref # deferred to Phase 2
 - **P3**: Native Settings UI at `/settings/` — 6 tabs: Company, Outbound Email, Inbound Email, Attachments, Security, Mileage
 
+### 🔜 Batch 11 — Foundational Client-Centric Rebuild (session 9 — planned, not yet built)
+
+Full spec in `docs/batch-11-plan.md`. Identified by complete side-by-side audit of the legacy
+PHP app (SCS Repair Tracker) vs Murphy's Bench. Core problem: Murphy's Bench treats Clients,
+Contacts, Devices, and Work Orders as peer objects. The legacy app — and correct workflow — is
+**client-centric**: everything flows through the client.
+
+**Priority 1 — Device + Client Hub:**
+- Device model: add `os`, `os_version`, `condition_at_intake`, `assigned_contact` FK, "Save & Create WO" button. Remove Device from top-level nav.
+- WorkOrder: add `contact` FK (nullable) — "whose WO is this?" Shown in WO History, WO detail header, WO create/edit form.
+- Client detail as hub: single-column layout, per-contact "+ WO" button, inline device add, phone custom label + type dropdown, inline client type edit, Set Primary Contact.
+- Client edit: Deactivate (block if WOs on delete) + Permanently Delete (type-to-confirm).
+
+**Priority 2 — WO Detail + Print:**
+- Unified black action toolbar: View Client | Edit Client | Edit Device | Edit WO | WO History | Repair Report | Claim Ticket | Email Report | Status ▼
+- Client info + Device info (OS, serial, condition) on WO page.
+- Days Open counter, Completed Date, Invoice Ninja Ref #.
+- Work Performed entries show bold label + description + timestamp.
+- Pre/Post Checklist collapsed by default. Credentials "+ Add note" field.
+- Repair Report: add OS/version/condition, note timestamps, signature lines, footer.
+- Claim Ticket: same template, `?type=claim` changes title only.
+
+**Priority 3 — Native Settings UI Expansion:**
+- Repair Types: native CRUD with categories + ▲/▼ reorder. Needs new `RepairTypeCategory` model.
+- Canned Responses: two Note Streams (Customer Notes / Tech Notes Internal), categories per stream, CRUD, picker on WO detail.
+- Quick Labor: native CRUD (currently Django admin only).
+- Checklist Items: model change — flat bank scoped by device type (not per-repair-type). Migration required.
+- Status Colors + Site Colors: hex inputs + live preview, stored in SiteSettings, rendered as CSS variables in base.html.
+- Company Info: split address into Line 1, Line 2, City, State, Zip (both SiteSettings and Client model). Report Header Preview.
+- Display Settings: browser-local UI preferences (localStorage) — nav/sidebar/content font size, card density (Compact/Normal/Comfortable).
+
+**Decisions locked in session 9:**
+- Permanently Delete blocks if client has WOs; offers Deactivate instead
+- Address: 5 fields (Line 1, Line 2 optional, City, State, Zip) — no country field
+- Existing address data migrates to Line 1; user cleans up manually
+- Colors stored in SiteSettings; rendered as `<style>` block of CSS variables in base.html
+- RepairTypeCategory model needs to be created with sort_order field
+- Device assigned_contact: server-side queryset filter (client_id from URL param); no HTMX cascade needed (standalone Device page being removed)
+
 ### Remaining Before Deployment
+- **Batch 11** — foundational rebuild (see above + `docs/batch-11-plan.md`)
 - **Testing suite** (deferred — will write after real-world use surfaces actual edge cases)
 - **Deployment** — internal network, HTTPS, PostgreSQL, backup strategy
 
