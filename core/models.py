@@ -511,6 +511,7 @@ class WorkOrder(models.Model):
     ticket = models.OneToOneField(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_order_created')
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='work_orders')
     device = models.ForeignKey(Device, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
+    contact = models.ForeignKey('Contact', on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
     repair_type = models.ForeignKey(RepairType, on_delete=models.SET_NULL, null=True, related_name='work_orders')
     assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders_assigned')
     service_type = models.CharField(max_length=20, choices=SERVICE_TYPE_CHOICES, default='in_shop')

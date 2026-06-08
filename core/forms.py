@@ -13,12 +13,13 @@ class WorkOrderForm(forms.ModelForm):
     class Meta:
         model = WorkOrder
         fields = [
-            'client', 'device', 'repair_type', 'assigned_to',
+            'client', 'contact', 'device', 'repair_type', 'assigned_to',
             'service_type', 'status', 'priority', 'scheduled_date',
             'time_spent_minutes', 'notes_customer_visible', 'notes_internal',
         ]
         widgets = {
             'client': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
+            'contact': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'device': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'repair_type': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'assigned_to': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
@@ -31,18 +32,28 @@ class WorkOrderForm(forms.ModelForm):
             'notes_internal': forms.Textarea(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'rows': 4}),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, client_id=None, **kwargs):
         super().__init__(*args, **kwargs)
-        # Only show active clients
         self.fields['client'].queryset = Client.objects.filter(is_active=True).order_by('name')
-        # Only show technicians (staff users)
         from .models import User
         self.fields['assigned_to'].queryset = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
         self.fields['assigned_to'].required = False
+        self.fields['contact'].required = False
         self.fields['device'].required = False
         self.fields['repair_type'].required = False
         self.fields['scheduled_date'].required = False
         self.fields['time_spent_minutes'].required = False
+
+        if client_id:
+            self.fields['contact'].queryset = Contact.objects.filter(
+                client_id=client_id
+            ).order_by('name')
+        elif self.instance and self.instance.pk:
+            self.fields['contact'].queryset = Contact.objects.filter(
+                client=self.instance.client
+            ).order_by('name')
+        else:
+            self.fields['contact'].queryset = Contact.objects.none()
 
 
 class ClientForm(forms.ModelForm):
