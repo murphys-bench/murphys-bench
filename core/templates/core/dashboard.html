@@ -106,12 +106,7 @@
                     <td class="px-5 py-3 whitespace-nowrap text-sm text-gray-900">{{ wo.client.name }}</td>
                     <td class="px-5 py-3 whitespace-nowrap text-sm text-gray-600">{{ wo.assigned_to.get_full_name|default:"Unassigned" }}</td>
                     <td class="px-5 py-3 whitespace-nowrap">
-                        <span class="px-2 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full
-                            {% if wo.status == 'new' %}bg-blue-100 text-blue-800
-                            {% elif wo.status == 'assigned' %}bg-purple-100 text-purple-800
-                            {% elif wo.status == 'in_progress' %}bg-yellow-100 text-yellow-800
-                            {% elif wo.status == 'completed' %}bg-green-100 text-green-800
-                            {% endif %}">
+                        <span class="wo-status-badge status-{{ wo.status }} px-2 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full text-gray-700">
                             {{ wo.get_status_display }}
                         </span>
                     </td>
@@ -142,7 +137,7 @@
                 </td>
                 <td class="px-5 py-3 whitespace-nowrap text-sm text-gray-500">{{ wo.client.name }}</td>
                 <td class="px-5 py-3 whitespace-nowrap">
-                    <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-gray-100 text-gray-500">
+                    <span class="wo-status-badge status-{{ wo.status }} px-2 py-0.5 text-xs font-semibold rounded-full text-gray-700">
                         {{ wo.get_status_display }}
                     </span>
                 </td>
