@@ -1,0 +1,67 @@
+{% comment %}Full checklist table — rendered on page load and after each check update.{% endcomment %}
+<div id="checklist-body">
+    {% if items %}
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="bg-gray-50 border-b border-gray-200">
+                <th class="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-3 py-2 w-1/2">Item</th>
+                <th class="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-3 py-2 w-1/4">Pre-Check</th>
+                <th class="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-3 py-2 w-1/4">Post-Check</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+            {% for item in items %}
+            <tr class="{% if item.pre_check == 'pass' and item.post_check == 'pass' %}bg-green-50{% elif item.pre_check == 'fail' or item.post_check == 'fail' %}bg-red-50{% endif %}">
+                <td class="px-3 py-2 text-gray-800">{{ item.description }}</td>
+                <td class="px-3 py-2">
+                    <form method="post" action="{% url 'core:work_order_item_check' item.pk %}"
+                          hx-post="{% url 'core:work_order_item_check' item.pk %}"
+                          hx-target="#checklist-wrapper"
+                          hx-swap="innerHTML">
+                        {% csrf_token %}
+                        <input type="hidden" name="field" value="pre_check">
+                        <select name="value" onchange="this.form.requestSubmit()"
+                                class="text-sm rounded px-2 py-1 border focus:outline-none focus:ring-1 focus:ring-blue-500 w-full
+                                {% if item.pre_check == 'pass' %}bg-green-100 border-green-300 text-green-800
+                                {% elif item.pre_check == 'fail' %}bg-red-100 border-red-300 text-red-800
+                                {% elif item.pre_check == 'na' %}bg-gray-100 border-gray-300 text-gray-500
+                                {% else %}bg-white border-gray-200 text-gray-400{% endif %}">
+                            <option value="" {% if not item.pre_check %}selected{% endif %}>—</option>
+                            <option value="pass" {% if item.pre_check == 'pass' %}selected{% endif %}>✓ Pass</option>
+                            <option value="fail" {% if item.pre_check == 'fail' %}selected{% endif %}>✗ Fail</option>
+                            <option value="na" {% if item.pre_check == 'na' %}selected{% endif %}>N/A</option>
+                        </select>
+                    </form>
+                </td>
+                <td class="px-3 py-2">
+                    <form method="post" action="{% url 'core:work_order_item_check' item.pk %}"
+                          hx-post="{% url 'core:work_order_item_check' item.pk %}"
+                          hx-target="#checklist-wrapper"
+                          hx-swap="innerHTML">
+                        {% csrf_token %}
+                        <input type="hidden" name="field" value="post_check">
+                        <select name="value" onchange="this.form.requestSubmit()"
+                                class="text-sm rounded px-2 py-1 border focus:outline-none focus:ring-1 focus:ring-blue-500 w-full
+                                {% if item.post_check == 'pass' %}bg-green-100 border-green-300 text-green-800
+                                {% elif item.post_check == 'fail' %}bg-red-100 border-red-300 text-red-800
+                                {% elif item.post_check == 'na' %}bg-gray-100 border-gray-300 text-gray-500
+                                {% else %}bg-white border-gray-200 text-gray-400{% endif %}">
+                            <option value="" {% if not item.post_check %}selected{% endif %}>—</option>
+                            <option value="pass" {% if item.post_check == 'pass' %}selected{% endif %}>✓ Pass</option>
+                            <option value="fail" {% if item.post_check == 'fail' %}selected{% endif %}>✗ Fail</option>
+                            <option value="na" {% if item.post_check == 'na' %}selected{% endif %}>N/A</option>
+                        </select>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="px-3 py-3 text-sm text-gray-400">
+        <p>No checklist items yet. Click <strong>↺ Apply Checklist</strong> above to load items, or go to
+        <a href="{% url 'core:settings' %}#checklist" class="text-blue-500 hover:underline">Settings › Checklist Items</a>
+        to define items first.</p>
+    </div>
+    {% endif %}
+</div>
