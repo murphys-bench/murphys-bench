@@ -10,7 +10,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.http import FileResponse, Http404
 from django.utils import timezone
 from .models import (
-    WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist,
+    WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist, ChecklistItem,
     Ticket, TicketReply, TicketLock, TicketLink, Attachment, SiteSettings,
     KBCategory, KBArticle, TicketQueue, DashboardTile, User,
     CustomField, CustomFieldValue,
@@ -583,6 +583,25 @@ class WorkOrderItemToggleView(LoginRequiredMixin, View):
         return render(request, 'core/partials/checklist_item.html', {'item': item})
 
 
+def _apply_checklist_items(work_order):
+    """Populate WorkOrderItems from the flat ChecklistItem bank for the WO's device type."""
+    device_type = None
+    if work_order.device_id:
+        try:
+            device_type = Device.objects.values_list('device_type', flat=True).get(pk=work_order.device_id)
+        except Device.DoesNotExist:
+            pass
+    items = ChecklistItem.objects.filter(is_active=True).order_by('sort_order', 'name')
+    for item in items:
+        if item.applies_to(device_type):
+            WorkOrderItem.objects.get_or_create(
+                work_order=work_order,
+                item_type='checklist',
+                description=item.name,
+                defaults={'quantity': 1, 'is_completed': False},
+            )
+
+
 # --- Work Order Create / Edit ---
 
 class WorkOrderCreateView(LoginRequiredMixin, CreateView):
@@ -607,20 +626,9 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
         response = super().form_valid(form)
         _save_attachments(self.request, self.object)
 
-        # Optionally apply the default checklist for the selected repair type
-        if form.cleaned_data.get('apply_checklist') and self.object.repair_type:
-            checklist = self.object.repair_type.checklists.filter(
-                is_default=True, is_active=True
-            ).first()
-            if checklist:
-                for item in checklist.items.filter(is_active=True).order_by('sort_order'):
-                    WorkOrderItem.objects.create(
-                        work_order=self.object,
-                        item_type='checklist',
-                        description=item.description,
-                        quantity=1,
-                        is_completed=False,
-                    )
+        # Optionally apply checklist items from the flat bank filtered by device type
+        if form.cleaned_data.get('apply_checklist'):
+            _apply_checklist_items(self.object)
 
         fields = _get_custom_fields_for_workorder(self.object)
         _save_custom_field_values(self.request, self.object, fields)
@@ -680,20 +688,9 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
                     ticket.status = 'resolved'
                     ticket.save()
 
-        # Optionally append the default checklist for the selected repair type
-        if form.cleaned_data.get('apply_checklist') and self.object.repair_type:
-            checklist = self.object.repair_type.checklists.filter(
-                is_default=True, is_active=True
-            ).first()
-            if checklist:
-                for item in checklist.items.filter(is_active=True).order_by('sort_order'):
-                    WorkOrderItem.objects.create(
-                        work_order=self.object,
-                        item_type='checklist',
-                        description=item.description,
-                        quantity=1,
-                        is_completed=False,
-                    )
+        # Optionally append checklist items from the flat bank filtered by device type
+        if form.cleaned_data.get('apply_checklist'):
+            _apply_checklist_items(self.object)
 
         fields = _get_custom_fields_for_workorder(self.object)
         _save_custom_field_values(self.request, self.object, fields)
@@ -1958,6 +1955,7 @@ SETTINGS_TABS = [
     ('repair_types',     'Repair Types',     None),
     ('canned_responses', 'Canned Responses', None),
     ('quick_labor',      'Quick Labor',      None),
+    ('checklist_items',  'Checklist Items',  None),
 ]
 
 SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS]
@@ -2005,6 +2003,8 @@ class SettingsView(LoginRequiredMixin, View):
             ctx.update(_canned_responses_context())
         if active_tab == 'quick_labor':
             ctx.update(_quick_labor_context())
+        if active_tab == 'checklist_items':
+            ctx.update(_checklist_items_context())
         return render(request, 'core/settings.html', ctx)
 
     def post(self, request):
@@ -2038,6 +2038,8 @@ class SettingsView(LoginRequiredMixin, View):
             ctx.update(_canned_responses_context())
         if tab == 'quick_labor':
             ctx.update(_quick_labor_context())
+        if tab == 'checklist_items':
+            ctx.update(_checklist_items_context())
         return render(request, 'core/settings.html', ctx)
 
 # ---------------------------------------------------------------------------
@@ -2315,3 +2317,58 @@ class QuickLaborDeleteView(LoginRequiredMixin, View):
         item = get_object_or_404(QuickLaborItem, pk=pk)
         item.delete()
         return redirect(reverse_lazy(QL_REDIRECT) + QL_TAB)
+
+# ---------------------------------------------------------------------------
+# Settings — Checklist Items CRUD
+# ---------------------------------------------------------------------------
+
+CLI_REDIRECT = 'core:settings'
+CLI_TAB = '?tab=checklist_items'
+
+DEVICE_TYPE_CHOICES = [
+    ('laptop', 'Laptop'),
+    ('desktop', 'Desktop'),
+    ('server', 'Server'),
+    ('mobile', 'Mobile Phone'),
+    ('tablet', 'Tablet'),
+    ('printer', 'Printer'),
+    ('other', 'Other'),
+]
+
+
+def _checklist_items_context():
+    items = ChecklistItem.objects.order_by('sort_order', 'name')
+    return {
+        'cli_items': items,
+        'cli_device_types': DEVICE_TYPE_CHOICES,
+    }
+
+
+class ChecklistItemCreateView(LoginRequiredMixin, View):
+    def post(self, request):
+        name = request.POST.get('name', '').strip()
+        device_types = request.POST.getlist('device_types')
+        if name:
+            ChecklistItem.objects.create(name=name, device_types=device_types)
+        return redirect(reverse_lazy(CLI_REDIRECT) + CLI_TAB)
+
+
+class ChecklistItemUpdateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        item = get_object_or_404(ChecklistItem, pk=pk)
+        name = request.POST.get('name', '').strip()
+        device_types = request.POST.getlist('device_types')
+        is_active = request.POST.get('is_active') == '1'
+        if name:
+            item.name = name
+            item.device_types = device_types
+            item.is_active = is_active
+            item.save(update_fields=['name', 'device_types', 'is_active'])
+        return redirect(reverse_lazy(CLI_REDIRECT) + CLI_TAB)
+
+
+class ChecklistItemDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        item = get_object_or_404(ChecklistItem, pk=pk)
+        item.delete()
+        return redirect(reverse_lazy(CLI_REDIRECT) + CLI_TAB)

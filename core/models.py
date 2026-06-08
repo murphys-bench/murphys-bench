@@ -708,25 +708,27 @@ class Checklist(models.Model):
 
 
 class ChecklistItem(models.Model):
-    """Individual tasks in a checklist template"""
+    """Flat bank of checklist tasks, each scoped to one or more device types."""
 
     id = models.AutoField(primary_key=True)
-    checklist = models.ForeignKey(Checklist, on_delete=models.CASCADE, related_name='items')
-    description = models.CharField(max_length=255)
+    name = models.CharField(max_length=255)
+    # JSON list of device_type keys from Device.DEVICE_TYPE_CHOICES, e.g. ["laptop","desktop"]
+    # Empty list means "applies to all device types"
+    device_types = models.JSONField(default=list, blank=True)
     sort_order = models.IntegerField(default=0)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'checklist_items'
-        ordering = ['checklist', 'sort_order']
-        indexes = [
-            models.Index(fields=['checklist', 'is_active']),
-        ]
+        ordering = ['sort_order', 'name']
 
     def __str__(self):
-        return f"{self.checklist.name}: {self.description}"
+        return self.name
+
+    def applies_to(self, device_type):
+        """Returns True if this item should appear for the given device type."""
+        return not self.device_types or device_type in self.device_types
 
 
 class TicketLock(models.Model):

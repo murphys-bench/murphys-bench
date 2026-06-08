@@ -875,6 +875,149 @@
         </div>
         {% endif %}
 
+        <!-- ── Checklist Items ───────────────────────────────────────── -->
+        {% if active_tab == 'checklist_items' %}
+        <div class="space-y-6">
+
+            <!-- Add New Item -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-1">Checklist Items</h2>
+                <p class="text-sm text-gray-500 mb-5">
+                    Flat bank of checklist tasks. Each item can be scoped to one or more device types,
+                    or left unscoped to appear on all work orders when a checklist is applied.
+                </p>
+
+                <form method="post" action="{% url 'core:cli_create' %}">
+                    {% csrf_token %}
+                    <div class="flex flex-wrap gap-3 items-end">
+                        <div class="flex-1 min-w-48">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Item Name</label>
+                            <input type="text" name="name" required placeholder="e.g. Check for malware"
+                                   class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Device Types <span class="text-gray-400">(leave blank = all)</span></label>
+                            <div class="flex flex-wrap gap-x-3 gap-y-1">
+                                {% for key, label in cli_device_types %}
+                                <label class="flex items-center gap-1 text-sm text-gray-700">
+                                    <input type="checkbox" name="device_types" value="{{ key }}"
+                                           class="rounded border-gray-300 text-blue-600">
+                                    {{ label }}
+                                </label>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div>
+                            <button type="submit"
+                                    class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded">
+                                + Add Item
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Item List -->
+            <div class="bg-white rounded-lg shadow">
+                {% if cli_items %}
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-xs text-gray-500 uppercase tracking-wide bg-gray-50 border-b border-gray-100">
+                            <th class="px-5 py-2 text-left font-medium">Item</th>
+                            <th class="px-5 py-2 text-left font-medium">Device Types</th>
+                            <th class="px-4 py-2 text-center font-medium w-16">Active</th>
+                            <th class="px-4 py-2 w-24"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-50">
+                        {% for item in cli_items %}
+                        <tr x-data="{ editing: false }" class="hover:bg-gray-50">
+
+                            <!-- View row -->
+                            <td x-show="!editing" class="px-5 py-2.5 font-medium text-gray-800">
+                                {{ item.name }}
+                            </td>
+                            <td x-show="!editing" class="px-5 py-2.5">
+                                {% if item.device_types %}
+                                <div class="flex flex-wrap gap-1">
+                                    {% for dt in item.device_types %}
+                                    <span class="inline-block bg-blue-50 text-blue-700 text-xs px-1.5 py-0.5 rounded">{{ dt }}</span>
+                                    {% endfor %}
+                                </div>
+                                {% else %}
+                                <span class="text-xs text-gray-400 italic">All devices</span>
+                                {% endif %}
+                            </td>
+                            <td x-show="!editing" class="px-4 py-2.5 text-center">
+                                {% if item.is_active %}
+                                <span class="inline-block w-2 h-2 rounded-full bg-green-500"></span>
+                                {% else %}
+                                <span class="inline-block w-2 h-2 rounded-full bg-gray-300"></span>
+                                {% endif %}
+                            </td>
+                            <td x-show="!editing" class="px-4 py-2.5 text-right space-x-3">
+                                <button @click="editing = true"
+                                        class="text-blue-500 hover:text-blue-700 text-xs">Edit</button>
+                                <form method="post" action="{% url 'core:cli_delete' item.pk %}" class="inline"
+                                      onsubmit="return confirm('Delete {{ item.name|escapejs }}?')">
+                                    {% csrf_token %}
+                                    <button type="submit" class="text-red-400 hover:text-red-600 text-xs">Delete</button>
+                                </form>
+                            </td>
+
+                            <!-- Edit row -->
+                            <td x-show="editing" colspan="4" class="px-5 py-3">
+                                <form method="post" action="{% url 'core:cli_update' item.pk %}"
+                                      class="space-y-3">
+                                    {% csrf_token %}
+                                    <div class="flex flex-wrap gap-3 items-start">
+                                        <div class="flex-1 min-w-48">
+                                            <label class="block text-xs font-medium text-gray-500 mb-1">Item Name</label>
+                                            <input type="text" name="name" value="{{ item.name }}" required
+                                                   class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-medium text-gray-500 mb-1">Device Types</label>
+                                            <div class="flex flex-wrap gap-x-3 gap-y-1">
+                                                {% for key, label in cli_device_types %}
+                                                <label class="flex items-center gap-1 text-sm text-gray-700">
+                                                    <input type="checkbox" name="device_types" value="{{ key }}"
+                                                           {% if key in item.device_types %}checked{% endif %}
+                                                           class="rounded border-gray-300 text-blue-600">
+                                                    {{ label }}
+                                                </label>
+                                                {% endfor %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-4">
+                                        <label class="flex items-center gap-1 text-sm text-gray-700">
+                                            <input type="checkbox" name="is_active" value="1"
+                                                   {% if item.is_active %}checked{% endif %}
+                                                   class="rounded border-gray-300 text-blue-600">
+                                            Active
+                                        </label>
+                                        <button type="submit"
+                                                class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-1.5 rounded">Save</button>
+                                        <button type="button" @click="editing = false"
+                                                class="text-gray-500 hover:text-gray-700 text-xs py-1.5">Cancel</button>
+                                    </div>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="px-6 py-10 text-center">
+                    <p class="text-sm text-gray-400 italic">No checklist items yet. Add one above.</p>
+                </div>
+                {% endif %}
+            </div>
+
+        </div>
+        {% endif %}
+
     </div>
 </div>
 {% endblock %}

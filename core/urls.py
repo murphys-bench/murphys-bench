@@ -101,4 +101,9 @@ urlpatterns = [
     path('settings/quick-labor/new/', views.QuickLaborCreateView.as_view(), name='ql_create'),
     path('settings/quick-labor/<int:pk>/edit/', views.QuickLaborUpdateView.as_view(), name='ql_update'),
     path('settings/quick-labor/<int:pk>/delete/', views.QuickLaborDeleteView.as_view(), name='ql_delete'),
+
+    # Settings — Checklist Items CRUD
+    path('settings/checklist-items/new/', views.ChecklistItemCreateView.as_view(), name='cli_create'),
+    path('settings/checklist-items/<int:pk>/edit/', views.ChecklistItemUpdateView.as_view(), name='cli_update'),
+    path('settings/checklist-items/<int:pk>/delete/', views.ChecklistItemDeleteView.as_view(), name='cli_delete'),
 ]
