@@ -6,13 +6,18 @@
 
 ---
 
-## What's already built and working (as of session 19):
+## What's already built and working (as of session 20):
 
 - Django 4.2 app, 37 models, 36 migrations applied
 - **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16
 - Deploy workflow: `git push` on Mac → SSH `scs-tech@10.58.58.82` → `cd /opt/murphys-bench && git pull && source venv/bin/activate && python3 manage.py migrate` → `kill -HUP <gunicorn-master-pid>`
 - Full CRUD views for work orders, clients, devices, mileage, contacts, tickets, KB, queues
 - HTMX inline notes, checklist, ticket replies, Quick Labor, credentials, billing
+
+**Session 20 additions:**
+- **Vertical left sidebar nav**: Replaced horizontal top nav bar with fixed left sidebar (`w-64` expanded / `w-16` collapsed). Logo fills header at top. 8 nav links with icons (home, list, building, ticket, funnel, map-pin, book-open, chart-bar). "My Work" HTMX accordion in scrollable middle section. Footer: Admin (admin-only → Settings), Log Out. Collapse toggle persists to localStorage; pre-Alpine CSS prevents layout flash. Security link removed from sidebar (accessible via Admin panel only).
+- **8 new icons in `mb_icons.py`**: `home`, `map-pin`, `chart-bar`, `funnel`, `chevron-left`, `book-open`, `shield`, `logout`.
+- No new models or migrations. No DB changes required.
 
 **Session 19 additions:**
 - **Status Management UI**: `StatusDefinition` model — configurable label + hex color per status, `entity_type` (ticket/workorder), `is_system` flag. Migration 0036 seeds 13 core statuses with default colors. Settings → Statuses tab: color picker for all statuses, custom status add/edit/delete. System statuses are color-editable but not deletable.
@@ -42,9 +47,9 @@
 
 ---
 
-## What's next (session 20 options):
+## What's next (session 21 options):
 
-### Option A — Navigation UI overhaul
+### Option A — Navigation UI overhaul ✅ DONE (session 20)
 Comparison with RepairShopCRM revealed clear gaps. Two sub-options:
 - **Quick wins**: Add icons to horizontal top nav, surface company logo from SiteSettings, show logged-in user name + role in nav. One session, low risk.
 - **Full vertical sidebar nav**: Convert from horizontal top bar to vertical left sidebar (icon + label, collapsible to icon-only). "My Work" merges below or integrates. Touches base.html significantly. Half to full session. Right long-term pattern for a multi-section app.

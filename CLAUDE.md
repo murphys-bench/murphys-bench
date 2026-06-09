@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 9, 2026 (end of session 19)
+**Last Updated**: June 9, 2026 (end of session 20)
 
 ---
 
@@ -320,6 +320,17 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - Sidebar: shows last reply/note preview instead of subject/description; falls back gracefully if no notes
 - Mileage Calculate button: fixed CSRF token for production (was silently failing in prod)
 - Google Maps API confirmed working from production server (WAN IP restriction set in Cloud Console)
+
+### ✅ Session 20 — Vertical Left Sidebar Nav (session 20 — COMPLETE)
+
+- **Replaced horizontal top nav** with fixed left sidebar (`w-64` expanded / `w-16` collapsed to icon-only)
+- **Logo** fills sidebar header at top (no company name text alongside it)
+- **8 primary nav links** with icons: Dashboard (home), Work Orders (list), Clients (building), Tickets (ticket), Queues (funnel), Mileage (map-pin), KB (book-open), Reports (chart-bar). All `text-base` with active-page highlight.
+- **My Work section** (HTMX accordion with tickets + WOs) integrated into scrollable sidebar middle — always loaded, hidden when collapsed
+- **Footer**: Admin (admin-only → `/settings/`), Log Out. Security removed from sidebar.
+- **Collapse toggle** (chevron) at bottom — state persisted to `localStorage`; pre-Alpine inline script + CSS attribute (`data-sidebar-collapsed`) prevents layout flash on page load
+- **8 new icons** added to `mb_icons.py`: `home`, `map-pin`, `chart-bar`, `funnel`, `chevron-left`, `book-open`, `shield`, `logout`
+- No model/migration changes. Deployed to production.
 
 ### ✅ Session 19 — Status Management UI (session 19 — COMPLETE)
 
