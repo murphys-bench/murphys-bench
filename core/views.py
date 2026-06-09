@@ -18,6 +18,7 @@ from .models import (
     Contact, RepairType, RepairTypeCategory,
     CannedResponseCategory, CannedResponse, Invoice,
     OrgCredential, CredentialAccessLog,
+    EmailTemplate,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
@@ -2276,6 +2277,7 @@ SETTINGS_TABS = [
     ('colors',           'Colors',           ColorSettingsForm),
     ('display',          'Display',          None),
     ('credentials',      'Credentials',      None),
+    ('email_templates',  'Email Templates',  None),
 ]
 
 SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS]
@@ -2402,6 +2404,18 @@ class SettingsView(LoginRequiredMixin, View):
         if active_tab == 'credentials':
             ctx['credentials'] = OrgCredential.objects.all()
             ctx['credential_categories'] = OrgCredential.CATEGORY_CHOICES
+        if active_tab == 'email_templates':
+            # Ensure all 4 trigger templates exist
+            for trigger, _ in EmailTemplate.TRIGGER_CHOICES:
+                EmailTemplate.objects.get_or_create(
+                    trigger=trigger,
+                    defaults={
+                        'subject_template': f'[{{{{ ticket.ticket_number }}}}] {{{{ ticket.subject }}}}',
+                        'body_template': f'Hi {{{{ client.name }}}},\n\nYour ticket {{{{ ticket.ticket_number }}}} has been updated.\n\nThank you,\n{{{{ tech_name }}}}',
+                        'is_active': False,
+                    }
+                )
+            ctx['email_templates'] = EmailTemplate.objects.all()
         return render(request, 'core/settings.html', ctx)
 
     def post(self, request):
@@ -2869,3 +2883,21 @@ class OrgCredentialRevealView(LoginRequiredMixin, View):
             return HttpResponse('', status=400)
         CredentialAccessLog.objects.create(credential=cred, user=request.user, action='viewed')
         return HttpResponse(value or '(empty)', content_type='text/plain')
+
+
+# --- Email Template Manager ---
+
+class EmailTemplateUpdateView(LoginRequiredMixin, View):
+    """Settings: update a single email template's subject, body, and active state."""
+
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        tmpl = get_object_or_404(EmailTemplate, pk=pk)
+        tmpl.subject_template = request.POST.get('subject_template', tmpl.subject_template).strip()
+        tmpl.body_template = request.POST.get('body_template', tmpl.body_template).strip()
+        tmpl.is_active = request.POST.get('is_active') == '1'
+        tmpl.save()
+        messages.success(request, f'Email template "{tmpl.get_trigger_display()}" saved.')
+        return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
