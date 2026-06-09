@@ -1,4 +1,5 @@
 {% extends "core/base.html" %}
+{% load mb_icons %}
 
 {% block page_header %}
 <div class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
@@ -58,7 +59,7 @@
                     <td class="px-6 py-4">
                         {% if row.has_mfa %}
                             <span class="flex items-center gap-1 text-xs text-green-700">
-                                <span class="text-green-500">✓</span> Enabled
+                                <span class="text-green-500 inline-flex items-center gap-1">{% icon "check" 4 %} Enabled</span>
                             </span>
                         {% else %}
                             <span class="text-xs text-gray-400">Not enrolled</span>

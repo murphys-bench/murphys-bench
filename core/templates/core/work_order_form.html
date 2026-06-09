@@ -1,4 +1,5 @@
 {% extends "core/base.html" %}
+{% load mb_icons %}
 
 {% block title %}{{ title }} - Murphy's Bench{% endblock %}
 
@@ -110,7 +111,7 @@
                     {{ form.notes_customer_visible }}
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">🔒 Internal Notes</label>
+                    <label class="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">{% icon "lock-closed" 4 %} Internal Notes</label>
                     <p class="text-xs text-gray-400 mb-1">Technician-only. Never shown to the customer.</p>
                     {{ form.notes_internal }}
                 </div>

@@ -1,4 +1,5 @@
 {% extends "core/base.html" %}
+{% load mb_icons %}
 
 {% block title %}Tickets - Murphy's Bench{% endblock %}
 
@@ -84,7 +85,7 @@
                                 <div class="truncate">{{ ticket.subject }}</div>
                                 {% if ticket.is_overdue %}
                                     {% if ticket.overdue_is_acknowledged %}
-                                        <span class="text-xs text-yellow-600 font-medium">⚠ Overdue (acked)</span>
+                                        <span class="text-xs text-yellow-600 font-medium inline-flex items-center gap-1">{% icon "exclamation-triangle" 4 %} Overdue (acked)</span>
                                     {% else %}
                                         <span class="text-xs text-red-600 font-semibold">🔴 Overdue</span>
                                     {% endif %}
