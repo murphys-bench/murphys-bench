@@ -1766,6 +1766,34 @@ class ReportsView(LoginRequiredMixin, View):
             .order_by('month', 'technician__last_name')
         )
 
+        # 9. Billing / financial summary
+        invoiced_total = Invoice.objects.filter(
+            invoiced_date__range=(start_date, end_date),
+            amount__isnull=False,
+        ).aggregate(total=Sum('amount'))['total'] or 0
+
+        paid_total = Invoice.objects.filter(
+            paid_date__range=(start_date, end_date),
+            billing_status__in=['paid', 'paid_direct'],
+            amount__isnull=False,
+        ).aggregate(total=Sum('amount'))['total'] or 0
+
+        # Outstanding is a current snapshot — not date-filtered
+        outstanding_total = Invoice.objects.filter(
+            billing_status__in=['uninvoiced', 'invoiced'],
+            amount__isnull=False,
+        ).aggregate(total=Sum('amount'))['total'] or 0
+
+        outstanding_by_client = list(
+            Invoice.objects.filter(
+                billing_status__in=['uninvoiced', 'invoiced'],
+                amount__isnull=False,
+            )
+            .values('work_order__client__name', 'work_order__client__pk')
+            .annotate(total=Sum('amount'))
+            .order_by('-total')
+        )
+
         context = {
             'start_date': start_date,
             'end_date': end_date,
@@ -1791,6 +1819,11 @@ class ReportsView(LoginRequiredMixin, View):
             'total_tickets': total_tickets,
             # 8
             'mileage_data': mileage_data,
+            # 9
+            'invoiced_total': invoiced_total,
+            'paid_total': paid_total,
+            'outstanding_total': outstanding_total,
+            'outstanding_by_client': outstanding_by_client,
         }
         return render(request, 'core/reports.html', context)
 
@@ -1877,6 +1910,22 @@ class ReportsCSVView(LoginRequiredMixin, View):
             writer.writerow(['Tech', 'Month', 'Miles'])
             for r in Mileage.objects.filter(trip_date__range=(start_date, end_date)).annotate(month=TruncMonth('trip_date')).values('technician__first_name', 'technician__last_name', 'month').annotate(miles=Sum('miles')).order_by('month', 'technician__last_name'):
                 writer.writerow([f"{r['technician__first_name']} {r['technician__last_name']}", r['month'].strftime('%Y-%m'), r['miles']])
+
+        elif report == 'billing':
+            writer.writerow(['WO #', 'Client', 'Billing Status', 'Amount', 'Invoiced Date', 'Paid Date', 'Payment Method'])
+            for inv in Invoice.objects.filter(
+                amount__isnull=False,
+            ).select_related('work_order', 'work_order__client').order_by('work_order__client__name', 'work_order__created_at'):
+                wo = inv.work_order
+                writer.writerow([
+                    wo.work_order_number,
+                    wo.client.name if wo.client else '',
+                    inv.get_billing_status_display(),
+                    inv.amount,
+                    inv.invoiced_date or '',
+                    inv.paid_date or '',
+                    inv.get_payment_method_display() if inv.payment_method else '',
+                ])
 
         else:
             writer.writerow(['Error', 'Unknown report'])
