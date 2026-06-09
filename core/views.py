@@ -16,7 +16,7 @@ from .models import (
     CustomField, CustomFieldValue,
     QuickLaborItem, WorkPerformed, ContactPhone,
     Contact, RepairType, RepairTypeCategory,
-    CannedResponseCategory, CannedResponse,
+    CannedResponseCategory, CannedResponse, Invoice,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
@@ -326,6 +326,9 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         checklist_items = list(self.object.items.filter(item_type='checklist').order_by('created_at'))
         context['checklist_items'] = checklist_items
         context['checklist_checked_count'] = sum(1 for i in checklist_items if i.pre_check or i.post_check)
+        # Billing
+        invoice, _ = Invoice.objects.get_or_create(work_order=self.object)
+        context['invoice'] = invoice
         return context
 
 
@@ -454,8 +457,20 @@ class ClientDetailView(LoginRequiredMixin, DetailView):
 
     def get_queryset(self):
         return Client.objects.prefetch_related(
-            'contacts', 'devices', 'work_orders', 'work_orders__assigned_to'
+            'contacts', 'devices', 'work_orders', 'work_orders__assigned_to',
+            'work_orders__invoice',
         )
+
+    def get_context_data(self, **kwargs):
+        from django.db.models import Sum
+        context = super().get_context_data(**kwargs)
+        outstanding = Invoice.objects.filter(
+            work_order__client=self.object,
+            billing_status__in=['uninvoiced', 'invoiced'],
+            amount__isnull=False,
+        ).aggregate(total=Sum('amount'))['total']
+        context['outstanding_balance'] = outstanding
+        return context
 
 
 class DeviceListView(LoginRequiredMixin, ListView):
@@ -2100,6 +2115,48 @@ class WorkOrderCredentialsSaveView(LoginRequiredMixin, View):
         wo.credential_notes = request.POST.get('credential_notes', '').strip()
         wo.save(update_fields=['device_username', 'device_password', 'device_pin', 'credential_notes'])
         return render(request, 'core/partials/credentials_display.html', {'work_order': wo})
+
+
+class WorkOrderBillingUpdateView(LoginRequiredMixin, View):
+    """HTMX: update billing state inline on WO detail."""
+
+    def post(self, request, pk):
+        from django.utils import timezone
+        wo = get_object_or_404(WorkOrder, pk=pk)
+        invoice, _ = Invoice.objects.get_or_create(work_order=wo)
+
+        billing_status = request.POST.get('billing_status', '').strip()
+        valid_statuses = dict(Invoice.BILLING_STATUS_CHOICES)
+        if billing_status in valid_statuses:
+            invoice.billing_status = billing_status
+
+        today = timezone.now().date()
+        if billing_status == 'invoiced' and not invoice.invoiced_date:
+            invoice.invoiced_date = today
+        if billing_status in ('paid', 'paid_direct') and not invoice.paid_date:
+            invoice.paid_date = today
+
+        if request.POST.get('full_edit'):
+            amount = request.POST.get('amount', '').strip()
+            invoice.amount = amount if amount else None
+
+            invoiced_date = request.POST.get('invoiced_date', '').strip()
+            invoice.invoiced_date = invoiced_date if invoiced_date else None
+
+            paid_date = request.POST.get('paid_date', '').strip()
+            invoice.paid_date = paid_date if paid_date else None
+
+            payment_method = request.POST.get('payment_method', '').strip()
+            if payment_method in dict(Invoice.PAYMENT_METHOD_CHOICES) or payment_method == '':
+                invoice.payment_method = payment_method
+
+            invoice.notes = request.POST.get('notes', '').strip()
+
+        invoice.save()
+        return render(request, 'core/partials/billing_card.html', {
+            'work_order': wo,
+            'invoice': invoice,
+        })
 
 
 # ---------------------------------------------------------------------------
