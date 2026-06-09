@@ -194,18 +194,6 @@
            style="opacity:0.75">
             {% icon 'shield' 5 %}<span class="nav-label">Admin</span>
         </a>
-        <!-- Security as sub-item under Admin -->
-        <a href="{% url 'two_factor:profile' %}" title="Account Security"
-           class="nav-item flex items-center gap-3 pl-7 pr-2 py-2 rounded-lg text-base transition-colors hover:bg-white/10"
-           style="opacity:0.65">
-            {% icon 'lock-closed' 4 %}<span class="nav-label">Security</span>
-        </a>
-        {% else %}
-        <a href="{% url 'two_factor:profile' %}" title="Account Security"
-           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-base transition-colors hover:bg-white/10"
-           style="opacity:0.75">
-            {% icon 'lock-closed' 4 %}<span class="nav-label">Security</span>
-        </a>
         {% endif %}
 
         <a href="{% url 'accounts:logout' %}" title="Log Out"
