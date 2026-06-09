@@ -38,6 +38,7 @@ class Role(models.Model):
     can_assign_ticket = models.BooleanField(default=True)
     can_reply_internal = models.BooleanField(default=True)
     can_reply_customer = models.BooleanField(default=True)
+    can_view_device_credentials = models.BooleanField(default=False, help_text='Reveal encrypted device credentials (username/password).')
     can_create_workorder = models.BooleanField(default=True)
     can_edit_workorder = models.BooleanField(default=True)
     can_close_workorder = models.BooleanField(default=True)
@@ -284,6 +285,10 @@ class Device(models.Model):
     os_version = models.CharField(max_length=100, blank=True)
     condition_at_intake = models.CharField(max_length=20, choices=CONDITION_CHOICES, blank=True)
     notes = models.TextField(blank=True)
+    # Encrypted device credentials — stored AES-256, revealed via HTMX eye icon
+    device_username = EncryptedCharField(max_length=255, blank=True)
+    device_password = EncryptedCharField(max_length=255, blank=True)
+    credential_notes = EncryptedTextField(blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -744,6 +749,27 @@ class CredentialAccessLog(models.Model):
 
     def __str__(self):
         return f'{self.user} {self.action} "{self.credential.name}" at {self.accessed_at}'
+
+
+class DeviceCredentialAccessLog(models.Model):
+    """Audit log — every reveal or edit of a Device's encrypted credentials."""
+
+    ACTION_CHOICES = [
+        ('viewed', 'Viewed'),
+        ('edited', 'Edited'),
+    ]
+
+    device      = models.ForeignKey('Device', on_delete=models.CASCADE, related_name='credential_logs')
+    user        = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    action      = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    field       = models.CharField(max_length=50, blank=True, help_text='Which field was revealed (username/password)')
+    accessed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-accessed_at']
+
+    def __str__(self):
+        return f'{self.user} {self.action} credentials on "{self.device.name}" at {self.accessed_at}'
 
 
 class Mileage(models.Model):
