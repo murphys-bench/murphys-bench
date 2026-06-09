@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 9, 2026 (session 15)
+**Last Updated**: June 9, 2026 (session 16)
 **Current Phase**: Phase 1 — SCS Internal
 
 ---
@@ -363,13 +363,19 @@
 
 ---
 
-- [ ] **Basic billing tracker (Invoice model)**
-  - Lightweight `Invoice` entity on WorkOrder (not fields on WO)
-  - `billing_status` enum: uninvoiced / invoiced / paid / paid_direct / disputed
-  - Payment metadata: date, method, notes
-  - Customer outstanding balance on client detail
-  - CSV export for accounting system import
-  - MB tracks state only — not an accounting module; Invoice Ninja remains authoritative
+#### ✅ Session 16 — Invoice Model (COMPLETE)
+- Invoice model: OneToOne on WorkOrder, billing_status enum, amount, dates, payment_method, notes
+- Signal: auto-creates Invoice on WorkOrder creation
+- Migration 0033: CreateModel + backfill RunPython — applied to production
+- WorkOrderBillingUpdateView: quick-action + full edit, returns billing_card.html partial
+- billing_card.html: display/edit toggle via Alpine.js, HTMX outerHTML swap
+- WO detail: billing card in right column (between Update WO and Device Credentials)
+- Client detail: outstanding balance badge on Work Order History header
+- URL: /work-orders/<pk>/billing/ → wo_billing_update
+
+---
+
+- [ ] **CSV export for Invoice records** — Simple view exporting invoice data per client for accounting import
 
 - [ ] **Testing suite**
   - Model tests (validation, relationships)

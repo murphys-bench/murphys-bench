@@ -6,60 +6,46 @@
 
 ---
 
-## What's already built and working (as of session 15):
+## What's already built and working (as of session 16):
 
-- Django 4.2 app, 32 models, 32 migrations applied
+- Django 4.2 app, 33 models, 33 migrations applied
 - **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16
 - Deploy workflow: `git push` on Mac → SSH `scs-tech@10.58.58.82` → `cd /opt/murphys-bench && git pull && source venv/bin/activate && python3 manage.py migrate` → `kill -HUP <gunicorn-master-pid>`
 - Full CRUD views for work orders, clients, devices, mileage, contacts, tickets, KB, queues
-- HTMX inline notes, checklist, ticket replies, Quick Labor, credentials
+- HTMX inline notes, checklist, ticket replies, Quick Labor, credentials, billing
+
+**Session 16 additions:**
+- **`Invoice` model**: OneToOne on WorkOrder. Fields: `billing_status` (uninvoiced/invoiced/paid/paid_direct/disputed), `amount`, `invoiced_date`, `paid_date`, `payment_method`, `notes`. Auto-created on WO creation via `post_save` signal.
+- **Migration 0033**: CreateModel + backfill RunPython. Applied to production.
+- **`WorkOrderBillingUpdateView`**: HTMX POST at `/work-orders/<pk>/billing/`. Quick-action mode (just `billing_status`): updates status, auto-sets dates on first transition. Full edit mode (`full_edit=1`): updates all fields.
+- **`billing_card.html`** partial: `id="billing-card"`, Alpine.js display/edit toggle, HTMX `hx-swap="outerHTML"`. Quick-action buttons are contextual per status.
+- **WO detail**: billing card in right column between "Update Work Order" and "Device Credentials"
+- **Client detail**: outstanding balance badge (yellow pill) next to "Work Order History" heading
 
 **Session 15 additions:**
-- **Color-coded dashboard tiles**: left-border accent, color computed from `status_filter`/`link_url` in `_tile_color()`. Blue=active, Yellow=waiting, Red=overdue, Green=completed.
-- **SVG icon templatetag**: `core/templatetags/mb_icons.py` — `{% icon name size %}`. Heroicons v1 outline paths. Load with `{% load mb_icons %}`.
-- **Device type icon grid**: replaces dropdown on device form. Alpine.js, hidden input, 7 types, selected state highlighted blue.
-- Migration 0032: converts DashboardTile emoji icon values → icon name strings
-- **Production fully deployed**: migrations 0031 + 0032, `FIELD_ENCRYPTION_KEY` in prod `.env`, key saved to Bitwarden
-
-**Session 14 additions:**
-- Credential encryption (migration 0031): `WorkOrder` device credentials + `SiteSettings` email passwords — AES-256 at rest via `django-encrypted-model-fields`
-- `FIELD_ENCRYPTION_KEY` in settings.py (reads from env)
-
-**Session 13 additions:**
-- Cross-visibility panels: open tickets on WO detail, open WOs on ticket detail
-- WO toolbar: linked ticket as clickable purple pill
-- Sidebar: last reply/note preview instead of subject
+- **Color-coded dashboard tiles**: `_tile_color()` in views.py computes color from `status_filter`/`link_url`. Blue=active, Yellow=waiting, Red=overdue, Green=completed.
+- **SVG icon templatetag**: `core/templatetags/mb_icons.py` — `{% icon name size %}`. Load with `{% load mb_icons %}`.
+- **Device type icon grid**: Alpine.js, hidden input, 7 types, replaces dropdown on device form.
+- Migration 0032: emoji → icon name strings in DashboardTile
+- **Production fully deployed**: migrations 0031–0033, `FIELD_ENCRYPTION_KEY` in prod `.env`, key in Bitwarden
 
 ---
 
-## What's next:
+## What's next (session 17 options):
 
-### Immediate (session 16 — Invoice model)
+### Option A — CSV export for Invoice records
+Simple view that exports invoice data per client as CSV for accounting import. Would tie off the billing module.
+- `InvoiceExportView` at `/clients/<pk>/invoices.csv/` or `/invoices/export/?client=<pk>`
+- Columns: WO#, client, description, amount, billing_status, invoiced_date, paid_date, payment_method, notes
 
-**Basic billing tracker** — lightweight billing state on WorkOrder. No accounting, no financials. MB tracks state only; Invoice Ninja remains authoritative.
+### Option B — Native Settings UI expansion
+From TODO.md Priority 3 items (see Batch 11 spec):
+- **Repair Types** native CRUD (currently admin-only) — add `RepairTypeCategory` model, sort_order, full CRUD UI at `/settings/repair-types/`
+- **Canned Responses** native CRUD — two note streams (Customer Notes / Tech Notes Internal), categories, CRUD, picker on WO detail
+- **Quick Labor** native CRUD (currently admin-only)
 
-Build in this order:
-
-1. **`Invoice` model** — One-to-one on WorkOrder (separate entity, not fields on WO):
-   - `billing_status` CharField: `uninvoiced` / `invoiced` / `paid` / `paid_direct` / `disputed`
-   - `invoiced_date` DateField (nullable)
-   - `paid_date` DateField (nullable)
-   - `payment_method` CharField (nullable): cash / check / card / transfer / other
-   - `amount` DecimalField (nullable — optional, WO amount may not be known at intake)
-   - `notes` TextField (blank)
-   - Auto-created as `uninvoiced` when WO is created (signal or override)
-
-2. **WO detail billing card** — Read-only display + HTMX inline edit:
-   - Shows current status as colored badge
-   - Quick-action buttons: "Mark Invoiced", "Mark Paid", "Mark Paid Direct"
-   - Edit form: full fields (status, date, method, amount, notes)
-
-3. **Client detail balance** — Show sum of uninvoiced + invoiced amounts on client detail page
-
-4. **CSV export** — Simple export of invoice records for accounting system import
-
-### Also queued (separate sessions)
-- **Native Admin section**, **Cloudflare tunnel**, **Testing suite**, **Client Portal**, **Reporting enhancements** — see TODO.md
+### Option C — Site-wide icon audit
+Replace remaining text symbols (×, ⚠, 🔑, etc.) with SVG icons via `{% icon %}`. Quick polish pass.
 
 ---
 
@@ -69,11 +55,9 @@ Build in this order:
 - **Billing philosophy**: MB tracks state only — not an accounting module. Invoice Ninja authoritative.
 - **Invoice model**: separate entity on WO (not fields on WO) — `paid_direct` for cash/walk-in before formal invoice
 - **Visual design is a first-class requirement**: color + icons communicate status faster than text
-
 - Permanently Delete blocks if client has WOs; offers Deactivate instead
 - Address: 5 fields — Line 1, Line 2 (optional), City, State, Zip. No country.
 - Colors: stored in SiteSettings, rendered as CSS variables in `<style>` block in base.html
-- WorkPerformed: labor_item nullable; custom_label + notes allow per-job customization
 - Ticket close is always manual even when linked WO closes
 
 ---
@@ -82,7 +66,7 @@ Build in this order:
 
 - **Gunicorn restart on prod**: runs as `scs-tech`, no passwordless sudo. Use `kill -HUP <master-pid>` to reload workers. Master PID: `ps aux | grep 'gunicorn.*murphys_bench.wsgi' | awk 'NR==1{print $2}'`
 - **Audit log in templates**: Never use `entry.changes_dict.items` — use `_audit_entries(obj)` from views.py
-- **Alpine.js**: CDN with `defer`. HTMX-swapped content may need `Alpine.initTree(el)` in htmx:afterSwap
+- **Alpine.js**: CDN with `defer`. HTMX-swapped content reinitializes automatically via mutation observer.
 - **two_factor template overrides**: Live in root `templates/two_factor/` (DIRS), NOT `core/templates/`
 - **WorkOrderNote customer filter**: Use `note_type='customer_visible'` NOT `is_internal=False`
 - **Mileage Calculate CSRF**: Uses `document.querySelector('[name=csrfmiddlewaretoken]')` — do not revert

@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 9, 2026 (end of session 15)
+**Last Updated**: June 9, 2026 (end of session 16)
 
 ---
 
@@ -63,6 +63,7 @@ The app is running locally at `http://localhost:8000`. All views require login.
 
 - `/work-orders/<id>/print/` — Repair Report (print-optimized, opens new tab)
 - `/work-orders/<id>/credentials/` — HTMX: save device credentials inline
+- `/work-orders/<id>/billing/` — HTMX: update billing state (quick-action + full edit)
 - `/work-orders/<id>/log-labor/<item_id>/` — HTMX: log Quick Labor Work Performed entry
 - `/work-performed/<id>/delete/` — HTMX: remove Work Performed entry
 - `/clients/<client_id>/contacts/new/` — Create contact (form POST, redirects back)
@@ -179,6 +180,7 @@ murphys-bench/
 │           ├── overdue_badge.html
 │           ├── overdue_ack_form.html
 │           ├── wo_time_spent.html
+│           ├── billing_card.html
 │           └── sidebar_content.html
 ├── templates/two_factor/        # Tailwind overrides for django-two-factor-auth
 │   ├── _base.html               # Extends Murphy's Bench base.html (profile pages)
@@ -198,7 +200,7 @@ murphys-bench/
     └── next-session-prompt.md
 ```
 
-### Data Models (32 current, 32 migrations applied)
+### Data Models (33 current, 33 migrations applied)
 - **Role** — permission role with 16 boolean flags; seeded: Administrator, Technician
 - **TechSkill** — skill tags M2M on User; captured for future skill-based routing
 - **User** — extended Django user; role CharField (legacy) + role_obj FK to Role + skills M2M
@@ -212,6 +214,7 @@ murphys-bench/
 - **WorkOrder** — repair job; service_type (in_shop/onsite/remote); time_spent_minutes; linked to originating ticket via OneToOne
 - **WorkOrderNote** — customer-visible or internal notes on a work order
 - **WorkOrderItem** — checklist items, parts, time entries
+- **Invoice** — billing state tracker; OneToOne on WorkOrder; billing_status enum (uninvoiced/invoiced/paid/paid_direct/disputed); amount, dates, payment_method, notes; auto-created on WO creation via signal
 - **Mileage** — travel logging; trip_type (one_way/round_trip); optionally linked to WorkOrder
 - **RepairType** — category (Laptop Repair, Desktop Repair, etc.)
 - **Checklist** — template task list linked to a repair type
@@ -316,6 +319,18 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - Sidebar: shows last reply/note preview instead of subject/description; falls back gracefully if no notes
 - Mileage Calculate button: fixed CSRF token for production (was silently failing in prod)
 - Google Maps API confirmed working from production server (WAN IP restriction set in Cloud Console)
+
+### ✅ Session 16 — Invoice Model (session 16 — COMPLETE)
+
+- **`Invoice` model**: OneToOne on WorkOrder (`db_table = 'invoices'`). Fields: `billing_status` (uninvoiced/invoiced/paid/paid_direct/disputed), `amount`, `invoiced_date`, `paid_date`, `payment_method`, `notes`
+- **Signal**: `post_save` on WorkOrder auto-creates Invoice on WO creation
+- **Migration 0033**: CreateModel + `backfill_invoices` RunPython for existing WOs; applied to production
+- **`WorkOrderBillingUpdateView`**: HTMX POST. Quick-action mode (just `billing_status`): updates status + auto-sets dates on first transition. Full edit mode (`full_edit=1`): updates all fields. Returns `billing_card.html` partial.
+- **`billing_card.html`** partial: display mode shows status badge + amount + dates + quick-action buttons (contextual per status). Edit mode (Alpine.js toggle): full form. HTMX `hx-swap="outerHTML"` on `#billing-card`.
+- **WO detail**: billing card inserted in right column between "Update Work Order" and "Device Credentials"
+- **Client detail**: outstanding balance badge (yellow pill) next to "Work Order History" heading — sum of `uninvoiced`+`invoiced` WO amounts
+- URL: `/work-orders/<pk>/billing/` → `wo_billing_update`
+- Production deployed: migration 0033 applied, Gunicorn reloaded
 
 ### ✅ Session 15 — Visual Polish (session 15 — COMPLETE)
 
