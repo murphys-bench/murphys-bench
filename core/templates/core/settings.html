@@ -1,4 +1,5 @@
 {% extends "core/base.html" %}
+{% load mb_icons %}
 
 {% block title %}Settings - Murphy's Bench{% endblock %}
 
@@ -407,7 +408,7 @@
                                 Users without MFA enrolled will be redirected to setup immediately after login.
                             </p>
                             {% if settings.require_mfa %}
-                            <p class="text-xs text-amber-600 mt-2 font-medium">⚠ MFA enforcement is currently active.</p>
+                            <p class="text-xs text-amber-600 mt-2 font-medium inline-flex items-center gap-1">{% icon "exclamation-triangle" 4 %} MFA enforcement is currently active.</p>
                             {% else %}
                             <p class="text-xs text-gray-400 mt-2">MFA enforcement is currently off — users may choose to enroll.</p>
                             {% endif %}
@@ -485,8 +486,9 @@
             {% for cat in rt_categories %}
             <div class="bg-white rounded-lg shadow overflow-hidden" x-data="{ open: true }">
                 <div class="px-6 py-3 bg-gray-50 border-b border-gray-200 flex items-center gap-3">
-                    <button @click="open = !open" class="text-gray-400 hover:text-gray-600 text-xs font-mono w-4">
-                        <span x-text="open ? '▼' : '▶'"></span>
+                    <button @click="open = !open" class="text-gray-400 hover:text-gray-600 inline-flex">
+                        <span x-show="open">{% icon "chevron-down" 4 %}</span>
+                        <span x-show="!open">{% icon "chevron-right" 4 %}</span>
                     </button>
                     <span class="text-sm font-semibold text-gray-800 flex-1">
                         {{ cat.name }}
@@ -495,16 +497,16 @@
                     <!-- Reorder buttons -->
                     <form method="post" action="{% url 'core:rt_category_reorder' cat.pk %}" class="inline">
                         {% csrf_token %}<input type="hidden" name="direction" value="up">
-                        <button type="submit" class="text-gray-400 hover:text-gray-600 text-xs px-1" title="Move up">▲</button>
+                        <button type="submit" class="text-gray-400 hover:text-gray-600" title="Move up">{% icon "chevron-up" 4 %}</button>
                     </form>
                     <form method="post" action="{% url 'core:rt_category_reorder' cat.pk %}" class="inline">
                         {% csrf_token %}<input type="hidden" name="direction" value="down">
-                        <button type="submit" class="text-gray-400 hover:text-gray-600 text-xs px-1" title="Move down">▼</button>
+                        <button type="submit" class="text-gray-400 hover:text-gray-600" title="Move down">{% icon "chevron-down" 4 %}</button>
                     </form>
                     <form method="post" action="{% url 'core:rt_category_delete' cat.pk %}" class="inline"
                           onsubmit="return confirm('Delete category {{ cat.name|escapejs }}? Repair types will become uncategorised.')">
                         {% csrf_token %}
-                        <button type="submit" class="text-red-400 hover:text-red-600 text-xs px-1" title="Delete category">✕</button>
+                        <button type="submit" class="text-red-400 hover:text-red-600" title="Delete category">{% icon "x-mark" 4 %}</button>
                     </form>
                 </div>
 
@@ -642,22 +644,23 @@
                 {% for cat in cr_cats %}
                 <div class="border border-gray-200 rounded-lg mb-4" x-data="{ open: true }">
                     <div class="flex items-center gap-2 px-4 py-2 bg-gray-50 rounded-t-lg">
-                        <button @click="open = !open" class="text-gray-500 hover:text-gray-700 text-xs font-mono w-4">
-                            <span x-show="open">▾</span><span x-show="!open">▸</span>
+                        <button @click="open = !open" class="text-gray-500 hover:text-gray-700 inline-flex">
+                            <span x-show="open">{% icon "chevron-down" 4 %}</span>
+                            <span x-show="!open">{% icon "chevron-right" 4 %}</span>
                         </button>
                         <span class="font-medium text-sm text-gray-700 flex-1">{{ cat.name }}</span>
                         <form method="post" action="{% url 'core:cr_category_reorder' cat.pk %}" class="inline">
                             {% csrf_token %}<input type="hidden" name="direction" value="up">
-                            <button type="submit" class="text-gray-400 hover:text-gray-600 text-xs px-1">▲</button>
+                            <button type="submit" class="text-gray-400 hover:text-gray-600">{% icon "chevron-up" 4 %}</button>
                         </form>
                         <form method="post" action="{% url 'core:cr_category_reorder' cat.pk %}" class="inline">
                             {% csrf_token %}<input type="hidden" name="direction" value="down">
-                            <button type="submit" class="text-gray-400 hover:text-gray-600 text-xs px-1">▼</button>
+                            <button type="submit" class="text-gray-400 hover:text-gray-600">{% icon "chevron-down" 4 %}</button>
                         </form>
                         <form method="post" action="{% url 'core:cr_category_delete' cat.pk %}"
                               onsubmit="return confirm('Delete this category? Responses will become uncategorised.')">
                             {% csrf_token %}
-                            <button type="submit" class="text-red-400 hover:text-red-600 text-xs ml-1">✕</button>
+                            <button type="submit" class="text-red-400 hover:text-red-600">{% icon "x-mark" 4 %}</button>
                         </form>
                     </div>
 

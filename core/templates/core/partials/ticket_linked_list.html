@@ -28,7 +28,7 @@
               hx-swap="innerHTML">
             {% csrf_token %}
             <input type="hidden" name="link_id" value="{{ item.link_id }}">
-            <button type="submit" class="text-gray-300 hover:text-red-500 ml-2 text-xs" title="Remove link">✕</button>
+            {% load mb_icons %}<button type="submit" class="text-gray-300 hover:text-red-500 ml-2" title="Remove link">{% icon "x-mark" 4 %}</button>
         </form>
     </li>
     {% endfor %}

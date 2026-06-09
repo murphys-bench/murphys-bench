@@ -1,4 +1,5 @@
 {% extends "core/base.html" %}
+{% load mb_icons %}
 
 {% block title %}{{ work_order.work_order_number }} - Murphy's Bench{% endblock %}
 
@@ -20,7 +21,7 @@
             <a href="{% url 'core:client_detail' work_order.client.pk %}#wo-history"
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">WO History</a>
             <a href="{% url 'core:work_order_print' work_order.pk %}" target="_blank"
-               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">🖨 Repair Report</a>
+               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap flex items-center gap-1">{% icon "printer" 4 %} Repair Report</a>
             <a href="{% url 'core:work_order_print' work_order.pk %}?type=claim" target="_blank"
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Claim Ticket</a>
             <!-- Quick status update -->
@@ -414,7 +415,7 @@
                     {% csrf_token %}
                     <div class="mb-3 flex gap-4">
                         <label class="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
-                            <input type="radio" name="note_type" value="internal" x-model="noteType" class="accent-blue-600"> 🔒 Internal Only
+                            <input type="radio" name="note_type" value="internal" x-model="noteType" class="accent-blue-600"> <span class="inline-flex items-center gap-1">{% icon "lock-closed" 3 %} Internal Only</span>
                         </label>
                         <label class="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
                             <input type="radio" name="note_type" value="customer_visible" x-model="noteType" class="accent-blue-600"> 👤 Customer Visible
@@ -425,7 +426,7 @@
                     <div class="mb-2 relative">
                         <button type="button" @click="loadPicker()"
                                 class="text-xs text-blue-600 hover:text-blue-800 font-medium">
-                            📋 Insert Canned Response
+                            <span class="inline-flex items-center gap-1">{% icon "document-text" 4 %} Insert Canned Response</span>
                         </button>
                         <div x-show="pickerOpen" @click.outside="pickerOpen = false"
                              class="absolute z-20 left-0 top-6 w-80 bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto">
@@ -433,7 +434,7 @@
                                 <span class="text-xs font-semibold text-gray-600"
                                       x-text="noteType === 'customer_visible' ? 'Customer Notes' : 'Tech Notes (Internal)'"></span>
                                 <button type="button" @click="pickerOpen = false"
-                                        class="text-gray-400 hover:text-gray-600 text-xs">✕</button>
+                                        class="text-gray-400 hover:text-gray-600">{% icon "x-mark" 4 %}</button>
                             </div>
                             <template x-if="pickerGroups.length === 0">
                                 <p class="text-xs text-gray-400 px-3 py-4 italic">No canned responses defined yet.</p>
@@ -583,7 +584,7 @@
 
         <!-- Device Credentials -->
         <div class="bg-white rounded-lg shadow p-5">
-            <h2 class="text-base font-semibold text-gray-900 mb-3">🔑 Device Credentials</h2>
+            <h2 class="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">{% icon "key" 5 %} Device Credentials</h2>
             {% include "core/partials/credentials_display.html" %}
         </div>
 
