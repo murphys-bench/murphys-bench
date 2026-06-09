@@ -42,16 +42,16 @@
 
 ---
 
-## What's next (session 18 options):
+## What's next (session 20 options):
 
-### Option A — Status Management UI (was Option A last session)
-Native CRUD for ticket and WO statuses. Currently hardcoded enums — would require a new model (`CustomStatus`) and migration. Core statuses stay locked; custom statuses add/edit/delete with color picker. Suggested library per entity type.
+### Option A — Navigation UI overhaul
+Comparison with RepairShopCRM revealed clear gaps. Two sub-options:
+- **Quick wins**: Add icons to horizontal top nav, surface company logo from SiteSettings, show logged-in user name + role in nav. One session, low risk.
+- **Full vertical sidebar nav**: Convert from horizontal top bar to vertical left sidebar (icon + label, collapsible to icon-only). "My Work" merges below or integrates. Touches base.html significantly. Half to full session. Right long-term pattern for a multi-section app.
+- RepairShopCRM reference: dark left sidebar, company logo at top, user name + role below logo, larger icon+text nav items, collapses to icons only.
 
 ### Option B — Data Management
 Import wizard (CSV → map columns → preview → import), bulk export ZIP, deleted data recovery (requires soft-delete changes), reset tool. Substantial build.
-
-### Option C — Device-level credentials
-`password` field on Device model (AES-256 encrypted, masked display + eye icon reveal). Admin always; Technician based on role flag. Simpler than it sounds — follows OrgCredential pattern exactly.
 
 ### Option D — Something from daily use
 Any friction points or gaps SCS has noticed in actual use since deployment.
