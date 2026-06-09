@@ -135,6 +135,53 @@
     {% endif %}
 </div>
 
+<!-- Team Workload (admin only) -->
+{% if is_admin and team_workload %}
+<div class="bg-white rounded-lg shadow overflow-hidden">
+    <div class="px-6 py-4 border-b border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900">Team Workload</h2>
+    </div>
+    <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Technician</th>
+                <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Open WOs</th>
+                <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Open Tickets</th>
+                <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+            </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-100">
+            {% for row in team_workload %}
+            <tr class="hover:bg-gray-50">
+                <td class="px-6 py-3 text-sm font-medium text-gray-900">
+                    {{ row.tech.get_full_name|default:row.tech.username }}
+                </td>
+                <td class="px-6 py-3 text-center">
+                    {% if row.open_wos %}
+                    <a href="{% url 'core:work_order_list' %}?assigned_to={{ row.tech.pk }}"
+                       class="text-sm font-semibold text-blue-600 hover:underline">{{ row.open_wos }}</a>
+                    {% else %}
+                    <span class="text-sm text-gray-300">—</span>
+                    {% endif %}
+                </td>
+                <td class="px-6 py-3 text-center">
+                    {% if row.open_tickets %}
+                    <a href="{% url 'core:ticket_list' %}?assigned_to={{ row.tech.pk }}"
+                       class="text-sm font-semibold text-purple-600 hover:underline">{{ row.open_tickets }}</a>
+                    {% else %}
+                    <span class="text-sm text-gray-300">—</span>
+                    {% endif %}
+                </td>
+                <td class="px-6 py-3 text-center">
+                    <span class="text-sm font-bold text-gray-700">{{ row.total }}</span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
 <!-- Recently Closed -->
 {% if recently_closed %}
 <div class="bg-white rounded-lg shadow overflow-hidden">
