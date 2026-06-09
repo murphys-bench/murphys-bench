@@ -948,7 +948,7 @@ class InvoiceExportView(LoginRequiredMixin, View):
                 inv.paid_date or '',
                 inv.get_payment_method_display() if inv.payment_method else '',
                 wo.created_at.date() if wo.created_at else '',
-                wo.closed_date or '',
+                wo.completed_date.date() if wo.completed_date else '',
                 inv.notes,
             ])
 
