@@ -188,26 +188,31 @@
                     </div>
                 </div>
 
-                <div class="mt-6 pt-4 border-t border-gray-200 flex items-start justify-between gap-6">
+                <div class="mt-6 pt-4 border-t border-gray-200">
                     <button type="submit"
                             class="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
                         Save Outbound Email
                     </button>
-                    <div class="flex items-center gap-2">
-                        <input type="email" id="test-outbound-to" name="to" placeholder="Send test to…"
-                               class="text-sm border border-gray-300 rounded px-2 py-1.5 w-52 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                        <button type="button"
-                                hx-post="{% url 'core:settings_test_outbound' %}"
-                                hx-include="#test-outbound-to"
-                                hx-target="#outbound-test-result"
-                                hx-swap="innerHTML"
-                                class="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 border border-gray-300 whitespace-nowrap">
-                            Send Test
-                        </button>
-                    </div>
                 </div>
-                <div id="outbound-test-result"></div>
             </form>
+
+            <!-- Test outbound (outside form so submit doesn't interfere) -->
+            <div class="mt-4 pt-4 border-t border-gray-100">
+                <p class="text-sm font-medium text-gray-700 mb-2">Send a test email</p>
+                <div class="flex items-center gap-2">
+                    <input type="email" id="test-outbound-to" name="to" placeholder="Recipient address…"
+                           class="text-sm border border-gray-300 rounded px-2 py-1.5 w-64 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    <button type="button"
+                            hx-post="{% url 'core:settings_test_outbound' %}"
+                            hx-include="#test-outbound-to"
+                            hx-target="#outbound-test-result"
+                            hx-swap="innerHTML"
+                            class="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 border border-gray-300 whitespace-nowrap">
+                        Send Test Email
+                    </button>
+                </div>
+                <div id="outbound-test-result" class="mt-2"></div>
+            </div>
         </div>
 
         <!-- ── Inbound Email ───────────────────────────────────────── -->
@@ -286,11 +291,18 @@
                     </div>
                 </div>
 
-                <div class="mt-6 pt-4 border-t border-gray-200 flex items-center gap-4">
+                <div class="mt-6 pt-4 border-t border-gray-200">
                     <button type="submit"
                             class="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
                         Save Inbound Email
                     </button>
+                </div>
+            </form>
+
+            <!-- Test inbound (outside form) -->
+            <div class="mt-4 pt-4 border-t border-gray-100">
+                <p class="text-sm font-medium text-gray-700 mb-2">Test connection</p>
+                <div class="flex items-center gap-2">
                     <button type="button"
                             hx-post="{% url 'core:settings_test_inbound' %}"
                             hx-target="#inbound-test-result"
@@ -300,7 +312,7 @@
                     </button>
                     <span id="inbound-test-result"></span>
                 </div>
-            </form>
+            </div>
         </div>
 
         <!-- ── Attachments ────────────────────────────────────────── -->
