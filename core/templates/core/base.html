@@ -95,20 +95,16 @@
          }
      }">
 
-    <!-- Logo / company name -->
-    <div class="flex items-center h-14 flex-shrink-0 px-3 border-b overflow-hidden"
+    <!-- Logo -->
+    <div class="flex items-center justify-center h-16 flex-shrink-0 border-b px-3"
          style="border-color:rgba(255,255,255,0.1)">
-        <a href="{% url 'core:dashboard' %}" class="flex items-center gap-3 overflow-hidden min-w-0 w-full">
+        <a href="{% url 'core:dashboard' %}" class="flex items-center justify-center w-full h-full py-2">
             {% if site_settings.site_logo %}
                 <img src="{{ site_settings.site_logo.url }}" alt=""
-                     class="h-8 w-8 flex-shrink-0 object-contain rounded">
+                     class="max-h-full w-auto max-w-full object-contain">
             {% else %}
-                <span class="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold"
-                      style="background-color:rgba(255,255,255,0.15)">
-                    {{ site_settings.company_name|default:"M"|slice:":1" }}
-                </span>
+                <span class="font-bold text-base text-center truncate px-1">{{ site_settings.company_name|default:"Murphy's Bench" }}</span>
             {% endif %}
-            <span class="nav-label font-semibold text-sm truncate">{{ site_settings.company_name|default:"Murphy's Bench" }}</span>
         </a>
     </div>
 
@@ -117,49 +113,49 @@
         {% with u=request.resolver_match.url_name %}
 
         <a href="{% url 'core:dashboard' %}" title="Dashboard"
-           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+           class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
                   {% if u == 'dashboard' %}bg-white/15{% endif %}">
             {% icon 'home' 5 %}<span class="nav-label">Dashboard</span>
         </a>
 
         <a href="{% url 'core:work_order_list' %}" title="Work Orders"
-           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+           class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
                   {% if u and 'work_order' in u %}bg-white/15{% endif %}">
             {% icon 'list' 5 %}<span class="nav-label">Work Orders</span>
         </a>
 
         <a href="{% url 'core:client_list' %}" title="Clients"
-           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+           class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
                   {% if u and 'client' in u %}bg-white/15{% endif %}">
             {% icon 'building' 5 %}<span class="nav-label">Clients</span>
         </a>
 
         <a href="{% url 'core:ticket_list' %}" title="Tickets"
-           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+           class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
                   {% if u and 'ticket' in u %}bg-white/15{% endif %}">
             {% icon 'ticket' 5 %}<span class="nav-label">Tickets</span>
         </a>
 
         <a href="{% url 'core:queue_list' %}" title="Queues"
-           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+           class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
                   {% if u and 'queue' in u %}bg-white/15{% endif %}">
             {% icon 'funnel' 5 %}<span class="nav-label">Queues</span>
         </a>
 
         <a href="{% url 'core:mileage_list' %}" title="Mileage"
-           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+           class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
                   {% if u and 'mileage' in u %}bg-white/15{% endif %}">
             {% icon 'map-pin' 5 %}<span class="nav-label">Mileage</span>
         </a>
 
         <a href="{% url 'core:kb_list' %}" title="Knowledge Base"
-           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+           class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
                   {% if u and 'kb' in u %}bg-white/15{% endif %}">
             {% icon 'book-open' 5 %}<span class="nav-label">KB</span>
         </a>
 
         <a href="{% url 'core:reports' %}" title="Reports"
-           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+           class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
                   {% if u and 'report' in u %}bg-white/15{% endif %}">
             {% icon 'chart-bar' 5 %}<span class="nav-label">Reports</span>
         </a>
@@ -199,12 +195,7 @@
         </a>
 
         {% if user.is_staff %}
-        <a href="{% url 'core:settings' %}" title="Settings"
-           class="nav-item flex items-center gap-3 px-2 py-1.5 rounded-lg text-xs transition-colors hover:bg-white/10"
-           style="opacity:0.75">
-            {% icon 'cog' 4 %}<span class="nav-label">Settings</span>
-        </a>
-        <a href="/admin/" title="Django Admin"
+        <a href="{% url 'core:settings' %}" title="Admin Settings"
            class="nav-item flex items-center gap-3 px-2 py-1.5 rounded-lg text-xs transition-colors hover:bg-white/10"
            style="opacity:0.75">
             {% icon 'shield' 4 %}<span class="nav-label">Admin</span>
