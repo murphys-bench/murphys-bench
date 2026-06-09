@@ -1519,13 +1519,15 @@
             <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
                 <p class="font-semibold text-blue-800 mb-2">Available template variables</p>
                 <div class="grid grid-cols-2 gap-x-8 gap-y-1 text-blue-700 font-mono text-xs">
-                    <span>{{ "{{ ticket.ticket_number }}" }}</span><span class="font-sans text-blue-600">Ticket number (TKT-…)</span>
-                    <span>{{ "{{ ticket.subject }}" }}</span><span class="font-sans text-blue-600">Ticket subject line</span>
-                    <span>{{ "{{ ticket.get_status_display }}" }}</span><span class="font-sans text-blue-600">Human-readable status</span>
-                    <span>{{ "{{ client.name }}" }}</span><span class="font-sans text-blue-600">Client company name</span>
-                    <span>{{ "{{ tech_name }}" }}</span><span class="font-sans text-blue-600">Assigned technician full name</span>
-                    <span>{{ "{{ status }}" }}</span><span class="font-sans text-blue-600">Status label (alias)</span>
-                    <span>{{ "{{ site_name }}" }}</span><span class="font-sans text-blue-600">Murphy's Bench</span>
+                    {% verbatim %}
+                    <span>{{ ticket.ticket_number }}</span><span class="font-sans text-blue-600">Ticket number (TKT-…)</span>
+                    <span>{{ ticket.subject }}</span><span class="font-sans text-blue-600">Ticket subject line</span>
+                    <span>{{ ticket.get_status_display }}</span><span class="font-sans text-blue-600">Human-readable status</span>
+                    <span>{{ client.name }}</span><span class="font-sans text-blue-600">Client company name</span>
+                    <span>{{ tech_name }}</span><span class="font-sans text-blue-600">Assigned technician full name</span>
+                    <span>{{ status }}</span><span class="font-sans text-blue-600">Status label (alias)</span>
+                    <span>{{ site_name }}</span><span class="font-sans text-blue-600">Murphy's Bench</span>
+                    {% endverbatim %}
                 </div>
             </div>
 
