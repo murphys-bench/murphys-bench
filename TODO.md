@@ -411,6 +411,51 @@
 
 ---
 
+### Credentials & Security
+
+- [ ] **Device-level credentials** — `password` field on Device model (AES-256 encrypted, masked display + eye icon reveal). Who can view: Administrators always; Technicians only if role allows.
+
+- [ ] **Org-level credentials vault** — Shared credential store for the organization, not tied to any device. Settings → Credentials tab (new).
+  - `OrgCredential` model: name, username (encrypted), password (encrypted), url, category (Email/Remote Support/Cloud/Network/Vendor/Other), notes (encrypted), accessible_by role flags, created_by, created_at, last_accessed_by, last_accessed_at
+  - `CredentialAccessLog` model: credential FK, user FK, accessed_at, action (viewed/copied/edited/deleted) — every reveal is logged
+  - List view: Name, Category, Last Accessed, Actions. Password always masked; eye icon reveals in-place. Edit via modal.
+  - RepairShopCRM has device-level only, no audit trail — this is a MB competitive advantage
+
+---
+
+### Settings UI Expansion
+
+- [ ] **Email Template Manager** — UI for existing `EmailTemplate` model (currently admin-only)
+  - Variable reference panel, live preview, test send button
+  - Triggers: ticket_created, reply_added, status_changed, overdue, ticket_resolved
+
+- [ ] **Status Management UI** — Native CRUD for Ticket and WO statuses
+  - Separate sections for Ticket Statuses and WO Statuses
+  - Core statuses locked (cannot delete); custom statuses add/edit/delete with color picker
+  - Suggested library per entity type (e.g., WOs: Diagnosed, Awaiting Parts, Quality Check, Ready for Pickup)
+  - Drag-to-reorder
+
+- [ ] **Data Management** — Import, Export, Deleted Data recovery, Reset
+  - Import wizard: Choose Type → Upload CSV → Map Columns → Preview → Import (Customers, Devices, Tickets, WOs)
+  - Export: per-entity CSV + bulk ZIP; audit log of who exported what/when
+  - Deleted Data: soft-delete recovery view — restore or permanently delete
+  - Reset: admin-only, checkbox per entity type, confirmation phrase, requires backup download first
+
+---
+
+### Reporting Expansion
+
+- [ ] **Financial reporting** — Billing state summary (not accounting)
+  - Total invoiced this period, total paid, total outstanding (uninvoiced + unpaid)
+  - Outstanding by client (sortable list)
+  - All existing CSV export already covers per-client data
+
+- [ ] **Technician performance reports** — Workload, completion rate, avg resolution time per tech
+
+- [ ] **Team workload widget** — Dashboard widget showing open WO/ticket count per tech
+
+---
+
 ### From OSTicket comparison — deferred features
 
 - [ ] **Ticket Merging** (destructive — secondary absorbed into primary)

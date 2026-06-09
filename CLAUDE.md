@@ -72,13 +72,11 @@ The app is running locally at `http://localhost:8000`. All views require login.
 - `/settings/` — Native Settings UI (admin only, 6 tabs)
 
 **What still requires admin panel:**
-- Managing checklists and canned responses
-- Email template editing (EmailTemplate model)
+- Email template editing (EmailTemplate model) — Phase 2: native Email Template Manager
 - Suppressed address management (SuppressedAddress model)
 - Email send/receive log review (EmailSendLog, InboundEmailLog — read-only)
 - SLA Plans, Help Topics, KB Categories (admin-managed)
 - Roles and TechSkills management
-- QuickLaborItem management (add/edit/retire quick labor buttons)
 
 **Note**: All routine workflow actions (create client, work order, device, contact) now use native app pages. The Django admin is staff-only config/reference only.
 
@@ -103,12 +101,15 @@ Ticket (intake + replies) → Triage → Work Order (repair) → Notes/Checklist
 - **Success**: SCS techs prefer this to the legacy PHP app
 
 ### Phase 2: Integrations & Polish (Future)
+- Org-level credentials vault (OrgCredential + CredentialAccessLog)
+- Device-level credentials (password field on Device, encrypted)
+- Email Template Manager UI, Status Management UI, Data Management (import/export/deleted/reset)
+- Financial reporting (invoiced/paid/outstanding by client)
 - Invoice Ninja API bridge
 - Email OAuth2 (Gmail/Office 365)
 - Departments, Teams, Auto-routing
 - Customer self-service portal
 - REST API (for Taskbar Utility App / Clover integration)
-- Visual design polish
 
 ### Phase 3+: Multi-Tenancy (Speculative)
 
@@ -387,7 +388,7 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - **Work order numbers** auto-generated as `WO-YYYYMMDD-NNNN`
 - **Ticket numbers** auto-generated as `TKT-YYYYMMDD-NNNN`
 - **SQLite for dev** — switch to PostgreSQL for production
-- **Visual polish** — next session (session 15): color-coded dashboard tiles, SVG icons replacing emoji, device type icon grid
+- **Visual polish** — shipped session 15: color-coded dashboard tiles, SVG icons replacing emoji, device type icon grid
 - **GitHub**: Private repo, push after each working feature
 - **HTMX** for inline interactions (notes, replies, checklist toggling)
 - **No Celery/async queue** — synchronous email sending is sufficient at MSP scale
@@ -402,7 +403,12 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - **`?assigned_to=me` filter**: works on both `/tickets/` and `/work-orders/`; admins see all
 - **Credential encryption**: AES-256 via `django-encrypted-model-fields`. `FIELD_ENCRYPTION_KEY` read from env. Never plaintext. Migrations 0031 + 0032 applied to production (June 9, session 15). Key stored in Bitwarden.
 - **Billing philosophy**: MB tracks billing state only — not an accounting module. Lightweight `Invoice` entity on WorkOrder (not fields on WO directly). `billing_status` enum: uninvoiced / invoiced / paid / paid_direct / disputed. `paid_direct` = cash/walk-in before formal invoice. Invoice Ninja and other systems remain authoritative for formal financials.
-- **Visual design is a first-class requirement**: Color + icons communicate status faster than text. RepairShopCRM comparison documented in `MB_UI_UX_Analysis.md`. Not optional polish.
+- **Visual design is a first-class requirement**: Color + icons communicate status faster than text. Not optional polish.
+- **Modals for quick edits, full pages for complex creation**: Settings section edits, status changes, mark-as-paid → modal. New Ticket, New WO, New Client → full page form.
+- **Soft-delete everything**: Hard deletes require deliberate admin action (type-to-confirm). No silent permanent deletes in normal operation.
+- **Export-based integrations**: CSV export works with any accounting system. No live API sync until there is clear demand. More flexible and future-proof.
+- **Org-level credentials vault is a competitive advantage**: RepairShopCRM has device-level credentials only, no audit trail. MB's org vault + access log is a differentiator — build it properly in Phase 2.
+- **Status color convention**: Blue = In Progress/Active, Yellow = Waiting on Customer, Red = Overdue/Urgent, Green = Completed, Gray = New/Unassigned.
 - **Audit log gotcha**: `changes_dict` can contain an `'items'` key that shadows `dict.items()` in Django templates. Always use `_audit_entries()` from views.py — never iterate `changes_dict.items` in templates.
 - **Queue filter_criteria**: JSON dict with optional keys: `status` (list), `assigned_to` (int or null), `overdue` (bool), `client` (int), `help_topic` (int), `sla_plan` (int). The `assigned_to: null` key (explicit null, not absent) means "unassigned only".
 - **Google Maps mileage**: API call is server-side via `MileageDistanceView` — key never sent to browser. Tested working in architecture; needs verification on internal server (outbound HTTPS required).
