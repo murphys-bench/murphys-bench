@@ -115,4 +115,10 @@ urlpatterns = [
     path('settings/checklist-items/new/', views.ChecklistItemCreateView.as_view(), name='cli_create'),
     path('settings/checklist-items/<int:pk>/edit/', views.ChecklistItemUpdateView.as_view(), name='cli_update'),
     path('settings/checklist-items/<int:pk>/delete/', views.ChecklistItemDeleteView.as_view(), name='cli_delete'),
+
+    # Settings — Org Credentials Vault
+    path('settings/credentials/new/', views.OrgCredentialCreateView.as_view(), name='cred_create'),
+    path('settings/credentials/<int:pk>/edit/', views.OrgCredentialUpdateView.as_view(), name='cred_update'),
+    path('settings/credentials/<int:pk>/delete/', views.OrgCredentialDeleteView.as_view(), name='cred_delete'),
+    path('settings/credentials/<int:pk>/reveal/<str:field>/', views.OrgCredentialRevealView.as_view(), name='cred_reveal'),
 ]

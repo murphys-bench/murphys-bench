@@ -695,6 +695,57 @@ class Invoice(models.Model):
         return f'Invoice for {self.work_order.work_order_number} — {self.get_billing_status_display()}'
 
 
+class OrgCredential(models.Model):
+    """Shared organizational credential vault entry. Encrypted at rest."""
+
+    CATEGORY_CHOICES = [
+        ('email',   'Email'),
+        ('remote',  'Remote Support'),
+        ('cloud',   'Cloud'),
+        ('network', 'Network'),
+        ('vendor',  'Vendor'),
+        ('other',   'Other'),
+    ]
+
+    name         = models.CharField(max_length=200)
+    username     = EncryptedCharField(max_length=255, blank=True)
+    password     = EncryptedCharField(max_length=255, blank=True)
+    url          = models.URLField(blank=True)
+    category     = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='other', db_index=True)
+    notes        = EncryptedTextField(blank=True)
+    admin_only   = models.BooleanField(default=False, help_text='Restrict to administrators only')
+    created_by   = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='org_credentials_created')
+    created_at   = models.DateTimeField(auto_now_add=True)
+    updated_at   = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['category', 'name']
+
+    def __str__(self):
+        return f'{self.name} ({self.get_category_display()})'
+
+
+class CredentialAccessLog(models.Model):
+    """Audit log — every reveal, copy, edit, or delete of an OrgCredential."""
+
+    ACTION_CHOICES = [
+        ('viewed',  'Viewed'),
+        ('edited',  'Edited'),
+        ('deleted', 'Deleted'),
+    ]
+
+    credential  = models.ForeignKey(OrgCredential, on_delete=models.CASCADE, related_name='access_logs')
+    user        = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    action      = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    accessed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-accessed_at']
+
+    def __str__(self):
+        return f'{self.user} {self.action} "{self.credential.name}" at {self.accessed_at}'
+
+
 class Mileage(models.Model):
     """Travel logging for billing/expense tracking"""
 

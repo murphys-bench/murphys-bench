@@ -17,6 +17,7 @@ from .models import (
     QuickLaborItem, WorkPerformed, ContactPhone,
     Contact, RepairType, RepairTypeCategory,
     CannedResponseCategory, CannedResponse, Invoice,
+    OrgCredential, CredentialAccessLog,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
@@ -2274,6 +2275,7 @@ SETTINGS_TABS = [
     ('checklist_items',  'Checklist Items',  None),
     ('colors',           'Colors',           ColorSettingsForm),
     ('display',          'Display',          None),
+    ('credentials',      'Credentials',      None),
 ]
 
 SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS]
@@ -2397,6 +2399,9 @@ class SettingsView(LoginRequiredMixin, View):
             ctx.update(_colors_context(forms_map.get('colors')))
         if active_tab == 'display':
             ctx.update(_display_context())
+        if active_tab == 'credentials':
+            ctx['credentials'] = OrgCredential.objects.all()
+            ctx['credential_categories'] = OrgCredential.CATEGORY_CHOICES
         return render(request, 'core/settings.html', ctx)
 
     def post(self, request):
@@ -2788,3 +2793,79 @@ class ChecklistItemDeleteView(LoginRequiredMixin, View):
         item = get_object_or_404(ChecklistItem, pk=pk)
         item.delete()
         return redirect(reverse_lazy(CLI_REDIRECT) + CLI_TAB)
+
+
+# --- Org Credentials Vault ---
+
+CRED_REDIRECT = 'core:settings'
+CRED_TAB = '?tab=credentials'
+
+
+class OrgCredentialCreateView(LoginRequiredMixin, View):
+    def post(self, request):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        name     = request.POST.get('name', '').strip()
+        category = request.POST.get('category', 'other')
+        username = request.POST.get('username', '').strip()
+        password = request.POST.get('password', '').strip()
+        url      = request.POST.get('url', '').strip()
+        notes    = request.POST.get('notes', '').strip()
+        admin_only = request.POST.get('admin_only') == '1'
+        if name:
+            cred = OrgCredential.objects.create(
+                name=name, category=category, username=username,
+                password=password, url=url, notes=notes,
+                admin_only=admin_only, created_by=request.user,
+            )
+            CredentialAccessLog.objects.create(credential=cred, user=request.user, action='edited')
+        return redirect(reverse_lazy(CRED_REDIRECT) + CRED_TAB)
+
+
+class OrgCredentialUpdateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        cred = get_object_or_404(OrgCredential, pk=pk)
+        cred.name      = request.POST.get('name', cred.name).strip()
+        cred.category  = request.POST.get('category', cred.category)
+        cred.username  = request.POST.get('username', '').strip()
+        cred.url       = request.POST.get('url', '').strip()
+        cred.notes     = request.POST.get('notes', '').strip()
+        cred.admin_only = request.POST.get('admin_only') == '1'
+        new_pw = request.POST.get('password', '').strip()
+        if new_pw:
+            cred.password = new_pw
+        cred.save()
+        CredentialAccessLog.objects.create(credential=cred, user=request.user, action='edited')
+        return redirect(reverse_lazy(CRED_REDIRECT) + CRED_TAB)
+
+
+class OrgCredentialDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        cred = get_object_or_404(OrgCredential, pk=pk)
+        CredentialAccessLog.objects.create(credential=cred, user=request.user, action='deleted')
+        cred.delete()
+        return redirect(reverse_lazy(CRED_REDIRECT) + CRED_TAB)
+
+
+class OrgCredentialRevealView(LoginRequiredMixin, View):
+    """HTMX: return plaintext credential value and log the access."""
+    def get(self, request, pk, field):
+        cred = get_object_or_404(OrgCredential, pk=pk)
+        if cred.admin_only and not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        if field == 'password':
+            value = cred.password
+        elif field == 'username':
+            value = cred.username
+        else:
+            return HttpResponse('', status=400)
+        CredentialAccessLog.objects.create(credential=cred, user=request.user, action='viewed')
+        return HttpResponse(value or '(empty)', content_type='text/plain')
