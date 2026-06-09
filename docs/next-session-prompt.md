@@ -42,13 +42,14 @@
 
 Ask the user what they want to tackle. Good candidates:
 
-1. **Cloudflare tunnel** — external access to the production server
-2. **Testing suite** — model/view/form tests (deferred until real-world use surfaces edge cases)
-3. **Client Portal** — read-only ticket/WO status view for clients
-4. **Reporting enhancements** — revenue by period, technician productivity, device type breakdown
-5. **Email templates UI** — native CRUD for EmailTemplate
-6. **Site-wide icon audit** — replace remaining text symbols (×, etc.) with SVG icons
-7. Any other items in TODO.md
+1. **Native Admin section** — replace Django admin entirely; move Settings, Users, Security, Roles, Email Templates, Suppressed Addresses, SLA Plans, Help Topics, KB Categories, Logs under a Murphy's Bench `/manage/` section; gate by `can_manage_settings` role flag (not `is_staff`)
+2. **Frontend dependency strategy** — currently using unpkg/jsdelivr/cdn.tailwindcss.com for HTMX, Alpine.js, Tailwind, Chart.js; discuss vendoring vs npm lock file vs Tailwind CLI; also evaluate replacing Google Distance Matrix API with OpenStreetMap/OSRM to eliminate external data sharing
+3. **Cloudflare tunnel** — external access to the production server
+4. **Testing suite** — model/view/form tests (deferred until real-world use surfaces edge cases)
+5. **Client Portal** — read-only ticket/WO status view for clients
+6. **Reporting enhancements** — revenue by period, technician productivity, device type breakdown
+7. **Site-wide icon audit** — replace remaining text symbols (×, etc.) with SVG icons
+8. Any other items in TODO.md
 
 ---
 
