@@ -147,11 +147,13 @@
         calcBtn.disabled = true;
         calcBtn.textContent = 'Calculating…';
 
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
+                       || document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
         fetch('{% url "core:mileage_calculate" %}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '',
+                'X-CSRFToken': csrfToken,
             },
             body: JSON.stringify({ origin, destination: dest }),
         })
