@@ -222,6 +222,25 @@ class DashboardView(LoginRequiredMixin, View):
             status__in=['closed', 'cancelled']
         ).order_by('-updated_at')[:5]
 
+        # Team workload (admin only)
+        team_workload = []
+        if is_admin:
+            from django.db.models import Count
+            techs = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
+            open_wo_statuses = ['new', 'in_progress', 'waiting_on_customer', 'on_hold']
+            open_ticket_statuses = ['new', 'open', 'in_progress', 'waiting_on_customer']
+            for tech in techs:
+                open_wos = WorkOrder.objects.filter(assigned_to=tech, status__in=open_wo_statuses).count()
+                open_tickets = Ticket.objects.filter(assigned_to=tech, status__in=open_ticket_statuses).count()
+                if open_wos or open_tickets:
+                    team_workload.append({
+                        'tech': tech,
+                        'open_wos': open_wos,
+                        'open_tickets': open_tickets,
+                        'total': open_wos + open_tickets,
+                    })
+            team_workload.sort(key=lambda x: -x['total'])
+
         context = {
             'ticket_tiles': ticket_tiles,
             'wo_tiles': wo_tiles,
@@ -230,6 +249,7 @@ class DashboardView(LoginRequiredMixin, View):
             'active_clients': Client.objects.filter(is_active=True).count(),
             'total_devices': Device.objects.filter(is_active=True).count(),
             'is_admin': is_admin,
+            'team_workload': team_workload,
         }
         return render(request, self.template_name, context)
 
@@ -1796,6 +1816,40 @@ class ReportsView(LoginRequiredMixin, View):
             .order_by('-total')
         )
 
+        # 10. Technician performance
+        tech_perf = []
+        for tech in User.objects.filter(is_active=True).order_by('first_name', 'last_name'):
+            wos_in_range = WorkOrder.objects.filter(
+                assigned_to=tech, created_at__range=(start_dt, end_dt)
+            )
+            total_wos = wos_in_range.count()
+            completed_wos = wos_in_range.filter(status='closed').count()
+            completion_rate = round(100 * completed_wos / total_wos) if total_wos else None
+
+            # Avg resolution time in hours (Python-side for DB compat)
+            closed_wos = wos_in_range.filter(status='closed', completed_date__isnull=False)
+            hours_list = [
+                (wo.completed_date - wo.created_at).total_seconds() / 3600
+                for wo in closed_wos
+                if wo.completed_date and wo.created_at
+            ]
+            avg_hours = round(sum(hours_list) / len(hours_list), 1) if hours_list else None
+
+            open_wos = WorkOrder.objects.filter(
+                assigned_to=tech,
+                status__in=['new', 'in_progress', 'waiting_on_customer', 'on_hold']
+            ).count()
+
+            if total_wos or open_wos:
+                tech_perf.append({
+                    'tech': tech,
+                    'total_wos': total_wos,
+                    'completed_wos': completed_wos,
+                    'completion_rate': completion_rate,
+                    'avg_hours': avg_hours,
+                    'open_wos': open_wos,
+                })
+
         context = {
             'start_date': start_date,
             'end_date': end_date,
@@ -1826,6 +1880,8 @@ class ReportsView(LoginRequiredMixin, View):
             'paid_total': paid_total,
             'outstanding_total': outstanding_total,
             'outstanding_by_client': outstanding_by_client,
+            # 10
+            'tech_perf': tech_perf,
         }
         return render(request, 'core/reports.html', context)
 
@@ -1912,6 +1968,20 @@ class ReportsCSVView(LoginRequiredMixin, View):
             writer.writerow(['Tech', 'Month', 'Miles'])
             for r in Mileage.objects.filter(trip_date__range=(start_date, end_date)).annotate(month=TruncMonth('trip_date')).values('technician__first_name', 'technician__last_name', 'month').annotate(miles=Sum('miles')).order_by('month', 'technician__last_name'):
                 writer.writerow([f"{r['technician__first_name']} {r['technician__last_name']}", r['month'].strftime('%Y-%m'), r['miles']])
+
+        elif report == 'tech_perf':
+            writer.writerow(['Technician', 'WOs (period)', 'Completed', 'Completion %', 'Avg Resolution (hrs)', 'Open Now'])
+            for tech in User.objects.filter(is_active=True).order_by('first_name', 'last_name'):
+                wos_in_range = WorkOrder.objects.filter(assigned_to=tech, created_at__range=(start_dt, end_dt))
+                total_wos = wos_in_range.count()
+                completed_wos = wos_in_range.filter(status='closed').count()
+                completion_rate = round(100 * completed_wos / total_wos) if total_wos else ''
+                closed_wos = wos_in_range.filter(status='closed', completed_date__isnull=False)
+                hours_list = [(wo.completed_date - wo.created_at).total_seconds() / 3600 for wo in closed_wos if wo.completed_date and wo.created_at]
+                avg_hours = round(sum(hours_list) / len(hours_list), 1) if hours_list else ''
+                open_wos = WorkOrder.objects.filter(assigned_to=tech, status__in=['new', 'in_progress', 'waiting_on_customer', 'on_hold']).count()
+                if total_wos or open_wos:
+                    writer.writerow([tech.get_full_name() or tech.username, total_wos, completed_wos, completion_rate, avg_hours, open_wos])
 
         elif report == 'billing':
             writer.writerow(['WO #', 'Client', 'Billing Status', 'Amount', 'Invoiced Date', 'Paid Date', 'Payment Method'])

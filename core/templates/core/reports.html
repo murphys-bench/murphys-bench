@@ -90,6 +90,56 @@
     {% endif %}
 </div>
 
+<!-- Technician Performance -->
+{% if tech_perf %}
+<div class="bg-white rounded-lg shadow p-5">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-gray-900">Technician Performance</h2>
+        <a href="{% url 'core:reports_csv' 'tech_perf' %}?{{ qs }}"
+           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded flex items-center gap-1">
+            {% icon "arrow-down-tray" 3 %} CSV
+        </a>
+    </div>
+    <table class="min-w-full text-sm">
+        <thead>
+            <tr class="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-200">
+                <th class="pb-2 pr-4">Technician</th>
+                <th class="pb-2 text-right pr-4">WOs (period)</th>
+                <th class="pb-2 text-right pr-4">Completed</th>
+                <th class="pb-2 text-right pr-4">Completion %</th>
+                <th class="pb-2 text-right pr-4">Avg Resolution</th>
+                <th class="pb-2 text-right">Open Now</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+            {% for row in tech_perf %}
+            <tr>
+                <td class="py-2 pr-4 font-medium text-gray-900">{{ row.tech.get_full_name|default:row.tech.username }}</td>
+                <td class="py-2 pr-4 text-right text-gray-700">{{ row.total_wos }}</td>
+                <td class="py-2 pr-4 text-right text-gray-700">{{ row.completed_wos }}</td>
+                <td class="py-2 pr-4 text-right">
+                    {% if row.completion_rate is not None %}
+                    <span class="{% if row.completion_rate >= 80 %}text-green-600{% elif row.completion_rate >= 50 %}text-yellow-600{% else %}text-red-600{% endif %} font-medium">
+                        {{ row.completion_rate }}%
+                    </span>
+                    {% else %}<span class="text-gray-300">—</span>{% endif %}
+                </td>
+                <td class="py-2 pr-4 text-right text-gray-600">
+                    {% if row.avg_hours is not None %}{{ row.avg_hours }}h{% else %}<span class="text-gray-300">—</span>{% endif %}
+                </td>
+                <td class="py-2 text-right">
+                    {% if row.open_wos %}
+                    <a href="{% url 'core:work_order_list' %}?assigned_to={{ row.tech.pk }}"
+                       class="text-blue-600 hover:underline font-semibold">{{ row.open_wos }}</a>
+                    {% else %}<span class="text-gray-300">—</span>{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
 <!-- 1. Ticket Volume Over Time -->
 <div class="bg-white rounded-lg shadow p-5">
     <div class="flex items-center justify-between mb-4">
