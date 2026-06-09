@@ -84,6 +84,8 @@ urlpatterns = [
 
     # Native Settings UI
     path('settings/', views.SettingsView.as_view(), name='settings'),
+    path('settings/test-outbound-email/', views.EmailTestOutboundView.as_view(), name='settings_test_outbound'),
+    path('settings/test-inbound-email/', views.EmailTestInboundView.as_view(), name='settings_test_inbound'),
 
     # Settings — Repair Types CRUD
     path('settings/repair-type-categories/new/', views.RepairTypeCategoryCreateView.as_view(), name='rt_category_create'),

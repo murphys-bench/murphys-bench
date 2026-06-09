@@ -188,12 +188,25 @@
                     </div>
                 </div>
 
-                <div class="mt-6 pt-4 border-t border-gray-200">
+                <div class="mt-6 pt-4 border-t border-gray-200 flex items-start justify-between gap-6">
                     <button type="submit"
                             class="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
                         Save Outbound Email
                     </button>
+                    <div class="flex items-center gap-2">
+                        <input type="email" id="test-outbound-to" name="to" placeholder="Send test to…"
+                               class="text-sm border border-gray-300 rounded px-2 py-1.5 w-52 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        <button type="button"
+                                hx-post="{% url 'core:settings_test_outbound' %}"
+                                hx-include="#test-outbound-to"
+                                hx-target="#outbound-test-result"
+                                hx-swap="innerHTML"
+                                class="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 border border-gray-300 whitespace-nowrap">
+                            Send Test
+                        </button>
+                    </div>
                 </div>
+                <div id="outbound-test-result"></div>
             </form>
         </div>
 
@@ -273,11 +286,19 @@
                     </div>
                 </div>
 
-                <div class="mt-6 pt-4 border-t border-gray-200">
+                <div class="mt-6 pt-4 border-t border-gray-200 flex items-center gap-4">
                     <button type="submit"
                             class="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
                         Save Inbound Email
                     </button>
+                    <button type="button"
+                            hx-post="{% url 'core:settings_test_inbound' %}"
+                            hx-target="#inbound-test-result"
+                            hx-swap="innerHTML"
+                            class="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 border border-gray-300">
+                        Test Connection
+                    </button>
+                    <span id="inbound-test-result"></span>
                 </div>
             </form>
         </div>

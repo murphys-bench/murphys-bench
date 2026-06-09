@@ -2105,6 +2105,72 @@ def _repair_types_context():
     return {'rt_categories': categories, 'rt_uncategorised': uncategorised}
 
 
+class EmailTestOutboundView(LoginRequiredMixin, View):
+    """HTMX: send a test email using saved SMTP settings."""
+
+    def post(self, request):
+        import smtplib, ssl
+        from email.mime.text import MIMEText
+        s = SiteSettings.get()
+        to_addr = request.POST.get('to', '').strip()
+        if not to_addr:
+            return HttpResponse('<p class="text-red-600 text-sm mt-2">Please enter a recipient address.</p>')
+        if not s.email_host or not s.email_username:
+            return HttpResponse('<p class="text-red-600 text-sm mt-2">SMTP settings not configured.</p>')
+        try:
+            msg = MIMEText("This is a test email from Murphy's Bench. Your outbound email is working correctly.")
+            msg['Subject'] = "Murphy's Bench — Outbound Email Test"
+            msg['From'] = s.email_from or s.email_username
+            msg['To'] = to_addr
+            if s.email_use_tls:
+                ctx = ssl.create_default_context()
+                with smtplib.SMTP(s.email_host, s.email_port, timeout=10) as server:
+                    server.starttls(context=ctx)
+                    server.login(s.email_username, s.email_password)
+                    server.sendmail(msg['From'], [to_addr], msg.as_string())
+            else:
+                with smtplib.SMTP(s.email_host, s.email_port, timeout=10) as server:
+                    if s.email_password:
+                        server.login(s.email_username, s.email_password)
+                    server.sendmail(msg['From'], [to_addr], msg.as_string())
+            return HttpResponse(f'<p class="text-green-600 text-sm mt-2">✓ Test email sent to {to_addr}.</p>')
+        except Exception as e:
+            return HttpResponse(f'<p class="text-red-600 text-sm mt-2">✗ Failed: {e}</p>')
+
+
+class EmailTestInboundView(LoginRequiredMixin, View):
+    """HTMX: test inbound email connection using saved IMAP/POP3 settings."""
+
+    def post(self, request):
+        import imaplib, poplib, ssl
+        s = SiteSettings.get()
+        if not s.inbound_host or not s.inbound_username:
+            return HttpResponse('<p class="text-red-600 text-sm mt-2">Inbound settings not configured.</p>')
+        try:
+            if s.inbound_protocol == 'imap':
+                if s.inbound_ssl:
+                    conn = imaplib.IMAP4_SSL(s.inbound_host, s.inbound_port, timeout=10)
+                else:
+                    conn = imaplib.IMAP4(s.inbound_host, s.inbound_port)
+                conn.login(s.inbound_username, s.inbound_password)
+                status, msgs = conn.select(s.inbound_folder or 'INBOX', readonly=True)
+                count = msgs[0].decode() if msgs else '?'
+                conn.logout()
+                return HttpResponse(f'<p class="text-green-600 text-sm mt-2">✓ Connected. {count} message(s) in {s.inbound_folder or "INBOX"}.</p>')
+            else:  # pop3
+                if s.inbound_ssl:
+                    conn = poplib.POP3_SSL(s.inbound_host, s.inbound_port)
+                else:
+                    conn = poplib.POP3(s.inbound_host, s.inbound_port)
+                conn.user(s.inbound_username)
+                conn.pass_(s.inbound_password)
+                count = len(conn.list()[1])
+                conn.quit()
+                return HttpResponse(f'<p class="text-green-600 text-sm mt-2">✓ Connected. {count} message(s) in mailbox.</p>')
+        except Exception as e:
+            return HttpResponse(f'<p class="text-red-600 text-sm mt-2">✗ Failed: {e}</p>')
+
+
 class SettingsView(LoginRequiredMixin, View):
     """Native settings UI — admin/can_manage_settings only."""
 
