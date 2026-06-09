@@ -906,6 +906,55 @@ class ClientDeleteView(LoginRequiredMixin, View):
         return redirect('core:client_list')
 
 
+class InvoiceExportView(LoginRequiredMixin, View):
+    """Export invoice records for a client as CSV."""
+
+    def get(self, request, pk):
+        import csv
+        client = get_object_or_404(Client, pk=pk)
+        status_filter = request.GET.get('status', '')
+
+        qs = Invoice.objects.filter(
+            work_order__client=client
+        ).select_related(
+            'work_order', 'work_order__device', 'work_order__assigned_to'
+        ).order_by('work_order__created_at')
+
+        if status_filter:
+            qs = qs.filter(billing_status=status_filter)
+
+        safe_name = client.name.replace(' ', '_').replace('/', '_')
+        filename = f'invoices_{safe_name}.csv'
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        writer = csv.writer(response)
+        writer.writerow([
+            'WO #', 'Client', 'Device', 'Assigned To',
+            'Billing Status', 'Amount', 'Invoiced Date', 'Paid Date',
+            'Payment Method', 'WO Created', 'WO Closed', 'Notes',
+        ])
+
+        for inv in qs:
+            wo = inv.work_order
+            writer.writerow([
+                wo.work_order_number,
+                client.name,
+                str(wo.device) if wo.device else '',
+                wo.assigned_to.get_full_name() if wo.assigned_to else '',
+                inv.get_billing_status_display(),
+                inv.amount if inv.amount is not None else '',
+                inv.invoiced_date or '',
+                inv.paid_date or '',
+                inv.get_payment_method_display() if inv.payment_method else '',
+                wo.created_at.date() if wo.created_at else '',
+                wo.closed_date or '',
+                inv.notes,
+            ])
+
+        return response
+
+
 # --- Device Create / Edit ---
 
 class DeviceCreateView(LoginRequiredMixin, CreateView):
