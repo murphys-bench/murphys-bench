@@ -184,33 +184,39 @@
 
         <!-- User name + role (visible when expanded) -->
         <div class="nav-label px-2 py-1 mb-0.5">
-            <div class="text-sm font-medium truncate">{{ user.get_full_name|default:user.username }}</div>
-            <div class="text-xs truncate" style="opacity:0.5">{{ user.role_obj.name|default:user.role|default:"" }}</div>
+            <div class="text-base font-medium truncate">{{ user.get_full_name|default:user.username }}</div>
+            <div class="text-sm truncate" style="opacity:0.5">{{ user.role_obj.name|default:user.role|default:"" }}</div>
         </div>
 
         {% if user.is_staff %}
         <a href="{% url 'core:settings' %}" title="Admin Settings"
-           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-colors hover:bg-white/10"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-base transition-colors hover:bg-white/10"
            style="opacity:0.75">
-            {% icon 'shield' 4 %}<span class="nav-label">Admin</span>
+            {% icon 'shield' 5 %}<span class="nav-label">Admin</span>
         </a>
-        {% endif %}
-
+        <!-- Security as sub-item under Admin -->
         <a href="{% url 'two_factor:profile' %}" title="Account Security"
-           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-colors hover:bg-white/10"
+           class="nav-item flex items-center gap-3 pl-7 pr-2 py-2 rounded-lg text-base transition-colors hover:bg-white/10"
+           style="opacity:0.65">
+            {% icon 'lock-closed' 4 %}<span class="nav-label">Security</span>
+        </a>
+        {% else %}
+        <a href="{% url 'two_factor:profile' %}" title="Account Security"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-base transition-colors hover:bg-white/10"
            style="opacity:0.75">
             {% icon 'lock-closed' 4 %}<span class="nav-label">Security</span>
         </a>
+        {% endif %}
 
         <a href="{% url 'accounts:logout' %}" title="Log Out"
-           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-colors hover:bg-white/10"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-base transition-colors hover:bg-white/10"
            style="opacity:0.75">
             {% icon 'logout' 4 %}<span class="nav-label">Log Out</span>
         </a>
 
         <!-- Sidebar collapse toggle -->
         <button @click="toggle()" title="Toggle sidebar"
-                class="nav-item w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm transition-colors hover:bg-white/10 mt-1"
+                class="nav-item w-full flex items-center gap-2 px-2 py-2 rounded-lg text-base transition-colors hover:bg-white/10 mt-1"
                 style="opacity:0.5">
             <span class="nav-icon-collapse">{% icon 'chevron-left' 4 %}</span>
             <span class="nav-icon-expand">{% icon 'chevron-right' 4 %}</span>
