@@ -2122,8 +2122,13 @@ class EmailTestOutboundView(LoginRequiredMixin, View):
             msg['Subject'] = "Murphy's Bench — Outbound Email Test"
             msg['From'] = s.email_from or s.email_username
             msg['To'] = to_addr
-            if s.email_use_tls:
-                ctx = ssl.create_default_context()
+            ctx = ssl.create_default_context()
+            # Port 465 = implicit SSL (SMTP_SSL); port 587 = STARTTLS
+            if s.email_port == 465:
+                with smtplib.SMTP_SSL(s.email_host, s.email_port, context=ctx, timeout=10) as server:
+                    server.login(s.email_username, s.email_password)
+                    server.sendmail(msg['From'], [to_addr], msg.as_string())
+            elif s.email_use_tls:
                 with smtplib.SMTP(s.email_host, s.email_port, timeout=10) as server:
                     server.starttls(context=ctx)
                     server.login(s.email_username, s.email_password)

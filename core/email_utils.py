@@ -81,13 +81,15 @@ def send_ticket_email(trigger, ticket, extra_context=None):
     from django.core.mail import EmailMessage, get_connection
     from django.conf import settings as django_settings
 
+    use_ssl = site.email_port == 465
     connection = get_connection(
         backend='django.core.mail.backends.smtp.EmailBackend',
         host=site.email_host or django_settings.EMAIL_HOST,
         port=site.email_port or django_settings.EMAIL_PORT,
         username=site.email_username or django_settings.EMAIL_HOST_USER,
         password=site.email_password or django_settings.EMAIL_HOST_PASSWORD,
-        use_tls=site.email_use_tls,
+        use_tls=site.email_use_tls and not use_ssl,
+        use_ssl=use_ssl,
         fail_silently=True,
     )
 
