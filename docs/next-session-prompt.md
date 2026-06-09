@@ -6,15 +6,20 @@
 
 ---
 
-## What's already built and working (as of session 13):
+## What's already built and working (as of session 14):
 
-- Django 4.2 app, 36+ models, 30 migrations applied
+- Django 4.2 app, 36+ models, 31 migrations applied
 - **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16
 - Deploy workflow: `git push` on Mac → SSH to server → `git pull && python manage.py migrate && sudo systemctl restart murphys-bench`
 - Full CRUD views for work orders, clients, devices, mileage, contacts, tickets, KB, queues
 - HTMX inline notes, checklist, ticket replies, Quick Labor, credentials
 
-**Batch 12 — COMPLETE (session 12)**
+**Session 14 additions:**
+- **Credential encryption (migration 0031)**: `WorkOrder.device_username`, `device_password`, `device_pin`, `credential_notes` and `SiteSettings.email_password`, `inbound_password` now AES-256 encrypted at rest via `django-encrypted-model-fields`
+- `FIELD_ENCRYPTION_KEY` added to settings.py (reads from env, dev fallback only)
+- `encrypted_model_fields` added to INSTALLED_APPS and requirements.txt
+- `.env.example` updated with key generation instructions
+- **⚠️ Production deployment of migration 0031 is PENDING** — must set `FIELD_ENCRYPTION_KEY` in production env BEFORE pulling. Do this together. See `docs/` or memory for steps.
 
 **Session 13 additions:**
 - Cross-visibility: open tickets panel on WO detail, open WOs panel on ticket detail (status, last note/reply, one-click nav)
@@ -38,22 +43,28 @@
 
 ---
 
-## What's next: choose from TODO.md
+## What's next:
 
-Ask the user what they want to tackle. Good candidates:
+### Immediate (session 15 — visual polish, already queued)
+Dashboard template already read and understood. Build in this order:
 
-1. **Native Admin section** — replace Django admin entirely; move Settings, Users, Security, Roles, Email Templates, Suppressed Addresses, SLA Plans, Help Topics, KB Categories, Logs under a Murphy's Bench `/manage/` section; gate by `can_manage_settings` role flag (not `is_staff`)
-2. **Frontend dependency strategy** — currently using unpkg/jsdelivr/cdn.tailwindcss.com for HTMX, Alpine.js, Tailwind, Chart.js; discuss vendoring vs npm lock file vs Tailwind CLI; also evaluate replacing Google Distance Matrix API with OpenStreetMap/OSRM to eliminate external data sharing
-3. **Cloudflare tunnel** — external access to the production server
-4. **Testing suite** — model/view/form tests (deferred until real-world use surfaces edge cases)
-5. **Client Portal** — read-only ticket/WO status view for clients
-6. **Reporting enhancements** — revenue by period, technician productivity, device type breakdown
-7. **Site-wide icon audit** — replace remaining text symbols (×, etc.) with SVG icons
-8. Any other items in TODO.md
+1. **Color-coded dashboard metric tiles** — Status-colored cards replacing uniform gray. Convention: Blue=active/in-progress, Yellow=waiting, Red=overdue, Green=complete, Gray=new/unassigned. Number color matches accent. DashboardTile model already has `icon` and `status_filter` fields to drive this.
+2. **SVG icons replacing emoji** — Dashboard tiles, quick stats row, sidebar. Use Heroicons (consistent with Tailwind). Mapping: 🎫→ticket, ⚙️→cog, ⏳→clock, 🔴→exclamation-circle, 🔧→wrench, ✅→check-circle, 📋→clipboard-list, 🏢→office-building, 💻→desktop-computer.
+3. **Device type icon grid** — Replace Device Type dropdown with 2×4 visual icon button grid (Laptop, Desktop, Tablet, Phone, Server, Printer, Monitor, Other). Selected state highlighted. Pattern from RepairShopCRM.
+
+### Also queued (separate sessions)
+- **Invoice model** — Lightweight billing tracker: `Invoice` entity on WO, `billing_status` enum (uninvoiced/invoiced/paid/paid_direct/disputed), payment metadata, customer balance on client detail. MB tracks state only — not an accounting module.
+- **Production deploy of migration 0031** — Together. Set FIELD_ENCRYPTION_KEY in prod env first, then pull + migrate.
+- **Native Admin section**, **Cloudflare tunnel**, **Testing suite**, **Client Portal**, **Reporting enhancements** — see TODO.md
 
 ---
 
-## Key decisions locked (do not re-litigate):
+## Key decisions locked (do not re-litigate — includes session 14):
+
+- **Credential encryption**: AES-256 via django-encrypted-model-fields. FIELD_ENCRYPTION_KEY from env. Never plaintext.
+- **Billing philosophy**: MB tracks billing state only (uninvoiced/invoiced/paid). Not an accounting module. Invoice Ninja or other system is authoritative for formal financials.
+- **Invoice model**: Lightweight `Invoice` entity on WO — not fields on WO. Allows WO scope to change before invoicing. billing_status includes `paid_direct` for cash/walk-in.
+- **Visual design is a first-class requirement**: Color + icons communicate status faster than text. Not optional polish.
 
 - Permanently Delete blocks if client has WOs; offers Deactivate instead
 - Address: 5 fields — Line 1, Line 2 (optional), City, State, Zip. No country.
