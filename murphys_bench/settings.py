@@ -23,6 +23,14 @@ SECRET_KEY = config(
     default='django-insecure-change-me-in-production-@ddk6oxul(ace7rj@37hx-ieizb)@f1j+w5@8px%!r287b_ef&'
 )
 
+# Field-level encryption key for sensitive data (device credentials, email passwords).
+# Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# MUST be set in production .env — never use the default in production.
+FIELD_ENCRYPTION_KEY = config(
+    'FIELD_ENCRYPTION_KEY',
+    default='nCmoQA0nD3vW1siXNm3Gvp1lXzN8KItaIMQGwjgijpE='
+)
+
 # Allowed hosts for internal network
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
 
@@ -37,6 +45,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 
     # Third-party
+    'encrypted_model_fields',
     'django_extensions',
     'auditlog',
     'django_otp',
