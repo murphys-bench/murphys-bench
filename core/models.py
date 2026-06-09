@@ -4,6 +4,7 @@ from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelatio
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
 from django.core.validators import MinValueValidator
+from encrypted_model_fields.fields import EncryptedCharField, EncryptedTextField
 import uuid
 import os
 
@@ -544,11 +545,11 @@ class WorkOrder(models.Model):
     notes_internal = models.TextField(blank=True, help_text="Technician-only notes")
     notes_customer_visible = models.TextField(blank=True, help_text="What the customer sees")
     invoice_ninja_ref = models.CharField(max_length=100, blank=True, help_text='Invoice Ninja invoice reference number')
-    # Device credentials (never shown on printed reports)
-    device_username = models.CharField(max_length=255, blank=True)
-    device_password = models.CharField(max_length=255, blank=True)
-    device_pin = models.CharField(max_length=50, blank=True)
-    credential_notes = models.TextField(blank=True, help_text='Freeform credential notes, e.g. recovery email, security question answers')
+    # Device credentials — encrypted at rest (AES-256), never shown on printed reports
+    device_username = EncryptedCharField(max_length=255, blank=True)
+    device_password = EncryptedCharField(max_length=255, blank=True)
+    device_pin = EncryptedCharField(max_length=50, blank=True)
+    credential_notes = EncryptedTextField(blank=True, help_text='Freeform credential notes, e.g. recovery email, security question answers')
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -865,7 +866,7 @@ class SiteSettings(models.Model):
     email_port = models.IntegerField(default=587)
     email_use_tls = models.BooleanField(default=True)
     email_username = models.CharField(max_length=255, blank=True)
-    email_password = models.CharField(max_length=255, blank=True, help_text='Stored in plaintext — for internal use only.')
+    email_password = EncryptedCharField(max_length=255, blank=True)
     email_from = models.EmailField(blank=True, help_text='From address shown to clients. e.g. support@yourdomain.com')
 
     # Auto-responder suppression patterns (newline-separated fnmatch patterns)
@@ -890,7 +891,7 @@ class SiteSettings(models.Model):
     inbound_port = models.IntegerField(default=993, help_text='993 for IMAP SSL, 995 for POP3 SSL, 143/110 without SSL.')
     inbound_ssl = models.BooleanField(default=True)
     inbound_username = models.CharField(max_length=255, blank=True)
-    inbound_password = models.CharField(max_length=255, blank=True, help_text='Stored in plaintext — internal use only.')
+    inbound_password = EncryptedCharField(max_length=255, blank=True)
     inbound_folder = models.CharField(max_length=100, default='INBOX', help_text='IMAP folder to poll. Ignored for POP3.')
     inbound_delete_after_fetch = models.BooleanField(
         default=False,
