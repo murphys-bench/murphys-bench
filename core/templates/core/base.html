@@ -96,14 +96,14 @@
      }">
 
     <!-- Logo -->
-    <div class="flex items-center justify-center h-16 flex-shrink-0 border-b px-3"
+    <div class="flex items-center justify-center h-24 flex-shrink-0 border-b px-2"
          style="border-color:rgba(255,255,255,0.1)">
-        <a href="{% url 'core:dashboard' %}" class="flex items-center justify-center w-full h-full py-2">
+        <a href="{% url 'core:dashboard' %}" class="flex items-center justify-center w-full h-full py-1.5">
             {% if site_settings.site_logo %}
                 <img src="{{ site_settings.site_logo.url }}" alt=""
-                     class="max-h-full w-auto max-w-full object-contain">
+                     class="h-full w-auto max-w-full object-contain">
             {% else %}
-                <span class="font-bold text-base text-center truncate px-1">{{ site_settings.company_name|default:"Murphy's Bench" }}</span>
+                <span class="font-bold text-lg text-center leading-tight px-1">{{ site_settings.company_name|default:"Murphy's Bench" }}</span>
             {% endif %}
         </a>
     </div>
@@ -167,7 +167,7 @@
     <div class="flex-1 flex flex-col overflow-hidden">
         <div class="nav-my-work flex-1 overflow-y-auto border-t pt-2 pb-1 px-1"
              style="border-color:rgba(255,255,255,0.1)">
-            <p class="px-2 mb-1 text-xs font-semibold uppercase tracking-wider"
+            <p class="px-2 mb-1 text-sm font-semibold uppercase tracking-wider"
                style="opacity:0.4">My Work</p>
             <div id="sidebar-content"
                  hx-get="{% url 'core:sidebar_fragment' %}"
@@ -188,29 +188,29 @@
             <div class="text-xs truncate" style="opacity:0.5">{{ user.role_obj.name|default:user.role|default:"" }}</div>
         </div>
 
-        <a href="{% url 'two_factor:profile' %}" title="Account Security"
-           class="nav-item flex items-center gap-3 px-2 py-1.5 rounded-lg text-xs transition-colors hover:bg-white/10"
-           style="opacity:0.75">
-            {% icon 'lock-closed' 4 %}<span class="nav-label">Security</span>
-        </a>
-
         {% if user.is_staff %}
         <a href="{% url 'core:settings' %}" title="Admin Settings"
-           class="nav-item flex items-center gap-3 px-2 py-1.5 rounded-lg text-xs transition-colors hover:bg-white/10"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-colors hover:bg-white/10"
            style="opacity:0.75">
             {% icon 'shield' 4 %}<span class="nav-label">Admin</span>
         </a>
         {% endif %}
 
+        <a href="{% url 'two_factor:profile' %}" title="Account Security"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-colors hover:bg-white/10"
+           style="opacity:0.75">
+            {% icon 'lock-closed' 4 %}<span class="nav-label">Security</span>
+        </a>
+
         <a href="{% url 'accounts:logout' %}" title="Log Out"
-           class="nav-item flex items-center gap-3 px-2 py-1.5 rounded-lg text-xs transition-colors hover:bg-white/10"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-colors hover:bg-white/10"
            style="opacity:0.75">
             {% icon 'logout' 4 %}<span class="nav-label">Log Out</span>
         </a>
 
         <!-- Sidebar collapse toggle -->
         <button @click="toggle()" title="Toggle sidebar"
-                class="nav-item w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-colors hover:bg-white/10 mt-1"
+                class="nav-item w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm transition-colors hover:bg-white/10 mt-1"
                 style="opacity:0.5">
             <span class="nav-icon-collapse">{% icon 'chevron-left' 4 %}</span>
             <span class="nav-icon-expand">{% icon 'chevron-right' 4 %}</span>
