@@ -1,3 +1,4 @@
+{% load mb_icons %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -22,22 +23,17 @@
             --color-status-closed:       {{ s.color_status_closed|default:"#f3f4f6" }};
             --color-status-cancelled:    {{ s.color_status_cancelled|default:"#fee2e2" }};
         }
-        nav.app-nav { background-color: var(--color-primary) !important; }
-        nav.app-nav a, nav.app-nav span, nav.app-nav button { color: var(--color-nav-text) !important; }
-        nav.app-nav a:hover { opacity: 0.8; }
-        aside.app-sidebar { background-color: var(--color-sidebar-bg) !important; color: var(--color-sidebar-text) !important; }
-        aside.app-sidebar a, aside.app-sidebar span, aside.app-sidebar p { color: var(--color-sidebar-text) !important; }
-        .wo-status-badge { background-color: var(--color-status-new); }
-        .wo-status-badge.status-new          { background-color: var(--color-status-new); }
-        .wo-status-badge.status-assigned     { background-color: var(--color-status-assigned); }
-        .wo-status-badge.status-in_progress  { background-color: var(--color-status-in-progress); }
-        .wo-status-badge.status-completed    { background-color: var(--color-status-completed); }
-        .wo-status-badge.status-closed       { background-color: var(--color-status-closed); }
-        .wo-status-badge.status-cancelled    { background-color: var(--color-status-cancelled); }
+        .wo-status-badge                  { background-color: var(--color-status-new); }
+        .wo-status-badge.status-new       { background-color: var(--color-status-new); }
+        .wo-status-badge.status-assigned  { background-color: var(--color-status-assigned); }
+        .wo-status-badge.status-in_progress { background-color: var(--color-status-in-progress); }
+        .wo-status-badge.status-completed { background-color: var(--color-status-completed); }
+        .wo-status-badge.status-closed    { background-color: var(--color-status-closed); }
+        .wo-status-badge.status-cancelled { background-color: var(--color-status-cancelled); }
     </style>
     {% endif %}{% endwith %}
 
-    <!-- Display Settings — applied before first paint to avoid flash -->
+    <!-- Display settings + sidebar collapse state — set before first paint to avoid flash -->
     <script>
     (function() {
         var fs  = localStorage.getItem('mb_font_size')  || '14px';
@@ -47,94 +43,202 @@
         el.style.setProperty('--mb-font-size', fs);
         el.style.setProperty('--mb-nav-size',  nfs);
         el.setAttribute('data-density', den);
+        if (localStorage.getItem('mb_nav_collapsed') === 'true') {
+            el.setAttribute('data-sidebar-collapsed', 'true');
+        }
     })();
     </script>
     <style>
         .mb-content { font-size: var(--mb-font-size, 14px); }
-        nav.app-nav a, nav.app-nav span { font-size: var(--mb-nav-size, 13px); }
 
-        /* Compact density — tighter table rows and card padding */
+        /* Sidebar width — CSS handles initial state (pre-Alpine), Alpine syncs on toggle */
+        .app-leftnav    { width: 16rem; transition: width 0.2s ease; }
+        .app-main-offset { margin-left: 16rem; transition: margin-left 0.2s ease; }
+        html[data-sidebar-collapsed="true"] .app-leftnav    { width: 4rem; }
+        html[data-sidebar-collapsed="true"] .app-main-offset { margin-left: 4rem; }
+
+        /* Hide text + My Work when collapsed */
+        html[data-sidebar-collapsed="true"] .nav-label    { display: none; }
+        html[data-sidebar-collapsed="true"] .nav-my-work  { display: none; }
+
+        /* Collapse/expand chevron direction */
+        .nav-icon-collapse { display: flex; align-items: center; }
+        .nav-icon-expand   { display: none;  align-items: center; }
+        html[data-sidebar-collapsed="true"] .nav-icon-collapse { display: none; }
+        html[data-sidebar-collapsed="true"] .nav-icon-expand   { display: flex; }
+
+        /* Center nav icons when collapsed */
+        html[data-sidebar-collapsed="true"] .nav-item { justify-content: center !important; padding-left: 0 !important; padding-right: 0 !important; gap: 0 !important; }
+
+        /* Compact density */
         html[data-density="compact"] td,
         html[data-density="compact"] th { padding-top: 4px !important; padding-bottom: 4px !important; }
         html[data-density="compact"] .density-card { padding: 12px !important; }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+<body class="bg-gray-100" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
 
-    <!-- Top Navigation Bar -->
-    <nav class="app-nav bg-gray-900 text-white fixed top-0 left-0 right-0 z-30">
-        <div class="px-4 sm:px-6 lg:px-8">
-            <div class="flex items-center justify-between h-14">
-                <div class="flex items-center gap-6">
-                    <a href="{% url 'core:dashboard' %}" class="flex items-center hover:opacity-80 whitespace-nowrap">
-                        {% if site_settings.site_logo %}
-                            <img src="{{ site_settings.site_logo.url }}" alt="Logo" class="h-8 max-w-40 object-contain">
-                        {% else %}
-                            <span class="text-lg font-bold tracking-tight">{{ site_settings.company_name|default:"Murphy's Bench" }}</span>
-                        {% endif %}
-                    </a>
-                    <div class="hidden md:flex items-center gap-1">
-                        <a href="{% url 'core:work_order_list' %}"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'work_order' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Work Orders</a>
-                        <a href="{% url 'core:client_list' %}"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'client' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Clients</a>
-<a href="{% url 'core:ticket_list' %}"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'ticket' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Tickets</a>
-                        <a href="{% url 'core:queue_list' %}"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'queue' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Queues</a>
-                        <a href="{% url 'core:mileage_list' %}"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if request.resolver_match.url_name == 'mileage_list' %}bg-gray-700{% endif %}">Mileage</a>
-                        <a href="{% url 'core:kb_list' %}"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'kb' in request.resolver_match.url_name %}bg-gray-700{% endif %}">KB</a>
-                        <a href="{% url 'core:reports' %}"
-                           class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 {% if 'report' in request.resolver_match.url_name %}bg-gray-700{% endif %}">Reports</a>
-                    </div>
-                </div>
-                <div class="flex items-center gap-4">
-                    {% if user.is_authenticated %}
-                        <span class="text-sm text-gray-400">{{ user.get_full_name|default:user.username }}</span>
-                        <a href="{% url 'two_factor:profile' %}" class="text-sm text-gray-400 hover:text-white">Security</a>
-                        {% if user.is_staff %}<a href="{% url 'core:settings' %}" class="text-sm text-gray-400 hover:text-white">Settings</a>{% endif %}
-                        {% if user.is_staff %}<a href="/admin/" class="text-sm text-gray-400 hover:text-white">Admin</a>{% endif %}
-                        <a href="{% url 'accounts:logout' %}" class="text-sm text-gray-400 hover:text-white">Log Out</a>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-    </nav>
+{% if user.is_authenticated %}
+<!-- Left Navigation Sidebar -->
+<nav class="app-leftnav fixed left-0 top-0 bottom-0 z-40 flex flex-col overflow-hidden"
+     style="background-color:var(--color-sidebar-bg,#1f2937);color:var(--color-sidebar-text,#fff);"
+     x-data="{
+         collapsed: document.documentElement.getAttribute('data-sidebar-collapsed') === 'true',
+         toggle() {
+             this.collapsed = !this.collapsed;
+             localStorage.setItem('mb_nav_collapsed', this.collapsed);
+             if (this.collapsed) {
+                 document.documentElement.setAttribute('data-sidebar-collapsed', 'true');
+             } else {
+                 document.documentElement.removeAttribute('data-sidebar-collapsed');
+             }
+         }
+     }">
 
-    <!-- Fixed nav spacer -->
-    <div class="h-14"></div>
+    <!-- Logo / company name -->
+    <div class="flex items-center h-14 flex-shrink-0 px-3 border-b overflow-hidden"
+         style="border-color:rgba(255,255,255,0.1)">
+        <a href="{% url 'core:dashboard' %}" class="flex items-center gap-3 overflow-hidden min-w-0 w-full">
+            {% if site_settings.site_logo %}
+                <img src="{{ site_settings.site_logo.url }}" alt=""
+                     class="h-8 w-8 flex-shrink-0 object-contain rounded">
+            {% else %}
+                <span class="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold"
+                      style="background-color:rgba(255,255,255,0.15)">
+                    {{ site_settings.company_name|default:"M"|slice:":1" }}
+                </span>
+            {% endif %}
+            <span class="nav-label font-semibold text-sm truncate">{{ site_settings.company_name|default:"Murphy's Bench" }}</span>
+        </a>
+    </div>
 
-    {% block page_header %}{% endblock %}
+    <!-- Primary nav links -->
+    <div class="flex-shrink-0 px-2 py-3 space-y-0.5">
+        {% with u=request.resolver_match.url_name %}
 
-    <!-- Body layout: sidebar + content, or full-width on dashboard -->
-    <div class="flex" style="min-height: calc(100vh - 3.5rem)">
+        <a href="{% url 'core:dashboard' %}" title="Dashboard"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+                  {% if u == 'dashboard' %}bg-white/15{% endif %}">
+            {% icon 'home' 5 %}<span class="nav-label">Dashboard</span>
+        </a>
 
-        {% if request.resolver_match.url_name != 'dashboard' and user.is_authenticated %}
-        <!-- Persistent Sidebar -->
-        <aside class="app-sidebar w-52 flex-shrink-0 bg-gray-800 text-white flex flex-col pt-3 pb-6 overflow-y-auto" style="min-height: calc(100vh - 3.5rem)">
-            <div class="px-3 mb-2">
-                <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">My Work</p>
-            </div>
+        <a href="{% url 'core:work_order_list' %}" title="Work Orders"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+                  {% if u and 'work_order' in u %}bg-white/15{% endif %}">
+            {% icon 'list' 5 %}<span class="nav-label">Work Orders</span>
+        </a>
+
+        <a href="{% url 'core:client_list' %}" title="Clients"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+                  {% if u and 'client' in u %}bg-white/15{% endif %}">
+            {% icon 'building' 5 %}<span class="nav-label">Clients</span>
+        </a>
+
+        <a href="{% url 'core:ticket_list' %}" title="Tickets"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+                  {% if u and 'ticket' in u %}bg-white/15{% endif %}">
+            {% icon 'ticket' 5 %}<span class="nav-label">Tickets</span>
+        </a>
+
+        <a href="{% url 'core:queue_list' %}" title="Queues"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+                  {% if u and 'queue' in u %}bg-white/15{% endif %}">
+            {% icon 'funnel' 5 %}<span class="nav-label">Queues</span>
+        </a>
+
+        <a href="{% url 'core:mileage_list' %}" title="Mileage"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+                  {% if u and 'mileage' in u %}bg-white/15{% endif %}">
+            {% icon 'map-pin' 5 %}<span class="nav-label">Mileage</span>
+        </a>
+
+        <a href="{% url 'core:kb_list' %}" title="Knowledge Base"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+                  {% if u and 'kb' in u %}bg-white/15{% endif %}">
+            {% icon 'book-open' 5 %}<span class="nav-label">KB</span>
+        </a>
+
+        <a href="{% url 'core:reports' %}" title="Reports"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/10
+                  {% if u and 'report' in u %}bg-white/15{% endif %}">
+            {% icon 'chart-bar' 5 %}<span class="nav-label">Reports</span>
+        </a>
+
+        {% endwith %}
+    </div>
+
+    <!-- My Work section — scrollable, hidden when collapsed -->
+    <div class="flex-1 flex flex-col overflow-hidden">
+        <div class="nav-my-work flex-1 overflow-y-auto border-t pt-2 pb-1 px-1"
+             style="border-color:rgba(255,255,255,0.1)">
+            <p class="px-2 mb-1 text-xs font-semibold uppercase tracking-wider"
+               style="opacity:0.4">My Work</p>
             <div id="sidebar-content"
                  hx-get="{% url 'core:sidebar_fragment' %}"
                  hx-trigger="load"
-                 hx-swap="innerHTML"
-                 class="flex-1 px-1">
-                <p class="px-3 py-2 text-xs text-gray-600 italic">Loading…</p>
+                 hx-swap="innerHTML">
+                <p class="px-3 py-2 text-xs italic" style="opacity:0.45">Loading…</p>
             </div>
-        </aside>
-        {% endif %}
+        </div>
+    </div>
 
-        <!-- Main content -->
-        <div class="flex-1 min-w-0">
-            <main class="mb-content {% if request.resolver_match.url_name == 'dashboard' %}max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8{% else %}px-6 py-6{% endif %}">
-                {% block content %}{% endblock %}
-            </main>
+    <!-- Footer: user info + utility links + collapse toggle -->
+    <div class="flex-shrink-0 border-t p-2 space-y-0.5"
+         style="border-color:rgba(255,255,255,0.1)">
+
+        <!-- User name + role (visible when expanded) -->
+        <div class="nav-label px-2 py-1 mb-0.5">
+            <div class="text-sm font-medium truncate">{{ user.get_full_name|default:user.username }}</div>
+            <div class="text-xs truncate" style="opacity:0.5">{{ user.role_obj.name|default:user.role|default:"" }}</div>
         </div>
 
+        <a href="{% url 'two_factor:profile' %}" title="Account Security"
+           class="nav-item flex items-center gap-3 px-2 py-1.5 rounded-lg text-xs transition-colors hover:bg-white/10"
+           style="opacity:0.75">
+            {% icon 'lock-closed' 4 %}<span class="nav-label">Security</span>
+        </a>
+
+        {% if user.is_staff %}
+        <a href="{% url 'core:settings' %}" title="Settings"
+           class="nav-item flex items-center gap-3 px-2 py-1.5 rounded-lg text-xs transition-colors hover:bg-white/10"
+           style="opacity:0.75">
+            {% icon 'cog' 4 %}<span class="nav-label">Settings</span>
+        </a>
+        <a href="/admin/" title="Django Admin"
+           class="nav-item flex items-center gap-3 px-2 py-1.5 rounded-lg text-xs transition-colors hover:bg-white/10"
+           style="opacity:0.75">
+            {% icon 'shield' 4 %}<span class="nav-label">Admin</span>
+        </a>
+        {% endif %}
+
+        <a href="{% url 'accounts:logout' %}" title="Log Out"
+           class="nav-item flex items-center gap-3 px-2 py-1.5 rounded-lg text-xs transition-colors hover:bg-white/10"
+           style="opacity:0.75">
+            {% icon 'logout' 4 %}<span class="nav-label">Log Out</span>
+        </a>
+
+        <!-- Sidebar collapse toggle -->
+        <button @click="toggle()" title="Toggle sidebar"
+                class="nav-item w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-colors hover:bg-white/10 mt-1"
+                style="opacity:0.5">
+            <span class="nav-icon-collapse">{% icon 'chevron-left' 4 %}</span>
+            <span class="nav-icon-expand">{% icon 'chevron-right' 4 %}</span>
+            <span class="nav-label">Collapse</span>
+        </button>
     </div>
+
+</nav>
+{% endif %}
+
+<!-- Main content area — offset by sidebar width -->
+<div class="{% if user.is_authenticated %}app-main-offset{% endif %} min-h-screen flex flex-col">
+    {% block page_header %}{% endblock %}
+    <main class="mb-content flex-1
+        {% if request.resolver_match.url_name == 'dashboard' %}max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8
+        {% else %}px-6 py-6{% endif %}">
+        {% block content %}{% endblock %}
+    </main>
+</div>
 
 {% block extra_js %}{% endblock %}
 </body>
