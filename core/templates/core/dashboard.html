@@ -1,4 +1,5 @@
 {% extends "core/base.html" %}
+{% load mb_icons %}
 
 {% block title %}Dashboard - Murphy's Bench{% endblock %}
 
@@ -32,9 +33,13 @@
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {% for entry in ticket_tiles %}
         <a href="{{ entry.tile.link_url }}"
-           class="bg-white rounded-lg shadow p-5 text-center hover:shadow-md hover:bg-blue-50 transition-shadow block">
-            {% if entry.tile.icon %}<p class="text-2xl mb-1">{{ entry.tile.icon }}</p>{% endif %}
-            <p class="text-3xl font-bold text-gray-900">{{ entry.count }}</p>
+           class="{{ entry.colors.card }} rounded-lg shadow p-5 text-center hover:shadow-md transition-all block">
+            {% if entry.tile.icon %}
+            <div class="flex justify-center mb-2 {{ entry.colors.icon }}">
+                {% icon entry.tile.icon "7" %}
+            </div>
+            {% endif %}
+            <p class="text-3xl font-bold {{ entry.colors.num }}">{{ entry.count }}</p>
             <p class="text-sm text-gray-500 mt-1">{{ entry.tile.label }}</p>
         </a>
         {% endfor %}
@@ -49,9 +54,13 @@
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {% for entry in wo_tiles %}
         <a href="{{ entry.tile.link_url }}"
-           class="bg-white rounded-lg shadow p-5 text-center hover:shadow-md hover:bg-green-50 transition-shadow block">
-            {% if entry.tile.icon %}<p class="text-2xl mb-1">{{ entry.tile.icon }}</p>{% endif %}
-            <p class="text-3xl font-bold text-gray-900">{{ entry.count }}</p>
+           class="{{ entry.colors.card }} rounded-lg shadow p-5 text-center hover:shadow-md transition-all block">
+            {% if entry.tile.icon %}
+            <div class="flex justify-center mb-2 {{ entry.colors.icon }}">
+                {% icon entry.tile.icon "7" %}
+            </div>
+            {% endif %}
+            <p class="text-3xl font-bold {{ entry.colors.num }}">{{ entry.count }}</p>
             <p class="text-sm text-gray-500 mt-1">{{ entry.tile.label }}</p>
         </a>
         {% endfor %}
@@ -62,14 +71,18 @@
 <!-- Quick stats row -->
 <div class="grid grid-cols-2 gap-4 mb-6">
     <div class="bg-white rounded-lg shadow p-4 flex items-center gap-3">
-        <span class="text-2xl">🏢</span>
+        <div class="text-gray-400">
+            {% icon "building" "8" %}
+        </div>
         <div>
             <p class="text-xl font-bold text-gray-900">{{ active_clients }}</p>
             <p class="text-sm text-gray-500">Active Clients</p>
         </div>
     </div>
     <div class="bg-white rounded-lg shadow p-4 flex items-center gap-3">
-        <span class="text-2xl">💻</span>
+        <div class="text-gray-400">
+            {% icon "computer" "8" %}
+        </div>
         <div>
             <p class="text-xl font-bold text-gray-900">{{ total_devices }}</p>
             <p class="text-sm text-gray-500">Devices on File</p>

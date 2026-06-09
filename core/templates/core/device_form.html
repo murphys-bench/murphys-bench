@@ -1,4 +1,5 @@
 {% extends "core/base.html" %}
+{% load mb_icons %}
 
 {% block title %}{{ title }} - Murphy's Bench{% endblock %}
 
@@ -45,9 +46,55 @@
                     <label class="block text-sm font-medium text-gray-700 mb-1">Device Name <span class="text-red-500">*</span></label>
                     {{ form.name }}
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Device Type <span class="text-red-500">*</span></label>
-                    {{ form.device_type }}
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Device Type <span class="text-red-500">*</span></label>
+                    <div x-data="{ deviceType: '{{ form.device_type.value|default:"laptop" }}' }">
+                        <input type="hidden" name="device_type" :value="deviceType">
+                        <div class="grid grid-cols-4 gap-2">
+                            <button type="button" @click="deviceType = 'laptop'"
+                                :class="deviceType === 'laptop' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-500 hover:border-blue-300 hover:bg-blue-50'"
+                                class="flex flex-col items-center justify-center gap-1.5 p-3 border-2 rounded-lg text-xs font-medium transition-colors">
+                                {% icon "laptop" "7" %}
+                                <span>Laptop</span>
+                            </button>
+                            <button type="button" @click="deviceType = 'desktop'"
+                                :class="deviceType === 'desktop' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-500 hover:border-blue-300 hover:bg-blue-50'"
+                                class="flex flex-col items-center justify-center gap-1.5 p-3 border-2 rounded-lg text-xs font-medium transition-colors">
+                                {% icon "desktop" "7" %}
+                                <span>Desktop</span>
+                            </button>
+                            <button type="button" @click="deviceType = 'mobile'"
+                                :class="deviceType === 'mobile' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-500 hover:border-blue-300 hover:bg-blue-50'"
+                                class="flex flex-col items-center justify-center gap-1.5 p-3 border-2 rounded-lg text-xs font-medium transition-colors">
+                                {% icon "mobile" "7" %}
+                                <span>Mobile</span>
+                            </button>
+                            <button type="button" @click="deviceType = 'tablet'"
+                                :class="deviceType === 'tablet' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-500 hover:border-blue-300 hover:bg-blue-50'"
+                                class="flex flex-col items-center justify-center gap-1.5 p-3 border-2 rounded-lg text-xs font-medium transition-colors">
+                                {% icon "tablet" "7" %}
+                                <span>Tablet</span>
+                            </button>
+                            <button type="button" @click="deviceType = 'server'"
+                                :class="deviceType === 'server' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-500 hover:border-blue-300 hover:bg-blue-50'"
+                                class="flex flex-col items-center justify-center gap-1.5 p-3 border-2 rounded-lg text-xs font-medium transition-colors">
+                                {% icon "server" "7" %}
+                                <span>Server</span>
+                            </button>
+                            <button type="button" @click="deviceType = 'printer'"
+                                :class="deviceType === 'printer' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-500 hover:border-blue-300 hover:bg-blue-50'"
+                                class="flex flex-col items-center justify-center gap-1.5 p-3 border-2 rounded-lg text-xs font-medium transition-colors">
+                                {% icon "printer" "7" %}
+                                <span>Printer</span>
+                            </button>
+                            <button type="button" @click="deviceType = 'other'"
+                                :class="deviceType === 'other' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-500 hover:border-blue-300 hover:bg-blue-50'"
+                                class="flex flex-col items-center justify-center gap-1.5 p-3 border-2 rounded-lg text-xs font-medium transition-colors">
+                                {% icon "question" "7" %}
+                                <span>Other</span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Default Repair Type</label>
