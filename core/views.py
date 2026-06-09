@@ -140,6 +140,31 @@ def _custom_fields_with_values(fields, obj):
     return result
 
 
+_TILE_COLOR_CLASSES = {
+    'blue':   {'card': 'bg-blue-50 border-l-4 border-blue-400',   'num': 'text-blue-700',   'icon': 'text-blue-400'},
+    'yellow': {'card': 'bg-yellow-50 border-l-4 border-yellow-400', 'num': 'text-yellow-700', 'icon': 'text-yellow-400'},
+    'red':    {'card': 'bg-red-50 border-l-4 border-red-500',     'num': 'text-red-700',    'icon': 'text-red-400'},
+    'green':  {'card': 'bg-green-50 border-l-4 border-green-400', 'num': 'text-green-700',  'icon': 'text-green-500'},
+    'gray':   {'card': 'bg-gray-50 border-l-4 border-gray-400',   'num': 'text-gray-600',   'icon': 'text-gray-400'},
+}
+
+
+def _tile_color(tile):
+    if 'overdue=1' in tile.link_url or '/overdue' in tile.link_url:
+        return 'red'
+    statuses = set(tile.status_filter or [])
+    active = {'open', 'in_progress', 'assigned'}
+    waiting = {'waiting_on_customer', 'waiting_on_parts', 'waiting'}
+    completed = {'completed', 'closed', 'resolved'}
+    if statuses & completed and not (statuses & (active | waiting)):
+        return 'green'
+    if statuses & waiting and not (statuses & active):
+        return 'yellow'
+    if statuses == {'new'}:
+        return 'gray'
+    return 'blue'
+
+
 def _tile_count(tile, user, is_admin):
     """Return the count for a DashboardTile."""
     statuses = tile.status_filter or []
@@ -175,7 +200,11 @@ class DashboardView(LoginRequiredMixin, View):
                 continue
             if tile.visible_to == 'tech' and is_admin:
                 continue
-            entry = {'tile': tile, 'count': _tile_count(tile, request.user, is_admin)}
+            entry = {
+                'tile': tile,
+                'count': _tile_count(tile, request.user, is_admin),
+                'colors': _TILE_COLOR_CLASSES[_tile_color(tile)],
+            }
             if tile.row == 'ticket':
                 ticket_tiles.append(entry)
             else:
