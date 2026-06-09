@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 9, 2026 (end of session 14)
+**Last Updated**: June 9, 2026 (end of session 15)
 
 ---
 
@@ -198,7 +198,7 @@ murphys-bench/
     └── next-session-prompt.md
 ```
 
-### Data Models (32 current, 31 migrations applied)
+### Data Models (32 current, 32 migrations applied)
 - **Role** — permission role with 16 boolean flags; seeded: Administrator, Technician
 - **TechSkill** — skill tags M2M on User; captured for future skill-based routing
 - **User** — extended Django user; role CharField (legacy) + role_obj FK to Role + skills M2M
@@ -317,6 +317,14 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - Mileage Calculate button: fixed CSRF token for production (was silently failing in prod)
 - Google Maps API confirmed working from production server (WAN IP restriction set in Cloud Console)
 
+### ✅ Session 15 — Visual Polish (session 15 — COMPLETE)
+
+- **Color-coded dashboard tiles**: left-border accent per status (Blue=active, Yellow=waiting, Red=overdue, Green=completed). Color computed in `_tile_color()` from `status_filter` and `link_url`.
+- **SVG icons replacing emoji**: all dashboard tiles and quick stats row now use Heroicons outline via `{% icon name size %}` templatetag (`core/templatetags/mb_icons.py`)
+- **Device type icon grid**: replaced Device Type dropdown on device form with 2-row × 4-col Alpine.js button grid (Laptop, Desktop, Mobile, Tablet, Server, Printer, Other). Selected state highlighted blue.
+- Migration 0032: data migration converting emoji icon values → icon name strings in DashboardTile
+- Production deployed: migrations 0031 + 0032 applied, `FIELD_ENCRYPTION_KEY` set in prod `.env`, Gunicorn reloaded
+
 ### ✅ Session 14 — Credential Encryption + Billing Architecture (session 14 — COMPLETE)
 
 - **Credential encryption (migration 0031)**: `WorkOrder.device_username`, `device_password`, `device_pin`, `credential_notes` and `SiteSettings.email_password`, `inbound_password` now AES-256 encrypted at rest via `django-encrypted-model-fields` (Fernet symmetric encryption)
@@ -377,7 +385,7 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - **Alpine.js** loaded via CDN in base.html with `defer` — required for sidebar accordion
 - **Sidebar**: HTMX-loaded on every page except dashboard; admins see all, techs see own
 - **`?assigned_to=me` filter**: works on both `/tickets/` and `/work-orders/`; admins see all
-- **Credential encryption**: AES-256 via `django-encrypted-model-fields`. `FIELD_ENCRYPTION_KEY` read from env. Never plaintext. Migration 0031 applied in dev — production deploy pending (must set key first).
+- **Credential encryption**: AES-256 via `django-encrypted-model-fields`. `FIELD_ENCRYPTION_KEY` read from env. Never plaintext. Migrations 0031 + 0032 applied to production (June 9, session 15). Key stored in Bitwarden.
 - **Billing philosophy**: MB tracks billing state only — not an accounting module. Lightweight `Invoice` entity on WorkOrder (not fields on WO directly). `billing_status` enum: uninvoiced / invoiced / paid / paid_direct / disputed. `paid_direct` = cash/walk-in before formal invoice. Invoice Ninja and other systems remain authoritative for formal financials.
 - **Visual design is a first-class requirement**: Color + icons communicate status faster than text. RepairShopCRM comparison documented in `MB_UI_UX_Analysis.md`. Not optional polish.
 - **Audit log gotcha**: `changes_dict` can contain an `'items'` key that shadows `dict.items()` in Django templates. Always use `_audit_entries()` from views.py — never iterate `changes_dict.items` in templates.

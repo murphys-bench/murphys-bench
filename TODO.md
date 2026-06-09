@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 9, 2026 (session 14)
+**Last Updated**: June 9, 2026 (session 15)
 **Current Phase**: Phase 1 — SCS Internal
 
 ---
@@ -352,14 +352,16 @@
 - `WorkOrder.device_username`, `device_password`, `device_pin`, `credential_notes` — AES-256 encrypted at rest
 - `SiteSettings.email_password`, `inbound_password` — AES-256 encrypted at rest
 - Package: `django-encrypted-model-fields==0.6.5`; `FIELD_ENCRYPTION_KEY` from env
-- Migration 0031 applied locally, **pending production deployment** (must set key in env first)
+- Migration 0031 applied locally and **deployed to production** (session 15)
+
+#### Session 15 — Visual Polish ✅
+- Color-coded dashboard metric tiles (Blue=active, Yellow=waiting, Red=overdue, Green=complete)
+- SVG icons replacing emoji via `{% icon %}` templatetag (`core/templatetags/mb_icons.py`)
+- Device type icon grid replacing dropdown on device form (Alpine.js, 7 types)
+- Migration 0032: emoji → icon name strings in DashboardTile
+- Production deployed: migrations 0031 + 0032, FIELD_ENCRYPTION_KEY set, key in Bitwarden
 
 ---
-
-- [ ] **Visual polish — Phase 1 (session 15, queued)**
-  - Color-coded dashboard metric tiles (Blue=active, Yellow=waiting, Red=overdue, Green=complete)
-  - SVG icons replacing emoji (Heroicons, consistent with Tailwind)
-  - Device type icon grid replacing dropdown on device form
 
 - [ ] **Basic billing tracker (Invoice model)**
   - Lightweight `Invoice` entity on WorkOrder (not fields on WO)
@@ -368,8 +370,6 @@
   - Customer outstanding balance on client detail
   - CSV export for accounting system import
   - MB tracks state only — not an accounting module; Invoice Ninja remains authoritative
-
-- [ ] **Production deploy migration 0031** — do together; set FIELD_ENCRYPTION_KEY in prod env before pulling
 
 - [ ] **Testing suite**
   - Model tests (validation, relationships)
