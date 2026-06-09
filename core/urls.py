@@ -124,4 +124,8 @@ urlpatterns = [
     path('settings/credentials/<int:pk>/edit/', views.OrgCredentialUpdateView.as_view(), name='cred_update'),
     path('settings/credentials/<int:pk>/delete/', views.OrgCredentialDeleteView.as_view(), name='cred_delete'),
     path('settings/credentials/<int:pk>/reveal/<str:field>/', views.OrgCredentialRevealView.as_view(), name='cred_reveal'),
+
+    # Device Credentials
+    path('devices/<int:pk>/credentials/reveal/<str:field>/', views.DeviceCredentialRevealView.as_view(), name='device_cred_reveal'),
+    path('devices/<int:pk>/credentials/', views.DeviceCredentialUpdateView.as_view(), name='device_cred_update'),
 ]

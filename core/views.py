@@ -18,6 +18,7 @@ from .models import (
     Contact, RepairType, RepairTypeCategory,
     CannedResponseCategory, CannedResponse, Invoice,
     OrgCredential, CredentialAccessLog,
+    DeviceCredentialAccessLog,
     EmailTemplate,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm,
@@ -538,6 +539,14 @@ class DeviceDetailView(LoginRequiredMixin, DetailView):
         ).prefetch_related(
             'work_orders', 'work_orders__assigned_to'
         )
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['is_admin'] = _is_admin(self.request.user)
+        ctx['can_view'] = _can_view_device_creds(self.request.user)
+        device = self.object
+        ctx['has_creds'] = bool(device.device_username or device.device_password or device.credential_notes)
+        return ctx
 
 
 class MileageDistanceView(LoginRequiredMixin, View):
@@ -2953,6 +2962,51 @@ class OrgCredentialRevealView(LoginRequiredMixin, View):
             return HttpResponse('', status=400)
         CredentialAccessLog.objects.create(credential=cred, user=request.user, action='viewed')
         return HttpResponse(value or '(empty)', content_type='text/plain')
+
+
+# --- Device Credentials ---
+
+def _can_view_device_creds(user):
+    return _is_admin(user) or user.has_perm_flag('can_view_device_credentials')
+
+
+class DeviceCredentialRevealView(LoginRequiredMixin, View):
+    """HTMX: return plaintext device credential value and log the access."""
+    def get(self, request, pk, field):
+        if not _can_view_device_creds(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        device = get_object_or_404(Device, pk=pk)
+        if field == 'username':
+            value = device.device_username
+        elif field == 'password':
+            value = device.device_password
+        else:
+            return HttpResponse('', status=400)
+        DeviceCredentialAccessLog.objects.create(device=device, user=request.user, action='viewed', field=field)
+        return HttpResponse(value or '(empty)', content_type='text/plain')
+
+
+class DeviceCredentialUpdateView(LoginRequiredMixin, View):
+    """HTMX: save device credentials (admin only). Returns updated credential card."""
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        device = get_object_or_404(Device, pk=pk)
+        device.device_username = request.POST.get('device_username', '').strip()
+        new_pw = request.POST.get('device_password', '').strip()
+        if new_pw:
+            device.device_password = new_pw
+        device.credential_notes = request.POST.get('credential_notes', '').strip()
+        device.save(update_fields=['device_username', 'device_password', 'credential_notes', 'updated_at'])
+        DeviceCredentialAccessLog.objects.create(device=device, user=request.user, action='edited', field='all')
+        is_admin = _is_admin(request.user)
+        can_view = _can_view_device_creds(request.user)
+        has_creds = bool(device.device_username or device.device_password or device.credential_notes)
+        return render(request, 'core/partials/device_credential_card.html', {
+            'device': device, 'is_admin': is_admin, 'can_view': can_view, 'has_creds': has_creds,
+        })
 
 
 # --- Email Template Manager ---
