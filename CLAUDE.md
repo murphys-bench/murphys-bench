@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 9, 2026 (end of session 17)
+**Last Updated**: June 9, 2026 (end of session 18)
 
 ---
 
@@ -320,6 +320,15 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - Sidebar: shows last reply/note preview instead of subject/description; falls back gracefully if no notes
 - Mileage Calculate button: fixed CSRF token for production (was silently failing in prod)
 - Google Maps API confirmed working from production server (WAN IP restriction set in Cloud Console)
+
+### ✅ Session 18 — Device Credentials Vault (session 18 — COMPLETE)
+
+- **Device-level credentials**: `device_username`, `device_password`, `credential_notes` (AES-256 encrypted) added to `Device` model
+- **`DeviceCredentialAccessLog`** model — logs every reveal (field + user) and edit
+- **`can_view_device_credentials`** flag on `Role` (Administrator=True, Technician=False by default, configurable)
+- **HTMX eye-reveal card** on device detail right column — masked by default, eye icon triggers HTMX GET, logs access
+- Admin always sees edit form (Alpine.js toggle). Users with flag can reveal. Others see "contact admin" message.
+- Migration 0035 applied to production. Administrator role seeded on prod.
 
 ### ✅ Session 17 — Phase 2 Foundations (session 17 — COMPLETE)
 

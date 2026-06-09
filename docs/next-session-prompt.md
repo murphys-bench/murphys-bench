@@ -6,13 +6,16 @@
 
 ---
 
-## What's already built and working (as of session 17):
+## What's already built and working (as of session 18):
 
-- Django 4.2 app, 35 models, 34 migrations applied
+- Django 4.2 app, 36 models, 35 migrations applied
 - **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16
 - Deploy workflow: `git push` on Mac → SSH `scs-tech@10.58.58.82` → `cd /opt/murphys-bench && git pull && source venv/bin/activate && python3 manage.py migrate` → `kill -HUP <gunicorn-master-pid>`
 - Full CRUD views for work orders, clients, devices, mileage, contacts, tickets, KB, queues
 - HTMX inline notes, checklist, ticket replies, Quick Labor, credentials, billing
+
+**Session 18 additions:**
+- **Device-level credentials vault**: `device_username`, `device_password`, `credential_notes` (AES-256 encrypted) on `Device` model. `DeviceCredentialAccessLog` model logs every reveal/edit. `can_view_device_credentials` flag on `Role` (Admin=True, Technician=False). HTMX eye-reveal card on device detail page. Admin can edit; techs with flag can reveal; others see "contact admin" message. Migration 0035 applied to production.
 
 **Session 17 additions:**
 - **Invoice CSV export**: `/clients/<pk>/invoices.csv`, optional `?status=` filter, CSV button on client detail
@@ -34,7 +37,7 @@
 
 ## What's next (session 18 options):
 
-### Option A — Status Management UI
+### Option A — Status Management UI (was Option A last session)
 Native CRUD for ticket and WO statuses. Currently hardcoded enums — would require a new model (`CustomStatus`) and migration. Core statuses stay locked; custom statuses add/edit/delete with color picker. Suggested library per entity type.
 
 ### Option B — Data Management
