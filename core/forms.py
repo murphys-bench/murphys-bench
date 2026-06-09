@@ -37,7 +37,7 @@ class WorkOrderForm(forms.ModelForm):
     def __init__(self, *args, client_id=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['client'].queryset = Client.objects.filter(is_active=True).order_by('name')
-        from .models import User
+        from .models import User, StatusDefinition
         self.fields['assigned_to'].queryset = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
         self.fields['assigned_to'].required = False
         self.fields['contact'].required = False
@@ -46,6 +46,14 @@ class WorkOrderForm(forms.ModelForm):
         self.fields['scheduled_date'].required = False
         self.fields['time_spent_minutes'].required = False
         self.fields['invoice_ninja_ref'].required = False
+        # Dynamic status choices from StatusDefinition
+        wo_statuses = list(StatusDefinition.objects.filter(
+            entity_type='workorder', is_active=True
+        ).order_by('sort_order').values_list('slug', 'label'))
+        self.fields['status'] = forms.ChoiceField(
+            choices=wo_statuses,
+            widget=forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
+        )
 
         if client_id:
             self.fields['contact'].queryset = Contact.objects.filter(
@@ -156,7 +164,7 @@ class TicketForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        from .models import User as UserModel
+        from .models import User as UserModel, StatusDefinition
         self.fields['client'].queryset = Client.objects.filter(is_active=True).order_by('name')
         self.fields['device'].required = False
         self.fields['help_topic'].queryset = HelpTopic.objects.filter(is_active=True).order_by('sort_order', 'name')
@@ -165,6 +173,14 @@ class TicketForm(forms.ModelForm):
         self.fields['sla_plan'].required = False
         self.fields['assigned_to'].queryset = UserModel.objects.filter(is_active=True).order_by('first_name', 'last_name')
         self.fields['assigned_to'].required = False
+        # Dynamic status choices from StatusDefinition
+        ticket_statuses = list(StatusDefinition.objects.filter(
+            entity_type='ticket', is_active=True
+        ).order_by('sort_order').values_list('slug', 'label'))
+        self.fields['status'] = forms.ChoiceField(
+            choices=ticket_statuses,
+            widget=forms.Select(attrs=SELECT_WIDGET),
+        )
 
     def save(self, commit=True):
         ticket = super().save(commit=False)

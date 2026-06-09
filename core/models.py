@@ -405,7 +405,7 @@ class Ticket(models.Model):
     subject = models.CharField(max_length=255)
     description = models.TextField()
     source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='email')
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open', db_index=True)
+    status = models.CharField(max_length=50, default='open', db_index=True)
     assigned_to = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -542,7 +542,7 @@ class WorkOrder(models.Model):
     repair_type = models.ForeignKey(RepairType, on_delete=models.SET_NULL, null=True, related_name='work_orders')
     assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders_assigned')
     service_type = models.CharField(max_length=20, choices=SERVICE_TYPE_CHOICES, default='in_shop')
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='new', db_index=True)
+    status = models.CharField(max_length=50, default='new', db_index=True)
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='normal')
     time_spent_minutes = models.IntegerField(default=0, validators=[MinValueValidator(0)])
     scheduled_date = models.DateField(null=True, blank=True)
@@ -770,6 +770,40 @@ class DeviceCredentialAccessLog(models.Model):
 
     def __str__(self):
         return f'{self.user} {self.action} credentials on "{self.device.name}" at {self.accessed_at}'
+
+
+class StatusDefinition(models.Model):
+    """Configurable status labels and colors for tickets and work orders."""
+
+    ENTITY_CHOICES = [
+        ('ticket',     'Ticket'),
+        ('workorder',  'Work Order'),
+    ]
+
+    entity_type = models.CharField(max_length=20, choices=ENTITY_CHOICES, db_index=True)
+    slug        = models.CharField(max_length=50)
+    label       = models.CharField(max_length=100)
+    color       = models.CharField(max_length=7, default='#E5E7EB', help_text='Background color hex (e.g. #DBEAFE)')
+    is_system   = models.BooleanField(default=False, help_text='System statuses cannot be deleted.')
+    is_active   = models.BooleanField(default=True)
+    sort_order  = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['entity_type', 'sort_order', 'label']
+        unique_together = [('entity_type', 'slug')]
+
+    def __str__(self):
+        return f'{self.get_entity_type_display()} — {self.label}'
+
+    def text_color(self):
+        """Return a contrasting text color (dark or light) for this badge's background."""
+        try:
+            h = self.color.lstrip('#')
+            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+            luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+            return '#1F2937' if luminance > 0.5 else '#F9FAFB'
+        except Exception:
+            return '#1F2937'
 
 
 class Mileage(models.Model):

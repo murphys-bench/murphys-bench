@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+{% load mb_icons %}<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -196,7 +196,7 @@
             {% if work_order.completed_date %}
             <div class="report-sub">Completed: {{ work_order.completed_date|date:"M d, Y" }}</div>
             {% endif %}
-            <div class="status-badge">{{ work_order.get_status_display }}</div>
+            <div class="status-badge">{% status_label work_order.status 'workorder' %}</div>
         </div>
     </div>
 

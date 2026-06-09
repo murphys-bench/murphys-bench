@@ -1,4 +1,5 @@
 {% extends "core/base.html" %}
+{% load mb_icons %}
 
 {% block title %}Work Orders - Murphy's Bench{% endblock %}
 
@@ -104,9 +105,7 @@
                                 {{ wo.assigned_to.get_full_name|default:"Unassigned" }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <span class="wo-status-badge status-{{ wo.status }} px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full text-gray-700">
-                                    {{ wo.get_status_display }}
-                                </span>
+                                {% status_badge wo.status 'workorder' %}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full

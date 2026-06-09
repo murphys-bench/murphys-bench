@@ -1,3 +1,4 @@
+{% load mb_icons %}
 {% if link_error %}
 <p class="text-sm text-red-600 mb-2">{{ link_error }}</p>
 {% endif %}
@@ -11,16 +12,7 @@
                 {{ item.ticket.ticket_number }}
             </a>
             <span class="text-gray-500 ml-1">{{ item.ticket.subject|truncatechars:30 }}</span>
-            <span class="ml-1 px-1.5 py-0.5 text-xs rounded
-                {% if item.ticket.status == 'new' %}bg-blue-100 text-blue-700
-                {% elif item.ticket.status == 'open' %}bg-indigo-100 text-indigo-700
-                {% elif item.ticket.status == 'in_progress' %}bg-yellow-100 text-yellow-700
-                {% elif item.ticket.status == 'resolved' %}bg-green-100 text-green-700
-                {% elif item.ticket.status == 'closed' %}bg-gray-100 text-gray-600
-                {% else %}bg-purple-100 text-purple-700
-                {% endif %}">
-                {{ item.ticket.get_status_display }}
-            </span>
+            {% status_badge item.ticket.status 'ticket' %}
             <span class="ml-1 text-xs text-gray-400">({{ item.link_type }})</span>
         </div>
         <form hx-post="{% url 'core:ticket_link_remove' ticket.pk %}"
@@ -28,7 +20,7 @@
               hx-swap="innerHTML">
             {% csrf_token %}
             <input type="hidden" name="link_id" value="{{ item.link_id }}">
-            {% load mb_icons %}<button type="submit" class="text-gray-300 hover:text-red-500 ml-2" title="Remove link">{% icon "x-mark" 4 %}</button>
+            <button type="submit" class="text-gray-300 hover:text-red-500 ml-2" title="Remove link">{% icon "x-mark" 4 %}</button>
         </form>
     </li>
     {% endfor %}

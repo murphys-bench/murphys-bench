@@ -128,4 +128,9 @@ urlpatterns = [
     # Device Credentials
     path('devices/<int:pk>/credentials/reveal/<str:field>/', views.DeviceCredentialRevealView.as_view(), name='device_cred_reveal'),
     path('devices/<int:pk>/credentials/', views.DeviceCredentialUpdateView.as_view(), name='device_cred_update'),
+
+    # Status Management
+    path('settings/statuses/new/', views.StatusDefinitionCreateView.as_view(), name='status_create'),
+    path('settings/statuses/<int:pk>/edit/', views.StatusDefinitionUpdateView.as_view(), name='status_update'),
+    path('settings/statuses/<int:pk>/delete/', views.StatusDefinitionDeleteView.as_view(), name='status_delete'),
 ]
