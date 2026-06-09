@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 9, 2026 (end of session 18)
+**Last Updated**: June 9, 2026 (end of session 19)
 
 ---
 
@@ -320,6 +320,18 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - Sidebar: shows last reply/note preview instead of subject/description; falls back gracefully if no notes
 - Mileage Calculate button: fixed CSRF token for production (was silently failing in prod)
 - Google Maps API confirmed working from production server (WAN IP restriction set in Cloud Console)
+
+### ✅ Session 19 — Status Management UI (session 19 — COMPLETE)
+
+- **`StatusDefinition` model**: `entity_type` (ticket/workorder), `slug`, `label`, `color` (hex bg), `is_system`, `sort_order`, `is_active`
+- **Migration 0036**: AlterField removes choices= from Ticket.status and WorkOrder.status (max_length→50); seeds 13 core statuses with default colors; RunPython after CreateModel
+- **Template tag suite** in `mb_icons.py`: `status_badge`, `status_label`, `status_color` — 2-min module-level cache, graceful fallback for unknown slugs. `invalidate_status_cache()` called after any CRUD change.
+- **11 templates updated**: all hardcoded status badge `{% if status == ... %}bg-X{% endif %}` patterns replaced
+- **WorkOrderForm + TicketForm**: status field overridden in `__init__` to load choices from StatusDefinition — custom statuses appear in dropdowns automatically
+- **WorkOrderListView, TicketListView, WorkOrderDetailView**: pass status choices via context
+- **Settings → Statuses tab**: two tables (Ticket / Work Order), color picker on each row, inline edit form (Alpine.js toggle), custom status add form at bottom, system statuses get "Edit Color" only
+- **email_utils.py**: `status` context var resolved via StatusDefinition instead of `get_status_display()`
+- Migration 0036 applied to production; all changes live
 
 ### ✅ Session 18 — Device Credentials Vault (session 18 — COMPLETE)
 

@@ -6,13 +6,20 @@
 
 ---
 
-## What's already built and working (as of session 18):
+## What's already built and working (as of session 19):
 
-- Django 4.2 app, 36 models, 35 migrations applied
+- Django 4.2 app, 37 models, 36 migrations applied
 - **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16
 - Deploy workflow: `git push` on Mac → SSH `scs-tech@10.58.58.82` → `cd /opt/murphys-bench && git pull && source venv/bin/activate && python3 manage.py migrate` → `kill -HUP <gunicorn-master-pid>`
 - Full CRUD views for work orders, clients, devices, mileage, contacts, tickets, KB, queues
 - HTMX inline notes, checklist, ticket replies, Quick Labor, credentials, billing
+
+**Session 19 additions:**
+- **Status Management UI**: `StatusDefinition` model — configurable label + hex color per status, `entity_type` (ticket/workorder), `is_system` flag. Migration 0036 seeds 13 core statuses with default colors. Settings → Statuses tab: color picker for all statuses, custom status add/edit/delete. System statuses are color-editable but not deletable.
+- **Template tag suite**: `{% status_badge slug entity_type %}` (styled HTML span), `{% status_label slug entity_type %}` (plain text), `{% status_color slug entity_type %}` (hex color). 2-minute module-level cache. Graceful fallback for unknown slugs.
+- **Replaced all hardcoded badge patterns**: 11 templates updated — ticket_list, ticket_detail, work_order_list, work_order_detail, client_detail, device_detail, dashboard, queue_detail, sidebar_content, ticket_linked_list, work_order_print.
+- **Dynamic form choices**: WorkOrderForm + TicketForm load status dropdowns from StatusDefinition (custom statuses appear automatically).
+- **email_utils.py**: `status` context variable for email templates now resolved via StatusDefinition.
 
 **Session 18 additions:**
 - **Device-level credentials vault**: `device_username`, `device_password`, `credential_notes` (AES-256 encrypted) on `Device` model. `DeviceCredentialAccessLog` model logs every reveal/edit. `can_view_device_credentials` flag on `Role` (Admin=True, Technician=False). HTMX eye-reveal card on device detail page. Admin can edit; techs with flag can reveal; others see "contact admin" message. Migration 0035 applied to production.
