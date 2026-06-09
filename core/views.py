@@ -20,6 +20,7 @@ from .models import (
     OrgCredential, CredentialAccessLog,
     DeviceCredentialAccessLog,
     EmailTemplate,
+    StatusDefinition,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
@@ -289,7 +290,10 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['status_choices'] = WorkOrder.STATUS_CHOICES
+        context['status_choices'] = list(
+            StatusDefinition.objects.filter(entity_type='workorder', is_active=True)
+            .order_by('sort_order').values_list('slug', 'label')
+        )
         context['priority_choices'] = WorkOrder.PRIORITY_CHOICES
         return context
 
@@ -352,6 +356,11 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         # Billing
         invoice, _ = Invoice.objects.get_or_create(work_order=self.object)
         context['invoice'] = invoice
+        # Dynamic status choices for inline status dropdown
+        context['wo_status_choices'] = list(
+            StatusDefinition.objects.filter(entity_type='workorder', is_active=True)
+            .order_by('sort_order').values_list('slug', 'label')
+        )
         return context
 
 
@@ -1088,7 +1097,10 @@ class TicketListView(LoginRequiredMixin, ListView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['status_choices'] = Ticket.STATUS_CHOICES
+        context['status_choices'] = list(
+            StatusDefinition.objects.filter(entity_type='ticket', is_active=True)
+            .order_by('sort_order').values_list('slug', 'label')
+        )
         return context
 
 
@@ -2357,6 +2369,7 @@ SETTINGS_TABS = [
     ('display',          'Display',          None),
     ('credentials',      'Credentials',      None),
     ('email_templates',  'Email Templates',  None),
+    ('statuses',         'Statuses',         None),
 ]
 
 SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS]
@@ -2483,6 +2496,9 @@ class SettingsView(LoginRequiredMixin, View):
         if active_tab == 'credentials':
             ctx['credentials'] = OrgCredential.objects.all()
             ctx['credential_categories'] = OrgCredential.CATEGORY_CHOICES
+        if active_tab == 'statuses':
+            ctx['ticket_statuses'] = StatusDefinition.objects.filter(entity_type='ticket').order_by('sort_order')
+            ctx['wo_statuses'] = StatusDefinition.objects.filter(entity_type='workorder').order_by('sort_order')
         if active_tab == 'email_templates':
             # Ensure all 4 trigger templates exist
             for trigger, _ in EmailTemplate.TRIGGER_CHOICES:
@@ -3025,3 +3041,57 @@ class EmailTemplateUpdateView(LoginRequiredMixin, View):
         tmpl.save()
         messages.success(request, f'Email template "{tmpl.get_trigger_display()}" saved.')
         return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
+
+
+# --- Status Management ---
+
+STATUS_REDIRECT = 'core:settings'
+STATUS_TAB = '?tab=statuses'
+
+
+class StatusDefinitionCreateView(LoginRequiredMixin, View):
+    def post(self, request):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        entity_type = request.POST.get('entity_type', '').strip()
+        slug = request.POST.get('slug', '').strip().lower().replace(' ', '_')
+        label = request.POST.get('label', '').strip()
+        color = request.POST.get('color', '#E5E7EB').strip()
+        if entity_type and slug and label:
+            StatusDefinition.objects.get_or_create(
+                entity_type=entity_type, slug=slug,
+                defaults=dict(label=label, color=color, is_system=False, sort_order=100),
+            )
+            from .templatetags.mb_icons import invalidate_status_cache
+            invalidate_status_cache()
+        return redirect(reverse_lazy(STATUS_REDIRECT) + STATUS_TAB)
+
+
+class StatusDefinitionUpdateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        sd = get_object_or_404(StatusDefinition, pk=pk)
+        sd.label = request.POST.get('label', sd.label).strip()
+        sd.color = request.POST.get('color', sd.color).strip()
+        sd.save()
+        from .templatetags.mb_icons import invalidate_status_cache
+        invalidate_status_cache()
+        return redirect(reverse_lazy(STATUS_REDIRECT) + STATUS_TAB)
+
+
+class StatusDefinitionDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        sd = get_object_or_404(StatusDefinition, pk=pk)
+        if sd.is_system:
+            messages.error(request, 'System statuses cannot be deleted.')
+        else:
+            sd.delete()
+            from .templatetags.mb_icons import invalidate_status_cache
+            invalidate_status_cache()
+        return redirect(reverse_lazy(STATUS_REDIRECT) + STATUS_TAB)

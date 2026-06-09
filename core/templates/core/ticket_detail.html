@@ -1,4 +1,5 @@
 {% extends "core/base.html" %}
+{% load mb_icons %}
 
 {% block title %}{{ ticket.ticket_number }} - Murphy's Bench{% endblock %}
 
@@ -13,17 +14,7 @@
             <p class="text-gray-500 text-sm">{{ ticket.client.name }}{% if ticket.device %} — {{ ticket.device.name }}{% endif %}</p>
         </div>
         <div class="flex flex-wrap items-center gap-3">
-            <span class="px-3 py-1 text-sm font-semibold rounded-full
-                {% if ticket.status == 'new' %}bg-blue-100 text-blue-800
-                {% elif ticket.status == 'open' %}bg-indigo-100 text-indigo-800
-                {% elif ticket.status == 'in_progress' %}bg-yellow-100 text-yellow-800
-                {% elif ticket.status == 'waiting_on_customer' %}bg-orange-100 text-orange-800
-                {% elif ticket.status == 'resolved' %}bg-green-100 text-green-800
-                {% elif ticket.status == 'closed' %}bg-gray-100 text-gray-800
-                {% else %}bg-purple-100 text-purple-800
-                {% endif %}">
-                {{ ticket.get_status_display }}
-            </span>
+            {% status_badge ticket.status 'ticket' %}
             <div id="overdue-section">
                 {% include "core/partials/overdue_badge.html" %}
             </div>
@@ -303,14 +294,7 @@ window.addEventListener('beforeunload', function() {
                    class="block rounded border border-gray-100 hover:border-blue-300 hover:bg-blue-50 p-3 transition-colors">
                     <div class="flex items-center justify-between gap-2 mb-1">
                         <span class="text-xs font-mono font-semibold text-gray-700">{{ wo.work_order_number }}</span>
-                        <span class="text-xs px-1.5 py-0.5 rounded-full font-medium
-                            {% if wo.status == 'new' %}bg-blue-100 text-blue-700
-                            {% elif wo.status == 'assigned' %}bg-purple-100 text-purple-700
-                            {% elif wo.status == 'in_progress' %}bg-yellow-100 text-yellow-700
-                            {% elif wo.status == 'completed' %}bg-green-100 text-green-700
-                            {% else %}bg-gray-100 text-gray-600{% endif %}">
-                            {{ wo.get_status_display }}
-                        </span>
+                        {% status_badge wo.status 'workorder' %}
                     </div>
                     <p class="text-xs text-gray-700 font-medium truncate">{{ wo.description|truncatechars:60 }}</p>
                     <p class="text-xs text-gray-400 mt-0.5">

@@ -1,7 +1,69 @@
+import time
 from django import template
 from django.utils.html import mark_safe
 
 register = template.Library()
+
+# Module-level cache for StatusDefinition lookups — avoids repeated DB hits on list pages.
+_sd_cache = {}       # entity_type → {slug: StatusDefinition}
+_sd_cache_ts = {}    # entity_type → float timestamp
+
+_SD_CACHE_TTL = 120  # seconds
+
+
+def _get_status_def(slug, entity_type):
+    now = time.time()
+    if entity_type not in _sd_cache or now - _sd_cache_ts.get(entity_type, 0) > _SD_CACHE_TTL:
+        from core.models import StatusDefinition
+        _sd_cache[entity_type] = {s.slug: s for s in StatusDefinition.objects.filter(entity_type=entity_type)}
+        _sd_cache_ts[entity_type] = now
+    return _sd_cache[entity_type].get(slug)
+
+
+def _contrasting_color(hex_color):
+    try:
+        h = hex_color.lstrip('#')
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return '#1F2937' if (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5 else '#F9FAFB'
+    except Exception:
+        return '#1F2937'
+
+
+@register.simple_tag
+def status_badge(slug, entity_type):
+    """Render a colored status badge span from StatusDefinition."""
+    sd = _get_status_def(slug, entity_type)
+    if sd:
+        color = sd.color
+        label = sd.label
+    else:
+        color = '#E5E7EB'
+        label = slug.replace('_', ' ').title()
+    text = _contrasting_color(color)
+    return mark_safe(
+        f'<span class="px-2 py-1 text-xs font-semibold rounded-full inline-block whitespace-nowrap" '
+        f'style="background-color:{color};color:{text};">{label}</span>'
+    )
+
+
+@register.simple_tag
+def status_label(slug, entity_type):
+    """Return the plain-text label for a status slug."""
+    sd = _get_status_def(slug, entity_type)
+    return sd.label if sd else slug.replace('_', ' ').title()
+
+
+@register.simple_tag
+def status_color(slug, entity_type):
+    """Return the background hex color for a status slug (for inline style use)."""
+    sd = _get_status_def(slug, entity_type)
+    return sd.color if sd else '#E5E7EB'
+
+
+def invalidate_status_cache():
+    """Call after StatusDefinition changes to flush the in-process cache."""
+    _sd_cache.clear()
+    _sd_cache_ts.clear()
 
 # Heroicons v1 outline (24x24) — paths from heroicons.com
 ICON_PATHS = {

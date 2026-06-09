@@ -118,11 +118,7 @@
                     </td>
                     <td class="px-5 py-3 whitespace-nowrap text-sm text-gray-900">{{ wo.client.name }}</td>
                     <td class="px-5 py-3 whitespace-nowrap text-sm text-gray-600">{{ wo.assigned_to.get_full_name|default:"Unassigned" }}</td>
-                    <td class="px-5 py-3 whitespace-nowrap">
-                        <span class="wo-status-badge status-{{ wo.status }} px-2 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full text-gray-700">
-                            {{ wo.get_status_display }}
-                        </span>
-                    </td>
+                    <td class="px-5 py-3 whitespace-nowrap">{% status_badge wo.status 'workorder' %}</td>
                     <td class="px-5 py-3 whitespace-nowrap text-sm text-gray-500">{{ wo.created_at|date:"M d, Y" }}</td>
                 </tr>
                 {% endfor %}
@@ -196,11 +192,7 @@
                     <a href="{% url 'core:work_order_detail' wo.pk %}">{{ wo.work_order_number }}</a>
                 </td>
                 <td class="px-5 py-3 whitespace-nowrap text-sm text-gray-500">{{ wo.client.name }}</td>
-                <td class="px-5 py-3 whitespace-nowrap">
-                    <span class="wo-status-badge status-{{ wo.status }} px-2 py-0.5 text-xs font-semibold rounded-full text-gray-700">
-                        {{ wo.get_status_display }}
-                    </span>
-                </td>
+                <td class="px-5 py-3 whitespace-nowrap">{% status_badge wo.status 'workorder' %}</td>
                 <td class="px-5 py-3 whitespace-nowrap text-sm text-gray-400">{{ wo.updated_at|date:"M d, Y" }}</td>
             </tr>
             {% endfor %}

@@ -1,3 +1,4 @@
+{% load mb_icons %}
 <!-- My Tickets accordion -->
 <div x-data="{ open: JSON.parse(localStorage.getItem('sidebar_tickets') ?? 'true') }"
      x-init="$watch('open', v => localStorage.setItem('sidebar_tickets', v))">
@@ -13,13 +14,8 @@
     {% for ticket in my_tickets %}
     <a href="{% url 'core:ticket_detail' ticket.pk %}"
        class="flex items-start gap-2 px-3 py-2 hover:opacity-90 rounded text-xs group" style="opacity:0.85">
-      <span class="mt-0.5 flex-shrink-0 w-2 h-2 rounded-full
-        {% if ticket.status == 'new' %}bg-blue-400
-        {% elif ticket.status == 'open' %}bg-green-400
-        {% elif ticket.status == 'in_progress' %}bg-yellow-400
-        {% elif ticket.status == 'waiting_on_customer' %}bg-orange-400
-        {% elif ticket.status == 'resolved' %}bg-gray-400
-        {% else %}bg-gray-500{% endif %}"></span>
+      {% status_color ticket.status 'ticket' as dot_color %}
+      <span class="mt-0.5 flex-shrink-0 w-2 h-2 rounded-full" style="background-color:{{ dot_color }};"></span>
       <div class="min-w-0">
         <div class="font-medium truncate">{{ ticket.ticket_number }}</div>
         <div class="truncate" style="opacity:0.7">{{ ticket.client.name }}</div>
@@ -51,12 +47,8 @@
     {% for wo in my_wos %}
     <a href="{% url 'core:work_order_detail' wo.pk %}"
        class="flex items-start gap-2 px-3 py-2 hover:opacity-90 rounded text-xs group" style="opacity:0.85">
-      <span class="mt-0.5 flex-shrink-0 w-2 h-2 rounded-full
-        {% if wo.status == 'new' %}bg-blue-400
-        {% elif wo.status == 'assigned' %}bg-purple-400
-        {% elif wo.status == 'in_progress' %}bg-yellow-400
-        {% elif wo.status == 'completed' %}bg-green-400
-        {% else %}bg-gray-500{% endif %}"></span>
+      {% status_color wo.status 'workorder' as wo_dot_color %}
+      <span class="mt-0.5 flex-shrink-0 w-2 h-2 rounded-full" style="background-color:{{ wo_dot_color }};"></span>
       <div class="min-w-0">
         <div class="font-medium truncate">{{ wo.work_order_number }}</div>
         <div class="truncate" style="opacity:0.7">{{ wo.client.name }}</div>

@@ -1,6 +1,12 @@
 from fnmatch import fnmatch
 
 
+def _status_label(slug, entity_type):
+    from .models import StatusDefinition
+    sd = StatusDefinition.objects.filter(entity_type=entity_type, slug=slug).first()
+    return sd.label if sd else slug.replace('_', ' ').title()
+
+
 def send_ticket_email(trigger, ticket, extra_context=None):
     """
     Send an automated email for a ticket event.
@@ -64,7 +70,7 @@ def send_ticket_email(trigger, ticket, extra_context=None):
         'ticket': ticket,
         'client': ticket.client,
         'tech_name': ticket.created_by.get_full_name() if ticket.created_by else '',
-        'status': ticket.get_status_display(),
+        'status': _status_label(ticket.status, 'ticket'),
         'site_name': "Murphy's Bench",
     }
     if extra_context:
