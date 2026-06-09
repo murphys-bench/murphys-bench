@@ -6,13 +6,24 @@
 
 ---
 
-## What's already built and working (as of session 12):
+## What's already built and working (as of session 13):
 
 - Django 4.2 app, 36+ models, 30 migrations applied
 - **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16
 - Deploy workflow: `git push` on Mac → SSH to server → `git pull && python manage.py migrate && sudo systemctl restart murphys-bench`
 - Full CRUD views for work orders, clients, devices, mileage, contacts, tickets, KB, queues
 - HTMX inline notes, checklist, ticket replies, Quick Labor, credentials
+
+**Batch 12 — COMPLETE (session 12)**
+
+**Session 13 additions:**
+- Cross-visibility: open tickets panel on WO detail, open WOs panel on ticket detail (status, last note/reply, one-click nav)
+- WO detail toolbar: linked ticket shown as clickable purple pill (← TKT-XXXXX)
+- Converted tickets now stay visible in sidebar, dashboard tile, and cross-visibility panels until resolved/closed
+- History tab removed from ticket detail (same as WO detail)
+- Sidebar: shows last reply/note preview instead of subject/description; falls back if no notes yet
+- Mileage Calculate button: fixed CSRF token for production (was silently failing)
+- Google Maps API confirmed working from production server (WAN IP restriction in Cloud Console)
 
 **Batch 12 — COMPLETE (session 12):**
 - Client list redesigned to match legacy layout (ACCOUNT/TYPE/CONTACT/PHONE/EMAIL/DEVICES/WOs)
@@ -70,6 +81,9 @@ Ask the user what they want to tackle. Good candidates:
 - **WorkOrderItemCheckView**: Posts `field` (pre_check/post_check) + `value`; returns full `checklist_list.html` partial targeting `#checklist-wrapper`
 - **Production Python**: Ubuntu 24.04 uses Python 3.12 (`python3`, not `python`)
 - **Production venv**: `/opt/murphys-bench/venv/` — activate before manage.py commands
+- **Mileage Calculate CSRF**: Uses `document.querySelector('[name=csrfmiddlewaretoken]')` — do not revert to cookie parsing
+- **Google Maps API key**: Stored in SiteSettings (DB), not .env. Restricted to WAN IP in Google Cloud Console. Distance Matrix API must be enabled.
+- **Converted tickets**: Included in sidebar, dashboard "My Open Tickets" tile, and cross-visibility panels. Excluded only from resolved/closed filters.
 
 ---
 
