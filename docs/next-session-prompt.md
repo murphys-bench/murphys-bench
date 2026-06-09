@@ -6,46 +6,45 @@
 
 ---
 
-## What's already built and working (as of session 16):
+## What's already built and working (as of session 17):
 
-- Django 4.2 app, 33 models, 33 migrations applied
+- Django 4.2 app, 35 models, 34 migrations applied
 - **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16
 - Deploy workflow: `git push` on Mac → SSH `scs-tech@10.58.58.82` → `cd /opt/murphys-bench && git pull && source venv/bin/activate && python3 manage.py migrate` → `kill -HUP <gunicorn-master-pid>`
 - Full CRUD views for work orders, clients, devices, mileage, contacts, tickets, KB, queues
 - HTMX inline notes, checklist, ticket replies, Quick Labor, credentials, billing
 
+**Session 17 additions:**
+- **Invoice CSV export**: `/clients/<pk>/invoices.csv`, optional `?status=` filter, CSV button on client detail
+- **Icon audit**: 10 new icons in `mb_icons.py`, all emoji/text symbols replaced across templates
+- **Billing financial summary**: Reports page — Invoiced/Collected/Outstanding cards + outstanding-by-client table. CSV at `/reports/csv/billing/`
+- **Org credentials vault**: `OrgCredential` + `CredentialAccessLog` models (migration 0034). Settings → Credentials tab. AES-256 encrypted. HTMX eye-reveal logs every access.
+- **Email Template Manager**: Settings → Email Templates tab. Editable subject/body, active toggle, variable reference panel.
+- **Team workload widget**: Dashboard (admin only) — open WOs + tickets per tech, sorted by load.
+- **Technician performance report**: Reports page — completion %, avg resolution hours, open WOs. CSV export.
+
 **Session 16 additions:**
 - **`Invoice` model**: OneToOne on WorkOrder. Fields: `billing_status` (uninvoiced/invoiced/paid/paid_direct/disputed), `amount`, `invoiced_date`, `paid_date`, `payment_method`, `notes`. Auto-created on WO creation via `post_save` signal.
 - **Migration 0033**: CreateModel + backfill RunPython. Applied to production.
-- **`WorkOrderBillingUpdateView`**: HTMX POST at `/work-orders/<pk>/billing/`. Quick-action mode (just `billing_status`): updates status, auto-sets dates on first transition. Full edit mode (`full_edit=1`): updates all fields.
-- **`billing_card.html`** partial: `id="billing-card"`, Alpine.js display/edit toggle, HTMX `hx-swap="outerHTML"`. Quick-action buttons are contextual per status.
-- **WO detail**: billing card in right column between "Update Work Order" and "Device Credentials"
-- **Client detail**: outstanding balance badge (yellow pill) next to "Work Order History" heading
-
-**Session 15 additions:**
-- **Color-coded dashboard tiles**: `_tile_color()` in views.py computes color from `status_filter`/`link_url`. Blue=active, Yellow=waiting, Red=overdue, Green=completed.
-- **SVG icon templatetag**: `core/templatetags/mb_icons.py` — `{% icon name size %}`. Load with `{% load mb_icons %}`.
-- **Device type icon grid**: Alpine.js, hidden input, 7 types, replaces dropdown on device form.
-- Migration 0032: emoji → icon name strings in DashboardTile
-- **Production fully deployed**: migrations 0031–0033, `FIELD_ENCRYPTION_KEY` in prod `.env`, key in Bitwarden
+- **`WorkOrderBillingUpdateView`**: HTMX POST at `/work-orders/<pk>/billing/`. Quick-action + full edit mode.
+- **`billing_card.html`** partial: Alpine.js display/edit toggle, HTMX `hx-swap="outerHTML"`.
+- **Client detail**: outstanding balance badge (yellow pill) next to "Work Order History" heading.
 
 ---
 
-## What's next (session 17 options):
+## What's next (session 18 options):
 
-### Option A — CSV export for Invoice records
-Simple view that exports invoice data per client as CSV for accounting import. Would tie off the billing module.
-- `InvoiceExportView` at `/clients/<pk>/invoices.csv/` or `/invoices/export/?client=<pk>`
-- Columns: WO#, client, description, amount, billing_status, invoiced_date, paid_date, payment_method, notes
+### Option A — Status Management UI
+Native CRUD for ticket and WO statuses. Currently hardcoded enums — would require a new model (`CustomStatus`) and migration. Core statuses stay locked; custom statuses add/edit/delete with color picker. Suggested library per entity type.
 
-### Option B — Native Settings UI expansion
-From TODO.md Priority 3 items (see Batch 11 spec):
-- **Repair Types** native CRUD (currently admin-only) — add `RepairTypeCategory` model, sort_order, full CRUD UI at `/settings/repair-types/`
-- **Canned Responses** native CRUD — two note streams (Customer Notes / Tech Notes Internal), categories, CRUD, picker on WO detail
-- **Quick Labor** native CRUD (currently admin-only)
+### Option B — Data Management
+Import wizard (CSV → map columns → preview → import), bulk export ZIP, deleted data recovery (requires soft-delete changes), reset tool. Substantial build.
 
-### Option C — Site-wide icon audit
-Replace remaining text symbols (×, ⚠, 🔑, etc.) with SVG icons via `{% icon %}`. Quick polish pass.
+### Option C — Device-level credentials
+`password` field on Device model (AES-256 encrypted, masked display + eye icon reveal). Admin always; Technician based on role flag. Simpler than it sounds — follows OrgCredential pattern exactly.
+
+### Option D — Something from daily use
+Any friction points or gaps SCS has noticed in actual use since deployment.
 
 ---
 
@@ -53,8 +52,12 @@ Replace remaining text symbols (×, ⚠, 🔑, etc.) with SVG icons via `{% icon
 
 - **Credential encryption**: AES-256, FIELD_ENCRYPTION_KEY from env, key in Bitwarden
 - **Billing philosophy**: MB tracks state only — not an accounting module. Invoice Ninja authoritative.
-- **Invoice model**: separate entity on WO (not fields on WO) — `paid_direct` for cash/walk-in before formal invoice
+- **Invoice model**: separate entity on WO (not fields on WO) — `paid_direct` for cash/walk-in
 - **Visual design is a first-class requirement**: color + icons communicate status faster than text
+- **Modals for quick edits, full pages for complex creation**
+- **Soft-delete everything** (hard deletes require admin deliberate action)
+- **Export-based integrations** — CSV works with any accounting system
+- **Org credentials vault is a competitive advantage** over RepairShopCRM
 - Permanently Delete blocks if client has WOs; offers Deactivate instead
 - Address: 5 fields — Line 1, Line 2 (optional), City, State, Zip. No country.
 - Colors: stored in SiteSettings, rendered as CSS variables in `<style>` block in base.html
@@ -72,7 +75,8 @@ Replace remaining text symbols (×, ⚠, 🔑, etc.) with SVG icons via `{% icon
 - **Mileage Calculate CSRF**: Uses `document.querySelector('[name=csrfmiddlewaretoken]')` — do not revert
 - **Google Maps API key**: Stored in SiteSettings (DB). Restricted to WAN IP in Google Cloud Console.
 - **Production Python**: `python3` not `python`. Venv: `/opt/murphys-bench/venv/`
-- **mb_icons templatetag**: `{% load mb_icons %}` at top of any template that uses `{% icon %}`
+- **mb_icons templatetag**: `{% load mb_icons %}` at top of any template that uses `{% icon %}`. Partials need their own load tag.
+- **Email template variable reference**: Must use `{% verbatim %}...{% endverbatim %}` to display `{{ }}` tokens in templates.
 
 ---
 

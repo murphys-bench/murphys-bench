@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 9, 2026 (end of session 16)
+**Last Updated**: June 9, 2026 (end of session 17)
 
 ---
 
@@ -72,11 +72,11 @@ The app is running locally at `http://localhost:8000`. All views require login.
 - `/settings/` — Native Settings UI (admin only, 6 tabs)
 
 **What still requires admin panel:**
-- Email template editing (EmailTemplate model) — Phase 2: native Email Template Manager
 - Suppressed address management (SuppressedAddress model)
 - Email send/receive log review (EmailSendLog, InboundEmailLog — read-only)
 - SLA Plans, Help Topics, KB Categories (admin-managed)
 - Roles and TechSkills management
+- Credential access log review (CredentialAccessLog — read-only, audit only)
 
 **Note**: All routine workflow actions (create client, work order, device, contact) now use native app pages. The Django admin is staff-only config/reference only.
 
@@ -320,6 +320,18 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - Sidebar: shows last reply/note preview instead of subject/description; falls back gracefully if no notes
 - Mileage Calculate button: fixed CSRF token for production (was silently failing in prod)
 - Google Maps API confirmed working from production server (WAN IP restriction set in Cloud Console)
+
+### ✅ Session 17 — Phase 2 Foundations (session 17 — COMPLETE)
+
+- **Invoice CSV export**: `InvoiceExportView` at `/clients/<pk>/invoices.csv` — all invoices for a client, optional `?status=` filter. CSV button on client detail WO History header.
+- **Icon audit**: 10 new icons added to `mb_icons.py` (x-mark, exclamation-triangle, lock-closed, user, key, document-text, chevron-up/down/right, arrow-down-tray, eye). All emoji/text symbols replaced across templates. Fixed arrow-down-tray silently rendering nothing.
+- **Billing financial summary on Reports page**: Invoiced/Collected/Outstanding metric cards + outstanding-by-client table with CSV links. Billing CSV export at `/reports/csv/billing/`.
+- **Org credentials vault**: `OrgCredential` + `CredentialAccessLog` models (migration 0034). Settings → Credentials tab. AES-256 encrypted username/password/notes. HTMX eye-reveal logs every access. CRUD with admin-only flag. Every view/edit/delete written to audit log.
+- **Email Template Manager**: Settings → Email Templates tab. Native UI for all 4 `EmailTemplate` triggers. Editable subject/body (monospace), active toggle, variable reference panel (`{% verbatim %}`), last-updated timestamp. Auto-creates inactive defaults on first visit.
+- **Team workload widget**: Dashboard (admin only) — Team Workload table showing open WOs + tickets per tech, sorted by total load, counts link to filtered lists.
+- **Technician performance report**: Reports page — WOs in period, completed count, completion % (color-coded), avg resolution hours, current open WOs. CSV export at `/reports/csv/tech_perf/`.
+- **Doc sweep**: MB_UI_UX_Analysis.md content merged into CLAUDE.md + TODO.md. Stale admin panel entries cleaned up.
+- Production deployed: migration 0034 applied, all changes live.
 
 ### ✅ Session 16 — Invoice Model (session 16 — COMPLETE)
 

@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 9, 2026 (session 16)
+**Last Updated**: June 9, 2026 (session 17)
 **Current Phase**: Phase 1 — SCS Internal
 
 ---
@@ -375,7 +375,7 @@
 
 ---
 
-- [ ] **CSV export for Invoice records** — Simple view exporting invoice data per client for accounting import
+- [x] **CSV export for Invoice records** — `InvoiceExportView` at `/clients/<pk>/invoices.csv`, optional `?status=` filter, CSV button on client detail
 
 - [ ] **Testing suite**
   - Model tests (validation, relationships)
@@ -415,19 +415,13 @@
 
 - [ ] **Device-level credentials** — `password` field on Device model (AES-256 encrypted, masked display + eye icon reveal). Who can view: Administrators always; Technicians only if role allows.
 
-- [ ] **Org-level credentials vault** — Shared credential store for the organization, not tied to any device. Settings → Credentials tab (new).
-  - `OrgCredential` model: name, username (encrypted), password (encrypted), url, category (Email/Remote Support/Cloud/Network/Vendor/Other), notes (encrypted), accessible_by role flags, created_by, created_at, last_accessed_by, last_accessed_at
-  - `CredentialAccessLog` model: credential FK, user FK, accessed_at, action (viewed/copied/edited/deleted) — every reveal is logged
-  - List view: Name, Category, Last Accessed, Actions. Password always masked; eye icon reveals in-place. Edit via modal.
-  - RepairShopCRM has device-level only, no audit trail — this is a MB competitive advantage
+- [x] **Org-level credentials vault** — `OrgCredential` + `CredentialAccessLog` models (migration 0034). Settings → Credentials tab. AES-256 encrypted username/password/notes. HTMX eye-reveal logs every access. Admin-only flag.
 
 ---
 
 ### Settings UI Expansion
 
-- [ ] **Email Template Manager** — UI for existing `EmailTemplate` model (currently admin-only)
-  - Variable reference panel, live preview, test send button
-  - Triggers: ticket_created, reply_added, status_changed, overdue, ticket_resolved
+- [x] **Email Template Manager** — Settings → Email Templates tab. Editable subject/body (monospace), active toggle, variable reference panel, last-updated timestamp. Auto-creates inactive defaults on first visit.
 
 - [ ] **Status Management UI** — Native CRUD for Ticket and WO statuses
   - Separate sections for Ticket Statuses and WO Statuses
@@ -445,14 +439,11 @@
 
 ### Reporting Expansion
 
-- [ ] **Financial reporting** — Billing state summary (not accounting)
-  - Total invoiced this period, total paid, total outstanding (uninvoiced + unpaid)
-  - Outstanding by client (sortable list)
-  - All existing CSV export already covers per-client data
+- [x] **Financial reporting** — Billing Summary section on Reports page: Invoiced/Collected/Outstanding metric cards + outstanding-by-client table. CSV at `/reports/csv/billing/`.
 
-- [ ] **Technician performance reports** — Workload, completion rate, avg resolution time per tech
+- [x] **Technician performance reports** — Reports page: WOs in period, completion %, avg resolution hours, open WOs. CSV at `/reports/csv/tech_perf/`.
 
-- [ ] **Team workload widget** — Dashboard widget showing open WO/ticket count per tech
+- [x] **Team workload widget** — Dashboard (admin only): open WOs + tickets per tech, sorted by load, counts link to filtered lists.
 
 ---
 
