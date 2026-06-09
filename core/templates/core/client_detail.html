@@ -346,7 +346,14 @@
     <!-- ── WORK ORDER HISTORY ──────────────────────────────────────── -->
     <div class="bg-white rounded-lg shadow overflow-hidden">
         <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-            <h2 class="text-lg font-semibold text-gray-900">Work Order History</h2>
+            <div class="flex items-center gap-3">
+                <h2 class="text-lg font-semibold text-gray-900">Work Order History</h2>
+                {% if outstanding_balance %}
+                <span class="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-700 font-medium">
+                    ${{ outstanding_balance }} outstanding
+                </span>
+                {% endif %}
+            </div>
             <a href="{% url 'core:work_order_create' %}?client={{ client.pk }}"
                class="text-sm text-blue-600 hover:underline">+ New WO</a>
         </div>

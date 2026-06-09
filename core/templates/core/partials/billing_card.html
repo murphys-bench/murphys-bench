@@ -1,0 +1,163 @@
+{% comment %}HTMX partial — billing state card on WO detail{% endcomment %}
+<div id="billing-card"
+     class="bg-white rounded-lg shadow p-5"
+     x-data="{ editing: false }">
+
+    <div class="flex items-center justify-between mb-3">
+        <h2 class="text-base font-semibold text-gray-900">Billing</h2>
+        <button type="button" @click="editing = !editing"
+                class="text-xs text-gray-400 hover:text-gray-600">
+            <span x-show="!editing">Edit</span>
+            <span x-show="editing" x-cloak>Cancel</span>
+        </button>
+    </div>
+
+    <!-- Display mode -->
+    <div x-show="!editing">
+        <!-- Status badge + amount -->
+        <div class="flex items-center gap-3 mb-3">
+            <span class="px-2 py-1 text-xs font-semibold rounded-full
+                {% if invoice.billing_status == 'uninvoiced' %}bg-gray-100 text-gray-600
+                {% elif invoice.billing_status == 'invoiced' %}bg-blue-100 text-blue-700
+                {% elif invoice.billing_status == 'paid' %}bg-green-100 text-green-700
+                {% elif invoice.billing_status == 'paid_direct' %}bg-green-100 text-green-700
+                {% elif invoice.billing_status == 'disputed' %}bg-red-100 text-red-700
+                {% endif %}">
+                {{ invoice.get_billing_status_display }}
+            </span>
+            {% if invoice.amount %}
+            <span class="text-sm font-medium text-gray-700">${{ invoice.amount }}</span>
+            {% endif %}
+        </div>
+
+        <!-- Dates + payment method -->
+        {% if invoice.invoiced_date or invoice.paid_date %}
+        <div class="text-xs text-gray-500 space-y-1 mb-3">
+            {% if invoice.invoiced_date %}
+            <div>Invoiced: {{ invoice.invoiced_date|date:"M d, Y" }}</div>
+            {% endif %}
+            {% if invoice.paid_date %}
+            <div>Paid: {{ invoice.paid_date|date:"M d, Y" }}{% if invoice.payment_method %} — {{ invoice.get_payment_method_display }}{% endif %}</div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if invoice.notes %}
+        <div class="mb-3 p-2 bg-gray-50 rounded text-xs text-gray-600 whitespace-pre-wrap">{{ invoice.notes }}</div>
+        {% endif %}
+
+        <!-- Quick action buttons -->
+        <div class="flex flex-wrap gap-2">
+            {% if invoice.billing_status == 'uninvoiced' %}
+            <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}"
+                  hx-target="#billing-card" hx-swap="outerHTML">
+                {% csrf_token %}
+                <input type="hidden" name="billing_status" value="invoiced">
+                <button type="submit"
+                        class="text-xs px-3 py-1.5 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 font-medium">
+                    Mark Invoiced
+                </button>
+            </form>
+            <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}"
+                  hx-target="#billing-card" hx-swap="outerHTML">
+                {% csrf_token %}
+                <input type="hidden" name="billing_status" value="paid_direct">
+                <button type="submit"
+                        class="text-xs px-3 py-1.5 rounded bg-green-100 text-green-700 hover:bg-green-200 font-medium">
+                    Paid Direct
+                </button>
+            </form>
+            {% elif invoice.billing_status == 'invoiced' %}
+            <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}"
+                  hx-target="#billing-card" hx-swap="outerHTML">
+                {% csrf_token %}
+                <input type="hidden" name="billing_status" value="paid">
+                <button type="submit"
+                        class="text-xs px-3 py-1.5 rounded bg-green-100 text-green-700 hover:bg-green-200 font-medium">
+                    Mark Paid
+                </button>
+            </form>
+            {% elif invoice.billing_status == 'disputed' %}
+            <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}"
+                  hx-target="#billing-card" hx-swap="outerHTML">
+                {% csrf_token %}
+                <input type="hidden" name="billing_status" value="uninvoiced">
+                <button type="submit"
+                        class="text-xs px-3 py-1.5 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium">
+                    Reset to Uninvoiced
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Edit mode -->
+    <div x-show="editing" x-cloak>
+        <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}"
+              hx-target="#billing-card" hx-swap="outerHTML"
+              class="space-y-3">
+            {% csrf_token %}
+            <input type="hidden" name="full_edit" value="1">
+
+            <div>
+                <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Status</label>
+                <select name="billing_status"
+                        class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    {% for val, label in invoice.BILLING_STATUS_CHOICES %}
+                    <option value="{{ val }}" {% if invoice.billing_status == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Amount ($)</label>
+                <input type="number" name="amount" step="0.01" min="0"
+                       value="{{ invoice.amount|default:'' }}"
+                       placeholder="0.00"
+                       class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Invoiced Date</label>
+                <input type="date" name="invoiced_date"
+                       value="{{ invoice.invoiced_date|date:'Y-m-d'|default:'' }}"
+                       class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Paid Date</label>
+                <input type="date" name="paid_date"
+                       value="{{ invoice.paid_date|date:'Y-m-d'|default:'' }}"
+                       class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Payment Method</label>
+                <select name="payment_method"
+                        class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    <option value="">— None —</option>
+                    {% for val, label in invoice.PAYMENT_METHOD_CHOICES %}
+                    <option value="{{ val }}" {% if invoice.payment_method == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Billing Notes</label>
+                <textarea name="notes" rows="2"
+                          class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">{{ invoice.notes }}</textarea>
+            </div>
+
+            <div class="flex gap-2 justify-end">
+                <button type="button" @click="editing = false"
+                        class="px-3 py-1.5 bg-gray-100 text-gray-600 text-sm rounded hover:bg-gray-200 font-medium">
+                    Cancel
+                </button>
+                <button type="submit"
+                        class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 font-medium">
+                    Save Billing
+                </button>
+            </div>
+        </form>
+    </div>
+</div>

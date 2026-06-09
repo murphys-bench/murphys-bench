@@ -73,8 +73,9 @@ urlpatterns = [
     # Repair Report (print view)
     path('work-orders/<int:pk>/print/', views.WorkOrderPrintView.as_view(), name='work_order_print'),
 
-    # Credentials (HTMX on WO detail)
+    # Credentials + Billing (HTMX on WO detail)
     path('work-orders/<int:pk>/credentials/', views.WorkOrderCredentialsSaveView.as_view(), name='wo_credentials_save'),
+    path('work-orders/<int:pk>/billing/', views.WorkOrderBillingUpdateView.as_view(), name='wo_billing_update'),
 
     # Contact management (HTMX inline on client detail)
     path('clients/<int:client_pk>/contacts/new/', views.ContactCreateView.as_view(), name='contact_create'),

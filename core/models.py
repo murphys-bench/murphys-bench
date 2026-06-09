@@ -660,6 +660,41 @@ class WorkOrderItem(models.Model):
         return f"{self.item_type}: {self.description}"
 
 
+class Invoice(models.Model):
+    """Billing state tracker for a WorkOrder. Tracks status only — not an accounting module."""
+
+    BILLING_STATUS_CHOICES = [
+        ('uninvoiced', 'Uninvoiced'),
+        ('invoiced', 'Invoiced'),
+        ('paid', 'Paid'),
+        ('paid_direct', 'Paid Direct'),
+        ('disputed', 'Disputed'),
+    ]
+    PAYMENT_METHOD_CHOICES = [
+        ('cash', 'Cash'),
+        ('check', 'Check'),
+        ('card', 'Card'),
+        ('transfer', 'Transfer'),
+        ('other', 'Other'),
+    ]
+
+    work_order = models.OneToOneField(WorkOrder, on_delete=models.CASCADE, related_name='invoice')
+    billing_status = models.CharField(max_length=20, choices=BILLING_STATUS_CHOICES, default='uninvoiced', db_index=True)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    invoiced_date = models.DateField(null=True, blank=True)
+    paid_date = models.DateField(null=True, blank=True)
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'invoices'
+
+    def __str__(self):
+        return f'Invoice for {self.work_order.work_order_number} — {self.get_billing_status_display()}'
+
+
 class Mileage(models.Model):
     """Travel logging for billing/expense tracking"""
 
@@ -1396,3 +1431,12 @@ auditlog.register(Ticket)
 auditlog.register(TicketReply)
 auditlog.register(WorkOrder)
 auditlog.register(WorkOrderNote)
+
+
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+@receiver(post_save, sender=WorkOrder)
+def create_invoice_for_new_work_order(sender, instance, created, **kwargs):
+    if created:
+        Invoice.objects.get_or_create(work_order=instance)
