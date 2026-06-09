@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 8, 2026 (session 10)
+**Last Updated**: June 9, 2026 (session 14)
 **Current Phase**: Phase 1 — SCS Internal
 
 ---
@@ -339,17 +339,44 @@
 
 ---
 
+#### Session 13 — Cross-Visibility + Misc Fixes ✅
+- Cross-visibility panels: open tickets on WO detail, open WOs on ticket detail
+- WO toolbar: linked ticket as purple pill (← TKT-XXXXX)
+- Converted tickets visible in sidebar/dashboard until resolved/closed
+- History tab removed from ticket detail
+- Sidebar: last reply/note preview instead of subject
+- Mileage Calculate: CSRF fix for production
+- Google Maps API confirmed working from production server
+
+#### Session 14 — Credential Encryption ✅
+- `WorkOrder.device_username`, `device_password`, `device_pin`, `credential_notes` — AES-256 encrypted at rest
+- `SiteSettings.email_password`, `inbound_password` — AES-256 encrypted at rest
+- Package: `django-encrypted-model-fields==0.6.5`; `FIELD_ENCRYPTION_KEY` from env
+- Migration 0031 applied locally, **pending production deployment** (must set key in env first)
+
+---
+
+- [ ] **Visual polish — Phase 1 (session 15, queued)**
+  - Color-coded dashboard metric tiles (Blue=active, Yellow=waiting, Red=overdue, Green=complete)
+  - SVG icons replacing emoji (Heroicons, consistent with Tailwind)
+  - Device type icon grid replacing dropdown on device form
+
+- [ ] **Basic billing tracker (Invoice model)**
+  - Lightweight `Invoice` entity on WorkOrder (not fields on WO)
+  - `billing_status` enum: uninvoiced / invoiced / paid / paid_direct / disputed
+  - Payment metadata: date, method, notes
+  - Customer outstanding balance on client detail
+  - CSV export for accounting system import
+  - MB tracks state only — not an accounting module; Invoice Ninja remains authoritative
+
+- [ ] **Production deploy migration 0031** — do together; set FIELD_ENCRYPTION_KEY in prod env before pulling
+
 - [ ] **Testing suite**
   - Model tests (validation, relationships)
   - View tests (authentication, permissions, data display)
   - Form tests (validation, submission)
   - Target: 70%+ coverage
-- [ ] **Deployment** (internal network)
-  - Configure for internal deployment
-  - HTTPS with self-signed certificate
-  - Database backup strategy
-  - Test on internal network (10.58.58.x)
-  - **Verify Google Maps mileage calculation** — works correctly in dev but Google Distance Matrix API call returns "network error" from localhost; likely an outbound connectivity or API key restriction issue. Test after deploying to internal server (10.58.58.x) which should have normal internet access.
+- [ ] ~~**Deployment** (internal network)~~ — ✅ COMPLETE (session 12, 10.58.58.82)
 
 ---
 

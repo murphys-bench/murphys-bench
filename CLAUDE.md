@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 8, 2026 (end of session 12)
+**Last Updated**: June 9, 2026 (end of session 14)
 
 ---
 
@@ -198,7 +198,7 @@ murphys-bench/
     └── next-session-prompt.md
 ```
 
-### Data Models (32 current)
+### Data Models (32 current, 31 migrations applied)
 - **Role** — permission role with 16 boolean flags; seeded: Administrator, Technician
 - **TechSkill** — skill tags M2M on User; captured for future skill-based routing
 - **User** — extended Django user; role CharField (legacy) + role_obj FK to Role + skills M2M
@@ -307,6 +307,25 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - RepairTypeCategory model needs to be created with sort_order field
 - Device assigned_contact: server-side queryset filter (client_id from URL param); no HTMX cascade needed (standalone Device page being removed)
 
+### ✅ Session 13 — Cross-Visibility + Bug Fixes (session 13 — COMPLETE)
+
+- **Cross-visibility panels**: Open tickets panel on WO detail; open WOs panel on ticket detail — status, last note/reply preview, one-click navigation
+- WO detail toolbar: linked ticket shown as clickable purple pill (← TKT-XXXXX)
+- Converted tickets stay visible in sidebar, dashboard "My Open Tickets" tile, and cross-visibility panels until resolved/closed
+- History tab removed from ticket detail (consistent with WO detail)
+- Sidebar: shows last reply/note preview instead of subject/description; falls back gracefully if no notes
+- Mileage Calculate button: fixed CSRF token for production (was silently failing in prod)
+- Google Maps API confirmed working from production server (WAN IP restriction set in Cloud Console)
+
+### ✅ Session 14 — Credential Encryption + Billing Architecture (session 14 — COMPLETE)
+
+- **Credential encryption (migration 0031)**: `WorkOrder.device_username`, `device_password`, `device_pin`, `credential_notes` and `SiteSettings.email_password`, `inbound_password` now AES-256 encrypted at rest via `django-encrypted-model-fields` (Fernet symmetric encryption)
+- `FIELD_ENCRYPTION_KEY` added to `murphys_bench/settings.py` — reads from env, dev fallback only
+- `encrypted_model_fields` added to INSTALLED_APPS and `requirements.txt`
+- `.env.example` updated with key generation instructions and warning
+- RepairShopCRM comparative UI/UX analysis completed — documented in `MB_UI_UX_Analysis.md`
+- **⚠️ Production deployment of migration 0031 is PENDING** — must set `FIELD_ENCRYPTION_KEY` in production `.env` BEFORE pulling. Must be done together. See `memory/project_credential_encryption_deploy.md`.
+
 ### ✅ Batch 12 — Production Deployment + WO Detail Polish (session 12 — COMPLETE)
 
 **Deployment:**
@@ -345,7 +364,7 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - **Work order numbers** auto-generated as `WO-YYYYMMDD-NNNN`
 - **Ticket numbers** auto-generated as `TKT-YYYYMMDD-NNNN`
 - **SQLite for dev** — switch to PostgreSQL for production
-- **Visual polish deferred** — functionality first
+- **Visual polish** — next session (session 15): color-coded dashboard tiles, SVG icons replacing emoji, device type icon grid
 - **GitHub**: Private repo, push after each working feature
 - **HTMX** for inline interactions (notes, replies, checklist toggling)
 - **No Celery/async queue** — synchronous email sending is sufficient at MSP scale
@@ -358,6 +377,9 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - **Alpine.js** loaded via CDN in base.html with `defer` — required for sidebar accordion
 - **Sidebar**: HTMX-loaded on every page except dashboard; admins see all, techs see own
 - **`?assigned_to=me` filter**: works on both `/tickets/` and `/work-orders/`; admins see all
+- **Credential encryption**: AES-256 via `django-encrypted-model-fields`. `FIELD_ENCRYPTION_KEY` read from env. Never plaintext. Migration 0031 applied in dev — production deploy pending (must set key first).
+- **Billing philosophy**: MB tracks billing state only — not an accounting module. Lightweight `Invoice` entity on WorkOrder (not fields on WO directly). `billing_status` enum: uninvoiced / invoiced / paid / paid_direct / disputed. `paid_direct` = cash/walk-in before formal invoice. Invoice Ninja and other systems remain authoritative for formal financials.
+- **Visual design is a first-class requirement**: Color + icons communicate status faster than text. RepairShopCRM comparison documented in `MB_UI_UX_Analysis.md`. Not optional polish.
 - **Audit log gotcha**: `changes_dict` can contain an `'items'` key that shadows `dict.items()` in Django templates. Always use `_audit_entries()` from views.py — never iterate `changes_dict.items` in templates.
 - **Queue filter_criteria**: JSON dict with optional keys: `status` (list), `assigned_to` (int or null), `overdue` (bool), `client` (int), `help_topic` (int), `sla_plan` (int). The `assigned_to: null` key (explicit null, not absent) means "unassigned only".
 - **Google Maps mileage**: API call is server-side via `MileageDistanceView` — key never sent to browser. Tested working in architecture; needs verification on internal server (outbound HTTPS required).
