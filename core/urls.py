@@ -116,6 +116,9 @@ urlpatterns = [
     path('settings/checklist-items/<int:pk>/edit/', views.ChecklistItemUpdateView.as_view(), name='cli_update'),
     path('settings/checklist-items/<int:pk>/delete/', views.ChecklistItemDeleteView.as_view(), name='cli_delete'),
 
+    # Settings — Email Templates
+    path('settings/email-templates/<int:pk>/edit/', views.EmailTemplateUpdateView.as_view(), name='email_template_update'),
+
     # Settings — Org Credentials Vault
     path('settings/credentials/new/', views.OrgCredentialCreateView.as_view(), name='cred_create'),
     path('settings/credentials/<int:pk>/edit/', views.OrgCredentialUpdateView.as_view(), name='cred_update'),

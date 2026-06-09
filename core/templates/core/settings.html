@@ -1508,6 +1508,65 @@
         </div>
         {% endif %}
 
+        {% if active_tab == 'email_templates' %}
+        <div class="space-y-6">
+            <div>
+                <h2 class="text-lg font-semibold text-gray-900">Email Templates</h2>
+                <p class="text-sm text-gray-500 mt-1">Customise the automated emails sent to clients. Templates use Django template syntax — see the variable reference below.</p>
+            </div>
+
+            <!-- Variable reference -->
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
+                <p class="font-semibold text-blue-800 mb-2">Available template variables</p>
+                <div class="grid grid-cols-2 gap-x-8 gap-y-1 text-blue-700 font-mono text-xs">
+                    <span>{{ "{{ ticket.ticket_number }}" }}</span><span class="font-sans text-blue-600">Ticket number (TKT-…)</span>
+                    <span>{{ "{{ ticket.subject }}" }}</span><span class="font-sans text-blue-600">Ticket subject line</span>
+                    <span>{{ "{{ ticket.get_status_display }}" }}</span><span class="font-sans text-blue-600">Human-readable status</span>
+                    <span>{{ "{{ client.name }}" }}</span><span class="font-sans text-blue-600">Client company name</span>
+                    <span>{{ "{{ tech_name }}" }}</span><span class="font-sans text-blue-600">Assigned technician full name</span>
+                    <span>{{ "{{ status }}" }}</span><span class="font-sans text-blue-600">Status label (alias)</span>
+                    <span>{{ "{{ site_name }}" }}</span><span class="font-sans text-blue-600">Murphy's Bench</span>
+                </div>
+            </div>
+
+            <!-- One card per trigger -->
+            {% for tmpl in email_templates %}
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <form method="post" action="{% url 'core:email_template_update' tmpl.pk %}">
+                    {% csrf_token %}
+                    <div class="px-5 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                        <span class="text-sm font-semibold text-gray-800">{{ tmpl.get_trigger_display }}</span>
+                        <label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                            <input type="checkbox" name="is_active" value="1" class="rounded border-gray-300 accent-blue-600"
+                                   {% if tmpl.is_active %}checked{% endif %}>
+                            Active
+                        </label>
+                    </div>
+                    <div class="p-5 space-y-4">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Subject</label>
+                            <input type="text" name="subject_template" value="{{ tmpl.subject_template }}"
+                                   class="w-full border border-gray-300 rounded px-3 py-2 text-sm font-mono focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Body</label>
+                            <textarea name="body_template" rows="8"
+                                      class="w-full border border-gray-300 rounded px-3 py-2 text-sm font-mono focus:ring-blue-500 focus:border-blue-500">{{ tmpl.body_template }}</textarea>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <button type="submit"
+                                    class="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700">
+                                Save Template
+                            </button>
+                            <span class="text-xs text-gray-400">Last updated: {{ tmpl.updated_at|date:"M j, Y g:i A" }}</span>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
     </div>
 </div>
 {% endblock %}
