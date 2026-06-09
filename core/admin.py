@@ -263,6 +263,12 @@ class CannedResponseAdmin(admin.ModelAdmin):
 # Site Settings (singleton)
 @admin.register(SiteSettings)
 class SiteSettingsAdmin(admin.ModelAdmin):
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        if db_field.name in ('email_password', 'inbound_password'):
+            from django import forms as dj_forms
+            kwargs['widget'] = dj_forms.PasswordInput(render_value=True)
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
     fieldsets = (
         ('Company Info', {
             'fields': ('company_name', 'company_address_line1', 'company_address_line2', 'company_phone', 'company_email', 'company_logo'),
