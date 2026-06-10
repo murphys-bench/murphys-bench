@@ -178,6 +178,8 @@ def _tile_count(tile, user, is_admin):
             qs = qs.filter(assigned_to=user)
         if statuses:
             qs = qs.filter(status__in=statuses)
+        else:
+            qs = qs.exclude(status__in=TICKET_CLOSED_STATUSES)
         if '/overdue' in tile.link_url or 'overdue=1' in tile.link_url:
             from django.utils import timezone as tz
             qs = qs.filter(due_at__lt=tz.now()).exclude(status__in=['closed', 'resolved'])
@@ -187,6 +189,8 @@ def _tile_count(tile, user, is_admin):
             qs = qs.filter(assigned_to=user)
         if statuses:
             qs = qs.filter(status__in=statuses)
+        else:
+            qs = qs.exclude(status__in=WO_CLOSED_STATUSES)
     return qs.count()
 
 
