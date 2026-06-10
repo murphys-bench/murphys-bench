@@ -7,7 +7,7 @@
             {% load mb_icons %}{% if reply.reply_type == 'internal' %}<span class="inline-flex items-center gap-1">{% icon "lock-closed" 3 %} Internal</span>{% else %}<span class="inline-flex items-center gap-1">{% icon "user" 3 %} Customer Visible</span>{% endif %}
         </span>
         <span class="text-xs text-gray-400">
-            {{ reply.created_by.get_full_name|default:"Unknown" }} — {{ reply.created_at|date:"M d, Y g:i A" }}
+            {{ reply.created_by.get_full_name|default:reply.created_by.username|default:"Unknown" }} — {{ reply.created_at|date:"M d, Y g:i A" }}
         </span>
     </div>
     <p class="text-sm text-gray-700">{{ reply.content }}</p>
