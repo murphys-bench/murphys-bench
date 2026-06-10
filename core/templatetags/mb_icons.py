@@ -67,6 +67,9 @@ def invalidate_status_cache():
 
 # Heroicons v1 outline (24x24) — paths from heroicons.com
 ICON_PATHS = {
+    'pencil': [
+        'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z',
+    ],
     'ticket': [
         'M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z',
     ],
