@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 10, 2026 (end of session 22)
+**Last Updated**: June 10, 2026 (end of session 22, continued)
 **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench`
 **App path on server**: `/opt/murphys-bench/`
 
@@ -333,6 +333,7 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - **Dark mode**: Per-user toggle in sidebar footer (moon/sun icon), persisted to `localStorage`. CSS override strategy in `base.html` covers all common surfaces, text, borders, inputs, tinted panels (blue-50/yellow-50/green-50), prose.
 - **My Work sidebar removed**: Was redundant in practice.
 - **Dashboard stat cards**: Active Clients + Devices on File are now clickable links.
+- **Reports page overhaul**: Per-section CSV/Print/PDF dropdowns in header. Print uses hidden iframe (no popup tab). PDF uses html2pdf.js. Mileage miles floatformat:1 in template and CSV.
 
 ### ✅ Session 21 — Ticket Contact FK, Email Fixes, User/Role Management (session 21 — COMPLETE)
 

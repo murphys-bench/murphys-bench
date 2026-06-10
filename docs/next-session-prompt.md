@@ -17,13 +17,14 @@
 
 **Session 22 additions:**
 - **UI polish — search bars inline**: Tickets, Work Orders, Clients, Mileage, KB list pages all have search/filter controls moved into the page header bar. Also fixed missing technician options in WO assigned_to dropdown.
-- **Mileage decimal fix**: Total miles now shows `67.6` not `67.6000000000000` (floatformat:1).
+- **Mileage decimal fix**: Total miles now shows `67.6` not `67.6000000000000` (floatformat:1) — in list, reports template, and CSV export.
 - **Ticket reply type**: Radio buttons instead of dropdown. Redundant "Add Reply ↓" Quick Actions button removed.
 - **KB Markdown rendering**: `markdown` library installed. Articles render full Markdown — headings, bold, lists, fenced code blocks, tables. `{% load mb_icons %}` fix applied. Tailwind typography plugin loaded via CDN.
 - **KB Categories in Settings**: Native CRUD tab at Settings → KB Categories. No Django admin needed.
-- **Dark mode**: Per-user toggle (moon/sun) in sidebar footer. Persisted to `localStorage` — no flash on load. CSS override strategy covers surfaces, text, borders, inputs, tables, tinted panels (blue-50, yellow-50, green-50), prose. `darkMode: 'class'` configured in Tailwind.
+- **Dark mode**: Per-user toggle (moon/sun) in sidebar footer. Persisted to `localStorage` — no flash on load. CSS override strategy covers surfaces, text, borders, inputs, tables, tinted panels (blue-50/yellow-50/green-50), colored text (blue/green/red/yellow/purple), prose. `darkMode: 'class'` configured in Tailwind.
 - **My Work sidebar section removed**: Was redundant in practice. Dead CSS rule cleaned up.
 - **Dashboard stat cards**: Active Clients and Devices on File are now clickable links to `/clients/` and `/devices/`.
+- **Reports page overhaul**: All CSV download buttons removed from individual sections. Header bar now has three export dropdowns — **Export CSV ▼** (pick report → download CSV), **Print ▼** (pick section → hidden iframe print, no popup tab), **PDF ▼** (pick section → html2pdf.js download). "All Sections" option available in Print and PDF dropdowns.
 
 ---
 
