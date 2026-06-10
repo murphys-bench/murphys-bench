@@ -110,6 +110,53 @@
 </a>
 {% endif %}
 
+<!-- Open Tickets -->
+<div class="bg-white rounded-lg shadow overflow-hidden mb-6">
+    <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-gray-900">
+            {% if is_admin %}Open Tickets{% else %}My Open Tickets{% endif %}
+        </h2>
+        <a href="{% url 'core:ticket_list' %}" class="text-sm text-blue-600 hover:underline">View all →</a>
+    </div>
+    {% if open_tickets %}
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ticket #</th>
+                    <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
+                    <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
+                    <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                {% for ticket in open_tickets %}
+                <tr class="hover:bg-gray-50 cursor-pointer {% if ticket.needs_response %}bg-amber-50{% endif %}"
+                    onclick="window.location='{% url 'core:ticket_detail' ticket.pk %}'">
+                    <td class="px-5 py-3 whitespace-nowrap text-sm font-medium text-blue-600">
+                        <div class="flex items-center gap-1.5">
+                            {% if ticket.needs_response %}<span class="inline-block w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" title="Awaiting response"></span>{% endif %}
+                            {% if ticket.wo_complete %}<span class="inline-block w-2 h-2 rounded-full bg-green-500 flex-shrink-0" title="Work complete — ready to close"></span>{% endif %}
+                            <a href="{% url 'core:ticket_detail' ticket.pk %}">{{ ticket.ticket_number }}</a>
+                        </div>
+                    </td>
+                    <td class="px-5 py-3 text-sm text-gray-900 max-w-xs">
+                        <div class="truncate">{{ ticket.subject }}</div>
+                    </td>
+                    <td class="px-5 py-3 whitespace-nowrap text-sm text-gray-600">{{ ticket.client.name }}</td>
+                    <td class="px-5 py-3 whitespace-nowrap">{% status_badge ticket.status 'ticket' %}</td>
+                    <td class="px-5 py-3 whitespace-nowrap text-sm text-gray-500">{{ ticket.created_at|date:"M d, Y" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="px-6 py-10 text-center">
+            <p class="text-gray-400">No open tickets.</p>
+        </div>
+    {% endif %}
+</div>
+
 <!-- Open Work Orders -->
 <div class="bg-white rounded-lg shadow overflow-hidden mb-6">
     <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
