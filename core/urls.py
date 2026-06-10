@@ -35,6 +35,7 @@ urlpatterns = [
     path('tickets/<int:pk>/', views.TicketDetailView.as_view(), name='ticket_detail'),
     path('tickets/<int:pk>/edit/', views.TicketUpdateView.as_view(), name='ticket_edit'),
     path('tickets/<int:pk>/replies/add/', views.TicketReplyCreateView.as_view(), name='ticket_reply_add'),
+    path('tickets/<int:pk>/replies/<int:reply_pk>/resend/', views.TicketReplyResendView.as_view(), name='ticket_reply_resend'),
     path('tickets/<int:pk>/convert/', views.TicketConvertView.as_view(), name='ticket_convert'),
     path('tickets/<int:pk>/lock/release/', views.TicketLockReleaseView.as_view(), name='ticket_lock_release'),
     path('tickets/<int:pk>/lock/status/', views.TicketLockStatusView.as_view(), name='ticket_lock_status'),
