@@ -90,6 +90,26 @@
     </a>
 </div>
 
+<!-- Needs Response Banner -->
+{% if needs_response_count %}
+<a href="{% url 'core:ticket_list' %}?needs_response=1"
+   class="flex items-center justify-between mb-6 bg-amber-50 border border-amber-200 border-l-4 border-l-amber-500 rounded-lg px-4 py-3 hover:bg-amber-100 transition-colors">
+    <div class="flex items-center gap-3">
+        <div class="flex-shrink-0 w-9 h-9 bg-amber-200 rounded-lg flex items-center justify-center text-amber-800">
+            {% icon "chat-bubble" "5" %}
+        </div>
+        <div>
+            <p class="text-sm font-semibold text-amber-800">{% if is_admin %}Tickets awaiting response{% else %}Your tickets awaiting response{% endif %}</p>
+            <p class="text-xs text-amber-700">Clients have replied — click to view</p>
+        </div>
+    </div>
+    <div class="flex items-center gap-3">
+        <span class="text-2xl font-semibold text-amber-800">{{ needs_response_count }}</span>
+        {% icon "chevron-right" "5" %}
+    </div>
+</a>
+{% endif %}
+
 <!-- Open Work Orders -->
 <div class="bg-white rounded-lg shadow overflow-hidden mb-6">
     <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">

@@ -48,6 +48,20 @@
 
 {% block content %}
 
+    <!-- Tabs -->
+    <div class="flex border-b border-gray-200 mb-4 bg-white rounded-t-lg shadow px-4">
+        <a href="?tab=active{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}"
+           class="px-4 py-3 text-sm font-medium border-b-2 -mb-px {% if current_tab == 'active' %}border-blue-600 text-blue-600{% else %}border-transparent text-gray-500 hover:text-gray-700{% endif %}">
+            Active
+            <span class="ml-1.5 px-2 py-0.5 rounded-full text-xs {% if current_tab == 'active' %}bg-blue-100 text-blue-700{% else %}bg-gray-100 text-gray-600{% endif %}">{{ active_count }}</span>
+        </a>
+        <a href="?tab=closed{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}"
+           class="px-4 py-3 text-sm font-medium border-b-2 -mb-px {% if current_tab == 'closed' %}border-blue-600 text-blue-600{% else %}border-transparent text-gray-500 hover:text-gray-700{% endif %}">
+            Closed
+            <span class="ml-1.5 px-2 py-0.5 rounded-full text-xs {% if current_tab == 'closed' %}bg-blue-100 text-blue-700{% else %}bg-gray-100 text-gray-600{% endif %}">{{ closed_count }}</span>
+        </a>
+    </div>
+
     <!-- Work Orders Table -->
     <div class="bg-white rounded-lg shadow overflow-hidden">
         {% if work_orders %}

@@ -421,6 +421,7 @@ class Ticket(models.Model):
         related_name='tickets_assigned',
     )
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='tickets_created')
+    needs_response = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 

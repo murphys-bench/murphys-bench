@@ -43,6 +43,7 @@ urlpatterns = [
     path('tickets/<int:pk>/links/remove/', views.TicketLinkRemoveView.as_view(), name='ticket_link_remove'),
     path('attachments/<int:pk>/download/', views.AttachmentDownloadView.as_view(), name='attachment_download'),
     path('tickets/<int:pk>/acknowledge-overdue/', views.TicketAcknowledgeOverdueView.as_view(), name='ticket_acknowledge_overdue'),
+    path('tickets/<int:pk>/dismiss-response/', views.TicketDismissNeedsResponseView.as_view(), name='ticket_dismiss_response'),
     path('tickets/<int:pk>/delete/', views.TicketDeleteView.as_view(), name='ticket_delete'),
     path('tickets/contacts-by-client/', views.TicketContactsByClientView.as_view(), name='ticket_contacts_by_client'),
     path('kb/', views.KBListView.as_view(), name='kb_list'),

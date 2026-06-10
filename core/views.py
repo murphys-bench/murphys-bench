@@ -243,6 +243,11 @@ class DashboardView(LoginRequiredMixin, View):
                     })
             team_workload.sort(key=lambda x: -x['total'])
 
+        needs_response_qs = Ticket.objects.filter(needs_response=True)
+        if not is_admin:
+            needs_response_qs = needs_response_qs.filter(assigned_to=request.user)
+        needs_response_count = needs_response_qs.count()
+
         context = {
             'ticket_tiles': ticket_tiles,
             'wo_tiles': wo_tiles,
@@ -252,8 +257,12 @@ class DashboardView(LoginRequiredMixin, View):
             'total_devices': Device.objects.filter(is_active=True).count(),
             'is_admin': is_admin,
             'team_workload': team_workload,
+            'needs_response_count': needs_response_count,
         }
         return render(request, self.template_name, context)
+
+
+WO_CLOSED_STATUSES = ['completed', 'cancelled', 'closed']
 
 
 class WorkOrderListView(LoginRequiredMixin, ListView):
@@ -266,19 +275,22 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
     def get_queryset(self):
         queryset = WorkOrder.objects.select_related('client', 'assigned_to', 'device')
 
-        # Filter by status if provided
         status = self.request.GET.get('status')
         if status:
             queryset = queryset.filter(status=status)
+        else:
+            tab = self.request.GET.get('tab', 'active')
+            if tab == 'closed':
+                queryset = queryset.filter(status__in=WO_CLOSED_STATUSES)
+            else:
+                queryset = queryset.exclude(status__in=WO_CLOSED_STATUSES)
 
-        # Filter by assigned_to if provided (admins using 'me' see all WOs)
         assigned_to = self.request.GET.get('assigned_to')
         if assigned_to == 'me' and not _is_admin(self.request.user):
             queryset = queryset.filter(assigned_to=self.request.user)
         elif assigned_to and assigned_to != 'me':
             queryset = queryset.filter(assigned_to_id=assigned_to)
 
-        # Search by work order number or client name
         search = self.request.GET.get('search')
         if search:
             queryset = queryset.filter(
@@ -295,6 +307,10 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
             .order_by('sort_order').values_list('slug', 'label')
         )
         context['priority_choices'] = WorkOrder.PRIORITY_CHOICES
+        base_qs = WorkOrder.objects.all()
+        context['active_count'] = base_qs.exclude(status__in=WO_CLOSED_STATUSES).count()
+        context['closed_count'] = base_qs.filter(status__in=WO_CLOSED_STATUSES).count()
+        context['current_tab'] = self.request.GET.get('tab', 'active')
         return context
 
 
@@ -1062,6 +1078,9 @@ class DeviceUpdateView(LoginRequiredMixin, UpdateView):
 
 # --- Ticket Views ---
 
+TICKET_CLOSED_STATUSES = ['resolved', 'closed', 'converted']
+
+
 class TicketListView(LoginRequiredMixin, ListView):
     model = Ticket
     template_name = 'core/ticket_list.html'
@@ -1071,9 +1090,21 @@ class TicketListView(LoginRequiredMixin, ListView):
     def get_queryset(self):
         queryset = Ticket.objects.select_related('client', 'device', 'created_by', 'assigned_to')
 
-        status = self.request.GET.get('status')
-        if status:
-            queryset = queryset.filter(status=status)
+        needs_response = self.request.GET.get('needs_response')
+        if needs_response:
+            queryset = queryset.filter(needs_response=True)
+            if not _is_admin(self.request.user):
+                queryset = queryset.filter(assigned_to=self.request.user)
+        else:
+            status = self.request.GET.get('status')
+            if status:
+                queryset = queryset.filter(status=status)
+            else:
+                tab = self.request.GET.get('tab', 'active')
+                if tab == 'closed':
+                    queryset = queryset.filter(status__in=TICKET_CLOSED_STATUSES)
+                else:
+                    queryset = queryset.exclude(status__in=TICKET_CLOSED_STATUSES)
 
         assigned_to = self.request.GET.get('assigned_to')
         if assigned_to == 'me' and not _is_admin(self.request.user):
@@ -1083,7 +1114,7 @@ class TicketListView(LoginRequiredMixin, ListView):
 
         overdue = self.request.GET.get('overdue')
         if overdue:
-            queryset = queryset.filter(due_at__lt=timezone.now()).exclude(status__in=['closed', 'resolved', 'converted'])
+            queryset = queryset.filter(due_at__lt=timezone.now()).exclude(status__in=TICKET_CLOSED_STATUSES)
 
         search = self.request.GET.get('search')
         if search:
@@ -1101,6 +1132,11 @@ class TicketListView(LoginRequiredMixin, ListView):
             StatusDefinition.objects.filter(entity_type='ticket', is_active=True)
             .order_by('sort_order').values_list('slug', 'label')
         )
+        base_qs = Ticket.objects.all()
+        context['active_count'] = base_qs.exclude(status__in=TICKET_CLOSED_STATUSES).count()
+        context['closed_count'] = base_qs.filter(status__in=TICKET_CLOSED_STATUSES).count()
+        context['current_tab'] = self.request.GET.get('tab', 'active')
+        context['needs_response_filter'] = self.request.GET.get('needs_response', '')
         return context
 
 
@@ -1249,6 +1285,9 @@ class TicketReplyCreateView(LoginRequiredMixin, View):
         )
         _save_attachments(request, reply)
         if reply.reply_type == 'customer_visible':
+            if ticket.needs_response:
+                ticket.needs_response = False
+                ticket.save(update_fields=['needs_response', 'updated_at'])
             from .email_utils import send_ticket_email
             prior_replies = list(
                 ticket.replies.filter(reply_type='customer_visible')
@@ -1288,6 +1327,27 @@ class TicketReplyResendView(LoginRequiredMixin, View):
             '_override_to': to_email,
         })
         messages.success(request, f'Reply resent to {to_email}.')
+        return redirect('core:ticket_detail', pk=pk)
+
+
+class TicketDismissNeedsResponseView(LoginRequiredMixin, View):
+    """Manually dismiss the needs_response flag with a required note."""
+
+    def post(self, request, pk):
+        ticket = get_object_or_404(Ticket, pk=pk)
+        note = request.POST.get('note', '').strip()
+        if not note:
+            messages.error(request, 'A note is required to dismiss the response flag.')
+            return redirect('core:ticket_detail', pk=pk)
+        TicketReply.objects.create(
+            ticket=ticket,
+            reply_type='internal',
+            content=f'[Response flag dismissed] {note}',
+            created_by=request.user,
+        )
+        ticket.needs_response = False
+        ticket.save(update_fields=['needs_response', 'updated_at'])
+        messages.success(request, 'Response flag dismissed.')
         return redirect('core:ticket_detail', pk=pk)
 
 

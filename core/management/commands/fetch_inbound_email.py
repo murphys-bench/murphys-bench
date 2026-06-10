@@ -185,9 +185,12 @@ def _process_message(raw_msg_bytes, settings, verbosity):
                 created_by=None,
             )
             _save_attachments(reply, msg)
+            update_fields = ['needs_response', 'updated_at']
+            ticket.needs_response = True
             if ticket.status in ('resolved', 'waiting_on_customer'):
                 ticket.status = 'open'
-                ticket.save(update_fields=['status', 'updated_at'])
+                update_fields.append('status')
+            ticket.save(update_fields=update_fields)
             return 'reply', f'Added reply to {ticket_number}', ticket
 
     # --- New ticket ---
