@@ -62,7 +62,7 @@
         /* Page title bar */
         .page-title-bar { background-color: var(--color-title-bar, #ffffff) !important; }
         /* Page title text — light mode only; dark mode governs its own text colors */
-        body:not(.dark) h1 { color: var(--color-page-title, #111827) !important; }
+        html:not(.dark) h1 { color: var(--color-page-title, #111827) !important; }
 
         /* Sidebar width — CSS handles initial state (pre-Alpine), Alpine syncs on toggle */
         .app-leftnav    { width: 16rem; transition: width 0.2s ease; }
