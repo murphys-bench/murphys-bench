@@ -461,3 +461,123 @@ class ColorSettingsForm(forms.ModelForm):
         ]
         widgets = {f: forms.TextInput(attrs={'class': _HEX_INPUT, 'maxlength': 7, 'placeholder': '#rrggbb'})
                    for f in _hex_fields}
+
+
+# ---------------------------------------------------------------------------
+# User management forms
+# ---------------------------------------------------------------------------
+
+_INPUT = 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'
+
+class UserCreateForm(forms.ModelForm):
+    password1 = forms.CharField(label='Password', widget=forms.PasswordInput(attrs={'class': _INPUT}))
+    password2 = forms.CharField(label='Confirm password', widget=forms.PasswordInput(attrs={'class': _INPUT}))
+
+    class Meta:
+        from .models import User as _User
+        model = _User
+        fields = ['first_name', 'last_name', 'username', 'email', 'phone', 'role_obj', 'is_staff', 'is_active']
+        widgets = {
+            'first_name': forms.TextInput(attrs={'class': _INPUT}),
+            'last_name': forms.TextInput(attrs={'class': _INPUT}),
+            'username': forms.TextInput(attrs={'class': _INPUT}),
+            'email': forms.EmailInput(attrs={'class': _INPUT}),
+            'phone': forms.TextInput(attrs={'class': _INPUT}),
+            'role_obj': forms.Select(attrs={'class': _INPUT}),
+            'is_staff': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
+            'is_active': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .models import Role
+        self.fields['role_obj'].queryset = Role.objects.all().order_by('name')
+        self.fields['role_obj'].required = False
+        self.fields['role_obj'].label = 'Role'
+        self.fields['is_staff'].label = 'Admin (can access Settings)'
+        self.fields['phone'].required = False
+        self.fields['email'].required = False
+
+    def clean(self):
+        cleaned = super().clean()
+        p1 = cleaned.get('password1')
+        p2 = cleaned.get('password2')
+        if p1 and p1 != p2:
+            self.add_error('password2', 'Passwords do not match.')
+        return cleaned
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        user.set_password(self.cleaned_data['password1'])
+        if commit:
+            user.save()
+        return user
+
+
+class UserEditForm(forms.ModelForm):
+    class Meta:
+        from .models import User as _User
+        model = _User
+        fields = ['first_name', 'last_name', 'username', 'email', 'phone', 'role_obj', 'is_staff', 'is_active']
+        widgets = {
+            'first_name': forms.TextInput(attrs={'class': _INPUT}),
+            'last_name': forms.TextInput(attrs={'class': _INPUT}),
+            'username': forms.TextInput(attrs={'class': _INPUT}),
+            'email': forms.EmailInput(attrs={'class': _INPUT}),
+            'phone': forms.TextInput(attrs={'class': _INPUT}),
+            'role_obj': forms.Select(attrs={'class': _INPUT}),
+            'is_staff': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
+            'is_active': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .models import Role
+        self.fields['role_obj'].queryset = Role.objects.all().order_by('name')
+        self.fields['role_obj'].required = False
+        self.fields['role_obj'].label = 'Role'
+        self.fields['is_staff'].label = 'Admin (can access Settings)'
+        self.fields['phone'].required = False
+        self.fields['email'].required = False
+
+
+class UserSetPasswordForm(forms.Form):
+    password1 = forms.CharField(label='New password', widget=forms.PasswordInput(attrs={'class': _INPUT}))
+    password2 = forms.CharField(label='Confirm password', widget=forms.PasswordInput(attrs={'class': _INPUT}))
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get('password1') != cleaned.get('password2'):
+            self.add_error('password2', 'Passwords do not match.')
+        return cleaned
+
+
+# ---------------------------------------------------------------------------
+# Role management form
+# ---------------------------------------------------------------------------
+
+class RoleForm(forms.ModelForm):
+    class Meta:
+        from .models import Role
+        model = Role
+        fields = [
+            'name', 'description',
+            'can_manage_settings', 'can_view_all_tickets', 'can_close_tickets',
+            'can_manage_users', 'can_view_reports', 'can_view_restricted_kb',
+            'can_manage_kb', 'can_create_ticket', 'can_edit_ticket',
+            'can_delete_ticket', 'can_assign_ticket', 'can_reply_internal',
+            'can_reply_customer', 'can_view_device_credentials',
+            'can_create_workorder', 'can_edit_workorder', 'can_close_workorder',
+        ]
+        widgets = {
+            'name': forms.TextInput(attrs={'class': _INPUT}),
+            'description': forms.TextInput(attrs={'class': _INPUT, 'placeholder': 'Optional description'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _cb = {'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}
+        for fname, field in self.fields.items():
+            if isinstance(field.widget, forms.CheckboxInput):
+                field.widget.attrs.update(_cb)
+        self.fields['description'].required = False

@@ -1,0 +1,95 @@
+{% extends "core/base.html" %}
+
+{% block page_header %}
+<div class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+    <div>
+        <h1 class="text-xl font-semibold text-gray-900">Roles</h1>
+        <p class="text-sm text-gray-500 mt-0.5">{{ roles|length }} role{{ roles|length|pluralize }}</p>
+    </div>
+    <a href="{% url 'core:user_list' %}" class="text-sm text-gray-500 hover:text-gray-700">← Back to Users</a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="p-6">
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="mb-4 px-4 py-3 rounded text-sm
+                {% if message.tags == 'success' %}bg-green-50 text-green-700 border border-green-200
+                {% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="space-y-4 mb-8">
+        {% for role in roles %}
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 flex items-center justify-between border-b border-gray-100">
+                <div>
+                    <span class="text-base font-semibold text-gray-900">{{ role.name }}</span>
+                    {% if role.is_system %}<span class="ml-2 px-2 py-0.5 text-xs bg-gray-100 text-gray-500 rounded">System</span>{% endif %}
+                    <span class="ml-2 text-xs text-gray-400">{{ role.users.count }} user{{ role.users.count|pluralize }}</span>
+                    {% if role.description %}<p class="text-xs text-gray-500 mt-0.5">{{ role.description }}</p>{% endif %}
+                </div>
+                <div class="flex gap-3">
+                    <a href="{% url 'core:role_edit' role.pk %}"
+                       class="text-sm text-blue-600 hover:text-blue-800 hover:underline">Edit</a>
+                    {% if not role.is_system %}
+                    <form method="post" action="{% url 'core:role_delete' role.pk %}"
+                          onsubmit="return confirm('Delete role {{ role.name }}?')">
+                        {% csrf_token %}
+                        <button type="submit" class="text-sm text-red-500 hover:text-red-700 hover:underline">Delete</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="px-6 py-3 grid grid-cols-3 gap-x-6 gap-y-1 text-xs text-gray-600">
+                {% for flag, label in role_flags %}
+                <span class="flex items-center gap-1.5">
+                    {% if role|attr:flag %}
+                        <span class="text-green-500">✓</span>
+                    {% else %}
+                        <span class="text-gray-300">✗</span>
+                    {% endif %}
+                    {{ label }}
+                </span>
+                {% endfor %}
+            </div>
+        </div>
+        {% empty %}
+        <p class="text-sm text-gray-400">No roles defined.</p>
+        {% endfor %}
+    </div>
+
+    <!-- New Role Form -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-base font-semibold text-gray-900 mb-4">New Role</h2>
+        <form method="post" action="{% url 'core:role_create' %}">
+            {% csrf_token %}
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Name <span class="text-red-500">*</span></label>
+                    {{ new_form.name }}
+                    {% if new_form.name.errors %}<p class="text-xs text-red-600 mt-1">{{ new_form.name.errors|join:", " }}</p>{% endif %}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                    {{ new_form.description }}
+                </div>
+            </div>
+            <div class="grid grid-cols-3 gap-x-6 gap-y-3 mb-4">
+                {% for flag, label in role_flags %}
+                <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                    {{ new_form|getfield:flag }} {{ label }}
+                </label>
+                {% endfor %}
+            </div>
+            <button type="submit" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+                Create Role
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}

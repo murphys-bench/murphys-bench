@@ -2165,6 +2165,216 @@ class AdminMFAResetView(LoginRequiredMixin, View):
 
 
 # ---------------------------------------------------------------------------
+# User CRUD (admin only)
+# ---------------------------------------------------------------------------
+
+class UserCreateView(LoginRequiredMixin, View):
+    def dispatch(self, request, *args, **kwargs):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+    def get(self, request):
+        from .forms import UserCreateForm
+        return render(request, 'core/user_form.html', {
+            'form': UserCreateForm(),
+            'title': 'New User',
+            'cancel_url': reverse_lazy('core:user_list'),
+        })
+
+    def post(self, request):
+        from .forms import UserCreateForm
+        form = UserCreateForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            messages.success(request, f'User {user.get_full_name() or user.username} created.')
+            return redirect('core:user_list')
+        return render(request, 'core/user_form.html', {
+            'form': form,
+            'title': 'New User',
+            'cancel_url': reverse_lazy('core:user_list'),
+        })
+
+
+class UserEditView(LoginRequiredMixin, View):
+    def dispatch(self, request, *args, **kwargs):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+    def get(self, request, pk):
+        from .forms import UserEditForm
+        target = get_object_or_404(User, pk=pk)
+        return render(request, 'core/user_form.html', {
+            'form': UserEditForm(instance=target),
+            'target': target,
+            'title': f'Edit {target.get_full_name() or target.username}',
+            'cancel_url': reverse_lazy('core:user_list'),
+        })
+
+    def post(self, request, pk):
+        from .forms import UserEditForm
+        target = get_object_or_404(User, pk=pk)
+        form = UserEditForm(request.POST, instance=target)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'User {target.get_full_name() or target.username} updated.')
+            return redirect('core:user_list')
+        return render(request, 'core/user_form.html', {
+            'form': form,
+            'target': target,
+            'title': f'Edit {target.get_full_name() or target.username}',
+            'cancel_url': reverse_lazy('core:user_list'),
+        })
+
+
+class UserSetPasswordView(LoginRequiredMixin, View):
+    def dispatch(self, request, *args, **kwargs):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+    def get(self, request, pk):
+        from .forms import UserSetPasswordForm
+        target = get_object_or_404(User, pk=pk)
+        return render(request, 'core/user_set_password.html', {
+            'form': UserSetPasswordForm(),
+            'target': target,
+        })
+
+    def post(self, request, pk):
+        from .forms import UserSetPasswordForm
+        target = get_object_or_404(User, pk=pk)
+        form = UserSetPasswordForm(request.POST)
+        if form.is_valid():
+            target.set_password(form.cleaned_data['password1'])
+            target.save()
+            messages.success(request, f'Password updated for {target.get_full_name() or target.username}.')
+            return redirect('core:user_list')
+        return render(request, 'core/user_set_password.html', {
+            'form': form,
+            'target': target,
+        })
+
+
+# ---------------------------------------------------------------------------
+# Role CRUD (admin only — lives in Settings)
+# ---------------------------------------------------------------------------
+
+_ROLE_FLAGS = [
+    ('can_manage_settings',        'Manage Settings'),
+    ('can_manage_users',           'Manage Users'),
+    ('can_view_all_tickets',       'View All Tickets'),
+    ('can_create_ticket',          'Create Tickets'),
+    ('can_edit_ticket',            'Edit Tickets'),
+    ('can_close_tickets',          'Close/Resolve Tickets'),
+    ('can_delete_ticket',          'Delete Tickets'),
+    ('can_assign_ticket',          'Assign Tickets'),
+    ('can_reply_internal',         'Internal Replies'),
+    ('can_reply_customer',         'Customer Replies'),
+    ('can_create_workorder',       'Create Work Orders'),
+    ('can_edit_workorder',         'Edit Work Orders'),
+    ('can_close_workorder',        'Close Work Orders'),
+    ('can_view_reports',           'View Reports'),
+    ('can_view_restricted_kb',     'View Restricted KB'),
+    ('can_manage_kb',              'Manage KB'),
+    ('can_view_device_credentials','View Device Credentials'),
+]
+
+
+class RoleListView(LoginRequiredMixin, View):
+    def dispatch(self, request, *args, **kwargs):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+    def get(self, request):
+        from .forms import RoleForm
+        from .models import Role
+        roles = Role.objects.prefetch_related('users').order_by('name')
+        return render(request, 'core/role_list.html', {
+            'roles': roles,
+            'new_form': RoleForm(),
+            'role_flags': _ROLE_FLAGS,
+        })
+
+
+class RoleCreateView(LoginRequiredMixin, View):
+    def dispatch(self, request, *args, **kwargs):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+    def post(self, request):
+        from .forms import RoleForm
+        form = RoleForm(request.POST)
+        if form.is_valid():
+            role = form.save()
+            messages.success(request, f'Role "{role.name}" created.')
+        else:
+            messages.error(request, 'Could not create role — check the form.')
+        return redirect('core:role_list')
+
+
+class RoleEditView(LoginRequiredMixin, View):
+    def dispatch(self, request, *args, **kwargs):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+    def get(self, request, pk):
+        from .forms import RoleForm
+        from .models import Role
+        role = get_object_or_404(Role, pk=pk)
+        return render(request, 'core/role_form.html', {
+            'form': RoleForm(instance=role),
+            'role': role,
+            'role_flags': _ROLE_FLAGS,
+        })
+
+    def post(self, request, pk):
+        from .forms import RoleForm
+        from .models import Role
+        role = get_object_or_404(Role, pk=pk)
+        form = RoleForm(request.POST, instance=role)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Role "{role.name}" updated.')
+            return redirect('core:role_list')
+        return render(request, 'core/role_form.html', {
+            'form': form,
+            'role': role,
+            'role_flags': _ROLE_FLAGS,
+        })
+
+
+class RoleDeleteView(LoginRequiredMixin, View):
+    def dispatch(self, request, *args, **kwargs):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+    def post(self, request, pk):
+        from .models import Role
+        role = get_object_or_404(Role, pk=pk)
+        if role.is_system:
+            messages.error(request, f'"{role.name}" is a system role and cannot be deleted.')
+        elif role.users.exists():
+            messages.error(request, f'"{role.name}" has users assigned — reassign them first.')
+        else:
+            role.delete()
+            messages.success(request, f'Role "{role.name}" deleted.')
+        return redirect('core:role_list')
+
+
+# ---------------------------------------------------------------------------
 # Quick Labor / Work Performed
 # ---------------------------------------------------------------------------
 

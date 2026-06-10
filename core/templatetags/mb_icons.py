@@ -197,3 +197,15 @@ def icon(name, size='6', extra_class=''):
         f'</svg>'
     )
     return mark_safe(svg)
+
+
+@register.filter
+def attr(obj, attribute):
+    """Return getattr(obj, attribute) — used to read role permission flags dynamically."""
+    return getattr(obj, attribute, False)
+
+
+@register.filter
+def getfield(form, field_name):
+    """Return a bound form field by name — used to render checkbox fields in a loop."""
+    return form[field_name]
