@@ -1,23 +1,57 @@
 {% extends "core/base.html" %}
+{% load mb_icons %}
 
 {% block title %}Reports - Murphy's Bench{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow">
-    <div class="px-6 py-4 flex items-center justify-between">
-        <h1 class="text-xl font-bold text-gray-900">Reports &amp; Analytics</h1>
-        <form method="get" class="flex items-center gap-3">
-            <label class="text-sm text-gray-600">From</label>
-            <input type="date" name="start_date" value="{{ start_date|date:'Y-m-d' }}"
+<div class="bg-white shadow print:hidden">
+    <div class="px-6 py-4 flex items-center gap-4 flex-wrap">
+        <h1 class="text-xl font-bold text-gray-900 shrink-0">Reports &amp; Analytics</h1>
+
+        <!-- Date range -->
+        <form method="get" class="flex items-center gap-2 flex-1 min-w-0" id="reports-date-form">
+            <label class="text-sm text-gray-600 shrink-0">From</label>
+            <input type="date" name="start_date" id="rpt-start" value="{{ start_date|date:'Y-m-d' }}"
                    class="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <label class="text-sm text-gray-600">To</label>
-            <input type="date" name="end_date" value="{{ end_date|date:'Y-m-d' }}"
+            <label class="text-sm text-gray-600 shrink-0">To</label>
+            <input type="date" name="end_date" id="rpt-end" value="{{ end_date|date:'Y-m-d' }}"
                    class="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <button type="submit"
-                    class="px-4 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
-                Apply
-            </button>
+            <button type="submit" class="px-4 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Apply</button>
         </form>
+
+        <!-- Export dropdown -->
+        <div x-data="{ open: false }" class="relative shrink-0">
+            <button @click="open = !open" @click.outside="open = false"
+                    class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50 bg-white">
+                {% icon "arrow-down-tray" 4 %} Export CSV <span class="text-gray-400 ml-0.5">▾</span>
+            </button>
+            <div x-show="open" x-cloak
+                 class="absolute right-0 mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
+                <p class="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">Select Report</p>
+                <a href="#" @click.prevent="downloadCSV('billing')"    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Billing Summary</a>
+                <a href="#" @click.prevent="downloadCSV('tech_perf')"  class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Technician Performance</a>
+                <a href="#" @click.prevent="downloadCSV('volume')"     class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Ticket Volume</a>
+                <a href="#" @click.prevent="downloadCSV('status')"     class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Status</a>
+                <a href="#" @click.prevent="downloadCSV('by_client')"  class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Client</a>
+                <a href="#" @click.prevent="downloadCSV('by_tech')"    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Technician</a>
+                <a href="#" @click.prevent="downloadCSV('resolution')" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Resolution Time</a>
+                <a href="#" @click.prevent="downloadCSV('sla')"        class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">SLA Compliance</a>
+                <a href="#" @click.prevent="downloadCSV('conversion')" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Conversion Rate</a>
+                <a href="#" @click.prevent="downloadCSV('mileage')"    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Mileage</a>
+            </div>
+        </div>
+
+        <!-- Print -->
+        <button onclick="window.print()"
+                class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50 shrink-0 print:hidden">
+            {% icon "document-text" 4 %} Print
+        </button>
+
+        <!-- PDF -->
+        <button id="btn-pdf"
+                class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50 shrink-0 print:hidden">
+            {% icon "arrow-down-tray" 4 %} PDF
+        </button>
     </div>
 </div>
 {% endblock %}
@@ -26,18 +60,11 @@
 
 {% with qs="start_date="|add:start_date|date:"Y-m-d"|add:"&end_date="|add:end_date|date:"Y-m-d" %}
 
-<div class="space-y-8">
+<div class="space-y-8" id="reports-content">
 
 <!-- Billing Summary -->
-{% load mb_icons %}
 <div class="bg-white rounded-lg shadow p-5">
-    <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-gray-900">Billing Summary</h2>
-        <a href="{% url 'core:reports_csv' 'billing' %}?{{ qs }}"
-           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded flex items-center gap-1">
-            {% icon "arrow-down-tray" 3 %} CSV
-        </a>
-    </div>
+    <h2 class="text-base font-semibold text-gray-900 mb-4">Billing Summary</h2>
 
     <!-- Three metric cards -->
     <div class="grid grid-cols-3 gap-4 mb-6">
@@ -66,7 +93,7 @@
             <tr class="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-200">
                 <th class="pb-2 pr-4">Client</th>
                 <th class="pb-2 text-right">Outstanding</th>
-                <th class="pb-2 text-right pl-4">Actions</th>
+                <th class="pb-2 text-right pl-4 print:hidden">Actions</th>
             </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
@@ -77,7 +104,7 @@
                        class="text-blue-600 hover:underline">{{ row.work_order__client__name }}</a>
                 </td>
                 <td class="py-2 text-right font-medium">${{ row.total|floatformat:2 }}</td>
-                <td class="py-2 text-right pl-4">
+                <td class="py-2 text-right pl-4 print:hidden">
                     <a href="{% url 'core:client_invoice_export' row.work_order__client__pk %}?status=uninvoiced"
                        class="text-xs text-gray-500 hover:text-gray-700">CSV</a>
                 </td>
@@ -93,13 +120,7 @@
 <!-- Technician Performance -->
 {% if tech_perf %}
 <div class="bg-white rounded-lg shadow p-5">
-    <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-gray-900">Technician Performance</h2>
-        <a href="{% url 'core:reports_csv' 'tech_perf' %}?{{ qs }}"
-           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded flex items-center gap-1">
-            {% icon "arrow-down-tray" 3 %} CSV
-        </a>
-    </div>
+    <h2 class="text-base font-semibold text-gray-900 mb-4">Technician Performance</h2>
     <table class="min-w-full text-sm">
         <thead>
             <tr class="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-200">
@@ -142,13 +163,7 @@
 
 <!-- 1. Ticket Volume Over Time -->
 <div class="bg-white rounded-lg shadow p-5">
-    <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-gray-900">1. Ticket Volume Over Time</h2>
-        <a href="{% url 'core:reports_csv' 'volume' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
-           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
-            ↓ CSV
-        </a>
-    </div>
+    <h2 class="text-base font-semibold text-gray-900 mb-4">1. Ticket Volume Over Time</h2>
     {% if volume_data %}
     <div style="height:220px"><canvas id="chartVolume"></canvas></div>
     {% else %}
@@ -158,13 +173,7 @@
 
 <!-- 2. Open Tickets by Status -->
 <div class="bg-white rounded-lg shadow p-5">
-    <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-gray-900">2. Open Tickets by Status</h2>
-        <a href="{% url 'core:reports_csv' 'status' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
-           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
-            ↓ CSV
-        </a>
-    </div>
+    <h2 class="text-base font-semibold text-gray-900 mb-4">2. Open Tickets by Status</h2>
     {% if status_data %}
     <div class="flex gap-8 items-center">
         <div style="height:200px;width:200px;flex-shrink:0"><canvas id="chartStatus"></canvas></div>
@@ -184,13 +193,7 @@
 
 <!-- 3. Tickets by Client -->
 <div class="bg-white rounded-lg shadow p-5">
-    <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-gray-900">3. Tickets by Client</h2>
-        <a href="{% url 'core:reports_csv' 'by_client' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
-           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
-            ↓ CSV
-        </a>
-    </div>
+    <h2 class="text-base font-semibold text-gray-900 mb-4">3. Tickets by Client</h2>
     {% if by_client %}
     <div class="grid grid-cols-2 gap-6">
         <table class="text-sm w-full">
@@ -216,13 +219,7 @@
 
 <!-- 4. Tickets by Technician -->
 <div class="bg-white rounded-lg shadow p-5">
-    <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-gray-900">4. Tickets by Technician (Workload)</h2>
-        <a href="{% url 'core:reports_csv' 'by_tech' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
-           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
-            ↓ CSV
-        </a>
-    </div>
+    <h2 class="text-base font-semibold text-gray-900 mb-4">4. Tickets by Technician (Workload)</h2>
     {% if by_tech %}
     <table class="text-sm w-full max-w-md">
         <thead><tr class="text-xs text-gray-500 uppercase border-b">
@@ -245,13 +242,7 @@
 
 <!-- 5. Average Resolution Time -->
 <div class="bg-white rounded-lg shadow p-5">
-    <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-gray-900">5. Average Ticket Resolution Time</h2>
-        <a href="{% url 'core:reports_csv' 'resolution' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
-           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
-            ↓ CSV
-        </a>
-    </div>
+    <h2 class="text-base font-semibold text-gray-900 mb-4">5. Average Ticket Resolution Time</h2>
     {% if avg_res_by_tech %}
     <table class="text-sm w-full max-w-md">
         <thead><tr class="text-xs text-gray-500 uppercase border-b">
@@ -276,13 +267,7 @@
 
 <!-- 6. SLA Compliance -->
 <div class="bg-white rounded-lg shadow p-5">
-    <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-gray-900">6. SLA Compliance Rate</h2>
-        <a href="{% url 'core:reports_csv' 'sla' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
-           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
-            ↓ CSV
-        </a>
-    </div>
+    <h2 class="text-base font-semibold text-gray-900 mb-4">6. SLA Compliance Rate</h2>
     {% if total_sla %}
     <div class="flex items-center gap-8">
         <div>
@@ -303,13 +288,7 @@
 
 <!-- 7. Ticket → WO Conversion Rate -->
 <div class="bg-white rounded-lg shadow p-5">
-    <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-gray-900">7. Ticket → Work Order Conversion Rate</h2>
-        <a href="{% url 'core:reports_csv' 'conversion' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
-           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
-            ↓ CSV
-        </a>
-    </div>
+    <h2 class="text-base font-semibold text-gray-900 mb-4">7. Ticket → Work Order Conversion Rate</h2>
     {% if total_tickets %}
     <div class="flex items-center gap-8">
         <div>
@@ -328,13 +307,7 @@
 
 <!-- 8. Mileage by Tech and Month -->
 <div class="bg-white rounded-lg shadow p-5">
-    <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-gray-900">8. Mileage by Technician &amp; Month</h2>
-        <a href="{% url 'core:reports_csv' 'mileage' %}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
-           class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1 rounded">
-            ↓ CSV
-        </a>
-    </div>
+    <h2 class="text-base font-semibold text-gray-900 mb-4">8. Mileage by Technician &amp; Month</h2>
     {% if mileage_data %}
     <table class="text-sm w-full max-w-md">
         <thead><tr class="text-xs text-gray-500 uppercase border-b">
@@ -364,7 +337,53 @@
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script>
+// CSV export — reads current date range from form inputs
+function downloadCSV(report) {
+    var start = document.getElementById('rpt-start').value;
+    var end   = document.getElementById('rpt-end').value;
+    var urls  = {
+        billing:    "{% url 'core:reports_csv' 'billing' %}",
+        tech_perf:  "{% url 'core:reports_csv' 'tech_perf' %}",
+        volume:     "{% url 'core:reports_csv' 'volume' %}",
+        status:     "{% url 'core:reports_csv' 'status' %}",
+        by_client:  "{% url 'core:reports_csv' 'by_client' %}",
+        by_tech:    "{% url 'core:reports_csv' 'by_tech' %}",
+        resolution: "{% url 'core:reports_csv' 'resolution' %}",
+        sla:        "{% url 'core:reports_csv' 'sla' %}",
+        conversion: "{% url 'core:reports_csv' 'conversion' %}",
+        mileage:    "{% url 'core:reports_csv' 'mileage' %}",
+    };
+    window.location = urls[report] + '?start_date=' + start + '&end_date=' + end;
+}
+
+// PDF export
+document.getElementById('btn-pdf').addEventListener('click', function() {
+    var start = document.getElementById('rpt-start').value;
+    var end   = document.getElementById('rpt-end').value;
+    var el    = document.getElementById('reports-content');
+    html2pdf().set({
+        margin: 10,
+        filename: 'reports-' + start + '-to-' + end + '.pdf',
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    }).from(el).save();
+});
+
+// Print styles
+var printStyle = document.createElement('style');
+printStyle.innerHTML = `
+@media print {
+    .app-leftnav, .app-leftnav * { display: none !important; }
+    .app-main-offset { margin-left: 0 !important; }
+    .print\\:hidden { display: none !important; }
+    body { background: white !important; }
+    .shadow, .rounded-lg { box-shadow: none !important; }
+}`;
+document.head.appendChild(printStyle);
+
 const CHART_COLORS = [
   '#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6',
   '#EC4899','#14B8A6','#F97316','#6366F1','#84CC16'
