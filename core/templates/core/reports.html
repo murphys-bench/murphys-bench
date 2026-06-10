@@ -41,17 +41,53 @@
             </div>
         </div>
 
-        <!-- Print -->
-        <button onclick="window.print()"
-                class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50 shrink-0 print:hidden">
-            {% icon "document-text" 4 %} Print
-        </button>
+        <!-- Print dropdown -->
+        <div x-data="{ open: false }" class="relative shrink-0">
+            <button @click="open = !open" @click.outside="open = false"
+                    class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50 bg-white">
+                {% icon "document-text" 4 %} Print <span class="text-gray-400 ml-0.5">▾</span>
+            </button>
+            <div x-show="open" x-cloak
+                 class="absolute right-0 mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
+                <p class="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">Select Section</p>
+                <a href="#" @click.prevent="printSection('billing');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Billing Summary</a>
+                <a href="#" @click.prevent="printSection('techperf');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Technician Performance</a>
+                <a href="#" @click.prevent="printSection('volume');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Ticket Volume</a>
+                <a href="#" @click.prevent="printSection('status');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Status</a>
+                <a href="#" @click.prevent="printSection('byclient');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Client</a>
+                <a href="#" @click.prevent="printSection('bytech');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Technician</a>
+                <a href="#" @click.prevent="printSection('resolution'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Resolution Time</a>
+                <a href="#" @click.prevent="printSection('sla');        open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">SLA Compliance</a>
+                <a href="#" @click.prevent="printSection('conversion'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Conversion Rate</a>
+                <a href="#" @click.prevent="printSection('mileage');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Mileage</a>
+                <hr class="my-1 border-gray-100">
+                <a href="#" @click.prevent="printSection('all');        open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium">All Sections</a>
+            </div>
+        </div>
 
-        <!-- PDF -->
-        <button id="btn-pdf"
-                class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50 shrink-0 print:hidden">
-            {% icon "arrow-down-tray" 4 %} PDF
-        </button>
+        <!-- PDF dropdown -->
+        <div x-data="{ open: false }" class="relative shrink-0">
+            <button @click="open = !open" @click.outside="open = false"
+                    class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50 bg-white">
+                {% icon "arrow-down-tray" 4 %} PDF <span class="text-gray-400 ml-0.5">▾</span>
+            </button>
+            <div x-show="open" x-cloak
+                 class="absolute right-0 mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
+                <p class="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">Select Section</p>
+                <a href="#" @click.prevent="downloadPDF('billing');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Billing Summary</a>
+                <a href="#" @click.prevent="downloadPDF('techperf');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Technician Performance</a>
+                <a href="#" @click.prevent="downloadPDF('volume');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Ticket Volume</a>
+                <a href="#" @click.prevent="downloadPDF('status');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Status</a>
+                <a href="#" @click.prevent="downloadPDF('byclient');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Client</a>
+                <a href="#" @click.prevent="downloadPDF('bytech');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Technician</a>
+                <a href="#" @click.prevent="downloadPDF('resolution'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Resolution Time</a>
+                <a href="#" @click.prevent="downloadPDF('sla');        open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">SLA Compliance</a>
+                <a href="#" @click.prevent="downloadPDF('conversion'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Conversion Rate</a>
+                <a href="#" @click.prevent="downloadPDF('mileage');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Mileage</a>
+                <hr class="my-1 border-gray-100">
+                <a href="#" @click.prevent="downloadPDF('all');        open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium">All Sections</a>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -63,7 +99,7 @@
 <div class="space-y-8" id="reports-content">
 
 <!-- Billing Summary -->
-<div class="bg-white rounded-lg shadow p-5">
+<div class="bg-white rounded-lg shadow p-5" id="section-billing">
     <h2 class="text-base font-semibold text-gray-900 mb-4">Billing Summary</h2>
 
     <!-- Three metric cards -->
@@ -119,7 +155,7 @@
 
 <!-- Technician Performance -->
 {% if tech_perf %}
-<div class="bg-white rounded-lg shadow p-5">
+<div class="bg-white rounded-lg shadow p-5" id="section-techperf">
     <h2 class="text-base font-semibold text-gray-900 mb-4">Technician Performance</h2>
     <table class="min-w-full text-sm">
         <thead>
@@ -162,7 +198,7 @@
 {% endif %}
 
 <!-- 1. Ticket Volume Over Time -->
-<div class="bg-white rounded-lg shadow p-5">
+<div class="bg-white rounded-lg shadow p-5" id="section-volume">
     <h2 class="text-base font-semibold text-gray-900 mb-4">1. Ticket Volume Over Time</h2>
     {% if volume_data %}
     <div style="height:220px"><canvas id="chartVolume"></canvas></div>
@@ -172,7 +208,7 @@
 </div>
 
 <!-- 2. Open Tickets by Status -->
-<div class="bg-white rounded-lg shadow p-5">
+<div class="bg-white rounded-lg shadow p-5" id="section-status">
     <h2 class="text-base font-semibold text-gray-900 mb-4">2. Open Tickets by Status</h2>
     {% if status_data %}
     <div class="flex gap-8 items-center">
@@ -192,7 +228,7 @@
 </div>
 
 <!-- 3. Tickets by Client -->
-<div class="bg-white rounded-lg shadow p-5">
+<div class="bg-white rounded-lg shadow p-5" id="section-byclient">
     <h2 class="text-base font-semibold text-gray-900 mb-4">3. Tickets by Client</h2>
     {% if by_client %}
     <div class="grid grid-cols-2 gap-6">
@@ -218,7 +254,7 @@
 </div>
 
 <!-- 4. Tickets by Technician -->
-<div class="bg-white rounded-lg shadow p-5">
+<div class="bg-white rounded-lg shadow p-5" id="section-bytech">
     <h2 class="text-base font-semibold text-gray-900 mb-4">4. Tickets by Technician (Workload)</h2>
     {% if by_tech %}
     <table class="text-sm w-full max-w-md">
@@ -241,7 +277,7 @@
 </div>
 
 <!-- 5. Average Resolution Time -->
-<div class="bg-white rounded-lg shadow p-5">
+<div class="bg-white rounded-lg shadow p-5" id="section-resolution">
     <h2 class="text-base font-semibold text-gray-900 mb-4">5. Average Ticket Resolution Time</h2>
     {% if avg_res_by_tech %}
     <table class="text-sm w-full max-w-md">
@@ -266,7 +302,7 @@
 </div>
 
 <!-- 6. SLA Compliance -->
-<div class="bg-white rounded-lg shadow p-5">
+<div class="bg-white rounded-lg shadow p-5" id="section-sla">
     <h2 class="text-base font-semibold text-gray-900 mb-4">6. SLA Compliance Rate</h2>
     {% if total_sla %}
     <div class="flex items-center gap-8">
@@ -287,7 +323,7 @@
 </div>
 
 <!-- 7. Ticket → WO Conversion Rate -->
-<div class="bg-white rounded-lg shadow p-5">
+<div class="bg-white rounded-lg shadow p-5" id="section-conversion">
     <h2 class="text-base font-semibold text-gray-900 mb-4">7. Ticket → Work Order Conversion Rate</h2>
     {% if total_tickets %}
     <div class="flex items-center gap-8">
@@ -306,7 +342,7 @@
 </div>
 
 <!-- 8. Mileage by Tech and Month -->
-<div class="bg-white rounded-lg shadow p-5">
+<div class="bg-white rounded-lg shadow p-5" id="section-mileage">
     <h2 class="text-base font-semibold text-gray-900 mb-4">8. Mileage by Technician &amp; Month</h2>
     {% if mileage_data %}
     <table class="text-sm w-full max-w-md">
@@ -339,6 +375,19 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script>
+var SECTION_LABELS = {
+    billing:    'Billing Summary',
+    techperf:   'Technician Performance',
+    volume:     'Ticket Volume',
+    status:     'Tickets by Status',
+    byclient:   'Tickets by Client',
+    bytech:     'Tickets by Technician',
+    resolution: 'Resolution Time',
+    sla:        'SLA Compliance',
+    conversion: 'Conversion Rate',
+    mileage:    'Mileage',
+};
+
 // CSV export — reads current date range from form inputs
 function downloadCSV(report) {
     var start = document.getElementById('rpt-start').value;
@@ -358,31 +407,44 @@ function downloadCSV(report) {
     window.location = urls[report] + '?start_date=' + start + '&end_date=' + end;
 }
 
-// PDF export
-document.getElementById('btn-pdf').addEventListener('click', function() {
+// Print a single section (or all)
+function printSection(key) {
+    var target = key === 'all'
+        ? document.getElementById('reports-content').innerHTML
+        : (document.getElementById('section-' + key) || {}).innerHTML;
+    if (!target) { alert('Section not available.'); return; }
+    var label = key === 'all' ? 'All Reports' : (SECTION_LABELS[key] || key);
     var start = document.getElementById('rpt-start').value;
     var end   = document.getElementById('rpt-end').value;
-    var el    = document.getElementById('reports-content');
+    var win = window.open('', '_blank');
+    win.document.write('<html><head><title>' + label + '</title>');
+    win.document.write('<style>body{font-family:sans-serif;margin:24px;color:#111}table{border-collapse:collapse;width:100%}th,td{border:1px solid #e5e7eb;padding:6px 10px;font-size:13px}th{background:#f9fafb;font-weight:600}h2{font-size:16px;margin-bottom:12px}.text-right{text-align:right}.text-left{text-align:left}p{font-size:13px}</style>');
+    win.document.write('</head><body>');
+    win.document.write('<p style="color:#888;font-size:12px;margin-bottom:8px">' + label + ' &nbsp;|&nbsp; ' + start + ' to ' + end + '</p>');
+    win.document.write(target);
+    win.document.write('</body></html>');
+    win.document.close();
+    win.focus();
+    setTimeout(function(){ win.print(); }, 400);
+}
+
+// PDF download of a single section (or all)
+function downloadPDF(key) {
+    var el = key === 'all'
+        ? document.getElementById('reports-content')
+        : document.getElementById('section-' + key);
+    if (!el) { alert('Section not available.'); return; }
+    var label = key === 'all' ? 'all-reports' : key;
+    var start = document.getElementById('rpt-start').value;
+    var end   = document.getElementById('rpt-end').value;
     html2pdf().set({
         margin: 10,
-        filename: 'reports-' + start + '-to-' + end + '.pdf',
+        filename: 'report-' + label + '-' + start + '-to-' + end + '.pdf',
         image: { type: 'jpeg', quality: 0.95 },
         html2canvas: { scale: 2, useCORS: true },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
     }).from(el).save();
-});
-
-// Print styles
-var printStyle = document.createElement('style');
-printStyle.innerHTML = `
-@media print {
-    .app-leftnav, .app-leftnav * { display: none !important; }
-    .app-main-offset { margin-left: 0 !important; }
-    .print\\:hidden { display: none !important; }
-    body { background: white !important; }
-    .shadow, .rounded-lg { box-shadow: none !important; }
-}`;
-document.head.appendChild(printStyle);
+}
 
 const CHART_COLORS = [
   '#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6',

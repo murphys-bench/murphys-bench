@@ -2055,7 +2055,7 @@ class ReportsCSVView(LoginRequiredMixin, View):
         elif report == 'mileage':
             writer.writerow(['Tech', 'Month', 'Miles'])
             for r in Mileage.objects.filter(trip_date__range=(start_date, end_date)).annotate(month=TruncMonth('trip_date')).values('technician__first_name', 'technician__last_name', 'month').annotate(miles=Sum('miles')).order_by('month', 'technician__last_name'):
-                writer.writerow([f"{r['technician__first_name']} {r['technician__last_name']}", r['month'].strftime('%Y-%m'), r['miles']])
+                writer.writerow([f"{r['technician__first_name']} {r['technician__last_name']}", r['month'].strftime('%Y-%m'), round(float(r['miles']), 1)])
 
         elif report == 'tech_perf':
             writer.writerow(['Technician', 'WOs (period)', 'Completed', 'Completion %', 'Avg Resolution (hrs)', 'Open Now'])
