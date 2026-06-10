@@ -1250,7 +1250,15 @@ class TicketReplyCreateView(LoginRequiredMixin, View):
         _save_attachments(request, reply)
         if reply.reply_type == 'customer_visible':
             from .email_utils import send_ticket_email
-            send_ticket_email('reply_added', ticket, {'reply': reply})
+            prior_replies = list(
+                ticket.replies.filter(reply_type='customer_visible')
+                .exclude(pk=reply.pk)
+                .order_by('created_at')
+            )
+            send_ticket_email('reply_added', ticket, {
+                'reply': reply,
+                'prior_replies': prior_replies,
+            })
         return render(request, 'core/partials/ticket_reply_item.html', {'reply': reply})
 
 
