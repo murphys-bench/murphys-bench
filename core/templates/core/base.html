@@ -19,6 +19,7 @@
             --color-sidebar-text:   {{ s.color_sidebar_text|default:"#ffffff" }};
             --color-page-bg:        {{ s.color_page_bg|default:"#f1f5f9" }};
             --color-page-title:     {{ s.color_page_title|default:"#111827" }};
+            --color-title-bar:      {{ s.color_title_bar|default:"#ffffff" }};
             --color-section-header: {{ s.color_section_header|default:"#f8fafc" }};
             --color-status-new:          {{ s.color_status_new|default:"#dbeafe" }};
             --color-status-assigned:     {{ s.color_status_assigned|default:"#ede9fe" }};
@@ -58,8 +59,10 @@
     <style>
         .mb-content { font-size: var(--mb-font-size, 14px); }
         body { background-color: var(--color-page-bg, #f1f5f9) !important; }
-        /* Page titles — all h1 elements site-wide */
+        /* Page title text */
         h1 { color: var(--color-page-title, #111827) !important; }
+        /* Page title bar — the white shadow bar at the top of each page */
+        .page-title-bar { background-color: var(--color-title-bar, #ffffff) !important; }
         /* Section header bars — card header divs and table heads */
         .bg-white > div.border-b,
         .bg-white > div > div.border-b { background-color: var(--color-section-header, #f8fafc) !important; }
