@@ -2021,7 +2021,7 @@
                             {% for entry in audit_log_entries %}
                             <tr class="hover:bg-gray-50">
                                 <td class="px-4 py-2 text-gray-500 whitespace-nowrap">{{ entry.timestamp|date:"M j Y H:i" }}</td>
-                                <td class="px-4 py-2 text-gray-700">{{ entry.actor.get_full_name|default:entry.actor.username|default:"System" }}</td>
+                                <td class="px-4 py-2 text-gray-700">{% if entry.actor %}{{ entry.actor.get_full_name|default:entry.actor.username }}{% else %}System{% endif %}</td>
                                 <td class="px-4 py-2 text-gray-600 capitalize">{{ entry.content_type.model }}</td>
                                 <td class="px-4 py-2 text-gray-700">{{ entry.object_repr|truncatechars:40 }}</td>
                                 <td class="px-4 py-2"><span class="px-2 py-0.5 rounded text-xs font-medium {% if entry.action == 0 %}bg-green-100 text-green-800{% elif entry.action == 1 %}bg-blue-100 text-blue-800{% else %}bg-red-100 text-red-800{% endif %}">{% if entry.action == 0 %}Create{% elif entry.action == 1 %}Update{% else %}Delete{% endif %}</span></td>
