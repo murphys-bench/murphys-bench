@@ -2775,6 +2775,7 @@ SETTINGS_TABS = [
     ('kb_categories',    'KB Categories',    None),
     ('users',            'Users',            None),
     ('roles',            'Roles',            None),
+    ('logs',             'Logs',             None),
 ]
 
 SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS]
@@ -2906,6 +2907,14 @@ class SettingsView(LoginRequiredMixin, View):
             ctx['wo_statuses'] = StatusDefinition.objects.filter(entity_type='workorder').order_by('sort_order')
         if active_tab == 'kb_categories':
             ctx.update(_kb_categories_context())
+        if active_tab == 'logs':
+            from .models import EmailSendLog, InboundEmailLog
+            from auditlog.models import LogEntry
+            ctx['email_send_logs'] = EmailSendLog.objects.select_related('ticket').order_by('-created_at')[:200]
+            ctx['inbound_logs'] = InboundEmailLog.objects.select_related('ticket').order_by('-created_at')[:200]
+            ctx['credential_logs'] = CredentialAccessLog.objects.select_related('credential', 'user').order_by('-accessed_at')[:200]
+            ctx['device_cred_logs'] = DeviceCredentialAccessLog.objects.select_related('device', 'user').order_by('-accessed_at')[:200]
+            ctx['audit_log_entries'] = LogEntry.objects.select_related('actor', 'content_type').order_by('-timestamp')[:200]
         if active_tab == 'email_templates':
             # Ensure all 4 trigger templates exist
             for trigger, _ in EmailTemplate.TRIGGER_CHOICES:

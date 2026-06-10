@@ -1870,6 +1870,174 @@
         </div>
         {% endif %}
 
+        {% if active_tab == 'logs' %}
+        <div class="space-y-8">
+
+            <!-- Email Send Log -->
+            <div class="bg-white rounded-lg shadow">
+                <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                    <h2 class="text-lg font-semibold text-gray-900">Outbound Email Log</h2>
+                    <span class="text-sm text-gray-500">Last 200 entries</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead class="bg-gray-50"><tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Trigger</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">To</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ticket</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Detail</th>
+                        </tr></thead>
+                        <tbody class="divide-y divide-gray-100">
+                            {% for entry in email_send_logs %}
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-2 text-gray-500 whitespace-nowrap">{{ entry.created_at|date:"M j Y H:i" }}</td>
+                                <td class="px-4 py-2 text-gray-700">{{ entry.trigger }}</td>
+                                <td class="px-4 py-2 text-gray-700">{{ entry.to_email }}</td>
+                                <td class="px-4 py-2">{% if entry.ticket %}<a href="{% url 'core:ticket_detail' entry.ticket.pk %}" class="text-blue-600 hover:underline">{{ entry.ticket.ticket_number }}</a>{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+                                <td class="px-4 py-2"><span class="px-2 py-0.5 rounded text-xs font-medium {% if entry.status == 'sent' %}bg-green-100 text-green-800{% elif entry.status == 'failed' %}bg-red-100 text-red-800{% else %}bg-gray-100 text-gray-600{% endif %}">{{ entry.get_status_display }}</span></td>
+                                <td class="px-4 py-2 text-gray-500 text-xs">{{ entry.detail|default:entry.get_reason_display }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="6" class="px-4 py-6 text-center text-gray-400">No entries yet.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Inbound Email Log -->
+            <div class="bg-white rounded-lg shadow">
+                <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                    <h2 class="text-lg font-semibold text-gray-900">Inbound Email Log</h2>
+                    <span class="text-sm text-gray-500">Last 200 entries</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead class="bg-gray-50"><tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">From</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Subject</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ticket</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Result</th>
+                        </tr></thead>
+                        <tbody class="divide-y divide-gray-100">
+                            {% for entry in inbound_logs %}
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-2 text-gray-500 whitespace-nowrap">{{ entry.created_at|date:"M j Y H:i" }}</td>
+                                <td class="px-4 py-2 text-gray-700">{{ entry.from_email }}</td>
+                                <td class="px-4 py-2 text-gray-700 max-w-xs truncate">{{ entry.subject }}</td>
+                                <td class="px-4 py-2">{% if entry.ticket %}<a href="{% url 'core:ticket_detail' entry.ticket.pk %}" class="text-blue-600 hover:underline">{{ entry.ticket.ticket_number }}</a>{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+                                <td class="px-4 py-2"><span class="px-2 py-0.5 rounded text-xs font-medium {% if entry.status == 'new_ticket' %}bg-blue-100 text-blue-800{% elif entry.status == 'reply' %}bg-green-100 text-green-800{% elif entry.status == 'error' %}bg-red-100 text-red-800{% else %}bg-gray-100 text-gray-600{% endif %}">{{ entry.get_status_display }}</span></td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No entries yet.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Org Credential Access Log -->
+            <div class="bg-white rounded-lg shadow">
+                <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                    <h2 class="text-lg font-semibold text-gray-900">Org Credential Access Log</h2>
+                    <span class="text-sm text-gray-500">Last 200 entries</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead class="bg-gray-50"><tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Credential</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
+                        </tr></thead>
+                        <tbody class="divide-y divide-gray-100">
+                            {% for entry in credential_logs %}
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-2 text-gray-500 whitespace-nowrap">{{ entry.accessed_at|date:"M j Y H:i" }}</td>
+                                <td class="px-4 py-2 text-gray-700">{{ entry.user.get_full_name|default:entry.user.username }}</td>
+                                <td class="px-4 py-2 text-gray-700">{{ entry.credential.name }}</td>
+                                <td class="px-4 py-2"><span class="px-2 py-0.5 rounded text-xs font-medium {% if entry.action == 'viewed' %}bg-blue-100 text-blue-800{% elif entry.action == 'edited' %}bg-yellow-100 text-yellow-800{% else %}bg-red-100 text-red-800{% endif %}">{{ entry.get_action_display }}</span></td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="4" class="px-4 py-6 text-center text-gray-400">No entries yet.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Device Credential Access Log -->
+            <div class="bg-white rounded-lg shadow">
+                <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                    <h2 class="text-lg font-semibold text-gray-900">Device Credential Access Log</h2>
+                    <span class="text-sm text-gray-500">Last 200 entries</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead class="bg-gray-50"><tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Device</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Field</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
+                        </tr></thead>
+                        <tbody class="divide-y divide-gray-100">
+                            {% for entry in device_cred_logs %}
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-2 text-gray-500 whitespace-nowrap">{{ entry.accessed_at|date:"M j Y H:i" }}</td>
+                                <td class="px-4 py-2 text-gray-700">{{ entry.user.get_full_name|default:entry.user.username }}</td>
+                                <td class="px-4 py-2"><a href="{% url 'core:device_detail' entry.device.pk %}" class="text-blue-600 hover:underline">{{ entry.device.name }}</a></td>
+                                <td class="px-4 py-2 text-gray-600">{{ entry.field|default:"—" }}</td>
+                                <td class="px-4 py-2"><span class="px-2 py-0.5 rounded text-xs font-medium {% if entry.action == 'viewed' %}bg-blue-100 text-blue-800{% else %}bg-yellow-100 text-yellow-800{% endif %}">{{ entry.get_action_display }}</span></td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No entries yet.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Audit Log -->
+            <div class="bg-white rounded-lg shadow">
+                <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                    <h2 class="text-lg font-semibold text-gray-900">Audit Log</h2>
+                    <span class="text-sm text-gray-500">Last 200 entries — all model changes</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead class="bg-gray-50"><tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Model</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Object</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Changes</th>
+                        </tr></thead>
+                        <tbody class="divide-y divide-gray-100">
+                            {% for entry in audit_log_entries %}
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-2 text-gray-500 whitespace-nowrap">{{ entry.timestamp|date:"M j Y H:i" }}</td>
+                                <td class="px-4 py-2 text-gray-700">{{ entry.actor.get_full_name|default:entry.actor.username|default:"System" }}</td>
+                                <td class="px-4 py-2 text-gray-600 capitalize">{{ entry.content_type.model }}</td>
+                                <td class="px-4 py-2 text-gray-700">{{ entry.object_repr|truncatechars:40 }}</td>
+                                <td class="px-4 py-2"><span class="px-2 py-0.5 rounded text-xs font-medium {% if entry.action == 0 %}bg-green-100 text-green-800{% elif entry.action == 1 %}bg-blue-100 text-blue-800{% else %}bg-red-100 text-red-800{% endif %}">{% if entry.action == 0 %}Create{% elif entry.action == 1 %}Update{% else %}Delete{% endif %}</span></td>
+                                <td class="px-4 py-2 text-gray-500 text-xs font-mono">{{ entry.changes|truncatechars:80 }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="6" class="px-4 py-6 text-center text-gray-400">No entries yet.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+        {% endif %}
+
     </div>
 </div>
 {% endblock %}
