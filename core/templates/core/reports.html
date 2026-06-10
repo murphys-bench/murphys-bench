@@ -356,7 +356,7 @@
         <tr>
             <td class="py-1.5 text-gray-800">{{ row.technician__first_name }} {{ row.technician__last_name }}</td>
             <td class="py-1.5 text-gray-600">{{ row.month|date:"M Y" }}</td>
-            <td class="py-1.5 text-right font-medium text-gray-900">{{ row.miles }}</td>
+            <td class="py-1.5 text-right font-medium text-gray-900">{{ row.miles|floatformat:1 }}</td>
         </tr>
         {% endfor %}
         </tbody>
