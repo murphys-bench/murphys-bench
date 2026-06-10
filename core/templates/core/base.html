@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Murphy's Bench{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    <script>tailwind.config = { darkMode: 'class' }</script>
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
     <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
     {% with s=site_settings %}{% if s %}
@@ -33,7 +34,7 @@
     </style>
     {% endif %}{% endwith %}
 
-    <!-- Display settings + sidebar collapse state — set before first paint to avoid flash -->
+    <!-- Display settings + sidebar collapse state + dark mode — set before first paint to avoid flash -->
     <script>
     (function() {
         var fs  = localStorage.getItem('mb_font_size')  || '14px';
@@ -45,6 +46,9 @@
         el.setAttribute('data-density', den);
         if (localStorage.getItem('mb_nav_collapsed') === 'true') {
             el.setAttribute('data-sidebar-collapsed', 'true');
+        }
+        if (localStorage.getItem('mb_dark_mode') === 'true') {
+            el.classList.add('dark');
         }
     })();
     </script>
@@ -74,6 +78,80 @@
         html[data-density="compact"] td,
         html[data-density="compact"] th { padding-top: 4px !important; padding-bottom: 4px !important; }
         html[data-density="compact"] .density-card { padding: 12px !important; }
+
+        /* ── Dark mode overrides ─────────────────────────────────────────────── */
+        .dark body                        { background-color: #0f172a !important; }
+
+        /* Surfaces */
+        .dark .bg-white                   { background-color: #1e293b !important; }
+        .dark .bg-gray-50                 { background-color: #0f172a !important; }
+        .dark .bg-gray-100                { background-color: #1e293b !important; }
+        .dark .bg-gray-200                { background-color: #334155 !important; }
+        .dark .bg-gray-300                { background-color: #475569 !important; }
+
+        /* Text */
+        .dark .text-gray-900              { color: #f1f5f9 !important; }
+        .dark .text-gray-800              { color: #e2e8f0 !important; }
+        .dark .text-gray-700              { color: #cbd5e1 !important; }
+        .dark .text-gray-600              { color: #94a3b8 !important; }
+        .dark .text-gray-500              { color: #64748b !important; }
+        .dark .text-gray-400              { color: #475569 !important; }
+
+        /* Borders */
+        .dark .border-gray-100            { border-color: #1e293b !important; }
+        .dark .border-gray-200            { border-color: #334155 !important; }
+        .dark .border-gray-300            { border-color: #475569 !important; }
+        .dark .border-t                   { border-color: #334155 !important; }
+        .dark .border-b                   { border-color: #334155 !important; }
+
+        /* Dividers */
+        .dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #334155 !important; }
+        .dark .divide-y > :not([hidden]) ~ :not([hidden])        { border-color: #334155 !important; }
+
+        /* Shadows */
+        .dark .shadow, .dark .shadow-sm, .dark .shadow-md, .dark .shadow-lg {
+            box-shadow: 0 1px 3px 0 rgba(0,0,0,0.6), 0 1px 2px -1px rgba(0,0,0,0.6) !important;
+        }
+
+        /* Page header bar */
+        .dark .bg-white.shadow            { background-color: #1e293b !important; }
+
+        /* Form inputs */
+        .dark input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]),
+        .dark select,
+        .dark textarea {
+            background-color: #0f172a !important;
+            border-color: #475569 !important;
+            color: #f1f5f9 !important;
+        }
+        .dark input::placeholder, .dark textarea::placeholder { color: #475569 !important; }
+        .dark select option { background-color: #1e293b; color: #f1f5f9; }
+
+        /* Tables */
+        .dark thead.bg-gray-50            { background-color: #0f172a !important; }
+        .dark tr.hover\:bg-gray-50:hover  { background-color: #162032 !important; }
+        .dark .hover\:bg-gray-50:hover    { background-color: #162032 !important; }
+        .dark .hover\:bg-gray-100:hover   { background-color: #1e293b !important; }
+
+        /* Buttons — keep coloured ones as-is, soften gray ones */
+        .dark .bg-gray-100.text-gray-700,
+        .dark .bg-gray-200.text-gray-700  { background-color: #334155 !important; color: #e2e8f0 !important; }
+        .dark .hover\:bg-gray-200:hover   { background-color: #334155 !important; }
+        .dark .hover\:bg-gray-300:hover   { background-color: #475569 !important; }
+
+        /* Prose (KB articles) */
+        .dark .prose                      { color: #e2e8f0; }
+        .dark .prose h1, .dark .prose h2,
+        .dark .prose h3, .dark .prose h4  { color: #f1f5f9; }
+        .dark .prose strong               { color: #f1f5f9; }
+        .dark .prose code                 { background-color: #0f172a; color: #7dd3fc; }
+        .dark .prose pre                  { background-color: #0f172a; }
+        .dark .prose blockquote           { border-color: #475569; color: #94a3b8; }
+        .dark .prose hr, .dark .prose thead { border-color: #334155; }
+        .dark .prose a                    { color: #38bdf8; }
+
+        /* Misc utility overrides */
+        .dark .rounded-lg.shadow.overflow-hidden { background-color: #1e293b; }
     </style>
 </head>
 <body class="bg-gray-100" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
@@ -84,6 +162,7 @@
      style="background-color:var(--color-sidebar-bg,#1f2937);color:var(--color-sidebar-text,#fff);"
      x-data="{
          collapsed: document.documentElement.getAttribute('data-sidebar-collapsed') === 'true',
+         dark: document.documentElement.classList.contains('dark'),
          toggle() {
              this.collapsed = !this.collapsed;
              localStorage.setItem('mb_nav_collapsed', this.collapsed);
@@ -92,6 +171,11 @@
              } else {
                  document.documentElement.removeAttribute('data-sidebar-collapsed');
              }
+         },
+         toggleDark() {
+             this.dark = !this.dark;
+             localStorage.setItem('mb_dark_mode', this.dark);
+             document.documentElement.classList.toggle('dark', this.dark);
          }
      }">
 
@@ -201,6 +285,15 @@
            style="opacity:0.75">
             {% icon 'logout' 4 %}<span class="nav-label">Log Out</span>
         </a>
+
+        <!-- Dark mode toggle -->
+        <button @click="toggleDark()" title="Toggle dark mode"
+                class="nav-item w-full flex items-center gap-2 px-2 py-2 rounded-lg text-base transition-colors hover:bg-white/10"
+                style="opacity:0.5">
+            <span x-show="!dark">{% icon 'moon' 4 %}</span>
+            <span x-show="dark" x-cloak>{% icon 'sun' 4 %}</span>
+            <span class="nav-label" x-text="dark ? 'Light Mode' : 'Dark Mode'"></span>
+        </button>
 
         <!-- Sidebar collapse toggle -->
         <button @click="toggle()" title="Toggle sidebar"
