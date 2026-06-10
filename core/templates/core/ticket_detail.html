@@ -122,13 +122,15 @@ window.addEventListener('beforeunload', function() {
                       hx-on:htmx:after-request="this.reset()"
                       x-data="{ replyType: 'internal' }">
                     {% csrf_token %}
-                    <div class="mb-3">
-                        <select name="reply_type"
-                                x-model="replyType"
-                                class="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="internal">🔒 Internal Only</option>
-                            <option value="customer_visible">👤 Customer Visible</option>
-                        </select>
+                    <div class="mb-3 flex gap-4">
+                        <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                            <input type="radio" name="reply_type" value="internal" x-model="replyType" class="text-blue-600 focus:ring-blue-500">
+                            🔒 Internal Only
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                            <input type="radio" name="reply_type" value="customer_visible" x-model="replyType" class="text-blue-600 focus:ring-blue-500">
+                            👤 Customer Visible
+                        </label>
                     </div>
                     <div class="mb-3" x-show="replyType === 'customer_visible'" x-cloak>
                         <label class="block text-xs font-medium text-gray-500 mb-1">CC (optional — comma-separated emails)</label>
@@ -314,10 +316,6 @@ window.addEventListener('beforeunload', function() {
                     <a href="{% url 'core:ticket_convert' ticket.pk %}"
                        class="block w-full text-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">
                         Convert to Work Order
-                    </a>
-                    <a href="#replies-list"
-                       class="block w-full text-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">
-                        Add Reply ↓
                     </a>
                     <a href="{% url 'core:kb_list' %}?q={{ ticket.subject|urlencode }}"
                        class="block w-full text-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">
