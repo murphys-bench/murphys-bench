@@ -2417,7 +2417,7 @@
                             <div><label class="block text-xs font-medium text-gray-600 mb-1">Help Topic Scope</label>
                                 <select name="scoped_to_help_topic" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
                                     <option value="">— all —</option>
-                                    {% for ht in help_topics_all %}<option value="{{ ht.pk %}">{{ ht.name }}</option>{% endfor %}
+                                    {% for ht in help_topics_all %}<option value="{{ ht.pk }}">{{ ht.name }}</option>{% endfor %}
                                 </select>
                             </div>
                             <div><label class="block text-xs font-medium text-gray-600 mb-1">Repair Type Scope</label>
