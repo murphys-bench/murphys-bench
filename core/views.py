@@ -1611,6 +1611,21 @@ class TicketContactsByClientView(LoginRequiredMixin, View):
         return HttpResponse(opts)
 
 
+class TicketCloseView(LoginRequiredMixin, View):
+    """Set a ticket to 'resolved' status. Used when WO is complete and tech has contacted client."""
+
+    def post(self, request, pk):
+        ticket = get_object_or_404(Ticket, pk=pk)
+        if ticket.status in TICKET_CLOSED_STATUSES:
+            messages.info(request, 'Ticket is already closed.')
+            return redirect('core:ticket_detail', pk=pk)
+        ticket.status = 'resolved'
+        ticket.wo_complete = False
+        ticket.save(update_fields=['status', 'wo_complete', 'updated_at'])
+        messages.success(request, f'{ticket.ticket_number} resolved.')
+        return redirect('core:ticket_detail', pk=pk)
+
+
 class TicketDeleteView(LoginRequiredMixin, View):
     """Hard-delete a ticket. Admin only. Blocked if a work order is linked."""
 

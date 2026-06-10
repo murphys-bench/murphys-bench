@@ -18,7 +18,7 @@
             <div id="overdue-section">
                 {% include "core/partials/overdue_badge.html" %}
             </div>
-            {% if ticket.status != 'converted' and ticket.status != 'closed' %}
+            {% if ticket.status != 'closed' %}
                 <a href="{% url 'core:ticket_edit' ticket.pk %}"
                    class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
                     Edit
@@ -156,7 +156,7 @@ window.addEventListener('beforeunload', function() {
                 {% endfor %}
             </div>
 
-            {% if ticket.status != 'converted' and ticket.status != 'closed' %}
+            {% if ticket.status != 'closed' %}
             <div class="border-t border-gray-100 pt-4">
                 <h3 class="text-sm font-semibold text-gray-700 mb-3">Add Reply</h3>
                 <form hx-post="{% url 'core:ticket_reply_add' ticket.pk %}"
@@ -365,10 +365,6 @@ window.addEventListener('beforeunload', function() {
         <div class="bg-yellow-50 border border-yellow-300 rounded-lg shadow p-4 text-sm text-yellow-800">
             🔗 Linked to <a href="{% url 'core:work_order_detail' linked_wo.pk %}" class="font-medium hover:underline">{{ linked_wo.work_order_number }}</a> — this ticket cannot be closed until the work order is complete.
         </div>
-        {% else %}
-        <div class="bg-green-50 border border-green-300 rounded-lg shadow p-4 text-sm text-green-800">
-            ✅ Work Order <a href="{% url 'core:work_order_detail' linked_wo.pk %}" class="font-medium hover:underline">{{ linked_wo.work_order_number }}</a> is complete — this ticket is ready to be resolved.
-        </div>
         {% endif %}
         {% endif %}
 
@@ -384,23 +380,32 @@ window.addEventListener('beforeunload', function() {
         <div class="bg-white rounded-lg shadow p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
             <div class="space-y-2">
-                {% if ticket.status != 'converted' and ticket.status != 'closed' %}
+                {% if ticket.status == 'closed' %}
+                    <p class="text-sm text-gray-400 text-center">This ticket is closed.</p>
+                {% else %}
                     <a href="{% url 'core:ticket_edit' ticket.pk %}"
                        class="block w-full text-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
                         Edit Ticket
                     </a>
+                    {% if ticket.status != 'converted' %}
                     <a href="{% url 'core:ticket_convert' ticket.pk %}"
                        class="block w-full text-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">
                         Convert to Work Order
                     </a>
+                    {% endif %}
+                    {% if ticket.wo_complete %}
+                    <form method="post" action="{% url 'core:ticket_close' ticket.pk %}">
+                        {% csrf_token %}
+                        <button type="submit"
+                                class="block w-full text-center px-4 py-2 bg-green-700 text-white rounded-md hover:bg-green-800 text-sm font-medium">
+                            Close Ticket
+                        </button>
+                    </form>
+                    {% endif %}
                     <a href="{% url 'core:kb_list' %}?q={{ ticket.subject|urlencode }}"
                        class="block w-full text-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">
                         Search KB
                     </a>
-                {% else %}
-                    <p class="text-sm text-gray-400 text-center">
-                        {% if ticket.status == 'converted' %}This ticket has been converted.{% else %}This ticket is closed.{% endif %}
-                    </p>
                 {% endif %}
             </div>
         </div>
