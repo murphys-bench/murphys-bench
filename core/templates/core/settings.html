@@ -1752,6 +1752,57 @@
         </div>
         {% endif %}
 
+        {% if active_tab == 'kb_categories' %}
+        <div class="space-y-4">
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-1">KB Categories</h2>
+                <p class="text-sm text-gray-500 mb-4">Organise knowledge base articles into categories. Deleting a category leaves its articles uncategorised.</p>
+
+                <form method="post" action="{% url 'core:kb_category_create' %}" class="flex gap-2">
+                    {% csrf_token %}
+                    <input type="text" name="name" placeholder="New category name"
+                           class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    <button type="submit" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+                        Add Category
+                    </button>
+                </form>
+            </div>
+
+            {% for cat in kb_categories %}
+            <div class="bg-white rounded-lg shadow overflow-hidden" x-data="{ editing: false }">
+                <div class="px-6 py-3 flex items-center gap-3">
+                    <div x-show="!editing" class="flex-1 min-w-0">
+                        <span class="text-sm font-semibold text-gray-800">{{ cat.name }}</span>
+                        {% if cat.description %}<span class="text-xs text-gray-400 ml-2">{{ cat.description }}</span>{% endif %}
+                        <span class="text-xs text-gray-400 ml-2">({{ cat.kbarticle_set.count }} articles)</span>
+                    </div>
+                    <div x-show="editing" x-cloak class="flex-1 min-w-0">
+                        <form method="post" action="{% url 'core:kb_category_update' cat.pk %}" class="flex gap-2 items-center">
+                            {% csrf_token %}
+                            <input type="text" name="name" value="{{ cat.name }}"
+                                   class="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                            <input type="text" name="description" value="{{ cat.description }}" placeholder="Description (optional)"
+                                   class="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                            <button type="submit" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">Save</button>
+                            <button type="button" @click="editing = false" class="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded hover:bg-gray-200">Cancel</button>
+                        </form>
+                    </div>
+                    <div x-show="!editing" class="flex gap-2 shrink-0">
+                        <button @click="editing = true" class="text-xs text-blue-600 hover:underline">Edit</button>
+                        <form method="post" action="{% url 'core:kb_category_delete' cat.pk %}" class="inline"
+                              onsubmit="return confirm('Delete category {{ cat.name|escapejs }}? Articles will become uncategorised.')">
+                            {% csrf_token %}
+                            <button type="submit" class="text-xs text-red-500 hover:underline">Delete</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% empty %}
+            <p class="text-sm text-gray-400">No categories yet. Add one above.</p>
+            {% endfor %}
+        </div>
+        {% endif %}
+
     </div>
 </div>
 {% endblock %}

@@ -2647,6 +2647,7 @@ SETTINGS_TABS = [
     ('credentials',      'Credentials',      None),
     ('email_templates',  'Email Templates',  None),
     ('statuses',         'Statuses',         None),
+    ('kb_categories',    'KB Categories',    None),
     ('users',            'Users',            None),
     ('roles',            'Roles',            None),
 ]
@@ -2778,6 +2779,8 @@ class SettingsView(LoginRequiredMixin, View):
         if active_tab == 'statuses':
             ctx['ticket_statuses'] = StatusDefinition.objects.filter(entity_type='ticket').order_by('sort_order')
             ctx['wo_statuses'] = StatusDefinition.objects.filter(entity_type='workorder').order_by('sort_order')
+        if active_tab == 'kb_categories':
+            ctx.update(_kb_categories_context())
         if active_tab == 'email_templates':
             # Ensure all 4 trigger templates exist
             for trigger, _ in EmailTemplate.TRIGGER_CHOICES:
@@ -2837,6 +2840,46 @@ class SettingsView(LoginRequiredMixin, View):
 
 REPAIR_TYPES_REDIRECT = 'core:settings'
 REPAIR_TYPES_TAB = '?tab=repair_types'
+
+# ---------------------------------------------------------------------------
+# Settings — KB Categories CRUD
+# ---------------------------------------------------------------------------
+
+KB_CAT_REDIRECT = 'core:settings'
+KB_CAT_TAB = '?tab=kb_categories'
+
+
+def _kb_categories_context():
+    return {'kb_categories': KBCategory.objects.order_by('sort_order', 'name')}
+
+
+class KBCategoryCreateView(LoginRequiredMixin, View):
+    def post(self, request):
+        name = request.POST.get('name', '').strip()
+        desc = request.POST.get('description', '').strip()
+        if name:
+            max_order = KBCategory.objects.aggregate(m=models_Max('sort_order'))['m'] or 0
+            KBCategory.objects.get_or_create(name=name, defaults={'description': desc, 'sort_order': max_order + 10})
+        return redirect(reverse_lazy(KB_CAT_REDIRECT) + KB_CAT_TAB)
+
+
+class KBCategoryUpdateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        cat = get_object_or_404(KBCategory, pk=pk)
+        name = request.POST.get('name', '').strip()
+        if name:
+            cat.name = name
+            cat.description = request.POST.get('description', '').strip()
+            cat.save(update_fields=['name', 'description'])
+        return redirect(reverse_lazy(KB_CAT_REDIRECT) + KB_CAT_TAB)
+
+
+class KBCategoryDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        cat = get_object_or_404(KBCategory, pk=pk)
+        KBArticle.objects.filter(category=cat).update(category=None)
+        cat.delete()
+        return redirect(reverse_lazy(KB_CAT_REDIRECT) + KB_CAT_TAB)
 
 
 class RepairTypeCategoryCreateView(LoginRequiredMixin, View):

@@ -108,6 +108,11 @@ urlpatterns = [
     path('settings/repair-types/<int:pk>/edit/', views.RepairTypeUpdateView.as_view(), name='rt_update'),
     path('settings/repair-types/<int:pk>/delete/', views.RepairTypeDeleteView.as_view(), name='rt_delete'),
 
+    # Settings — KB Categories CRUD
+    path('settings/kb-categories/new/', views.KBCategoryCreateView.as_view(), name='kb_category_create'),
+    path('settings/kb-categories/<int:pk>/edit/', views.KBCategoryUpdateView.as_view(), name='kb_category_update'),
+    path('settings/kb-categories/<int:pk>/delete/', views.KBCategoryDeleteView.as_view(), name='kb_category_delete'),
+
     # Settings — Canned Responses CRUD
     path('settings/canned-response-categories/new/', views.CannedResponseCategoryCreateView.as_view(), name='cr_category_create'),
     path('settings/canned-response-categories/<int:pk>/delete/', views.CannedResponseCategoryDeleteView.as_view(), name='cr_category_delete'),
