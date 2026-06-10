@@ -70,7 +70,7 @@
 
 <!-- Quick stats row -->
 <div class="grid grid-cols-2 gap-4 mb-6">
-    <div class="bg-white rounded-lg shadow p-4 flex items-center gap-3">
+    <a href="{% url 'core:client_list' %}" class="bg-white rounded-lg shadow p-4 flex items-center gap-3 hover:shadow-md transition-shadow">
         <div class="text-gray-400">
             {% icon "building" "8" %}
         </div>
@@ -78,8 +78,8 @@
             <p class="text-xl font-bold text-gray-900">{{ active_clients }}</p>
             <p class="text-sm text-gray-500">Active Clients</p>
         </div>
-    </div>
-    <div class="bg-white rounded-lg shadow p-4 flex items-center gap-3">
+    </a>
+    <a href="{% url 'core:device_list' %}" class="bg-white rounded-lg shadow p-4 flex items-center gap-3 hover:shadow-md transition-shadow">
         <div class="text-gray-400">
             {% icon "computer" "8" %}
         </div>
@@ -87,7 +87,7 @@
             <p class="text-xl font-bold text-gray-900">{{ total_devices }}</p>
             <p class="text-sm text-gray-500">Devices on File</p>
         </div>
-    </div>
+    </a>
 </div>
 
 <!-- Open Work Orders -->
