@@ -119,14 +119,22 @@ window.addEventListener('beforeunload', function() {
                       hx-target="#replies-list"
                       hx-swap="beforeend"
                       hx-encoding="multipart/form-data"
-                      hx-on:htmx:after-request="this.reset()">
+                      hx-on:htmx:after-request="this.reset()"
+                      x-data="{ replyType: 'internal' }">
                     {% csrf_token %}
                     <div class="mb-3">
                         <select name="reply_type"
+                                x-model="replyType"
                                 class="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                             <option value="internal">🔒 Internal Only</option>
                             <option value="customer_visible">👤 Customer Visible</option>
                         </select>
+                    </div>
+                    <div class="mb-3" x-show="replyType === 'customer_visible'" x-cloak>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">CC (optional — comma-separated emails)</label>
+                        <input type="text" name="cc_emails"
+                               placeholder="e.g. someone@example.com, other@example.com"
+                               class="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                     </div>
                     <div class="mb-3">
                         <textarea name="content"

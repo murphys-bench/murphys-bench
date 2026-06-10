@@ -7,7 +7,7 @@ def _status_label(slug, entity_type):
     return sd.label if sd else slug.replace('_', ' ').title()
 
 
-def send_ticket_email(trigger, ticket, extra_context=None):
+def send_ticket_email(trigger, ticket, extra_context=None, cc=None):
     """
     Send an automated email for a ticket event.
     Checks all three suppression layers before sending.
@@ -20,8 +20,11 @@ def send_ticket_email(trigger, ticket, extra_context=None):
     if not site.email_enabled:
         return
 
+    # Allow explicit override (e.g. resend to a specific address)
+    if extra_context and extra_context.get('_override_to'):
+        to_email = extra_context.pop('_override_to')
     # Resolve recipient — ticket's assigned contact first, then primary, then any, then client email
-    if ticket.contact_id and ticket.contact and ticket.contact.email:
+    elif ticket.contact_id and ticket.contact and ticket.contact.email:
         to_email = ticket.contact.email
     else:
         contact = ticket.client.contacts.filter(is_primary=True, is_active=True).first()
@@ -110,6 +113,7 @@ def send_ticket_email(trigger, ticket, extra_context=None):
             body=body,
             from_email=from_email,
             to=[to_email],
+            cc=[e for e in (cc or []) if e and e != to_email],
             connection=connection,
         )
         sent = msg.send(fail_silently=False)

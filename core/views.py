@@ -1255,11 +1255,40 @@ class TicketReplyCreateView(LoginRequiredMixin, View):
                 .exclude(pk=reply.pk)
                 .order_by('created_at')
             )
+            cc_raw = request.POST.get('cc_emails', '')
+            cc_list = [e.strip() for e in cc_raw.split(',') if e.strip()]
             send_ticket_email('reply_added', ticket, {
                 'reply': reply,
                 'prior_replies': prior_replies,
-            })
+            }, cc=cc_list)
         return render(request, 'core/partials/ticket_reply_item.html', {'reply': reply})
+
+
+class TicketReplyResendView(LoginRequiredMixin, View):
+    """Resend a specific reply email to a chosen address."""
+
+    def post(self, request, pk, reply_pk):
+        ticket = get_object_or_404(Ticket, pk=pk)
+        reply = get_object_or_404(TicketReply, pk=reply_pk, ticket=ticket)
+        to_email = request.POST.get('to_email', '').strip()
+        if to_email == '__custom__':
+            to_email = request.POST.get('to_email_custom', '').strip()
+        if not to_email:
+            messages.error(request, 'No email address provided.')
+            return redirect('core:ticket_detail', pk=pk)
+        from .email_utils import send_ticket_email
+        prior_replies = list(
+            ticket.replies.filter(reply_type='customer_visible')
+            .exclude(pk=reply.pk)
+            .order_by('created_at')
+        )
+        send_ticket_email('reply_added', ticket, {
+            'reply': reply,
+            'prior_replies': prior_replies,
+            '_override_to': to_email,
+        })
+        messages.success(request, f'Reply resent to {to_email}.')
+        return redirect('core:ticket_detail', pk=pk)
 
 
 class TicketConvertView(LoginRequiredMixin, View):
