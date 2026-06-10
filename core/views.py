@@ -1458,6 +1458,20 @@ class TicketAcknowledgeOverdueView(LoginRequiredMixin, View):
         return render(request, 'core/partials/overdue_badge.html', {'ticket': ticket})
 
 
+class TicketContactsByClientView(LoginRequiredMixin, View):
+    """HTMX: return <option> elements for contacts belonging to a given client."""
+
+    def get(self, request):
+        client_id = request.GET.get('client_id') or request.GET.get('client')
+        contacts = []
+        if client_id:
+            contacts = Contact.objects.filter(client_id=client_id, is_active=True).order_by('last_name', 'first_name')
+        opts = '<option value="">---------</option>'
+        for c in contacts:
+            opts += f'<option value="{c.pk}">{c.first_name} {c.last_name}</option>'
+        return HttpResponse(opts)
+
+
 class TicketDeleteView(LoginRequiredMixin, View):
     """Hard-delete a ticket. Admin only. Blocked if a work order is linked."""
 
