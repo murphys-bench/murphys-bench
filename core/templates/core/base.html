@@ -247,20 +247,8 @@
         {% endwith %}
     </div>
 
-    <!-- My Work section — scrollable, hidden when collapsed -->
-    <div class="flex-1 flex flex-col overflow-hidden">
-        <div class="nav-my-work flex-1 overflow-y-auto border-t pt-2 pb-1 px-1"
-             style="border-color:rgba(255,255,255,0.1)">
-            <p class="px-2 mb-1 text-sm font-semibold uppercase tracking-wider"
-               style="opacity:0.4">My Work</p>
-            <div id="sidebar-content"
-                 hx-get="{% url 'core:sidebar_fragment' %}"
-                 hx-trigger="load"
-                 hx-swap="innerHTML">
-                <p class="px-3 py-2 text-xs italic" style="opacity:0.45">Loading…</p>
-            </div>
-        </div>
-    </div>
+    <!-- Spacer -->
+    <div class="flex-1"></div>
 
     <!-- Footer: user info + utility links + collapse toggle -->
     <div class="flex-shrink-0 border-t p-2 space-y-0.5"
