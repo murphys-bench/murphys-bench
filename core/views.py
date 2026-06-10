@@ -1220,6 +1220,8 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         if linked_wo_pk:
             open_wos = open_wos.exclude(pk=linked_wo_pk)
         context['client_open_wos'] = open_wos
+        context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
+        context['is_admin'] = _is_admin(self.request.user)
         return context
 
 
@@ -1542,6 +1544,20 @@ class TicketLinkRemoveView(LoginRequiredMixin, View):
 # ---------------------------------------------------------------------------
 # SLA — Overdue Acknowledgment
 # ---------------------------------------------------------------------------
+
+class TicketAssignView(LoginRequiredMixin, View):
+    """Assign or claim a ticket. POST with assigned_to=<pk> or assigned_to='' to unassign, or claim=1 to self-assign."""
+
+    def post(self, request, pk):
+        ticket = get_object_or_404(Ticket, pk=pk)
+        if request.POST.get('claim'):
+            ticket.assigned_to = request.user
+        else:
+            uid = request.POST.get('assigned_to', '').strip()
+            ticket.assigned_to_id = uid if uid else None
+        ticket.save(update_fields=['assigned_to', 'updated_at'])
+        return redirect('core:ticket_detail', pk=pk)
+
 
 class TicketAcknowledgeOverdueView(LoginRequiredMixin, View):
     """Acknowledge an overdue ticket with a required internal note."""
