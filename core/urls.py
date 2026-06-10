@@ -104,6 +104,8 @@ urlpatterns = [
     path('settings/test-outbound-email/', views.EmailTestOutboundView.as_view(), name='settings_test_outbound'),
     path('settings/suppressed-addresses/add/', views.SuppressedAddressAddView.as_view(), name='suppressed_address_add'),
     path('settings/suppressed-addresses/<int:pk>/delete/', views.SuppressedAddressDeleteView.as_view(), name='suppressed_address_delete'),
+    path('settings/blocked-senders/add/', views.BlockedSenderAddView.as_view(), name='blocked_sender_add'),
+    path('settings/blocked-senders/<int:pk>/delete/', views.BlockedSenderDeleteView.as_view(), name='blocked_sender_delete'),
     path('settings/test-inbound-email/', views.EmailTestInboundView.as_view(), name='settings_test_inbound'),
 
     # Settings — Repair Types CRUD
@@ -150,6 +152,30 @@ urlpatterns = [
     # Device Credentials
     path('devices/<int:pk>/credentials/reveal/<str:field>/', views.DeviceCredentialRevealView.as_view(), name='device_cred_reveal'),
     path('devices/<int:pk>/credentials/', views.DeviceCredentialUpdateView.as_view(), name='device_cred_update'),
+
+    # Settings — SLA Plans
+    path('settings/sla-plans/new/', views.SLAPlanCreateView.as_view(), name='sla_plan_create'),
+    path('settings/sla-plans/<int:pk>/edit/', views.SLAPlanUpdateView.as_view(), name='sla_plan_update'),
+    path('settings/sla-plans/<int:pk>/delete/', views.SLAPlanDeleteView.as_view(), name='sla_plan_delete'),
+
+    # Settings — Help Topics
+    path('settings/help-topics/new/', views.HelpTopicCreateView.as_view(), name='help_topic_create'),
+    path('settings/help-topics/<int:pk>/edit/', views.HelpTopicUpdateView.as_view(), name='help_topic_update'),
+    path('settings/help-topics/<int:pk>/delete/', views.HelpTopicDeleteView.as_view(), name='help_topic_delete'),
+
+    # Settings — Tech Skills
+    path('settings/tech-skills/new/', views.TechSkillCreateView.as_view(), name='tech_skill_create'),
+    path('settings/tech-skills/<int:pk>/delete/', views.TechSkillDeleteView.as_view(), name='tech_skill_delete'),
+
+    # Settings — Dashboard Tiles
+    path('settings/dashboard-tiles/<int:pk>/edit/', views.DashboardTileUpdateView.as_view(), name='dashboard_tile_update'),
+
+    # Settings — Custom Fields
+    path('settings/custom-fields/new/', views.CustomFieldCreateView.as_view(), name='cf_create'),
+    path('settings/custom-fields/<int:pk>/edit/', views.CustomFieldUpdateView.as_view(), name='cf_update'),
+    path('settings/custom-fields/<int:pk>/delete/', views.CustomFieldDeleteView.as_view(), name='cf_delete'),
+    path('settings/custom-fields/<int:pk>/choices/add/', views.CustomFieldChoiceAddView.as_view(), name='cf_choice_add'),
+    path('settings/custom-field-choices/<int:pk>/delete/', views.CustomFieldChoiceDeleteView.as_view(), name='cf_choice_delete'),
 
     # Status Management
     path('settings/statuses/new/', views.StatusDefinitionCreateView.as_view(), name='status_create'),

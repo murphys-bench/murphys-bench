@@ -1267,6 +1267,24 @@ class EmailTemplate(models.Model):
         return f'{self.get_trigger_display()}'
 
 
+class BlockedSender(models.Model):
+    """Inbound email senders that are silently dropped — no ticket or reply created."""
+
+    pattern = models.CharField(
+        max_length=255, unique=True,
+        help_text='Exact address or fnmatch pattern (e.g. spam@example.com or *@badomain.com).'
+    )
+    reason = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'blocked_senders'
+        ordering = ['pattern']
+
+    def __str__(self):
+        return self.pattern
+
+
 class SuppressedAddress(models.Model):
     """Exact email addresses that should never receive automated emails."""
 
