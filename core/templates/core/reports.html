@@ -425,7 +425,10 @@ function printSection(key) {
     win.document.write('</body></html>');
     win.document.close();
     win.focus();
-    setTimeout(function(){ win.print(); }, 400);
+    setTimeout(function(){
+        win.print();
+        win.onafterprint = function(){ win.close(); };
+    }, 400);
 }
 
 // PDF download of a single section (or all)
