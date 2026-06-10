@@ -1897,7 +1897,7 @@
                                 <td class="px-4 py-2 text-gray-700">{{ entry.to_email }}</td>
                                 <td class="px-4 py-2">{% if entry.ticket %}<a href="{% url 'core:ticket_detail' entry.ticket.pk %}" class="text-blue-600 hover:underline">{{ entry.ticket.ticket_number }}</a>{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
                                 <td class="px-4 py-2"><span class="px-2 py-0.5 rounded text-xs font-medium {% if entry.status == 'sent' %}bg-green-100 text-green-800{% elif entry.status == 'failed' %}bg-red-100 text-red-800{% else %}bg-gray-100 text-gray-600{% endif %}">{{ entry.get_status_display }}</span></td>
-                                <td class="px-4 py-2 text-gray-500 text-xs">{{ entry.detail|default:entry.get_reason_display }}</td>
+                                <td class="px-4 py-2 text-gray-500 text-xs">{{ entry.detail|default:entry.reason }}</td>
                             </tr>
                             {% empty %}
                             <tr><td colspan="6" class="px-4 py-6 text-center text-gray-400">No entries yet.</td></tr>
