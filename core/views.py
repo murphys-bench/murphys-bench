@@ -219,7 +219,7 @@ class DashboardView(LoginRequiredMixin, View):
                 wo_tiles.append(entry)
 
         # Recent open work orders (tech sees own, admin sees all)
-        wo_qs = WorkOrder.objects.select_related('client', 'assigned_to', 'device').exclude(status__in=['closed', 'cancelled'])
+        wo_qs = WorkOrder.objects.select_related('client', 'assigned_to', 'device').exclude(status__in=WO_CLOSED_STATUSES)
         if not is_admin:
             wo_qs = wo_qs.filter(assigned_to=request.user)
         open_work_orders = wo_qs.order_by('-created_at')[:10]
@@ -266,7 +266,7 @@ class DashboardView(LoginRequiredMixin, View):
         return render(request, self.template_name, context)
 
 
-WO_CLOSED_STATUSES = ['completed', 'cancelled', 'closed']
+WO_CLOSED_STATUSES = ['completed', 'cancelled']
 
 
 class WorkOrderListView(LoginRequiredMixin, ListView):
@@ -439,7 +439,7 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
         if wo.status == 'completed' and not wo.completed_date:
             from django.utils import timezone as tz
             wo.completed_date = tz.now()
-        elif wo.status not in ('completed', 'closed') and wo.completed_date:
+        elif wo.status not in ('completed', 'cancelled') and wo.completed_date:
             wo.completed_date = None
 
         wo.save()
@@ -1191,7 +1191,7 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         wo = getattr(ticket, 'work_order_created', None)
         if wo:
             context['linked_wo'] = wo
-            context['wo_is_open'] = wo.status not in ('closed', 'cancelled')
+            context['wo_is_open'] = wo.status not in WO_CLOSED_STATUSES
         # Linked tickets
         context['linked_tickets'] = ticket.get_linked_tickets()
         context['audit_log'] = _audit_entries(ticket)
@@ -1254,7 +1254,7 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
         new_status = form.cleaned_data.get('status')
         if new_status in ('resolved', 'closed'):
             wo = getattr(self.object, 'work_order_created', None)
-            if wo and wo.status not in ('closed', 'cancelled'):
+            if wo and wo.status not in WO_CLOSED_STATUSES:
                 form.add_error('status', f'Cannot close this ticket — linked work order {wo.work_order_number} is still open.')
                 return self.form_invalid(form)
         old_status = self.object.status
@@ -1989,11 +1989,11 @@ class ReportsView(LoginRequiredMixin, View):
                 assigned_to=tech, created_at__range=(start_dt, end_dt)
             )
             total_wos = wos_in_range.count()
-            completed_wos = wos_in_range.filter(status='closed').count()
+            completed_wos = wos_in_range.filter(status='completed').count()
             completion_rate = round(100 * completed_wos / total_wos) if total_wos else None
 
             # Avg resolution time in hours (Python-side for DB compat)
-            closed_wos = wos_in_range.filter(status='closed', completed_date__isnull=False)
+            closed_wos = wos_in_range.filter(status='completed', completed_date__isnull=False)
             hours_list = [
                 (wo.completed_date - wo.created_at).total_seconds() / 3600
                 for wo in closed_wos
@@ -2140,9 +2140,9 @@ class ReportsCSVView(LoginRequiredMixin, View):
             for tech in User.objects.filter(is_active=True).order_by('first_name', 'last_name'):
                 wos_in_range = WorkOrder.objects.filter(assigned_to=tech, created_at__range=(start_dt, end_dt))
                 total_wos = wos_in_range.count()
-                completed_wos = wos_in_range.filter(status='closed').count()
+                completed_wos = wos_in_range.filter(status='completed').count()
                 completion_rate = round(100 * completed_wos / total_wos) if total_wos else ''
-                closed_wos = wos_in_range.filter(status='closed', completed_date__isnull=False)
+                closed_wos = wos_in_range.filter(status='completed', completed_date__isnull=False)
                 hours_list = [(wo.completed_date - wo.created_at).total_seconds() / 3600 for wo in closed_wos if wo.completed_date and wo.created_at]
                 avg_hours = round(sum(hours_list) / len(hours_list), 1) if hours_list else ''
                 open_wos = WorkOrder.objects.filter(assigned_to=tech, status__in=['new', 'in_progress', 'waiting_on_customer', 'on_hold']).count()
