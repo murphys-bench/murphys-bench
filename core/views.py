@@ -247,6 +247,11 @@ class DashboardView(LoginRequiredMixin, View):
                     })
             team_workload.sort(key=lambda x: -x['total'])
 
+        ticket_qs = Ticket.objects.select_related('client', 'assigned_to').exclude(status__in=TICKET_CLOSED_STATUSES)
+        if not is_admin:
+            ticket_qs = ticket_qs.filter(assigned_to=request.user)
+        open_tickets = ticket_qs.order_by('-created_at')[:10]
+
         needs_response_qs = Ticket.objects.filter(needs_response=True)
         if not is_admin:
             needs_response_qs = needs_response_qs.filter(assigned_to=request.user)
@@ -262,6 +267,7 @@ class DashboardView(LoginRequiredMixin, View):
             'is_admin': is_admin,
             'team_workload': team_workload,
             'needs_response_count': needs_response_count,
+            'open_tickets': open_tickets,
         }
         return render(request, self.template_name, context)
 
