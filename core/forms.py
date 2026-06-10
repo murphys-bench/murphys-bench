@@ -149,9 +149,10 @@ TEXTAREA_WIDGET = {'class': 'w-full px-3 py-2 border border-gray-300 rounded-md 
 class TicketForm(forms.ModelForm):
     class Meta:
         model = Ticket
-        fields = ['client', 'device', 'help_topic', 'sla_plan', 'assigned_to', 'subject', 'description', 'source', 'status']
+        fields = ['client', 'contact', 'device', 'help_topic', 'sla_plan', 'assigned_to', 'subject', 'description', 'source', 'status']
         widgets = {
             'client': forms.Select(attrs=SELECT_WIDGET),
+            'contact': forms.Select(attrs=SELECT_WIDGET),
             'device': forms.Select(attrs=SELECT_WIDGET),
             'help_topic': forms.Select(attrs=SELECT_WIDGET),
             'sla_plan': forms.Select(attrs=SELECT_WIDGET),
@@ -166,6 +167,13 @@ class TicketForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         from .models import User as UserModel, StatusDefinition
         self.fields['client'].queryset = Client.objects.filter(is_active=True).order_by('name')
+        self.fields['contact'].required = False
+        # Populate contact choices based on selected client (if editing an existing ticket)
+        instance = kwargs.get('instance')
+        if instance and instance.client_id:
+            self.fields['contact'].queryset = Contact.objects.filter(client_id=instance.client_id, is_active=True).order_by('last_name', 'first_name')
+        else:
+            self.fields['contact'].queryset = Contact.objects.none()
         self.fields['device'].required = False
         self.fields['help_topic'].queryset = HelpTopic.objects.filter(is_active=True).order_by('sort_order', 'name')
         self.fields['help_topic'].required = False

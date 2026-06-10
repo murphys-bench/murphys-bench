@@ -20,11 +20,14 @@ def send_ticket_email(trigger, ticket, extra_context=None):
     if not site.email_enabled:
         return
 
-    # Resolve recipient — primary contact first, then any contact, then client email
-    contact = ticket.client.contacts.filter(is_primary=True, is_active=True).first()
-    if not contact:
-        contact = ticket.client.contacts.filter(is_active=True, email__gt='').first()
-    to_email = (contact.email if contact else '') or ticket.client.email
+    # Resolve recipient — ticket's assigned contact first, then primary, then any, then client email
+    if ticket.contact_id and ticket.contact and ticket.contact.email:
+        to_email = ticket.contact.email
+    else:
+        contact = ticket.client.contacts.filter(is_primary=True, is_active=True).first()
+        if not contact:
+            contact = ticket.client.contacts.filter(is_active=True, email__gt='').first()
+        to_email = (contact.email if contact else '') or ticket.client.email
 
     if not to_email:
         EmailSendLog.objects.create(

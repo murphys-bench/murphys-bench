@@ -199,6 +199,7 @@ def _process_message(raw_msg_bytes, settings, verbosity):
     ticket = Ticket(
         ticket_number=Ticket.generate_ticket_number(),
         client=client,
+        contact=contact,
         subject=subject[:255],
         description=body,
         source='email',
