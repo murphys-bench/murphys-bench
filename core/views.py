@@ -471,6 +471,16 @@ def _flag_ticket_wo_complete(wo):
             ticket.save(update_fields=['wo_complete', 'updated_at'])
 
 
+class WorkOrderClaimView(LoginRequiredMixin, View):
+    """Self-assign a work order to the current user."""
+
+    def post(self, request, pk):
+        wo = get_object_or_404(WorkOrder, pk=pk)
+        wo.assigned_to = request.user
+        wo.save(update_fields=['assigned_to', 'updated_at'])
+        return redirect('core:work_order_detail', pk=pk)
+
+
 class WorkOrderAttachmentUploadView(LoginRequiredMixin, View):
     """Upload files directly to a work order (not tied to a note)."""
 

@@ -189,7 +189,15 @@
                         <dd class="text-gray-900 mt-1">{{ work_order.repair_type|default:"—" }}</dd>
                     </div>
                     <div>
-                        <dt class="text-xs font-medium text-gray-500 uppercase">Assigned To</dt>
+                        <dt class="text-xs font-medium text-gray-500 uppercase flex items-center justify-between">
+                            Assigned To
+                            {% if work_order.assigned_to != request.user %}
+                            <form method="post" action="{% url 'core:wo_claim' work_order.pk %}">
+                                {% csrf_token %}
+                                <button type="submit" class="text-xs text-blue-600 hover:underline font-medium normal-case">Claim</button>
+                            </form>
+                            {% endif %}
+                        </dt>
                         <dd class="text-gray-900 mt-1">{{ work_order.assigned_to.get_full_name|default:"Unassigned" }}</dd>
                     </div>
                     <div>
