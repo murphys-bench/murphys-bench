@@ -6,59 +6,36 @@
 
 ---
 
-## What's already built and working (as of session 20):
+## What's already built and working (as of session 21):
 
-- Django 4.2 app, 37 models, 36 migrations applied
+- Django 4.2 app, 37 models, 37 migrations applied
 - **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16
-- Deploy workflow: `git push` on Mac → SSH `scs-tech@10.58.58.82` → `cd /opt/murphys-bench && git pull && source venv/bin/activate && python3 manage.py migrate` → `kill -HUP <gunicorn-master-pid>`
+- **Gunicorn service name**: `murphys-bench.service` — restart with `sudo systemctl restart murphys-bench`
+- **App path on server**: `/opt/murphys-bench/`
+- Deploy workflow: `git push` on Mac → SSH `scs-tech@10.58.58.82` → `cd /opt/murphys-bench && git pull && source venv/bin/activate && python3 manage.py migrate` → `sudo systemctl restart murphys-bench`
 - Full CRUD views for work orders, clients, devices, mileage, contacts, tickets, KB, queues
-- HTMX inline notes, checklist, ticket replies, Quick Labor, credentials, billing
 
-**Session 20 additions:**
-- **Vertical left sidebar nav**: Replaced horizontal top nav bar with fixed left sidebar (`w-64` expanded / `w-16` collapsed). Logo fills header at top. 8 nav links with icons (home, list, building, ticket, funnel, map-pin, book-open, chart-bar). "My Work" HTMX accordion in scrollable middle section. Footer: Admin (admin-only → Settings), Log Out. Collapse toggle persists to localStorage; pre-Alpine CSS prevents layout flash. Security link removed from sidebar (accessible via Admin panel only).
-- **8 new icons in `mb_icons.py`**: `home`, `map-pin`, `chart-bar`, `funnel`, `chevron-left`, `book-open`, `shield`, `logout`.
-- No new models or migrations. No DB changes required.
-
-**Session 19 additions:**
-- **Status Management UI**: `StatusDefinition` model — configurable label + hex color per status, `entity_type` (ticket/workorder), `is_system` flag. Migration 0036 seeds 13 core statuses with default colors. Settings → Statuses tab: color picker for all statuses, custom status add/edit/delete. System statuses are color-editable but not deletable.
-- **Template tag suite**: `{% status_badge slug entity_type %}` (styled HTML span), `{% status_label slug entity_type %}` (plain text), `{% status_color slug entity_type %}` (hex color). 2-minute module-level cache. Graceful fallback for unknown slugs.
-- **Replaced all hardcoded badge patterns**: 11 templates updated — ticket_list, ticket_detail, work_order_list, work_order_detail, client_detail, device_detail, dashboard, queue_detail, sidebar_content, ticket_linked_list, work_order_print.
-- **Dynamic form choices**: WorkOrderForm + TicketForm load status dropdowns from StatusDefinition (custom statuses appear automatically).
-- **email_utils.py**: `status` context variable for email templates now resolved via StatusDefinition.
-
-**Session 18 additions:**
-- **Device-level credentials vault**: `device_username`, `device_password`, `credential_notes` (AES-256 encrypted) on `Device` model. `DeviceCredentialAccessLog` model logs every reveal/edit. `can_view_device_credentials` flag on `Role` (Admin=True, Technician=False). HTMX eye-reveal card on device detail page. Admin can edit; techs with flag can reveal; others see "contact admin" message. Migration 0035 applied to production.
-
-**Session 17 additions:**
-- **Invoice CSV export**: `/clients/<pk>/invoices.csv`, optional `?status=` filter, CSV button on client detail
-- **Icon audit**: 10 new icons in `mb_icons.py`, all emoji/text symbols replaced across templates
-- **Billing financial summary**: Reports page — Invoiced/Collected/Outstanding cards + outstanding-by-client table. CSV at `/reports/csv/billing/`
-- **Org credentials vault**: `OrgCredential` + `CredentialAccessLog` models (migration 0034). Settings → Credentials tab. AES-256 encrypted. HTMX eye-reveal logs every access.
-- **Email Template Manager**: Settings → Email Templates tab. Editable subject/body, active toggle, variable reference panel.
-- **Team workload widget**: Dashboard (admin only) — open WOs + tickets per tech, sorted by load.
-- **Technician performance report**: Reports page — completion %, avg resolution hours, open WOs. CSV export.
-
-**Session 16 additions:**
-- **`Invoice` model**: OneToOne on WorkOrder. Fields: `billing_status` (uninvoiced/invoiced/paid/paid_direct/disputed), `amount`, `invoiced_date`, `paid_date`, `payment_method`, `notes`. Auto-created on WO creation via `post_save` signal.
-- **Migration 0033**: CreateModel + backfill RunPython. Applied to production.
-- **`WorkOrderBillingUpdateView`**: HTMX POST at `/work-orders/<pk>/billing/`. Quick-action + full edit mode.
-- **`billing_card.html`** partial: Alpine.js display/edit toggle, HTMX `hx-swap="outerHTML"`.
-- **Client detail**: outstanding balance badge (yellow pill) next to "Work Order History" heading.
+**Session 21 additions:**
+- **Ticket contact FK** (migration 0037): `Ticket.contact` nullable FK to `Contact` — same pattern as `WorkOrder.contact`. Email replies route to `ticket.contact.email` first, then fall back to primary contact. Inbound emails auto-set contact from matched sender.
+- **HTMX contact cascade on ticket form**: Selecting a client dynamically loads that client's contacts into the Contact dropdown. Endpoint: `GET /tickets/contacts-by-client/?client=<id>`.
+- **Ticket contact shown on ticket detail**: Name + email in the info panel.
+- **Reply resend**: Each customer-visible reply has a "Resend" button. Pick any client contact or type a custom address — fires the same reply email to that recipient.
+- **CC on replies**: Reply form shows a CC field (comma-separated) when Customer Visible is selected. Included as BCC on that send only, not saved.
+- **Native User management**: `/users/new/`, `/users/<pk>/edit/`, `/users/<pk>/set-password/`. Full user CRUD — name, username, email, phone, role, is_staff, is_active, password. No Django admin needed.
+- **Native Role management**: `/roles/` — list all roles with 17 permission flags shown as ✓/✗ grid. Create, edit, delete. System roles protected. Edit page shows all flags as checkboxes.
+- **Users + Roles in Settings sidebar**: Both appear at the bottom of the Settings nav and link to their pages. Each page has "← Settings" back link. Roles also has "← Users".
 
 ---
 
-## What's next (session 21 options):
+## What's next (session 22 options):
 
-### Option A — Navigation UI overhaul ✅ DONE (session 20)
-Comparison with RepairShopCRM revealed clear gaps. Two sub-options:
-- **Quick wins**: Add icons to horizontal top nav, surface company logo from SiteSettings, show logged-in user name + role in nav. One session, low risk.
-- **Full vertical sidebar nav**: Convert from horizontal top bar to vertical left sidebar (icon + label, collapsible to icon-only). "My Work" merges below or integrates. Touches base.html significantly. Half to full session. Right long-term pattern for a multi-section app.
-- RepairShopCRM reference: dark left sidebar, company logo at top, user name + role below logo, larger icon+text nav items, collapses to icons only.
+### Option A — Inbound email overhaul
+Smarter intake: junk/noise filtering, unmatched sender handling, new ticket notifications (in-app badge + email alert), visual "unread" indicator on ticket list (bold row + dot, clears on first open). The inbound timer runs every 5 min via systemd user timer (`mb-inbound.timer`). Log at `/home/scs-tech/mb-inbound.log`.
 
 ### Option B — Data Management
-Import wizard (CSV → map columns → preview → import), bulk export ZIP, deleted data recovery (requires soft-delete changes), reset tool. Substantial build.
+Import wizard (CSV → map columns → preview → import), bulk export ZIP, deleted data recovery.
 
-### Option D — Something from daily use
+### Option C — Something from daily use
 Any friction points or gaps SCS has noticed in actual use since deployment.
 
 ---
@@ -82,7 +59,8 @@ Any friction points or gaps SCS has noticed in actual use since deployment.
 
 ## Known gotchas (read before touching these areas):
 
-- **Gunicorn restart on prod**: runs as `scs-tech`, no passwordless sudo. Use `kill -HUP <master-pid>` to reload workers. Master PID: `ps aux | grep 'gunicorn.*murphys_bench.wsgi' | awk 'NR==1{print $2}'`
+- **Gunicorn service**: `murphys-bench.service` — NOT `gunicorn.service`. Restart: `sudo systemctl restart murphys-bench`
+- **App path on server**: `/opt/murphys-bench/` — NOT `~/murphys-bench/`
 - **Audit log in templates**: Never use `entry.changes_dict.items` — use `_audit_entries(obj)` from views.py
 - **Alpine.js**: CDN with `defer`. HTMX-swapped content reinitializes automatically via mutation observer.
 - **two_factor template overrides**: Live in root `templates/two_factor/` (DIRS), NOT `core/templates/`
@@ -90,8 +68,9 @@ Any friction points or gaps SCS has noticed in actual use since deployment.
 - **Mileage Calculate CSRF**: Uses `document.querySelector('[name=csrfmiddlewaretoken]')` — do not revert
 - **Google Maps API key**: Stored in SiteSettings (DB). Restricted to WAN IP in Google Cloud Console.
 - **Production Python**: `python3` not `python`. Venv: `/opt/murphys-bench/venv/`
-- **mb_icons templatetag**: `{% load mb_icons %}` at top of any template that uses `{% icon %}`. Partials need their own load tag.
+- **mb_icons templatetag**: `{% load mb_icons %}` at top of any template that uses `{% icon %}`, `{% attr %}`, or `{% getfield %}`. Partials need their own load tag.
 - **Email template variable reference**: Must use `{% verbatim %}...{% endverbatim %}` to display `{{ }}` tokens in templates.
+- **Inbound email timer**: systemd user timer as `scs-tech` — `mb-inbound.timer`, runs every 5 min. Log: `/home/scs-tech/mb-inbound.log`. Enabled linger: `loginctl enable-linger scs-tech`.
 
 ---
 
@@ -104,4 +83,4 @@ Any friction points or gaps SCS has noticed in actual use since deployment.
 - Tailwind CSS via CDN — match existing class patterns
 - After building, run `python manage.py check` to confirm no issues
 - Create and apply migrations for all new models (both dev and prod)
-- Commit and push when complete; deploy with git pull + gunicorn reload on server
+- Commit and push when complete; deploy with git pull + service restart on server

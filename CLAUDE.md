@@ -4,7 +4,9 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 9, 2026 (end of session 20)
+**Last Updated**: June 9, 2026 (end of session 21)
+**Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench`
+**App path on server**: `/opt/murphys-bench/`
 
 ---
 
@@ -320,6 +322,17 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - Sidebar: shows last reply/note preview instead of subject/description; falls back gracefully if no notes
 - Mileage Calculate button: fixed CSRF token for production (was silently failing in prod)
 - Google Maps API confirmed working from production server (WAN IP restriction set in Cloud Console)
+
+### ✅ Session 21 — Ticket Contact FK, Email Fixes, User/Role Management (session 21 — COMPLETE)
+
+- **Ticket contact FK** (migration 0037): `Ticket.contact` nullable FK to `Contact`. Reply emails route to `ticket.contact.email` first, fall back to primary contact. Inbound emails auto-set contact from matched sender.
+- **HTMX contact cascade on ticket form**: Client select dynamically loads contacts. Endpoint: `GET /tickets/contacts-by-client/?client=<id>`.
+- **Reply resend**: Each customer-visible reply has a "Resend" button — pick any client contact or type a custom address.
+- **CC on replies**: Reply form shows a CC field (comma-separated) when Customer Visible is selected.
+- **Native User management**: `/users/new/`, `/users/<pk>/edit/`, `/users/<pk>/set-password/` — full CRUD, no Django admin needed.
+- **Native Role management**: `/roles/` — list with ✓/✗ permission grid, create/edit/delete. 17 permission flags. System roles protected.
+- **Users + Roles in Settings sidebar**: Both at the bottom of Settings nav, with "← Settings" back links.
+- New template filters: `attr` (getattr on model), `getfield` (form[name]) — in `mb_icons.py`.
 
 ### ✅ Session 20 — Vertical Left Sidebar Nav (session 20 — COMPLETE)
 
