@@ -234,7 +234,7 @@ class DashboardView(LoginRequiredMixin, View):
             from django.db.models import Count
             techs = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
             open_wo_statuses = ['new', 'in_progress', 'waiting_on_customer', 'on_hold']
-            open_ticket_statuses = ['new', 'open', 'in_progress', 'waiting_on_customer']
+            open_ticket_statuses = ['new', 'open', 'in_progress', 'waiting_on_customer', 'converted']
             for tech in techs:
                 open_wos = WorkOrder.objects.filter(assigned_to=tech, status__in=open_wo_statuses).count()
                 open_tickets = Ticket.objects.filter(assigned_to=tech, status__in=open_ticket_statuses).count()
