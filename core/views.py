@@ -443,7 +443,26 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
             wo.completed_date = None
 
         wo.save()
+        _flag_ticket_wo_complete(wo)
         return redirect('core:work_order_detail', pk=pk)
+
+
+def _flag_ticket_wo_complete(wo):
+    """Arm wo_complete on linked ticket when WO is completed/closed; clear it if WO re-opened."""
+    try:
+        ticket = wo.ticket
+    except Exception:
+        return
+    if not ticket:
+        return
+    if wo.status in WO_CLOSED_STATUSES:
+        if not ticket.wo_complete:
+            ticket.wo_complete = True
+            ticket.save(update_fields=['wo_complete', 'updated_at'])
+    else:
+        if ticket.wo_complete:
+            ticket.wo_complete = False
+            ticket.save(update_fields=['wo_complete', 'updated_at'])
 
 
 class WorkOrderAttachmentUploadView(LoginRequiredMixin, View):
@@ -880,15 +899,7 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
     def form_valid(self, form):
         old_status = WorkOrder.objects.get(pk=self.object.pk).status
         response = super().form_valid(form)
-
-        # Auto-resolve linked ticket when WO closes (if setting is on)
-        if self.object.status == 'closed' and old_status != 'closed':
-            from django.conf import settings
-            if getattr(settings, 'AUTO_RESOLVE_TICKET_ON_WO_CLOSE', False):
-                ticket = self.object.ticket
-                if ticket and ticket.status not in ('resolved', 'closed', 'converted'):
-                    ticket.status = 'resolved'
-                    ticket.save()
+        _flag_ticket_wo_complete(self.object)
 
         # Optionally append checklist items from the flat bank filtered by device type
         if form.cleaned_data.get('apply_checklist'):
@@ -1250,6 +1261,9 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
         response = super().form_valid(form)
         fields = _get_custom_fields_for_ticket(self.object)
         _save_custom_field_values(self.request, self.object, fields)
+        if self.object.status in ('resolved', 'closed') and self.object.wo_complete:
+            self.object.wo_complete = False
+            self.object.save(update_fields=['wo_complete'])
         from .email_utils import send_ticket_email
         if self.object.status != old_status:
             send_ticket_email('status_changed', self.object, {'old_status': old_status})
