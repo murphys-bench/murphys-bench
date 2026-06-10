@@ -13,7 +13,7 @@ from .models import (
     WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist, ChecklistItem,
     Ticket, TicketReply, TicketLock, TicketLink, Attachment, SiteSettings,
     KBCategory, KBArticle, TicketQueue, DashboardTile, User,
-    CustomField, CustomFieldValue,
+    CustomField, CustomFieldChoice, CustomFieldValue,
     QuickLaborItem, WorkPerformed, ContactPhone,
     Contact, RepairType, RepairTypeCategory,
     CannedResponseCategory, CannedResponse, Invoice,
@@ -22,6 +22,8 @@ from .models import (
     EmailTemplate,
     StatusDefinition,
     SuppressedAddress,
+    BlockedSender,
+    SLAPlan, HelpTopic, TechSkill,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
@@ -2774,6 +2776,11 @@ SETTINGS_TABS = [
     ('email_templates',  'Email Templates',  None),
     ('statuses',         'Statuses',         None),
     ('kb_categories',    'KB Categories',    None),
+    ('sla_plans',        'SLA Plans',        None),
+    ('help_topics',      'Help Topics',      None),
+    ('tech_skills',      'Tech Skills',      None),
+    ('dashboard_tiles',  'Dashboard Tiles',  None),
+    ('custom_fields',    'Custom Fields',    None),
     ('users',            'Users',            None),
     ('roles',            'Roles',            None),
     ('logs',             'Logs',             None),
@@ -2929,6 +2936,21 @@ class SettingsView(LoginRequiredMixin, View):
             ctx.update(_kb_categories_context())
         if active_tab == 'outbound':
             ctx['suppressed_addresses'] = SuppressedAddress.objects.all()
+        if active_tab == 'inbound':
+            ctx['blocked_senders'] = BlockedSender.objects.all()
+        if active_tab == 'sla_plans':
+            ctx['sla_plans'] = SLAPlan.objects.all()
+        if active_tab == 'help_topics':
+            ctx['help_topics'] = HelpTopic.objects.all()
+            ctx['sla_plans_all'] = SLAPlan.objects.filter(is_active=True)
+        if active_tab == 'tech_skills':
+            ctx['tech_skills'] = TechSkill.objects.all()
+        if active_tab == 'dashboard_tiles':
+            ctx['dashboard_tiles'] = DashboardTile.objects.all()
+        if active_tab == 'custom_fields':
+            ctx['custom_fields'] = CustomField.objects.prefetch_related('choices').all()
+            ctx['help_topics_all'] = HelpTopic.objects.filter(is_active=True)
+            ctx['repair_types_all'] = RepairType.objects.filter(is_active=True)
         if active_tab == 'logs':
             from .models import EmailSendLog, InboundEmailLog
             from auditlog.models import LogEntry
@@ -3573,3 +3595,304 @@ class StatusDefinitionDeleteView(LoginRequiredMixin, View):
             from .templatetags.mb_icons import invalidate_status_cache
             invalidate_status_cache()
         return redirect(reverse_lazy(STATUS_REDIRECT) + STATUS_TAB)
+
+
+# ---------------------------------------------------------------------------
+# Blocked Senders (inbound email filter)
+# ---------------------------------------------------------------------------
+
+class BlockedSenderAddView(LoginRequiredMixin, View):
+    def post(self, request):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        pattern = request.POST.get('pattern', '').strip().lower()
+        reason = request.POST.get('reason', '').strip()
+        if pattern:
+            BlockedSender.objects.get_or_create(pattern=pattern, defaults={'reason': reason})
+        return redirect(f"{reverse('core:settings')}?tab=inbound")
+
+
+class BlockedSenderDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        BlockedSender.objects.filter(pk=pk).delete()
+        return redirect(f"{reverse('core:settings')}?tab=inbound")
+
+
+# ---------------------------------------------------------------------------
+# SLA Plans
+# ---------------------------------------------------------------------------
+
+_SLA_REDIRECT = 'core:settings'
+_SLA_TAB = '?tab=sla_plans'
+
+
+class SLAPlanCreateView(LoginRequiredMixin, View):
+    def post(self, request):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied; raise PermissionDenied
+        name = request.POST.get('name', '').strip()
+        grace = request.POST.get('grace_period_hours', '24').strip()
+        is_active = request.POST.get('is_active') == 'on'
+        is_transient = request.POST.get('is_transient') == 'on'
+        disable_alerts = request.POST.get('disable_overdue_alerts') == 'on'
+        if name:
+            try:
+                grace_int = int(grace)
+            except ValueError:
+                grace_int = 24
+            SLAPlan.objects.get_or_create(name=name, defaults=dict(
+                grace_period_hours=grace_int,
+                is_active=is_active,
+                is_transient=is_transient,
+                disable_overdue_alerts=disable_alerts,
+            ))
+        return redirect(reverse_lazy(_SLA_REDIRECT) + _SLA_TAB)
+
+
+class SLAPlanUpdateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied; raise PermissionDenied
+        plan = get_object_or_404(SLAPlan, pk=pk)
+        plan.name = request.POST.get('name', plan.name).strip()
+        try:
+            plan.grace_period_hours = int(request.POST.get('grace_period_hours', plan.grace_period_hours))
+        except ValueError:
+            pass
+        plan.is_active = request.POST.get('is_active') == 'on'
+        plan.is_transient = request.POST.get('is_transient') == 'on'
+        plan.disable_overdue_alerts = request.POST.get('disable_overdue_alerts') == 'on'
+        plan.save()
+        return redirect(reverse_lazy(_SLA_REDIRECT) + _SLA_TAB)
+
+
+class SLAPlanDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied; raise PermissionDenied
+        plan = get_object_or_404(SLAPlan, pk=pk)
+        if plan.help_topics.exists():
+            messages.error(request, f'Cannot delete "{plan.name}" — it is referenced by help topics.')
+        else:
+            plan.delete()
+        return redirect(reverse_lazy(_SLA_REDIRECT) + _SLA_TAB)
+
+
+# ---------------------------------------------------------------------------
+# Help Topics
+# ---------------------------------------------------------------------------
+
+_HT_REDIRECT = 'core:settings'
+_HT_TAB = '?tab=help_topics'
+
+
+class HelpTopicCreateView(LoginRequiredMixin, View):
+    def post(self, request):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied; raise PermissionDenied
+        name = request.POST.get('name', '').strip()
+        description = request.POST.get('description', '').strip()
+        sla_id = request.POST.get('default_sla') or None
+        is_active = request.POST.get('is_active') == 'on'
+        sort_order = request.POST.get('sort_order', '0').strip()
+        if name:
+            try:
+                sort_int = int(sort_order)
+            except ValueError:
+                sort_int = 0
+            sla = SLAPlan.objects.filter(pk=sla_id).first() if sla_id else None
+            HelpTopic.objects.get_or_create(name=name, defaults=dict(
+                description=description,
+                default_sla=sla,
+                is_active=is_active,
+                sort_order=sort_int,
+            ))
+        return redirect(reverse_lazy(_HT_REDIRECT) + _HT_TAB)
+
+
+class HelpTopicUpdateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied; raise PermissionDenied
+        topic = get_object_or_404(HelpTopic, pk=pk)
+        topic.name = request.POST.get('name', topic.name).strip()
+        topic.description = request.POST.get('description', '').strip()
+        sla_id = request.POST.get('default_sla') or None
+        topic.default_sla = SLAPlan.objects.filter(pk=sla_id).first() if sla_id else None
+        topic.is_active = request.POST.get('is_active') == 'on'
+        try:
+            topic.sort_order = int(request.POST.get('sort_order', topic.sort_order))
+        except ValueError:
+            pass
+        topic.save()
+        return redirect(reverse_lazy(_HT_REDIRECT) + _HT_TAB)
+
+
+class HelpTopicDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied; raise PermissionDenied
+        topic = get_object_or_404(HelpTopic, pk=pk)
+        if topic.tickets.exists():
+            messages.error(request, f'Cannot delete "{topic.name}" — it is used by existing tickets.')
+        else:
+            topic.delete()
+        return redirect(reverse_lazy(_HT_REDIRECT) + _HT_TAB)
+
+
+# ---------------------------------------------------------------------------
+# Tech Skills
+# ---------------------------------------------------------------------------
+
+_TS_REDIRECT = 'core:settings'
+_TS_TAB = '?tab=tech_skills'
+
+
+class TechSkillCreateView(LoginRequiredMixin, View):
+    def post(self, request):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied; raise PermissionDenied
+        name = request.POST.get('name', '').strip()
+        description = request.POST.get('description', '').strip()
+        if name:
+            TechSkill.objects.get_or_create(name=name, defaults={'description': description})
+        return redirect(reverse_lazy(_TS_REDIRECT) + _TS_TAB)
+
+
+class TechSkillDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied; raise PermissionDenied
+        TechSkill.objects.filter(pk=pk).delete()
+        return redirect(reverse_lazy(_TS_REDIRECT) + _TS_TAB)
+
+
+# ---------------------------------------------------------------------------
+# Dashboard Tiles
+# ---------------------------------------------------------------------------
+
+_DT_REDIRECT = 'core:settings'
+_DT_TAB = '?tab=dashboard_tiles'
+
+
+class DashboardTileUpdateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied; raise PermissionDenied
+        import json as _json
+        tile = get_object_or_404(DashboardTile, pk=pk)
+        tile.label = request.POST.get('label', tile.label).strip()
+        tile.visible_to = request.POST.get('visible_to', tile.visible_to)
+        tile.is_active = request.POST.get('is_active') == 'on'
+        try:
+            tile.sort_order = int(request.POST.get('sort_order', tile.sort_order))
+        except ValueError:
+            pass
+        raw_filter = request.POST.get('status_filter', '').strip()
+        if raw_filter:
+            try:
+                tile.status_filter = _json.loads(raw_filter)
+            except Exception:
+                tile.status_filter = [s.strip() for s in raw_filter.split(',') if s.strip()]
+        else:
+            tile.status_filter = []
+        tile.save()
+        return redirect(reverse_lazy(_DT_REDIRECT) + _DT_TAB)
+
+
+# ---------------------------------------------------------------------------
+# Custom Fields
+# ---------------------------------------------------------------------------
+
+_CF_REDIRECT = 'core:settings'
+_CF_TAB = '?tab=custom_fields'
+
+
+class CustomFieldCreateView(LoginRequiredMixin, View):
+    def post(self, request):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied; raise PermissionDenied
+        label = request.POST.get('label', '').strip()
+        if not label:
+            return redirect(reverse_lazy(_CF_REDIRECT) + _CF_TAB)
+        field_type = request.POST.get('field_type', 'text')
+        applies_to = request.POST.get('applies_to', 'ticket')
+        is_required = request.POST.get('is_required') == 'on'
+        help_text = request.POST.get('help_text', '').strip()
+        try:
+            sort_order = int(request.POST.get('sort_order', '0'))
+        except ValueError:
+            sort_order = 0
+        sth_id = request.POST.get('scoped_to_help_topic') or None
+        str_id = request.POST.get('scoped_to_repair_type') or None
+        cf = CustomField.objects.create(
+            label=label,
+            field_type=field_type,
+            applies_to=applies_to,
+            is_required=is_required,
+            help_text=help_text,
+            sort_order=sort_order,
+            scoped_to_help_topic=HelpTopic.objects.filter(pk=sth_id).first() if sth_id else None,
+            scoped_to_repair_type=RepairType.objects.filter(pk=str_id).first() if str_id else None,
+        )
+        # Seed choices for select fields
+        choices_raw = request.POST.get('choices', '').strip()
+        if cf.field_type == 'select' and choices_raw:
+            for i, c in enumerate(choices_raw.splitlines()):
+                c = c.strip()
+                if c:
+                    CustomFieldChoice.objects.create(field=cf, label=c, sort_order=i)
+        return redirect(reverse_lazy(_CF_REDIRECT) + _CF_TAB)
+
+
+class CustomFieldUpdateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied; raise PermissionDenied
+        cf = get_object_or_404(CustomField, pk=pk)
+        cf.label = request.POST.get('label', cf.label).strip()
+        cf.field_type = request.POST.get('field_type', cf.field_type)
+        cf.applies_to = request.POST.get('applies_to', cf.applies_to)
+        cf.is_required = request.POST.get('is_required') == 'on'
+        cf.help_text = request.POST.get('help_text', '').strip()
+        try:
+            cf.sort_order = int(request.POST.get('sort_order', cf.sort_order))
+        except ValueError:
+            pass
+        cf.is_active = request.POST.get('is_active') == 'on'
+        sth_id = request.POST.get('scoped_to_help_topic') or None
+        str_id = request.POST.get('scoped_to_repair_type') or None
+        cf.scoped_to_help_topic = HelpTopic.objects.filter(pk=sth_id).first() if sth_id else None
+        cf.scoped_to_repair_type = RepairType.objects.filter(pk=str_id).first() if str_id else None
+        cf.save()
+        return redirect(reverse_lazy(_CF_REDIRECT) + _CF_TAB)
+
+
+class CustomFieldDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied; raise PermissionDenied
+        get_object_or_404(CustomField, pk=pk).delete()
+        return redirect(reverse_lazy(_CF_REDIRECT) + _CF_TAB)
+
+
+class CustomFieldChoiceAddView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        cf = get_object_or_404(CustomField, pk=pk)
+        label = request.POST.get('label', '').strip()
+        if label:
+            max_order = cf.choices.aggregate(m=models_Max('sort_order'))['m'] or 0
+            CustomFieldChoice.objects.create(field=cf, label=label, sort_order=max_order + 10)
+        return redirect(reverse_lazy(_CF_REDIRECT) + _CF_TAB)
+
+
+class CustomFieldChoiceDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        CustomFieldChoice.objects.filter(pk=pk).delete()
+        return redirect(reverse_lazy(_CF_REDIRECT) + _CF_TAB)

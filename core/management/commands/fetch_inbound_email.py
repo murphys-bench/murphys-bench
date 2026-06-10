@@ -22,8 +22,10 @@ from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from fnmatch import fnmatch
+
 from core.models import (
-    Attachment, Client, Contact, InboundEmailLog, SiteSettings,
+    Attachment, BlockedSender, Client, Contact, InboundEmailLog, SiteSettings,
     Ticket, TicketReply,
 )
 
@@ -161,6 +163,11 @@ def _process_message(raw_msg_bytes, settings, verbosity):
 
     if verbosity >= 2:
         print(f'  Processing: "{subject}" from {from_email}')
+
+    # Blocked sender check
+    blocked_patterns = list(BlockedSender.objects.values_list('pattern', flat=True))
+    if any(fnmatch(from_email, p.lower()) for p in blocked_patterns):
+        return 'error', f'Blocked sender: {from_email}', None
 
     # Duplicate guard on Message-ID
     if message_id and InboundEmailLog.objects.filter(message_id=message_id).exclude(status='error').exists():

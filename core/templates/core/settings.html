@@ -379,6 +379,55 @@
             </div>
         </div>
 
+        <!-- Blocked Senders -->
+        <div class="bg-white rounded-lg shadow mt-6">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-lg font-semibold text-gray-900">Blocked Senders</h2>
+                <p class="text-sm text-gray-500 mt-1">Inbound emails from these addresses or patterns are silently dropped. Supports fnmatch wildcards (e.g. <code>*@spammer.com</code>).</p>
+            </div>
+            <div class="p-6">
+                <table class="min-w-full divide-y divide-gray-200 text-sm mb-4">
+                    <thead class="bg-gray-50"><tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pattern</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reason</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
+                        <th class="px-4 py-3"></th>
+                    </tr></thead>
+                    <tbody class="divide-y divide-gray-100">
+                        {% for bs in blocked_senders %}
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-4 py-2 font-mono text-gray-800">{{ bs.pattern }}</td>
+                            <td class="px-4 py-2 text-gray-600">{{ bs.reason|default:"—" }}</td>
+                            <td class="px-4 py-2 text-gray-500">{{ bs.created_at|date:"M j Y" }}</td>
+                            <td class="px-4 py-2 text-right">
+                                <form method="post" action="{% url 'core:blocked_sender_delete' bs.pk %}" onsubmit="return confirm('Remove this block?');">
+                                    {% csrf_token %}
+                                    <button type="submit" class="text-red-600 hover:text-red-800 text-xs">Remove</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4" class="px-4 py-4 text-center text-gray-400">No blocked senders yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <form method="post" action="{% url 'core:blocked_sender_add' %}" class="flex gap-3 items-end">
+                    {% csrf_token %}
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Pattern</label>
+                        <input type="text" name="pattern" placeholder="spam@example.com or *@domain.com" required
+                               class="border border-gray-300 rounded px-3 py-1.5 text-sm w-64 focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Reason (optional)</label>
+                        <input type="text" name="reason" placeholder="e.g. Known spammer"
+                               class="border border-gray-300 rounded px-3 py-1.5 text-sm w-48 focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <button type="submit" class="px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Add Block</button>
+                </form>
+            </div>
+        </div>
+
         <!-- ── Attachments ────────────────────────────────────────── -->
         {% elif active_tab == 'attachments' %}
         <div class="bg-white rounded-lg shadow p-6">
@@ -1918,6 +1967,479 @@
             {% empty %}
             <p class="text-sm text-gray-400">No categories yet. Add one above.</p>
             {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- ── SLA Plans ─────────────────────────────────────────────── -->
+        {% if active_tab == 'sla_plans' %}
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-lg font-semibold text-gray-900">SLA Plans</h2>
+                <p class="text-sm text-gray-500 mt-1">Define response deadlines for tickets. Grace period is hours until a ticket is marked overdue.</p>
+            </div>
+            <div class="p-6">
+                <table class="min-w-full divide-y divide-gray-200 text-sm mb-6">
+                    <thead class="bg-gray-50"><tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hours</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Active</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transient</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">No Alerts</th>
+                        <th class="px-4 py-3"></th>
+                    </tr></thead>
+                    <tbody class="divide-y divide-gray-100" x-data>
+                        {% for plan in sla_plans %}
+                        <tr class="hover:bg-gray-50" x-data="{ editing: false }">
+                            <template x-if="!editing">
+                                <td class="px-4 py-2 font-medium text-gray-900">{{ plan.name }}</td>
+                            </template>
+                            <template x-if="editing">
+                                <td class="px-4 py-2" colspan="5">
+                                    <form method="post" action="{% url 'core:sla_plan_update' plan.pk %}" class="flex flex-wrap gap-3 items-end">
+                                        {% csrf_token %}
+                                        <div><label class="block text-xs text-gray-500 mb-1">Name</label><input type="text" name="name" value="{{ plan.name }}" required class="border border-gray-300 rounded px-2 py-1 text-sm w-40"></div>
+                                        <div><label class="block text-xs text-gray-500 mb-1">Grace (hours)</label><input type="number" name="grace_period_hours" value="{{ plan.grace_period_hours }}" min="1" class="border border-gray-300 rounded px-2 py-1 text-sm w-20"></div>
+                                        <div class="flex flex-col gap-1 text-sm">
+                                            <label class="flex items-center gap-1"><input type="checkbox" name="is_active" {% if plan.is_active %}checked{% endif %}> Active</label>
+                                            <label class="flex items-center gap-1"><input type="checkbox" name="is_transient" {% if plan.is_transient %}checked{% endif %}> Transient</label>
+                                            <label class="flex items-center gap-1"><input type="checkbox" name="disable_overdue_alerts" {% if plan.disable_overdue_alerts %}checked{% endif %}> Disable Alerts</label>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button type="submit" class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Save</button>
+                                            <button type="button" @click="editing=false" class="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 border border-gray-300">Cancel</button>
+                                        </div>
+                                    </form>
+                                </td>
+                            </template>
+                            <template x-if="!editing">
+                                <td class="px-4 py-2 text-gray-700">{{ plan.grace_period_hours }}h</td>
+                            </template>
+                            <template x-if="!editing">
+                                <td class="px-4 py-2">{% if plan.is_active %}<span class="text-green-600">✓</span>{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+                            </template>
+                            <template x-if="!editing">
+                                <td class="px-4 py-2">{% if plan.is_transient %}<span class="text-blue-600">✓</span>{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+                            </template>
+                            <template x-if="!editing">
+                                <td class="px-4 py-2">{% if plan.disable_overdue_alerts %}<span class="text-yellow-600">✓</span>{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+                            </template>
+                            <template x-if="!editing">
+                                <td class="px-4 py-2 text-right flex gap-3 justify-end">
+                                    <button type="button" @click="editing=true" class="text-blue-600 hover:text-blue-800 text-xs">Edit</button>
+                                    <form method="post" action="{% url 'core:sla_plan_delete' plan.pk %}" onsubmit="return confirm('Delete this SLA plan?');" class="inline">
+                                        {% csrf_token %}
+                                        <button type="submit" class="text-red-600 hover:text-red-800 text-xs">Delete</button>
+                                    </form>
+                                </td>
+                            </template>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="6" class="px-4 py-4 text-center text-gray-400">No SLA plans yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <!-- Add new SLA plan -->
+                <form method="post" action="{% url 'core:sla_plan_create' %}" class="flex flex-wrap gap-3 items-end border-t border-gray-100 pt-4">
+                    {% csrf_token %}
+                    <div><label class="block text-xs font-medium text-gray-600 mb-1">Name</label><input type="text" name="name" placeholder="e.g. Standard 24h" required class="border border-gray-300 rounded px-3 py-1.5 text-sm w-48"></div>
+                    <div><label class="block text-xs font-medium text-gray-600 mb-1">Grace (hours)</label><input type="number" name="grace_period_hours" value="24" min="1" class="border border-gray-300 rounded px-3 py-1.5 text-sm w-20"></div>
+                    <div class="flex flex-col gap-1 text-sm pt-4">
+                        <label class="flex items-center gap-1"><input type="checkbox" name="is_active" checked> Active</label>
+                        <label class="flex items-center gap-1"><input type="checkbox" name="is_transient"> Transient</label>
+                        <label class="flex items-center gap-1"><input type="checkbox" name="disable_overdue_alerts"> Disable Alerts</label>
+                    </div>
+                    <button type="submit" class="px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Add SLA Plan</button>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ── Help Topics ────────────────────────────────────────────── -->
+        {% if active_tab == 'help_topics' %}
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-lg font-semibold text-gray-900">Help Topics</h2>
+                <p class="text-sm text-gray-500 mt-1">Classify tickets by issue type. Each topic can have a default SLA plan.</p>
+            </div>
+            <div class="p-6">
+                <table class="min-w-full divide-y divide-gray-200 text-sm mb-6">
+                    <thead class="bg-gray-50"><tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Default SLA</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Order</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Active</th>
+                        <th class="px-4 py-3"></th>
+                    </tr></thead>
+                    <tbody class="divide-y divide-gray-100">
+                        {% for topic in help_topics %}
+                        <tr class="hover:bg-gray-50" x-data="{ editing: false }">
+                            <template x-if="!editing">
+                                <td class="px-4 py-2 font-medium text-gray-900">{{ topic.name }}</td>
+                            </template>
+                            <template x-if="!editing">
+                                <td class="px-4 py-2 text-gray-600">{{ topic.description|default:"—"|truncatechars:40 }}</td>
+                            </template>
+                            <template x-if="!editing">
+                                <td class="px-4 py-2 text-gray-600">{{ topic.default_sla.name|default:"—" }}</td>
+                            </template>
+                            <template x-if="!editing">
+                                <td class="px-4 py-2 text-gray-500">{{ topic.sort_order }}</td>
+                            </template>
+                            <template x-if="!editing">
+                                <td class="px-4 py-2">{% if topic.is_active %}<span class="text-green-600">✓</span>{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+                            </template>
+                            <template x-if="!editing">
+                                <td class="px-4 py-2 text-right flex gap-3 justify-end">
+                                    <button type="button" @click="editing=true" class="text-blue-600 hover:text-blue-800 text-xs">Edit</button>
+                                    <form method="post" action="{% url 'core:help_topic_delete' topic.pk %}" onsubmit="return confirm('Delete this help topic?');" class="inline">
+                                        {% csrf_token %}
+                                        <button type="submit" class="text-red-600 hover:text-red-800 text-xs">Delete</button>
+                                    </form>
+                                </td>
+                            </template>
+                            <template x-if="editing">
+                                <td colspan="6" class="px-4 py-3">
+                                    <form method="post" action="{% url 'core:help_topic_update' topic.pk %}" class="flex flex-wrap gap-3 items-end">
+                                        {% csrf_token %}
+                                        <div><label class="block text-xs text-gray-500 mb-1">Name</label><input type="text" name="name" value="{{ topic.name }}" required class="border border-gray-300 rounded px-2 py-1 text-sm w-40"></div>
+                                        <div><label class="block text-xs text-gray-500 mb-1">Description</label><input type="text" name="description" value="{{ topic.description }}" class="border border-gray-300 rounded px-2 py-1 text-sm w-48"></div>
+                                        <div><label class="block text-xs text-gray-500 mb-1">Default SLA</label>
+                                            <select name="default_sla" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                                                <option value="">— none —</option>
+                                                {% for s in sla_plans_all %}<option value="{{ s.pk }}" {% if topic.default_sla_id == s.pk %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+                                            </select>
+                                        </div>
+                                        <div><label class="block text-xs text-gray-500 mb-1">Sort</label><input type="number" name="sort_order" value="{{ topic.sort_order }}" class="border border-gray-300 rounded px-2 py-1 text-sm w-16"></div>
+                                        <div class="flex flex-col pt-4">
+                                            <label class="flex items-center gap-1 text-sm"><input type="checkbox" name="is_active" {% if topic.is_active %}checked{% endif %}> Active</label>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button type="submit" class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Save</button>
+                                            <button type="button" @click="editing=false" class="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 border border-gray-300">Cancel</button>
+                                        </div>
+                                    </form>
+                                </td>
+                            </template>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="6" class="px-4 py-4 text-center text-gray-400">No help topics yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <form method="post" action="{% url 'core:help_topic_create' %}" class="flex flex-wrap gap-3 items-end border-t border-gray-100 pt-4">
+                    {% csrf_token %}
+                    <div><label class="block text-xs font-medium text-gray-600 mb-1">Name</label><input type="text" name="name" placeholder="e.g. Network Issue" required class="border border-gray-300 rounded px-3 py-1.5 text-sm w-48"></div>
+                    <div><label class="block text-xs font-medium text-gray-600 mb-1">Description</label><input type="text" name="description" placeholder="Optional" class="border border-gray-300 rounded px-3 py-1.5 text-sm w-48"></div>
+                    <div><label class="block text-xs font-medium text-gray-600 mb-1">Default SLA</label>
+                        <select name="default_sla" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
+                            <option value="">— none —</option>
+                            {% for s in sla_plans_all %}<option value="{{ s.pk }}">{{ s.name }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div><label class="block text-xs font-medium text-gray-600 mb-1">Sort</label><input type="number" name="sort_order" value="0" class="border border-gray-300 rounded px-3 py-1.5 text-sm w-16"></div>
+                    <div class="flex flex-col pt-4"><label class="flex items-center gap-1 text-sm"><input type="checkbox" name="is_active" checked> Active</label></div>
+                    <button type="submit" class="px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Add Help Topic</button>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ── Tech Skills ────────────────────────────────────────────── -->
+        {% if active_tab == 'tech_skills' %}
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-lg font-semibold text-gray-900">Tech Skills</h2>
+                <p class="text-sm text-gray-500 mt-1">Skill tags that can be assigned to technicians for future skill-based routing.</p>
+            </div>
+            <div class="p-6">
+                <table class="min-w-full divide-y divide-gray-200 text-sm mb-4">
+                    <thead class="bg-gray-50"><tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Skill</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                        <th class="px-4 py-3"></th>
+                    </tr></thead>
+                    <tbody class="divide-y divide-gray-100">
+                        {% for skill in tech_skills %}
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-4 py-2 font-medium text-gray-900">{{ skill.name }}</td>
+                            <td class="px-4 py-2 text-gray-600">{{ skill.description|default:"—" }}</td>
+                            <td class="px-4 py-2 text-right">
+                                <form method="post" action="{% url 'core:tech_skill_delete' skill.pk %}" onsubmit="return confirm('Delete this skill?');" class="inline">
+                                    {% csrf_token %}
+                                    <button type="submit" class="text-red-600 hover:text-red-800 text-xs">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="3" class="px-4 py-4 text-center text-gray-400">No skills defined yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <form method="post" action="{% url 'core:tech_skill_create' %}" class="flex gap-3 items-end border-t border-gray-100 pt-4">
+                    {% csrf_token %}
+                    <div><label class="block text-xs font-medium text-gray-600 mb-1">Skill Name</label><input type="text" name="name" placeholder="e.g. Apple Repair" required class="border border-gray-300 rounded px-3 py-1.5 text-sm w-48"></div>
+                    <div><label class="block text-xs font-medium text-gray-600 mb-1">Description (optional)</label><input type="text" name="description" placeholder="" class="border border-gray-300 rounded px-3 py-1.5 text-sm w-64"></div>
+                    <button type="submit" class="px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Add Skill</button>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ── Dashboard Tiles ────────────────────────────────────────── -->
+        {% if active_tab == 'dashboard_tiles' %}
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-lg font-semibold text-gray-900">Dashboard Tiles</h2>
+                <p class="text-sm text-gray-500 mt-1">Configure which tiles appear on the dashboard. Status filter is a comma-separated list of status slugs (e.g. <code>new,open</code>) or leave blank to count all.</p>
+            </div>
+            <div class="p-6 space-y-6">
+                {% regroup dashboard_tiles by get_row_display as tile_rows %}
+                {% for row_group in tile_rows %}
+                <div>
+                    <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">{{ row_group.grouper }}</h3>
+                    <table class="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead class="bg-gray-50"><tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Label</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status Filter</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Visible To</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Order</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Active</th>
+                            <th class="px-4 py-3"></th>
+                        </tr></thead>
+                        <tbody class="divide-y divide-gray-100">
+                            {% for tile in row_group.list %}
+                            <tr class="hover:bg-gray-50" x-data="{ editing: false }">
+                                <template x-if="!editing">
+                                    <td class="px-4 py-2 font-medium text-gray-900">{{ tile.label }}</td>
+                                </template>
+                                <template x-if="!editing">
+                                    <td class="px-4 py-2 text-gray-500 font-mono text-xs">{{ tile.status_filter|join:", "|default:"all" }}</td>
+                                </template>
+                                <template x-if="!editing">
+                                    <td class="px-4 py-2 text-gray-600">{{ tile.get_visible_to_display }}</td>
+                                </template>
+                                <template x-if="!editing">
+                                    <td class="px-4 py-2 text-gray-500">{{ tile.sort_order }}</td>
+                                </template>
+                                <template x-if="!editing">
+                                    <td class="px-4 py-2">{% if tile.is_active %}<span class="text-green-600">✓</span>{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+                                </template>
+                                <template x-if="!editing">
+                                    <td class="px-4 py-2 text-right">
+                                        <button type="button" @click="editing=true" class="text-blue-600 hover:text-blue-800 text-xs">Edit</button>
+                                    </td>
+                                </template>
+                                <template x-if="editing">
+                                    <td colspan="6" class="px-4 py-3">
+                                        <form method="post" action="{% url 'core:dashboard_tile_update' tile.pk %}" class="flex flex-wrap gap-3 items-end">
+                                            {% csrf_token %}
+                                            <div><label class="block text-xs text-gray-500 mb-1">Label</label><input type="text" name="label" value="{{ tile.label }}" required class="border border-gray-300 rounded px-2 py-1 text-sm w-40"></div>
+                                            <div><label class="block text-xs text-gray-500 mb-1">Status Filter (comma-sep)</label><input type="text" name="status_filter" value="{{ tile.status_filter|join:', ' }}" placeholder="new,open or blank for all" class="border border-gray-300 rounded px-2 py-1 text-sm w-48"></div>
+                                            <div><label class="block text-xs text-gray-500 mb-1">Visible To</label>
+                                                <select name="visible_to" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                                                    <option value="all" {% if tile.visible_to == 'all' %}selected{% endif %}>All Users</option>
+                                                    <option value="admin" {% if tile.visible_to == 'admin' %}selected{% endif %}>Admins Only</option>
+                                                    <option value="tech" {% if tile.visible_to == 'tech' %}selected{% endif %}>Techs Only</option>
+                                                </select>
+                                            </div>
+                                            <div><label class="block text-xs text-gray-500 mb-1">Sort</label><input type="number" name="sort_order" value="{{ tile.sort_order }}" class="border border-gray-300 rounded px-2 py-1 text-sm w-16"></div>
+                                            <div class="flex flex-col pt-4">
+                                                <label class="flex items-center gap-1 text-sm"><input type="checkbox" name="is_active" {% if tile.is_active %}checked{% endif %}> Active</label>
+                                            </div>
+                                            <div class="flex gap-2">
+                                                <button type="submit" class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Save</button>
+                                                <button type="button" @click="editing=false" class="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 border border-gray-300">Cancel</button>
+                                            </div>
+                                        </form>
+                                    </td>
+                                </template>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ── Custom Fields ──────────────────────────────────────────── -->
+        {% if active_tab == 'custom_fields' %}
+        <div class="space-y-6">
+            <div class="bg-white rounded-lg shadow">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-900">Custom Fields</h2>
+                    <p class="text-sm text-gray-500 mt-1">Add extra fields to Tickets or Work Orders. Optionally scope to a specific Help Topic or Repair Type.</p>
+                </div>
+                <div class="p-6">
+                    <table class="min-w-full divide-y divide-gray-200 text-sm mb-6">
+                        <thead class="bg-gray-50"><tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Label</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Applies To</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Scope</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Req</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Active</th>
+                            <th class="px-4 py-3"></th>
+                        </tr></thead>
+                        <tbody class="divide-y divide-gray-100">
+                            {% for cf in custom_fields %}
+                            <tr class="hover:bg-gray-50" x-data="{ editing: false }">
+                                <template x-if="!editing">
+                                    <td class="px-4 py-2 font-medium text-gray-900">{{ cf.label }}</td>
+                                </template>
+                                <template x-if="!editing">
+                                    <td class="px-4 py-2 text-gray-600">{{ cf.get_field_type_display }}</td>
+                                </template>
+                                <template x-if="!editing">
+                                    <td class="px-4 py-2 text-gray-600">{{ cf.get_applies_to_display }}</td>
+                                </template>
+                                <template x-if="!editing">
+                                    <td class="px-4 py-2 text-gray-500 text-xs">
+                                        {% if cf.scoped_to_help_topic %}Topic: {{ cf.scoped_to_help_topic.name }}
+                                        {% elif cf.scoped_to_repair_type %}Type: {{ cf.scoped_to_repair_type.name }}
+                                        {% else %}All{% endif %}
+                                    </td>
+                                </template>
+                                <template x-if="!editing">
+                                    <td class="px-4 py-2">{% if cf.is_required %}<span class="text-red-600">✓</span>{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+                                </template>
+                                <template x-if="!editing">
+                                    <td class="px-4 py-2">{% if cf.is_active %}<span class="text-green-600">✓</span>{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+                                </template>
+                                <template x-if="!editing">
+                                    <td class="px-4 py-2 text-right flex gap-3 justify-end">
+                                        <button type="button" @click="editing=true" class="text-blue-600 hover:text-blue-800 text-xs">Edit</button>
+                                        <form method="post" action="{% url 'core:cf_delete' cf.pk %}" onsubmit="return confirm('Delete this custom field and all its values?');" class="inline">
+                                            {% csrf_token %}
+                                            <button type="submit" class="text-red-600 hover:text-red-800 text-xs">Delete</button>
+                                        </form>
+                                    </td>
+                                </template>
+                                <template x-if="editing">
+                                    <td colspan="7" class="px-4 py-3 bg-blue-50">
+                                        <form method="post" action="{% url 'core:cf_update' cf.pk %}" class="flex flex-wrap gap-3 items-end">
+                                            {% csrf_token %}
+                                            <div><label class="block text-xs text-gray-500 mb-1">Label</label><input type="text" name="label" value="{{ cf.label }}" required class="border border-gray-300 rounded px-2 py-1 text-sm w-40"></div>
+                                            <div><label class="block text-xs text-gray-500 mb-1">Type</label>
+                                                <select name="field_type" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                                                    <option value="text" {% if cf.field_type == 'text' %}selected{% endif %}>Text</option>
+                                                    <option value="textarea" {% if cf.field_type == 'textarea' %}selected{% endif %}>Text Area</option>
+                                                    <option value="select" {% if cf.field_type == 'select' %}selected{% endif %}>Dropdown</option>
+                                                    <option value="checkbox" {% if cf.field_type == 'checkbox' %}selected{% endif %}>Checkbox</option>
+                                                    <option value="date" {% if cf.field_type == 'date' %}selected{% endif %}>Date</option>
+                                                </select>
+                                            </div>
+                                            <div><label class="block text-xs text-gray-500 mb-1">Applies To</label>
+                                                <select name="applies_to" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                                                    <option value="ticket" {% if cf.applies_to == 'ticket' %}selected{% endif %}>Tickets</option>
+                                                    <option value="workorder" {% if cf.applies_to == 'workorder' %}selected{% endif %}>Work Orders</option>
+                                                    <option value="both" {% if cf.applies_to == 'both' %}selected{% endif %}>Both</option>
+                                                </select>
+                                            </div>
+                                            <div><label class="block text-xs text-gray-500 mb-1">Help Topic Scope</label>
+                                                <select name="scoped_to_help_topic" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                                                    <option value="">— all —</option>
+                                                    {% for ht in help_topics_all %}<option value="{{ ht.pk }}" {% if cf.scoped_to_help_topic_id == ht.pk %}selected{% endif %}>{{ ht.name }}</option>{% endfor %}
+                                                </select>
+                                            </div>
+                                            <div><label class="block text-xs text-gray-500 mb-1">Repair Type Scope</label>
+                                                <select name="scoped_to_repair_type" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                                                    <option value="">— all —</option>
+                                                    {% for rt in repair_types_all %}<option value="{{ rt.pk }}" {% if cf.scoped_to_repair_type_id == rt.pk %}selected{% endif %}>{{ rt.name }}</option>{% endfor %}
+                                                </select>
+                                            </div>
+                                            <div><label class="block text-xs text-gray-500 mb-1">Sort</label><input type="number" name="sort_order" value="{{ cf.sort_order }}" class="border border-gray-300 rounded px-2 py-1 text-sm w-16"></div>
+                                            <div class="flex flex-col gap-1 pt-4 text-sm">
+                                                <label class="flex items-center gap-1"><input type="checkbox" name="is_required" {% if cf.is_required %}checked{% endif %}> Required</label>
+                                                <label class="flex items-center gap-1"><input type="checkbox" name="is_active" {% if cf.is_active %}checked{% endif %}> Active</label>
+                                            </div>
+                                            <div class="flex gap-2">
+                                                <button type="submit" class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Save</button>
+                                                <button type="button" @click="editing=false" class="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 border border-gray-300">Cancel</button>
+                                            </div>
+                                        </form>
+                                        {% if cf.field_type == 'select' %}
+                                        <div class="mt-4 pt-4 border-t border-blue-200">
+                                            <p class="text-xs font-medium text-gray-600 mb-2">Dropdown Choices</p>
+                                            <div class="flex flex-wrap gap-2 mb-2">
+                                                {% for choice in cf.choices.all %}
+                                                <span class="inline-flex items-center gap-1 bg-white border border-gray-200 rounded px-2 py-0.5 text-xs">
+                                                    {{ choice.label }}
+                                                    <form method="post" action="{% url 'core:cf_choice_delete' choice.pk %}" class="inline" onsubmit="return confirm('Remove this choice?');">
+                                                        {% csrf_token %}
+                                                        <button type="submit" class="text-red-500 hover:text-red-700 ml-1">×</button>
+                                                    </form>
+                                                </span>
+                                                {% empty %}
+                                                <span class="text-xs text-gray-400">No choices yet.</span>
+                                                {% endfor %}
+                                            </div>
+                                            <form method="post" action="{% url 'core:cf_choice_add' cf.pk %}" class="flex gap-2 items-center">
+                                                {% csrf_token %}
+                                                <input type="text" name="label" placeholder="New choice..." required class="border border-gray-300 rounded px-2 py-1 text-sm w-40">
+                                                <button type="submit" class="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 border border-gray-300">Add</button>
+                                            </form>
+                                        </div>
+                                        {% endif %}
+                                    </td>
+                                </template>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="7" class="px-4 py-4 text-center text-gray-400">No custom fields yet.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+
+                    <!-- Add new custom field -->
+                    <div class="border-t border-gray-100 pt-4" x-data="{ ft: 'text' }">
+                        <p class="text-sm font-medium text-gray-700 mb-3">Add Custom Field</p>
+                        <form method="post" action="{% url 'core:cf_create' %}" class="flex flex-wrap gap-3 items-end">
+                            {% csrf_token %}
+                            <div><label class="block text-xs font-medium text-gray-600 mb-1">Label</label><input type="text" name="label" placeholder="e.g. Serial Number" required class="border border-gray-300 rounded px-3 py-1.5 text-sm w-40"></div>
+                            <div><label class="block text-xs font-medium text-gray-600 mb-1">Type</label>
+                                <select name="field_type" x-model="ft" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
+                                    <option value="text">Text</option>
+                                    <option value="textarea">Text Area</option>
+                                    <option value="select">Dropdown</option>
+                                    <option value="checkbox">Checkbox</option>
+                                    <option value="date">Date</option>
+                                </select>
+                            </div>
+                            <div><label class="block text-xs font-medium text-gray-600 mb-1">Applies To</label>
+                                <select name="applies_to" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
+                                    <option value="ticket">Tickets</option>
+                                    <option value="workorder">Work Orders</option>
+                                    <option value="both">Both</option>
+                                </select>
+                            </div>
+                            <div><label class="block text-xs font-medium text-gray-600 mb-1">Help Topic Scope</label>
+                                <select name="scoped_to_help_topic" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
+                                    <option value="">— all —</option>
+                                    {% for ht in help_topics_all %}<option value="{{ ht.pk %}">{{ ht.name }}</option>{% endfor %}
+                                </select>
+                            </div>
+                            <div><label class="block text-xs font-medium text-gray-600 mb-1">Repair Type Scope</label>
+                                <select name="scoped_to_repair_type" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
+                                    <option value="">— all —</option>
+                                    {% for rt in repair_types_all %}<option value="{{ rt.pk }}">{{ rt.name }}</option>{% endfor %}
+                                </select>
+                            </div>
+                            <div class="flex flex-col gap-1 text-sm pt-4">
+                                <label class="flex items-center gap-1"><input type="checkbox" name="is_required"> Required</label>
+                            </div>
+                            <div x-show="ft === 'select'" class="w-full mt-2">
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Initial Choices (one per line)</label>
+                                <textarea name="choices" rows="3" placeholder="Option A&#10;Option B&#10;Option C" class="border border-gray-300 rounded px-3 py-1.5 text-sm w-full max-w-xs"></textarea>
+                            </div>
+                            <div class="w-full">
+                                <button type="submit" class="px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Add Custom Field</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
         </div>
         {% endif %}
 
