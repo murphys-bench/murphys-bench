@@ -41,7 +41,7 @@
 {% block content %}
 <div class="max-w-4xl">
     <div class="bg-white rounded-lg shadow p-6">
-        <div class="prose max-w-none text-gray-800 whitespace-pre-wrap leading-relaxed">{{ article.content }}</div>
+        <div class="prose prose-gray max-w-none">{{ article.content|markdownify }}</div>
     </div>
 </div>
 {% endblock %}

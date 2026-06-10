@@ -42,7 +42,7 @@
             </div>
 
             <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Content</label>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Content <span class="text-xs font-normal text-gray-400 ml-1">Markdown supported — headings, bold, lists, code blocks, tables</span></label>
                 {{ form.content }}
                 {% if form.content.errors %}<p class="text-red-600 text-sm mt-1">{{ form.content.errors.0 }}</p>{% endif %}
             </div>
