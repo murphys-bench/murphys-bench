@@ -6,9 +6,9 @@
 
 ---
 
-## What's already built and working (as of session 24):
+## What's already built and working (as of session 25):
 
-- Django 4.2 app, 42 migrations applied
+- Django 4.2 app, 43 migrations applied
 - **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16
 - **Gunicorn service name**: `murphys-bench.service` — restart with `sudo systemctl restart murphys-bench`
 - **App path on server**: `/opt/murphys-bench/`
@@ -26,6 +26,12 @@
 - **Dashboard Tiles** (Settings → Dashboard Tiles): inline edit of label, status filter, visibility, sort, active
 - **Custom Fields** (Settings → Custom Fields): full CRUD; all field types; scope to help topic or repair type; per-field choice management for select type
 - **Django admin** is now break-glass only (superuser/is_staff flag changes and emergency data fixes)
+
+**Session 25 additions:**
+
+- **Section header text color** (Settings → Colors → Page Colors): new `color_section_header_text` field (migration 0043); controls h2/h3/span/a inside section header bars; light mode only
+- **Subtitle text follows title color**: `html:not(.dark) .page-title-bar p, p span` rule added — covers mileage total and other inline spans
+- **Reports page title bar**: added `page-title-bar` class so it respects the title bar background color setting
 
 ---
 
