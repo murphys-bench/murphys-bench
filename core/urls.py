@@ -102,6 +102,8 @@ urlpatterns = [
     # Native Settings UI
     path('settings/', views.SettingsView.as_view(), name='settings'),
     path('settings/test-outbound-email/', views.EmailTestOutboundView.as_view(), name='settings_test_outbound'),
+    path('settings/suppressed-addresses/add/', views.SuppressedAddressAddView.as_view(), name='suppressed_address_add'),
+    path('settings/suppressed-addresses/<int:pk>/delete/', views.SuppressedAddressDeleteView.as_view(), name='suppressed_address_delete'),
     path('settings/test-inbound-email/', views.EmailTestInboundView.as_view(), name='settings_test_inbound'),
 
     # Settings — Repair Types CRUD
