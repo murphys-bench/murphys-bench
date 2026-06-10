@@ -5,61 +5,39 @@
 
 {% block page_header %}
 <div class="bg-white shadow">
-    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex items-center justify-between">
-        <h1 class="text-2xl font-bold text-gray-900">Tickets</h1>
-        <a href="{% url 'core:ticket_create' %}"
-           class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">
-            + New Ticket
-        </a>
+    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
+        <div class="flex items-center gap-4">
+            <h1 class="text-2xl font-bold text-gray-900 shrink-0">Tickets</h1>
+            <form method="get" class="flex items-center gap-2 flex-1 min-w-0">
+                <input
+                    type="text"
+                    name="search"
+                    value="{{ request.GET.search }}"
+                    placeholder="Ticket # or subject or client"
+                    class="flex-1 min-w-0 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                <select
+                    name="status"
+                    class="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                    <option value="">All Statuses</option>
+                    {% for status_value, status_label in status_choices %}
+                        <option value="{{ status_value }}" {% if request.GET.status == status_value %}selected{% endif %}>{{ status_label }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Search</button>
+                <a href="{% url 'core:ticket_list' %}" class="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium shrink-0">Clear</a>
+            </form>
+            <a href="{% url 'core:ticket_create' %}"
+               class="px-4 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium shrink-0">
+                + New Ticket
+            </a>
+        </div>
     </div>
 </div>
 {% endblock %}
 
 {% block content %}
-
-    <!-- Search & Filter Bar -->
-    <div class="bg-white rounded-lg shadow p-6 mb-6">
-        <form method="get" class="space-y-4">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Search</label>
-                    <input
-                        type="text"
-                        name="search"
-                        value="{{ request.GET.search }}"
-                        placeholder="Ticket # or subject or client"
-                        class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    >
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Status</label>
-                    <select
-                        name="status"
-                        class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    >
-                        <option value="">All Statuses</option>
-                        {% for status_value, status_label in status_choices %}
-                            <option value="{{ status_value }}" {% if request.GET.status == status_value %}selected{% endif %}>
-                                {{ status_label }}
-                            </option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-            </div>
-
-            <div class="flex gap-2">
-                <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium text-sm">
-                    Search
-                </button>
-                <a href="{% url 'core:ticket_list' %}" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium text-sm">
-                    Clear
-                </a>
-            </div>
-        </form>
-    </div>
 
     <!-- Tickets Table -->
     <div class="bg-white rounded-lg shadow overflow-hidden">
