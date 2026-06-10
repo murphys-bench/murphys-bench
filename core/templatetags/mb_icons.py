@@ -209,3 +209,14 @@ def attr(obj, attribute):
 def getfield(form, field_name):
     """Return a bound form field by name — used to render checkbox fields in a loop."""
     return form[field_name]
+
+
+@register.filter
+def markdownify(text):
+    """Render Markdown text to safe HTML."""
+    import markdown as md
+    html = md.markdown(
+        text or '',
+        extensions=['tables', 'fenced_code', 'nl2br', 'sane_lists', 'toc'],
+    )
+    return mark_safe(html)

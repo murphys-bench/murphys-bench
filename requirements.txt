@@ -38,3 +38,4 @@ boto3==1.42.97
 # Utilities
 Pillow==10.1.0
 requests==2.31.0
+markdown
