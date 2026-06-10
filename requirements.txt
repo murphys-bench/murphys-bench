@@ -39,3 +39,4 @@ boto3==1.42.97
 Pillow==10.1.0
 requests==2.31.0
 markdown
+django-axes==8.0.0

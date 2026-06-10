@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'encrypted_model_fields',
     'django_extensions',
     'auditlog',
+    'axes',
     'django_otp',
     'django_otp.plugins.otp_totp',
     'django_otp.plugins.otp_static',
@@ -64,6 +65,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'axes.middleware.AxesMiddleware',
     'django_otp.middleware.OTPMiddleware',
     'auditlog.middleware.AuditlogMiddleware',
     'core.middleware.MFAEnforcementMiddleware',
@@ -127,7 +129,7 @@ AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
         'OPTIONS': {
-            'min_length': 8,
+            'min_length': 12,
         }
     },
     {
@@ -197,23 +199,42 @@ DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@murphys-bench
 SERVER_EMAIL = config('SERVER_EMAIL', default='noreply@murphys-bench.local')
 
 # Security Settings
-# Internal network deployment - stricter than default, but not cloud-paranoid
+# When behind Cloudflare Tunnel, Cloudflare terminates SSL and proxies over HTTP internally.
+# This tells Django to trust the X-Forwarded-Proto header from the proxy so it knows
+# the original request was HTTPS.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
+
 if not DEBUG:
     SECURE_BROWSER_XSS_FILTER = True
-    SECURE_CONTENT_SECURITY_POLICY = {
-        'default-src': ("'self'",),
-        'script-src': ("'self'", "'unsafe-inline'"),  # HTMX requires inline
-        'style-src': ("'self'", "'unsafe-inline'"),   # Tailwind requires inline
-    }
+
+# CSRF trusted origins — required for any domain other than ALLOWED_HOSTS (e.g. Cloudflare tunnel URL).
+# Add your public hostname here: CSRF_TRUSTED_ORIGINS=https://mb.yourdomain.com
+_csrf_origins = config('CSRF_TRUSTED_ORIGINS', default='', cast=Csv())
+if _csrf_origins:
+    CSRF_TRUSTED_ORIGINS = list(_csrf_origins)
 
 # Session security
 SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=not DEBUG, cast=bool)
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SAMESITE = 'Strict'
+SESSION_COOKIE_SAMESITE = 'Lax'  # Strict breaks Cloudflare redirects; Lax is safe
+SESSION_COOKIE_AGE = config('SESSION_COOKIE_AGE', default=28800, cast=int)  # 8 hours
 
 # CSRF security
 CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=not DEBUG, cast=bool)
 CSRF_COOKIE_HTTPONLY = True
+
+# ── Login brute-force protection (django-axes) ──────────────────────────────
+AXES_FAILURE_LIMIT = config('AXES_FAILURE_LIMIT', default=5, cast=int)
+AXES_COOLOFF_TIME = 1          # hours before lockout clears automatically
+AXES_LOCKOUT_CALLABLE = None   # use default 403 response
+AXES_RESET_ON_SUCCESS = True   # clear failure count on successful login
+AXES_ENABLE_ADMIN = True       # allow admin to view/reset lockouts
+AXES_LOCKOUT_PARAMETERS = ['ip_address', 'username']  # lock by IP + username combo
+AUTHENTICATION_BACKENDS = [
+    'axes.backends.AxesStandaloneBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
 
 # Logging
 LOGGING = {
