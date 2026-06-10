@@ -1450,6 +1450,22 @@ class TicketAcknowledgeOverdueView(LoginRequiredMixin, View):
         return render(request, 'core/partials/overdue_badge.html', {'ticket': ticket})
 
 
+class TicketDeleteView(LoginRequiredMixin, View):
+    """Hard-delete a ticket. Admin only. Blocked if a work order is linked."""
+
+    def post(self, request, pk):
+        if not request.user.is_staff:
+            return HttpResponse('Forbidden', status=403)
+        ticket = get_object_or_404(Ticket, pk=pk)
+        if hasattr(ticket, 'work_order'):
+            messages.error(request, f'Cannot delete {ticket.ticket_number} — it has a linked work order.')
+            return redirect('core:ticket_detail', pk=pk)
+        ticket_num = ticket.ticket_number
+        ticket.delete()
+        messages.success(request, f'{ticket_num} permanently deleted.')
+        return redirect('core:ticket_list')
+
+
 # ---------------------------------------------------------------------------
 # Knowledge Base
 # ---------------------------------------------------------------------------

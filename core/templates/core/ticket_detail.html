@@ -24,6 +24,35 @@
                     Edit
                 </a>
             {% endif %}
+            {% if user.is_staff and not ticket.work_order %}
+            <div x-data="{ open: false }">
+                <button @click="open = true"
+                        class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm font-medium">
+                    Delete
+                </button>
+                <!-- Confirmation modal -->
+                <div x-show="open" x-cloak
+                     class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                    <div class="bg-white rounded-lg shadow-xl p-6 max-w-sm w-full mx-4" @click.outside="open = false">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-2">Delete {{ ticket.ticket_number }}?</h3>
+                        <p class="text-sm text-gray-600 mb-6">This permanently deletes the ticket and all its replies. This cannot be undone.</p>
+                        <div class="flex gap-3 justify-end">
+                            <button @click="open = false"
+                                    class="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
+                                Cancel
+                            </button>
+                            <form method="post" action="{% url 'core:ticket_delete' ticket.pk %}">
+                                {% csrf_token %}
+                                <button type="submit"
+                                        class="px-4 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700">
+                                    Yes, delete permanently
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
