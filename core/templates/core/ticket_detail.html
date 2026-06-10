@@ -177,6 +177,17 @@ window.addEventListener('beforeunload', function() {
                     </dd>
                 </div>
                 <div>
+                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Contact</dt>
+                    <dd class="text-sm text-gray-900 mt-1">
+                        {% if ticket.contact %}
+                            {{ ticket.contact.first_name }} {{ ticket.contact.last_name }}
+                            {% if ticket.contact.email %}<span class="text-gray-400 text-xs ml-1">({{ ticket.contact.email }})</span>{% endif %}
+                        {% else %}
+                            <span class="text-gray-400">—</span>
+                        {% endif %}
+                    </dd>
+                </div>
+                <div>
                     <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Device</dt>
                     <dd class="text-sm text-gray-900 mt-1">
                         {% if ticket.device %}

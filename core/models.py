@@ -406,6 +406,13 @@ class Ticket(models.Model):
     description = models.TextField()
     source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='email')
     status = models.CharField(max_length=50, default='open', db_index=True)
+    contact = models.ForeignKey(
+        'Contact',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tickets',
+    )
     assigned_to = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
