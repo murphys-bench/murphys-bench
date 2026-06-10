@@ -16,7 +16,10 @@
             --color-nav-text:     {{ s.color_nav_text|default:"#ffffff" }};
             --color-accent:       {{ s.color_accent|default:"#2563eb" }};
             --color-sidebar-bg:   {{ s.color_sidebar_bg|default:"#1f2937" }};
-            --color-sidebar-text: {{ s.color_sidebar_text|default:"#ffffff" }};
+            --color-sidebar-text:   {{ s.color_sidebar_text|default:"#ffffff" }};
+            --color-page-bg:        {{ s.color_page_bg|default:"#f1f5f9" }};
+            --color-page-title:     {{ s.color_page_title|default:"#111827" }};
+            --color-section-header: {{ s.color_section_header|default:"#f8fafc" }};
             --color-status-new:          {{ s.color_status_new|default:"#dbeafe" }};
             --color-status-assigned:     {{ s.color_status_assigned|default:"#ede9fe" }};
             --color-status-in-progress:  {{ s.color_status_in_progress|default:"#fef9c3" }};
@@ -54,6 +57,13 @@
     </script>
     <style>
         .mb-content { font-size: var(--mb-font-size, 14px); }
+        body { background-color: var(--color-page-bg, #f1f5f9) !important; }
+        /* Page titles — all h1 elements site-wide */
+        h1 { color: var(--color-page-title, #111827) !important; }
+        /* Section header bars — card header divs and table heads */
+        .bg-white > div.border-b,
+        .bg-white > div > div.border-b { background-color: var(--color-section-header, #f8fafc) !important; }
+        thead.bg-gray-50 { background-color: var(--color-section-header, #f8fafc) !important; }
 
         /* Sidebar width — CSS handles initial state (pre-Alpine), Alpine syncs on toggle */
         .app-leftnav    { width: 16rem; transition: width 0.2s ease; }

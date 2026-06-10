@@ -1114,6 +1114,9 @@ class SiteSettings(models.Model):
     color_accent      = models.CharField(max_length=7, default='#2563eb', blank=True)  # blue-600 — links, buttons
     color_sidebar_bg  = models.CharField(max_length=7, default='#1f2937', blank=True)  # gray-800 — sidebar bg
     color_sidebar_text = models.CharField(max_length=7, default='#ffffff', blank=True)  # white — sidebar text
+    color_page_bg        = models.CharField(max_length=7, default='#f1f5f9', blank=True)  # page background
+    color_page_title     = models.CharField(max_length=7, default='#111827', blank=True)  # page heading text
+    color_section_header = models.CharField(max_length=7, default='#f8fafc', blank=True)  # section header bar bg
 
     class Meta:
         db_table = 'site_settings'
