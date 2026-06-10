@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 10, 2026 (end of session 22, continued)
+**Last Updated**: June 10, 2026 (end of session 24)
 **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench`
 **App path on server**: `/opt/murphys-bench/`
 
@@ -74,13 +74,10 @@ The app is running locally at `http://localhost:8000`. All views require login.
 - `/settings/` — Native Settings UI (admin only, 6 tabs)
 
 **What still requires admin panel:**
-- Suppressed address management (SuppressedAddress model)
-- Email send/receive log review (EmailSendLog, InboundEmailLog — read-only)
-- SLA Plans, Help Topics, KB Categories (admin-managed)
-- Roles and TechSkills management
-- Credential access log review (CredentialAccessLog — read-only, audit only)
+- Superuser / `is_staff` flag management (by design — can't self-escalate in native UI)
+- Emergency data fixes for records stuck in bad state
 
-**Note**: All routine workflow actions (create client, work order, device, contact) now use native app pages. The Django admin is staff-only config/reference only.
+**Note**: All routine workflow actions and all configuration are now in native MB UI. Django admin is a break-glass tool only.
 
 ---
 

@@ -6,9 +6,9 @@
 
 ---
 
-## What's already built and working (as of session 23):
+## What's already built and working (as of session 24):
 
-- Django 4.2 app, 41 migrations applied
+- Django 4.2 app, 42 migrations applied
 - **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16
 - **Gunicorn service name**: `murphys-bench.service` — restart with `sudo systemctl restart murphys-bench`
 - **App path on server**: `/opt/murphys-bench/`
@@ -16,23 +16,20 @@
 - Deploy workflow: `git push` on Mac → SSH → `cd /opt/murphys-bench && git pull && source venv/bin/activate && python3 manage.py migrate` → `sudo systemctl restart murphys-bench`
 - Full CRUD views for work orders, clients, devices, mileage, contacts, tickets, KB, queues
 
-**Session 23 additions:**
+**Session 24 additions:**
 
-- **Converted ticket interaction fixed**: Edit, reply, Quick Actions, and Close Ticket button all work on converted tickets. `TicketCloseView` at `/tickets/<pk>/close/` sets status to `resolved` and clears `wo_complete`. Duplicate WO-complete card in right column removed.
-- **Active/Closed tabs on ticket and WO lists**: Both lists have Active/Closed tab bar. `TICKET_CLOSED_STATUSES = ['resolved', 'closed']`. `WO_CLOSED_STATUSES = ['completed', 'cancelled']`. 'converted' is always active.
-- **needs_response flag**: Armed by inbound email (created_by=None on TicketReply). Disarmed by staff customer-visible reply or manual dismiss with note. Amber banner on ticket detail and dashboard.
-- **wo_complete flag**: Armed when WO moves to completed/cancelled. Cleared when ticket closes. Green banner on ticket detail.
-- **Sequential numbering**: `TKT-00001`, `TKT-00002`, etc. WO inherits ticket suffix on conversion (`WO-00001`).
-- **Assign/claim on tickets and WOs**: Admin can assign to any user, any user can claim. `TicketAssignView`, `WorkOrderClaimView`.
-- **Open Tickets section on dashboard**: Above Open Work Orders, with amber/green dots for needs_response/wo_complete.
-- **Team Workload counts converted tickets**: `open_ticket_statuses` includes 'converted'.
-- **Page color settings** (Settings → Colors → Page Colors): Page Background, Title Bar Background, Title Text, Section Header — all CSS variable driven, light mode only (dark mode uses its own scheme). Migrations 0040–0041.
-- **Light mode card depth**: `border: 1px solid #e2e8f0` + subtle shadow on all `bg-white rounded-lg/xl` cards.
-- **Dark mode CSS fixes**: `html:not(.dark)` scope for all light-mode-only color variable rules. Section header color applies to card title bar divs only (not thead or content rows).
+- **Django admin fully replaced** — all remaining admin-only models are now in native Settings UI
+- **Blocked Senders** (Settings → Inbound Email): fnmatch pattern filter for inbound email; migration 0042
+- **SLA Plans** (Settings → SLA Plans): full CRUD with inline Alpine.js edit; grace hours, active, transient, disable-alerts flags
+- **Help Topics** (Settings → Help Topics): full CRUD with inline edit; default SLA dropdown, sort order, active
+- **Tech Skills** (Settings → Tech Skills): add/delete skill tags for future routing
+- **Dashboard Tiles** (Settings → Dashboard Tiles): inline edit of label, status filter, visibility, sort, active
+- **Custom Fields** (Settings → Custom Fields): full CRUD; all field types; scope to help topic or repair type; per-field choice management for select type
+- **Django admin** is now break-glass only (superuser/is_staff flag changes and emergency data fixes)
 
 ---
 
-## What's next (session 24 options):
+## What's next (session 25 options):
 
 ### Option A — Inbound email overhaul
 Smarter intake: junk/noise filtering, unmatched sender handling, new ticket notifications (in-app badge + email alert), visual "unread" indicator on ticket list (bold row + dot, clears on first open). The inbound timer runs every 5 min via systemd user timer (`mb-inbound.timer`). Log at `/home/scs-tech/mb-inbound.log`.
