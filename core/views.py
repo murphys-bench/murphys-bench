@@ -1082,7 +1082,7 @@ class DeviceUpdateView(LoginRequiredMixin, UpdateView):
 
 # --- Ticket Views ---
 
-TICKET_CLOSED_STATUSES = ['resolved', 'closed', 'converted']
+TICKET_CLOSED_STATUSES = ['resolved', 'closed']
 
 
 class TicketListView(LoginRequiredMixin, ListView):
