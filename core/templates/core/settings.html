@@ -1335,6 +1335,21 @@
                                  :style="'background:'+val">Open Tickets</div>
                         </div>
                         {% endwith %}
+
+                        {% with field=form.color_section_header_text default="#111827" ref="sec_hdr_txt" label="Section Header Text" %}
+                        <div x-data="{ val: '{{ field.value|default:default }}' }">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">{{ label }}</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" :value="val" @input="val=$event.target.value; $refs.{{ ref }}.value=$event.target.value"
+                                       class="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0.5">
+                                <input type="text" name="colors-color_section_header_text" x-ref="{{ ref }}" :value="val" @input="val=$event.target.value"
+                                       maxlength="7" placeholder="{{ default }}"
+                                       class="w-24 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            </div>
+                            <div class="mt-2 h-8 rounded text-xs flex items-center px-3 font-semibold border border-gray-200"
+                                 :style="'color:'+val">Open Tickets</div>
+                        </div>
+                        {% endwith %}
                     </div>
                 </div>
 

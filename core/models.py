@@ -1128,7 +1128,8 @@ class SiteSettings(models.Model):
     color_page_bg        = models.CharField(max_length=7, default='#f1f5f9', blank=True)  # page background
     color_page_title     = models.CharField(max_length=7, default='#111827', blank=True)  # page heading text color
     color_title_bar      = models.CharField(max_length=7, default='#ffffff', blank=True)  # page title bar background
-    color_section_header = models.CharField(max_length=7, default='#f8fafc', blank=True)  # section header bar bg
+    color_section_header      = models.CharField(max_length=7, default='#f8fafc', blank=True)  # section header bar bg
+    color_section_header_text = models.CharField(max_length=7, default='#111827', blank=True)  # section header text + links
 
     class Meta:
         db_table = 'site_settings'

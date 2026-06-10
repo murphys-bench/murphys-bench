@@ -20,7 +20,8 @@
             --color-page-bg:        {{ s.color_page_bg|default:"#f1f5f9" }};
             --color-page-title:     {{ s.color_page_title|default:"#111827" }};
             --color-title-bar:      {{ s.color_title_bar|default:"#ffffff" }};
-            --color-section-header: {{ s.color_section_header|default:"#f8fafc" }};
+            --color-section-header:      {{ s.color_section_header|default:"#f8fafc" }};
+            --color-section-header-text: {{ s.color_section_header_text|default:"#111827" }};
             --color-status-new:          {{ s.color_status_new|default:"#dbeafe" }};
             --color-status-assigned:     {{ s.color_status_assigned|default:"#ede9fe" }};
             --color-status-in-progress:  {{ s.color_status_in_progress|default:"#fef9c3" }};
@@ -214,6 +215,10 @@
 
         /* ── Section header color variable — light mode only ── */
         html:not(.dark) .bg-white > div:first-child.border-b { background-color: var(--color-section-header, #f8fafc) !important; }
+        html:not(.dark) .bg-white > div:first-child.border-b h2,
+        html:not(.dark) .bg-white > div:first-child.border-b h3,
+        html:not(.dark) .bg-white > div:first-child.border-b span,
+        html:not(.dark) .bg-white > div:first-child.border-b a { color: var(--color-section-header-text, #111827) !important; }
 
         /* ── Dark mode section header + thead defaults ── */
         .dark .bg-white > div:first-child.border-b { background-color: #1e293b !important; }
