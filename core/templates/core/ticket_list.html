@@ -80,6 +80,7 @@
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">
                                 <div class="flex items-center gap-1.5">
                                     {% if ticket.needs_response %}<span class="inline-block w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" title="Awaiting response"></span>{% endif %}
+                                    {% if ticket.wo_complete %}<span class="inline-block w-2 h-2 rounded-full bg-green-500 flex-shrink-0" title="Work complete — ready to close"></span>{% endif %}
                                     <a href="{% url 'core:ticket_detail' ticket.pk %}" class="{% if ticket.needs_response %}font-bold{% endif %}">{{ ticket.ticket_number }}</a>
                                 </div>
                             </td>

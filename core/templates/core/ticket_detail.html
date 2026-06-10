@@ -60,6 +60,19 @@
 
 {% block content %}
 
+<!-- WO Complete Banner -->
+{% if ticket.wo_complete %}
+<div class="mb-4 bg-green-50 border border-green-200 border-l-4 border-l-green-500 rounded-lg px-4 py-3">
+    <div class="flex items-center gap-3">
+        <div class="flex-shrink-0 text-green-600">{% icon "check-circle" "5" %}</div>
+        <div>
+            <p class="text-sm font-semibold text-green-800">Work is complete — ready for final contact</p>
+            <p class="text-xs text-green-700">The linked work order has been completed. Contact the client and close this ticket when done.</p>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- Needs Response Banner -->
 {% if ticket.needs_response %}
 <div class="mb-4 bg-amber-50 border border-amber-200 border-l-4 border-l-amber-500 rounded-lg px-4 py-3"
