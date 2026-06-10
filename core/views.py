@@ -1395,7 +1395,7 @@ class TicketConvertView(LoginRequiredMixin, View):
             return render(request, 'core/ticket_convert.html', {'ticket': ticket, 'form': form})
 
         work_order = WorkOrder.objects.create(
-            work_order_number=WorkOrder.generate_work_order_number(),
+            work_order_number=WorkOrder.generate_work_order_number(from_ticket_number=ticket.ticket_number),
             ticket=ticket,
             client=ticket.client,
             device=ticket.device,

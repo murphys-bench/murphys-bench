@@ -440,11 +440,9 @@ class Ticket(models.Model):
 
     @classmethod
     def generate_ticket_number(cls):
-        """Generate unique ticket number like TKT-20260604-0001"""
-        from django.utils import timezone
-        today = timezone.now().strftime('%Y%m%d')
-        count = cls.objects.filter(created_at__date=timezone.now().date()).count() + 1
-        return f"TKT-{today}-{count:04d}"
+        """Generate sequential ticket number like TKT-00001"""
+        count = cls.objects.count() + 1
+        return f"TKT-{count:05d}"
 
     attachments = GenericRelation('Attachment')
 
@@ -582,12 +580,16 @@ class WorkOrder(models.Model):
         return f"{self.work_order_number}: {self.client.name}"
 
     @classmethod
-    def generate_work_order_number(cls):
-        """Generate unique work order number like WO-20260604-0001"""
-        from django.utils import timezone
-        today = timezone.now().strftime('%Y%m%d')
-        count = cls.objects.filter(created_at__date=timezone.now().date()).count() + 1
-        return f"WO-{today}-{count:04d}"
+    def generate_work_order_number(cls, from_ticket_number=None):
+        """Generate sequential WO number like WO-00001.
+        If from_ticket_number is given (e.g. TKT-00042), reuse that sequence: WO-00042."""
+        if from_ticket_number:
+            seq = from_ticket_number.split('-', 1)[-1]
+            candidate = f"WO-{seq}"
+            if not cls.objects.filter(work_order_number=candidate).exists():
+                return candidate
+        count = cls.objects.count() + 1
+        return f"WO-{count:05d}"
 
     @property
     def time_spent_display(self):
