@@ -4,7 +4,7 @@
 {% block title %}Settings - Murphy's Bench{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow">
+<div class="bg-white shadow page-title-bar">
     <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
         <h1 class="text-2xl font-bold text-gray-900">Settings</h1>
         <p class="text-sm text-gray-500 mt-1">Site-wide configuration for Murphy's Bench.</p>
@@ -1191,7 +1191,22 @@
                         </div>
                         {% endwith %}
 
-                        {% with field=form.color_page_title default="#111827" ref="pg_title" label="Page Title" %}
+                        {% with field=form.color_title_bar default="#ffffff" ref="title_bar" label="Title Bar Background" %}
+                        <div x-data="{ val: '{{ field.value|default:default }}' }">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">{{ label }}</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" :value="val" @input="val=$event.target.value; $refs.{{ ref }}.value=$event.target.value"
+                                       class="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0.5">
+                                <input type="text" name="colors-color_title_bar" x-ref="{{ ref }}" :value="val" @input="val=$event.target.value"
+                                       maxlength="7" placeholder="{{ default }}"
+                                       class="w-24 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            </div>
+                            <div class="mt-2 h-8 rounded text-xs flex items-center px-3 font-semibold border border-gray-200 shadow-sm"
+                                 :style="'background:'+val">Dashboard</div>
+                        </div>
+                        {% endwith %}
+
+                        {% with field=form.color_page_title default="#111827" ref="pg_title" label="Title Text" %}
                         <div x-data="{ val: '{{ field.value|default:default }}' }">
                             <label class="block text-xs font-medium text-gray-600 mb-1">{{ label }}</label>
                             <div class="flex items-center gap-2">
