@@ -2647,6 +2647,8 @@ SETTINGS_TABS = [
     ('credentials',      'Credentials',      None),
     ('email_templates',  'Email Templates',  None),
     ('statuses',         'Statuses',         None),
+    ('users',            'Users',            None),
+    ('roles',            'Roles',            None),
 ]
 
 SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS]

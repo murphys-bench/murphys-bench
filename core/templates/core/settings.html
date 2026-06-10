@@ -35,12 +35,24 @@
         <ul class="bg-white rounded-lg shadow overflow-hidden divide-y divide-gray-100">
             {% for key, label in tabs %}
             <li>
+                {% if key == 'users' %}
+                <a href="{% url 'core:user_list' %}"
+                   class="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                    {{ label }}
+                </a>
+                {% elif key == 'roles' %}
+                <a href="{% url 'core:role_list' %}"
+                   class="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                    {{ label }}
+                </a>
+                {% else %}
                 <a href="?tab={{ key }}"
                    class="block px-4 py-3 text-sm font-medium
                        {% if active_tab == key %}bg-blue-50 text-blue-700 border-l-4 border-blue-600
                        {% else %}text-gray-700 hover:bg-gray-50{% endif %}">
                     {{ label }}
                 </a>
+                {% endif %}
             </li>
             {% endfor %}
         </ul>
