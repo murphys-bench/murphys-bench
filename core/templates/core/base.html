@@ -59,14 +59,10 @@
     <style>
         .mb-content { font-size: var(--mb-font-size, 14px); }
         body { background-color: var(--color-page-bg, #f1f5f9) !important; }
-        /* Page title text */
-        h1 { color: var(--color-page-title, #111827) !important; }
-        /* Page title bar — the white shadow bar at the top of each page */
+        /* Page title bar */
         .page-title-bar { background-color: var(--color-title-bar, #ffffff) !important; }
-        /* Section header bars — card header divs and table heads */
-        .bg-white > div.border-b,
-        .bg-white > div > div.border-b { background-color: var(--color-section-header, #f8fafc) !important; }
-        thead.bg-gray-50 { background-color: var(--color-section-header, #f8fafc) !important; }
+        /* Page title text — light mode only; dark mode governs its own text colors */
+        body:not(.dark) h1 { color: var(--color-page-title, #111827) !important; }
 
         /* Sidebar width — CSS handles initial state (pre-Alpine), Alpine syncs on toggle */
         .app-leftnav    { width: 16rem; transition: width 0.2s ease; }
@@ -213,6 +209,12 @@
 
         /* Misc utility overrides */
         .dark .rounded-lg.shadow.overflow-hidden { background-color: #1e293b; }
+
+        /* ── Section header color variable — placed after dark overrides so it wins ── */
+        /* Only target first-child border-b divs (the header row, not content rows) */
+        .bg-white > div:first-child.border-b { background-color: var(--color-section-header, #f8fafc) !important; }
+        thead.bg-gray-50,
+        .dark thead.bg-gray-50 { background-color: var(--color-section-header, #f8fafc) !important; }
     </style>
 </head>
 <body class="bg-gray-100" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
