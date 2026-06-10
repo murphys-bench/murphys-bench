@@ -221,12 +221,12 @@
      }">
 
     <!-- Logo -->
-    <div class="flex items-center justify-center h-24 flex-shrink-0 border-b px-2"
+    <div class="flex-shrink-0 border-b"
          style="border-color:rgba(255,255,255,0.1)">
-        <a href="{% url 'core:dashboard' %}" class="flex items-center justify-center w-full h-full py-1.5">
+        <a href="{% url 'core:dashboard' %}" style="display:block;width:100%;">
             {% if site_settings.site_logo %}
                 <img src="{{ site_settings.site_logo.url }}" alt=""
-                     class="h-full w-auto max-w-full object-contain">
+                     style="display:block;width:100%;height:auto;">
             {% else %}
                 <span class="font-bold text-lg text-center leading-tight px-1">{{ site_settings.company_name|default:"Murphy's Bench" }}</span>
             {% endif %}
