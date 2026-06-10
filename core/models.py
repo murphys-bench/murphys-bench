@@ -441,8 +441,13 @@ class Ticket(models.Model):
     @classmethod
     def generate_ticket_number(cls):
         """Generate sequential ticket number like TKT-00001"""
-        count = cls.objects.count() + 1
-        return f"TKT-{count:05d}"
+        import re
+        existing = cls.objects.filter(
+            ticket_number__regex=r'^TKT-\d{5}$'
+        ).values_list('ticket_number', flat=True)
+        nums = [int(n[4:]) for n in existing if re.match(r'^TKT-\d{5}$', n)]
+        next_num = (max(nums) + 1) if nums else 1
+        return f"TKT-{next_num:05d}"
 
     attachments = GenericRelation('Attachment')
 
@@ -588,8 +593,14 @@ class WorkOrder(models.Model):
             candidate = f"WO-{seq}"
             if not cls.objects.filter(work_order_number=candidate).exists():
                 return candidate
-        count = cls.objects.count() + 1
-        return f"WO-{count:05d}"
+        # Find the highest existing sequential number and increment
+        import re
+        existing = cls.objects.filter(
+            work_order_number__regex=r'^WO-\d{5}$'
+        ).values_list('work_order_number', flat=True)
+        nums = [int(n[3:]) for n in existing if re.match(r'^WO-\d{5}$', n)]
+        next_num = (max(nums) + 1) if nums else 1
+        return f"WO-{next_num:05d}"
 
     @property
     def time_spent_display(self):
