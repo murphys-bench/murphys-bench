@@ -211,10 +211,8 @@
         .dark .rounded-lg.shadow.overflow-hidden { background-color: #1e293b; }
 
         /* ── Section header color variable — placed after dark overrides so it wins ── */
-        /* Only target first-child border-b divs (the header row, not content rows) */
+        /* Only target the first-child border-b div (the card title bar, not content rows or thead) */
         .bg-white > div:first-child.border-b { background-color: var(--color-section-header, #f8fafc) !important; }
-        thead.bg-gray-50,
-        .dark thead.bg-gray-50 { background-color: var(--color-section-header, #f8fafc) !important; }
     </style>
 </head>
 <body class="bg-gray-100" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
