@@ -1171,6 +1171,58 @@
                     </div>
                 </div>
 
+                <!-- Page Colors -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-lg font-semibold text-gray-900 mb-1">Page Colors</h2>
+                    <p class="text-sm text-gray-500 mb-5">Background, page titles, and section header bars.</p>
+                    <div class="grid grid-cols-3 gap-6 max-w-2xl">
+                        {% with field=form.color_page_bg default="#f1f5f9" ref="pg_bg" label="Page Background" %}
+                        <div x-data="{ val: '{{ field.value|default:default }}' }">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">{{ label }}</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" :value="val" @input="val=$event.target.value; $refs.{{ ref }}.value=$event.target.value"
+                                       class="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0.5">
+                                <input type="text" name="colors-color_page_bg" x-ref="{{ ref }}" :value="val" @input="val=$event.target.value"
+                                       maxlength="7" placeholder="{{ default }}"
+                                       class="w-24 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            </div>
+                            <div class="mt-2 h-8 rounded text-xs flex items-center px-3 font-medium border border-gray-200"
+                                 :style="'background:'+val">Background</div>
+                        </div>
+                        {% endwith %}
+
+                        {% with field=form.color_page_title default="#111827" ref="pg_title" label="Page Title" %}
+                        <div x-data="{ val: '{{ field.value|default:default }}' }">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">{{ label }}</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" :value="val" @input="val=$event.target.value; $refs.{{ ref }}.value=$event.target.value"
+                                       class="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0.5">
+                                <input type="text" name="colors-color_page_title" x-ref="{{ ref }}" :value="val" @input="val=$event.target.value"
+                                       maxlength="7" placeholder="{{ default }}"
+                                       class="w-24 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            </div>
+                            <div class="mt-2 h-8 rounded text-xs flex items-center px-3 font-bold"
+                                 :style="'color:'+val">Dashboard</div>
+                        </div>
+                        {% endwith %}
+
+                        {% with field=form.color_section_header default="#f8fafc" ref="sec_hdr" label="Section Header" %}
+                        <div x-data="{ val: '{{ field.value|default:default }}' }">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">{{ label }}</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" :value="val" @input="val=$event.target.value; $refs.{{ ref }}.value=$event.target.value"
+                                       class="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0.5">
+                                <input type="text" name="colors-color_section_header" x-ref="{{ ref }}" :value="val" @input="val=$event.target.value"
+                                       maxlength="7" placeholder="{{ default }}"
+                                       class="w-24 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            </div>
+                            <div class="mt-2 h-8 rounded text-xs flex items-center px-3 font-semibold border border-gray-200"
+                                 :style="'background:'+val">Open Tickets</div>
+                        </div>
+                        {% endwith %}
+                    </div>
+                </div>
+
                 <!-- Sidebar Colors -->
                 <div class="bg-white rounded-lg shadow p-6">
                     <h2 class="text-lg font-semibold text-gray-900 mb-1">Sidebar Colors</h2>

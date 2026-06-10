@@ -450,12 +450,14 @@ class ColorSettingsForm(forms.ModelForm):
             'site_logo',
             'color_primary', 'color_nav_text', 'color_accent',
             'color_sidebar_bg', 'color_sidebar_text',
+            'color_page_bg', 'color_page_title', 'color_section_header',
             'color_status_new', 'color_status_assigned', 'color_status_in_progress',
             'color_status_completed', 'color_status_closed', 'color_status_cancelled',
         ]
         _hex_fields = [
             'color_primary', 'color_nav_text', 'color_accent',
             'color_sidebar_bg', 'color_sidebar_text',
+            'color_page_bg', 'color_page_title', 'color_section_header',
             'color_status_new', 'color_status_assigned', 'color_status_in_progress',
             'color_status_completed', 'color_status_closed', 'color_status_cancelled',
         ]
