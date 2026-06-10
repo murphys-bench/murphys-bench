@@ -209,6 +209,57 @@
                 </div>
             </form>
 
+            <!-- Suppressed Addresses -->
+            <div class="mt-6 pt-4 border-t border-gray-200">
+                <h3 class="text-sm font-semibold text-gray-700 mb-1">Suppressed Addresses</h3>
+                <p class="text-xs text-gray-400 mb-3">Specific addresses that will never receive automated email, regardless of patterns above.</p>
+
+                <!-- Add form -->
+                <form method="post" action="{% url 'core:suppressed_address_add' %}" class="flex items-center gap-2 mb-4">
+                    {% csrf_token %}
+                    <input type="email" name="email" placeholder="address@example.com" required
+                           class="text-sm border border-gray-300 rounded px-2 py-1.5 w-64 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    <input type="text" name="reason" placeholder="Reason (optional)"
+                           class="text-sm border border-gray-300 rounded px-2 py-1.5 flex-1 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    <button type="submit"
+                            class="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700">
+                        Add
+                    </button>
+                </form>
+
+                <!-- List -->
+                {% if suppressed_addresses %}
+                <table class="min-w-full text-sm divide-y divide-gray-200 border border-gray-200 rounded-lg overflow-hidden">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Reason</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
+                            <th class="px-4 py-2"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100 bg-white">
+                        {% for addr in suppressed_addresses %}
+                        <tr>
+                            <td class="px-4 py-2 text-gray-800">{{ addr.email }}</td>
+                            <td class="px-4 py-2 text-gray-500">{{ addr.reason|default:"—" }}</td>
+                            <td class="px-4 py-2 text-gray-400 whitespace-nowrap">{{ addr.created_at|date:"M j Y" }}</td>
+                            <td class="px-4 py-2 text-right">
+                                <form method="post" action="{% url 'core:suppressed_address_delete' addr.pk %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="text-xs text-red-500 hover:underline"
+                                            onclick="return confirm('Remove {{ addr.email|escapejs }} from suppression list?')">Remove</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-sm text-gray-400">No addresses suppressed yet.</p>
+                {% endif %}
+            </div>
+
             <!-- Test outbound (outside form so submit doesn't interfere) -->
             <div class="mt-4 pt-4 border-t border-gray-100">
                 <p class="text-sm font-medium text-gray-700 mb-2">Send a test email</p>

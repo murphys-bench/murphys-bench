@@ -21,6 +21,7 @@ from .models import (
     DeviceCredentialAccessLog,
     EmailTemplate,
     StatusDefinition,
+    SuppressedAddress,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
@@ -2791,6 +2792,25 @@ def _repair_types_context():
     return {'rt_categories': categories, 'rt_uncategorised': uncategorised}
 
 
+class SuppressedAddressAddView(LoginRequiredMixin, View):
+    def post(self, request):
+        if not request.user.is_staff:
+            return HttpResponse('Forbidden', status=403)
+        email = request.POST.get('email', '').strip().lower()
+        reason = request.POST.get('reason', '').strip()
+        if email:
+            SuppressedAddress.objects.get_or_create(email=email, defaults={'reason': reason})
+        return redirect(f"{reverse('core:settings')}?tab=outbound")
+
+
+class SuppressedAddressDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not request.user.is_staff:
+            return HttpResponse('Forbidden', status=403)
+        SuppressedAddress.objects.filter(pk=pk).delete()
+        return redirect(f"{reverse('core:settings')}?tab=outbound")
+
+
 class EmailTestOutboundView(LoginRequiredMixin, View):
     """HTMX: send a test email using saved SMTP settings."""
 
@@ -2907,6 +2927,8 @@ class SettingsView(LoginRequiredMixin, View):
             ctx['wo_statuses'] = StatusDefinition.objects.filter(entity_type='workorder').order_by('sort_order')
         if active_tab == 'kb_categories':
             ctx.update(_kb_categories_context())
+        if active_tab == 'outbound':
+            ctx['suppressed_addresses'] = SuppressedAddress.objects.all()
         if active_tab == 'logs':
             from .models import EmailSendLog, InboundEmailLog
             from auditlog.models import LogEntry
