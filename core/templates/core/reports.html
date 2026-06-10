@@ -407,7 +407,7 @@ function downloadCSV(report) {
     window.location = urls[report] + '?start_date=' + start + '&end_date=' + end;
 }
 
-// Print a single section (or all)
+// Print a single section (or all) via hidden iframe — no extra window
 function printSection(key) {
     var target = key === 'all'
         ? document.getElementById('reports-content').innerHTML
@@ -416,19 +416,26 @@ function printSection(key) {
     var label = key === 'all' ? 'All Reports' : (SECTION_LABELS[key] || key);
     var start = document.getElementById('rpt-start').value;
     var end   = document.getElementById('rpt-end').value;
-    var win = window.open('', '_blank');
-    win.document.write('<html><head><title>' + label + '</title>');
-    win.document.write('<style>body{font-family:sans-serif;margin:24px;color:#111}table{border-collapse:collapse;width:100%}th,td{border:1px solid #e5e7eb;padding:6px 10px;font-size:13px}th{background:#f9fafb;font-weight:600}h2{font-size:16px;margin-bottom:12px}.text-right{text-align:right}.text-left{text-align:left}p{font-size:13px}</style>');
-    win.document.write('</head><body>');
-    win.document.write('<p style="color:#888;font-size:12px;margin-bottom:8px">' + label + ' &nbsp;|&nbsp; ' + start + ' to ' + end + '</p>');
-    win.document.write(target);
-    win.document.write('</body></html>');
-    win.document.close();
-    win.focus();
-    setTimeout(function(){
-        win.print();
-        win.onafterprint = function(){ win.close(); };
-    }, 400);
+
+    var frame = document.createElement('iframe');
+    frame.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:0';
+    document.body.appendChild(frame);
+
+    var doc = frame.contentDocument || frame.contentWindow.document;
+    doc.open();
+    doc.write('<html><head><title>' + label + '</title>');
+    doc.write('<style>body{font-family:sans-serif;margin:24px;color:#111}table{border-collapse:collapse;width:100%}th,td{border:1px solid #e5e7eb;padding:6px 10px;font-size:13px}th{background:#f9fafb;font-weight:600}h2{font-size:16px;margin-bottom:12px}.text-right{text-align:right}.text-left{text-align:left}p{font-size:13px}</style>');
+    doc.write('</head><body>');
+    doc.write('<p style="color:#888;font-size:12px;margin-bottom:8px">' + label + ' &nbsp;|&nbsp; ' + start + ' to ' + end + '</p>');
+    doc.write(target);
+    doc.write('</body></html>');
+    doc.close();
+
+    frame.onload = function() {
+        frame.contentWindow.focus();
+        frame.contentWindow.print();
+        document.body.removeChild(frame);
+    };
 }
 
 // PDF download of a single section (or all)
