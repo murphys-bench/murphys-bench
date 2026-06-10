@@ -6,7 +6,7 @@
 
 ---
 
-## What's already built and working (as of session 21):
+## What's already built and working (as of session 22):
 
 - Django 4.2 app, 37 models, 37 migrations applied
 - **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16
@@ -15,19 +15,19 @@
 - Deploy workflow: `git push` on Mac → SSH `scs-tech@10.58.58.82` → `cd /opt/murphys-bench && git pull && source venv/bin/activate && python3 manage.py migrate` → `sudo systemctl restart murphys-bench`
 - Full CRUD views for work orders, clients, devices, mileage, contacts, tickets, KB, queues
 
-**Session 21 additions:**
-- **Ticket contact FK** (migration 0037): `Ticket.contact` nullable FK to `Contact` — same pattern as `WorkOrder.contact`. Email replies route to `ticket.contact.email` first, then fall back to primary contact. Inbound emails auto-set contact from matched sender.
-- **HTMX contact cascade on ticket form**: Selecting a client dynamically loads that client's contacts into the Contact dropdown. Endpoint: `GET /tickets/contacts-by-client/?client=<id>`.
-- **Ticket contact shown on ticket detail**: Name + email in the info panel.
-- **Reply resend**: Each customer-visible reply has a "Resend" button. Pick any client contact or type a custom address — fires the same reply email to that recipient.
-- **CC on replies**: Reply form shows a CC field (comma-separated) when Customer Visible is selected. Included as BCC on that send only, not saved.
-- **Native User management**: `/users/new/`, `/users/<pk>/edit/`, `/users/<pk>/set-password/`. Full user CRUD — name, username, email, phone, role, is_staff, is_active, password. No Django admin needed.
-- **Native Role management**: `/roles/` — list all roles with 17 permission flags shown as ✓/✗ grid. Create, edit, delete. System roles protected. Edit page shows all flags as checkboxes.
-- **Users + Roles in Settings sidebar**: Both appear at the bottom of the Settings nav and link to their pages. Each page has "← Settings" back link. Roles also has "← Users".
+**Session 22 additions:**
+- **UI polish — search bars inline**: Tickets, Work Orders, Clients, Mileage, KB list pages all have search/filter controls moved into the page header bar. Also fixed missing technician options in WO assigned_to dropdown.
+- **Mileage decimal fix**: Total miles now shows `67.6` not `67.6000000000000` (floatformat:1).
+- **Ticket reply type**: Radio buttons instead of dropdown. Redundant "Add Reply ↓" Quick Actions button removed.
+- **KB Markdown rendering**: `markdown` library installed. Articles render full Markdown — headings, bold, lists, fenced code blocks, tables. `{% load mb_icons %}` fix applied. Tailwind typography plugin loaded via CDN.
+- **KB Categories in Settings**: Native CRUD tab at Settings → KB Categories. No Django admin needed.
+- **Dark mode**: Per-user toggle (moon/sun) in sidebar footer. Persisted to `localStorage` — no flash on load. CSS override strategy covers surfaces, text, borders, inputs, tables, tinted panels (blue-50, yellow-50, green-50), prose. `darkMode: 'class'` configured in Tailwind.
+- **My Work sidebar section removed**: Was redundant in practice. Dead CSS rule cleaned up.
+- **Dashboard stat cards**: Active Clients and Devices on File are now clickable links to `/clients/` and `/devices/`.
 
 ---
 
-## What's next (session 22 options):
+## What's next (session 23 options):
 
 ### Option A — Inbound email overhaul
 Smarter intake: junk/noise filtering, unmatched sender handling, new ticket notifications (in-app badge + email alert), visual "unread" indicator on ticket list (bold row + dot, clears on first open). The inbound timer runs every 5 min via systemd user timer (`mb-inbound.timer`). Log at `/home/scs-tech/mb-inbound.log`.
@@ -68,9 +68,11 @@ Any friction points or gaps SCS has noticed in actual use since deployment.
 - **Mileage Calculate CSRF**: Uses `document.querySelector('[name=csrfmiddlewaretoken]')` — do not revert
 - **Google Maps API key**: Stored in SiteSettings (DB). Restricted to WAN IP in Google Cloud Console.
 - **Production Python**: `python3` not `python`. Venv: `/opt/murphys-bench/venv/`
-- **mb_icons templatetag**: `{% load mb_icons %}` at top of any template that uses `{% icon %}`, `{% attr %}`, or `{% getfield %}`. Partials need their own load tag.
+- **mb_icons templatetag**: `{% load mb_icons %}` at top of any template that uses `{% icon %}`, `{% attr %}`, `{% getfield %}`, or `{% markdownify %}`. Partials need their own load tag.
 - **Email template variable reference**: Must use `{% verbatim %}...{% endverbatim %}` to display `{{ }}` tokens in templates.
 - **Inbound email timer**: systemd user timer as `scs-tech` — `mb-inbound.timer`, runs every 5 min. Log: `/home/scs-tech/mb-inbound.log`. Enabled linger: `loginctl enable-linger scs-tech`.
+- **Dark mode**: CSS override strategy in base.html — `darkMode: 'class'` in Tailwind config, `dark` class toggled on `<html>` via localStorage. Per-user, persisted across sessions.
+- **Tailwind CDN**: Loaded with `?plugins=typography` for KB prose rendering.
 
 ---
 

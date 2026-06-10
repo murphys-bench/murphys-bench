@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 9, 2026 (end of session 21)
+**Last Updated**: June 10, 2026 (end of session 22)
 **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench`
 **App path on server**: `/opt/murphys-bench/`
 
@@ -322,6 +322,17 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - Sidebar: shows last reply/note preview instead of subject/description; falls back gracefully if no notes
 - Mileage Calculate button: fixed CSRF token for production (was silently failing in prod)
 - Google Maps API confirmed working from production server (WAN IP restriction set in Cloud Console)
+
+### ✅ Session 22 — UI Polish, Dark Mode, KB Markdown (session 22 — COMPLETE)
+
+- **Search bars inline**: Tickets, Work Orders, Clients, Mileage, KB lists — filter controls moved into page header bar. Fixed missing technician options in WO assigned_to dropdown.
+- **Mileage decimal fix**: `floatformat:1` on total miles display.
+- **Ticket reply type**: Radio buttons instead of dropdown. Removed redundant "Add Reply ↓" Quick Actions button.
+- **KB Markdown rendering**: `markdown` library, `markdownify` template filter, Tailwind typography CDN plugin. Articles render headings/bold/lists/code/tables from pasted `.md` files.
+- **KB Categories in Settings**: Native CRUD tab — no Django admin needed.
+- **Dark mode**: Per-user toggle in sidebar footer (moon/sun icon), persisted to `localStorage`. CSS override strategy in `base.html` covers all common surfaces, text, borders, inputs, tinted panels (blue-50/yellow-50/green-50), prose.
+- **My Work sidebar removed**: Was redundant in practice.
+- **Dashboard stat cards**: Active Clients + Devices on File are now clickable links.
 
 ### ✅ Session 21 — Ticket Contact FK, Email Fixes, User/Role Management (session 21 — COMPLETE)
 
