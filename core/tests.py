@@ -196,3 +196,37 @@ def test_reset_can_keep_named_user(client_obj, admin_user):
 
     assert User.objects.filter(pk=keep.pk).exists()
     assert not User.objects.filter(pk=drop.pk).exists()
+
+
+# ── Conversation view: quoted-reply folding ─────────────────────────────────
+
+def test_split_reply_quote_separates_new_text_from_quote():
+    from core.templatetags.mb_icons import split_reply_quote
+
+    content = (
+        "I took it outside and ran a hose on it.\r\n\r\n"
+        "On 6/10/26 5:43 PM, testing@example.com wrote:\r\n"
+        "> Re: [TKT-00006] Desktop on Fire\r\n"
+        "> Did you put it out?\r\n"
+    )
+    new_text, quoted = split_reply_quote(content)
+    assert new_text == 'I took it outside and ran a hose on it.'
+    assert 'On 6/10/26' in quoted
+    assert 'Did you put it out?' in quoted
+
+
+def test_split_reply_quote_no_quote_returns_empty():
+    from core.templatetags.mb_icons import split_reply_quote
+
+    new_text, quoted = split_reply_quote('Just a plain reply, no quote.')
+    assert new_text == 'Just a plain reply, no quote.'
+    assert quoted == ''
+
+
+def test_reply_body_folds_quote_and_escapes_html():
+    from core.templatetags.mb_icons import reply_body
+
+    html = str(reply_body("Hello <script>alert(1)</script>\n\nOn x wrote:\n> hi"))
+    assert '<details' in html               # quote folded into a disclosure
+    assert '&lt;script&gt;' in html          # user HTML escaped, not live
+    assert '<script>' not in html

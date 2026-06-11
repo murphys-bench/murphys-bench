@@ -1,6 +1,7 @@
+import re
 import time
 from django import template
-from django.utils.html import mark_safe
+from django.utils.html import escape, mark_safe
 
 register = template.Library()
 
@@ -228,4 +229,54 @@ def markdownify(text):
         text or '',
         extensions=['tables', 'fenced_code', 'nl2br', 'sane_lists', 'toc'],
     )
+    return mark_safe(html)
+
+
+# Boundaries that mark where an email reply stops and the quoted history begins.
+_QUOTE_BOUNDARY_PATTERNS = [
+    re.compile(r'(?m)^On\b.{5,250}?\bwrote:\s*$'),          # "On <date>, <who> wrote:"
+    re.compile(r'(?m)^>'),                                   # a quoted line
+    re.compile(r'(?m)^-{2,}\s*Original Message\s*-{2,}', re.I),
+    re.compile(r'(?m)^-{2,}\s*Forwarded message\s*-{2,}', re.I),
+    re.compile(r'(?m)^_{5,}\s*$'),                           # Outlook underscore divider
+]
+
+
+def split_reply_quote(content):
+    """Split a reply body into (new_text, quoted_text).
+
+    The new text is what the person actually wrote this time; the quoted text is
+    the email history they replied on top of. quoted_text is '' when no quote is
+    detected. Pure string logic so it can be unit-tested without rendering.
+    """
+    text = (content or '').replace('\r\n', '\n').replace('\r', '\n')
+    earliest = None
+    for pat in _QUOTE_BOUNDARY_PATTERNS:
+        m = pat.search(text)
+        if m and (earliest is None or m.start() < earliest):
+            earliest = m.start()
+    if earliest is None:
+        return text.strip(), ''
+    return text[:earliest].rstrip(), text[earliest:].strip()
+
+
+@register.filter
+def reply_body(content):
+    """Render a ticket reply: new text shown plainly (newlines preserved), the
+    quoted email history folded into a collapsible, greyed blockquote — like a
+    standard email client. Content is escaped before any markup is added.
+    """
+    new_text, quoted = split_reply_quote(content)
+    html = escape(new_text).replace('\n', '<br>')
+    if quoted:
+        # Strip leading "> " markers per line for a clean blockquote.
+        cleaned = '\n'.join(re.sub(r'^>\s?', '', ln) for ln in quoted.split('\n'))
+        html += (
+            '<details class="mt-2">'
+            '<summary class="cursor-pointer text-xs text-gray-400 hover:text-gray-600 select-none">'
+            '&#8943; Show quoted text</summary>'
+            '<div class="mt-1 pl-3 border-l-2 border-gray-300 text-gray-500 text-xs whitespace-pre-line">'
+            + escape(cleaned).replace('\n', '<br>')
+            + '</div></details>'
+        )
     return mark_safe(html)
