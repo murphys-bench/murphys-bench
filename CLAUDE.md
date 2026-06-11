@@ -63,14 +63,15 @@ project coherent across sessions, not the model. That said, match model to task:
 **Test harness now exists** (session 27): `pytest.ini` + `core/tests.py` spine suite.
 Run with `venv/bin/python -m pytest`. The "tests for anything touching data" rule is now enforceable.
 
-5. **`reset_operational_data` management command** (built test-first — bootstraps the test
-   suite): surgically deletes operational data (clients, contacts, devices, tickets, WOs,
-   mileage, attachments+files, logs, non-superuser users) while KEEPING all configuration
+5. ✅ **DONE (session 27):** `reset_operational_data` management command. Surgically
+   deletes operational data (clients, contacts, devices, tickets, WOs, mileage,
+   attachments+files, logs, non-superuser users) while KEEPING all configuration
    (settings, roles, statuses, help topics, SLA plans, repair types, checklists, canned
-   responses, templates, tiles, custom-field *definitions*, KB, org credentials) and the
-   superuser. Dry-run by default; requires typed `--confirm`; runs in a transaction.
-   This is the clean cutover-from-OSTicket wipe. **Never use `manage.py flush`** — it
-   destroys configuration too.
+   responses, templates, tiles, custom-field *definitions*, KB, org credentials) and all
+   superusers. **Dry-run by default**; the destructive path requires the exact phrase
+   `--confirm "DELETE ALL OPERATIONAL DATA"`; runs in one transaction. Optional
+   `--keep-users a,b`. Covered by tests. This is the clean cutover-from-OSTicket wipe.
+   **Never use `manage.py flush`** — it destroys configuration too.
 6. **Production safety guards:** fail loudly if `DEBUG=False` and `SECRET_KEY` /
    `FIELD_ENCRYPTION_KEY` are still the committed defaults; flip `DEBUG` default to `False`;
    clear `manage.py check --deploy`.
