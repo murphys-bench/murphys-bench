@@ -1,10 +1,14 @@
-<div class="border-l-4 pl-4
-    {% if reply.reply_type == 'internal' %}border-yellow-400 bg-yellow-50{% else %}border-blue-400 bg-blue-50{% endif %}
-    rounded-r py-2">
+{% load mb_icons %}
+<div class="border-l-4 pl-4 rounded-r py-2
+    {% if reply.reply_type == 'internal' %}border-yellow-400 bg-yellow-50
+    {% elif not reply.created_by %}border-green-400 bg-green-50
+    {% else %}border-blue-400 bg-blue-50{% endif %}">
     <div class="flex items-center justify-between mb-1">
         <span class="text-xs font-semibold
-            {% if reply.reply_type == 'internal' %}text-yellow-700{% else %}text-blue-700{% endif %}">
-            {% load mb_icons %}{% if reply.reply_type == 'internal' %}<span class="inline-flex items-center gap-1">{% icon "lock-closed" 3 %} Internal</span>{% else %}<span class="inline-flex items-center gap-1">{% icon "user" 3 %} Customer Visible</span>{% endif %}
+            {% if reply.reply_type == 'internal' %}text-yellow-700
+            {% elif not reply.created_by %}text-green-700
+            {% else %}text-blue-700{% endif %}">
+            {% if reply.reply_type == 'internal' %}<span class="inline-flex items-center gap-1">{% icon "lock-closed" 3 %} Internal</span>{% elif not reply.created_by %}<span class="inline-flex items-center gap-1">{% icon "user" 3 %} Client Reply</span>{% else %}<span class="inline-flex items-center gap-1">{% icon "user" 3 %} Customer Visible</span>{% endif %}
         </span>
         <div class="flex items-center gap-3">
             <span class="text-xs text-gray-400">
@@ -47,6 +51,6 @@
             {% endif %}
         </div>
     </div>
-    <p class="text-sm text-gray-700">{{ reply.content }}</p>
+    <div class="text-sm text-gray-700">{{ reply.content|reply_body }}</div>
     {% include "core/partials/attachment_list.html" with attachments=reply.attachments.all %}
 </div>
