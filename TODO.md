@@ -1,7 +1,11 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 9, 2026 (session 17)
-**Current Phase**: Phase 1 — SCS Internal
+**Last Updated**: June 11, 2026 (session 27 — stabilization)
+**Current Phase**: Phase 1 — SCS Internal — **STABILIZATION** (see "How We Work" in CLAUDE.md)
+
+> ⚠ We are in a stabilization phase, not a feature phase. New features are paused until
+> the test suite is broader and the spine is solid. Default response to a feature request
+> is to check it against the stabilization rule in CLAUDE.md first.
 
 ---
 
@@ -377,12 +381,28 @@
 
 - [x] **CSV export for Invoice records** — `InvoiceExportView` at `/clients/<pk>/invoices.csv`, optional `?status=` filter, CSV button on client detail
 
-- [ ] **Testing suite**
-  - Model tests (validation, relationships)
-  - View tests (authentication, permissions, data display)
-  - Form tests (validation, submission)
-  - Target: 70%+ coverage
+- [~] **Testing suite** — STARTED (session 27): `pytest.ini` + `core/tests.py` spine suite
+  (10 tests) covering the four bug fixes and the reset command. Run `venv/bin/python -m pytest`.
+  - [ ] Broaden beyond the spine: ticket→WO convert/lifecycle, email routing, queue filters,
+        permission denials, form validation. (No fixed coverage % target — target the spine
+        and the money/data paths first.)
 - [ ] ~~**Deployment** (internal network)~~ — ✅ COMPLETE (session 12, 10.58.58.82)
+
+---
+
+#### Session 27 — Stabilization (COMPLETE) ✅
+
+Full code review → shifted from feature-building to hardening. All shipped + deployed:
+- "How We Work On This Project" guardrail added to top of CLAUDE.md
+- Four data-integrity bugs fixed (delete guard, nullable serial/migration 0045, number-collision
+  retry, fail-loud logging) — each test-covered
+- First test harness (pytest, 10 tests)
+- `reset_operational_data` management command (clean OSTicket-cutover wipe; dry-run by default)
+- Production safety guards (DEBUG default False; refuse default secret/encryption keys)
+- Nightly DB backup (`scripts/backup_db.sh`) + systemd timer
+- systemd timers for `fetch_inbound_email` (2 min) and `check_sla_overdue` (15 min) — inbound
+  email was unscheduled/dormant; now installed, active, and verified connecting to IMAP
+- **Action left for Mike:** point inbound mailbox from `testing@` to the real support inbox in Settings
 
 ---
 
