@@ -8,15 +8,27 @@ def _status_label(slug, entity_type):
 
 
 def _build_html_email(body, signature_body, subject, ticket, site):
-    """Render the HTML email wrapper around a plain-text body."""
+    """Render the HTML email wrapper. Returns (html_str, logo_data, logo_mime_type)."""
     from django.template.loader import render_to_string
-    from django.contrib.sites.shortcuts import get_current_site
-    import re
 
-    logo_url = ''
+    logo_data = None
+    logo_mime_type = 'image/png'
+    has_logo = False
+
     if site.company_logo:
         try:
-            logo_url = site.company_logo.url
+            import os
+            logo_path = site.company_logo.path
+            if os.path.isfile(logo_path):
+                with open(logo_path, 'rb') as f:
+                    logo_data = f.read()
+                ext = os.path.splitext(logo_path)[1].lower()
+                logo_mime_type = {
+                    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+                    '.png': 'image/png', '.gif': 'image/gif',
+                    '.webp': 'image/webp',
+                }.get(ext, 'image/png')
+                has_logo = True
         except Exception:
             pass
 
@@ -25,12 +37,12 @@ def _build_html_email(body, signature_body, subject, ticket, site):
         'body': body,
         'signature': signature_body,
         'company_name': site.company_name or "Murphy's Bench",
-        'logo_url': logo_url,
+        'has_logo': has_logo,
         'title_bar_color': site.color_title_bar or '#1f2937',
         'title_text_color': site.color_page_title or '#ffffff',
         'ticket_number': ticket.ticket_number if ticket else '',
     })
-    return html
+    return html, logo_data, logo_mime_type
 
 
 def send_ticket_email(trigger, ticket, extra_context=None, cc=None):
@@ -120,7 +132,7 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None):
         return  # Bad template syntax — fail silently
 
     # Build HTML version
-    html_body = _build_html_email(body, signature_body, subject.strip(), ticket, site)
+    html_body, logo_data, logo_mime_type = _build_html_email(body, signature_body, subject.strip(), ticket, site)
 
     # Plain-text version appends signature below a separator
     plain_body = body
@@ -155,6 +167,12 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None):
             connection=connection,
         )
         msg.attach_alternative(html_body, 'text/html')
+        if logo_data:
+            from email.mime.image import MIMEImage
+            img = MIMEImage(logo_data, _subtype=logo_mime_type.split('/')[-1])
+            img.add_header('Content-ID', '<logo>')
+            img.add_header('Content-Disposition', 'inline', filename='logo')
+            msg.attach(img)
         sent = msg.send(fail_silently=False)
         status = 'sent' if sent else 'failed'
         reason = '' if sent else 'send_error'
