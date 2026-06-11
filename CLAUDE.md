@@ -81,10 +81,17 @@ Run with `venv/bin/python -m pytest`. The "tests for anything touching data" rul
    Prod verified already has DEBUG=False + real keys, so the guard passes there.
 7. ✅ **DONE (session 27):** nightly `pg_dump` backup. Versioned script at
    `scripts/backup_db.sh` (gzip, 14-day rotation, writes to `/opt/murphys-bench/backups/`,
-   which is gitignored). Installed on the VM as a `scs-tech` crontab entry running 02:15
-   nightly, logging to `backups/backup.log`. Complements the Proxmox VM snapshots with a
-   portable logical dump. Reminder: the dump holds *encrypted* ciphertext, not the
+   gitignored). Test-run on the VM produces a valid dump. **This VM has no cron**, so
+   scheduling uses a systemd timer: `deploy/murphys-bench-backup.{service,timer}` (02:15
+   nightly, `Persistent=true`). The unit files are deployed to the VM; the one-time
+   `sudo` install is pending Mike (see `deploy/README.md` — sudo needs his password,
+   the assistant only has NOPASSWD for restarting the app service). Complements the
+   Proxmox VM snapshots. Reminder: the dump holds *encrypted* ciphertext, not the
    `FIELD_ENCRYPTION_KEY` — a restore needs dump + key (key in Bitwarden).
+
+   ⚠ **Related gap found this session:** `fetch_inbound_email` and `check_sla_overdue`
+   are NOT scheduled on the VM (no cron, no timers). Inbound email is therefore not being
+   polled automatically. Needs systemd timers too (same pattern) — flagged to Mike.
 
 ### Going HTTPS (Cloudflare cutover checklist — NOT done yet, deliberately deferred)
 The app is currently served over plain HTTP on the LAN (`10.58.58.82`, no domain), so

@@ -37,7 +37,7 @@ find "$BACKUP_DIR" -name 'mb_*.sql.gz' -mtime +"$KEEP_DAYS" -delete
 
 echo "$(date '+%F %T') backup OK -> $OUT ($(du -h "$OUT" | cut -f1))"
 
-# ── Install (one-time, on the VM) ───────────────────────────────────────────
-# chmod +x /opt/murphys-bench/scripts/backup_db.sh
-# Add to the scs-tech crontab (runs 02:15 nightly, logs to backups/backup.log):
-#   15 2 * * * /opt/murphys-bench/scripts/backup_db.sh >> /opt/murphys-bench/backups/backup.log 2>&1
+# ── Scheduling ──────────────────────────────────────────────────────────────
+# This VM has no cron. Scheduling is via systemd timer — see deploy/README.md
+# for the murphys-bench-backup.{service,timer} units and the one-time sudo
+# install. Output is captured by journalctl (journalctl -u murphys-bench-backup).
