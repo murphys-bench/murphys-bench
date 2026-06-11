@@ -1,0 +1,10 @@
+[Unit]
+Description=Murphy's Bench — check for overdue SLA tickets
+After=postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+User=scs-tech
+WorkingDirectory=/opt/murphys-bench
+ExecStart=/opt/murphys-bench/venv/bin/python /opt/murphys-bench/manage.py check_sla_overdue

@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll the Murphy's Bench mailbox every 2 minutes
+
+[Timer]
+# Fire 2 min after boot, then 2 min after each run finishes (no overlap).
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=20s
+
+[Install]
+WantedBy=timers.target

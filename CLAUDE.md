@@ -89,9 +89,12 @@ Run with `venv/bin/python -m pytest`. The "tests for anything touching data" rul
    Proxmox VM snapshots. Reminder: the dump holds *encrypted* ciphertext, not the
    `FIELD_ENCRYPTION_KEY` — a restore needs dump + key (key in Bitwarden).
 
-   ⚠ **Related gap found this session:** `fetch_inbound_email` and `check_sla_overdue`
-   are NOT scheduled on the VM (no cron, no timers). Inbound email is therefore not being
-   polled automatically. Needs systemd timers too (same pattern) — flagged to Mike.
+   ✅ **Related gap CLOSED (session 27):** `fetch_inbound_email` (every 2 min) and
+   `check_sla_overdue` (every 15 min) now have systemd timers in `deploy/`. Inbound was
+   verified working (IMAP dry-run connected to mail.shamrockcomputerservices.com). Timer
+   files deployed to the VM; one-time `sudo` install pending Mike (see `deploy/README.md`).
+   NOTE: the configured inbound mailbox is `testing@…` — Mike should point it at the real
+   support inbox in Settings before relying on it.
 
 ### Going HTTPS (Cloudflare cutover checklist — NOT done yet, deliberately deferred)
 The app is currently served over plain HTTP on the LAN (`10.58.58.82`, no domain), so
