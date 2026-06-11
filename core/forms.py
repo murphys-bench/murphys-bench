@@ -469,6 +469,24 @@ class ColorSettingsForm(forms.ModelForm):
                    for f in _hex_fields}
 
 
+class EmailBrandingForm(forms.ModelForm):
+    """Outgoing-email appearance — independent of the app's look."""
+    class Meta:
+        model = SiteSettings
+        fields = ['email_header_color', 'email_logo']
+        widgets = {
+            'email_header_color': forms.TextInput(attrs={
+                'class': _HEX_INPUT, 'maxlength': 7, 'placeholder': '#rrggbb',
+            }),
+            'email_logo': forms.ClearableFileInput(attrs={'class': 'text-sm'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['email_header_color'].required = False
+        self.fields['email_logo'].required = False
+
+
 # ---------------------------------------------------------------------------
 # User management forms
 # ---------------------------------------------------------------------------
