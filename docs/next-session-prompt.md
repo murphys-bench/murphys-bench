@@ -42,10 +42,11 @@ go/no-go only before destructive or production-affecting steps.
   sudo systemctl list-timers murphys-bench-backup.timer
   ```
 
-- **⚠ Inbound email + SLA checks are NOT scheduled on the VM** — no cron, no timers exist.
-  Inbound email is therefore not being polled automatically. The session-26 `/tmp` units are
-  gone. Needs systemd timers for `fetch_inbound_email` (~every 2 min) and `check_sla_overdue`
-  (~every 15 min), same pattern as the backup units in `deploy/`. **High priority.**
+- ✅ **Inbound email + SLA checks now scheduled + verified** — systemd timers installed and
+  active on the VM (fetch-email every 2 min, sla-check every 15 min, backup nightly 02:15).
+  The fetch service was confirmed connecting to IMAP (status 0/SUCCESS).
+  **⚠ One action left:** the inbound mailbox is `testing@shamrockcomputerservices.com` —
+  point it at the real support inbox in Settings → Inbound Email so customer emails become tickets.
 
 - **HTTPS / Cloudflare cutover pending**: app is HTTP-on-LAN, so 4 `check --deploy` warnings
   (secure cookies, SSL redirect, HSTS) are deliberately deferred. See the "Going HTTPS"

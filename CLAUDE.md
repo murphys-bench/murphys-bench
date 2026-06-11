@@ -83,18 +83,17 @@ Run with `venv/bin/python -m pytest`. The "tests for anything touching data" rul
    `scripts/backup_db.sh` (gzip, 14-day rotation, writes to `/opt/murphys-bench/backups/`,
    gitignored). Test-run on the VM produces a valid dump. **This VM has no cron**, so
    scheduling uses a systemd timer: `deploy/murphys-bench-backup.{service,timer}` (02:15
-   nightly, `Persistent=true`). The unit files are deployed to the VM; the one-time
-   `sudo` install is pending Mike (see `deploy/README.md` — sudo needs his password,
-   the assistant only has NOPASSWD for restarting the app service). Complements the
+   nightly, `Persistent=true`). **Installed + active on the VM** (verified). Complements the
    Proxmox VM snapshots. Reminder: the dump holds *encrypted* ciphertext, not the
    `FIELD_ENCRYPTION_KEY` — a restore needs dump + key (key in Bitwarden).
 
-   ✅ **Related gap CLOSED (session 27):** `fetch_inbound_email` (every 2 min) and
-   `check_sla_overdue` (every 15 min) now have systemd timers in `deploy/`. Inbound was
-   verified working (IMAP dry-run connected to mail.shamrockcomputerservices.com). Timer
-   files deployed to the VM; one-time `sudo` install pending Mike (see `deploy/README.md`).
-   NOTE: the configured inbound mailbox is `testing@…` — Mike should point it at the real
-   support inbox in Settings before relying on it.
+   ✅ **Related gap CLOSED + VERIFIED (session 27):** `fetch_inbound_email` (every 2 min)
+   and `check_sla_overdue` (every 15 min) systemd timers (`deploy/`) are **installed and
+   active** on the VM. Confirmed working end-to-end: the fetch service ran and connected to
+   IMAP `mail.shamrockcomputerservices.com` (status 0/SUCCESS). All three MB timers
+   (backup, fetch-email, sla-check) are `active`/`enabled`.
+   ⚠ **One action left for Mike:** the inbound mailbox is `testing@…` — point it at the
+   real support inbox in Settings → Inbound Email so customer emails become tickets.
 
 ### Going HTTPS (Cloudflare cutover checklist — NOT done yet, deliberately deferred)
 The app is currently served over plain HTTP on the LAN (`10.58.58.82`, no domain), so
