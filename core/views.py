@@ -19,7 +19,7 @@ from .models import (
     CannedResponseCategory, CannedResponse, Invoice,
     OrgCredential, CredentialAccessLog,
     DeviceCredentialAccessLog,
-    EmailTemplate,
+    EmailTemplate, EmailSignature,
     StatusDefinition,
     SuppressedAddress,
     BlockedSender,
@@ -2977,7 +2977,8 @@ class SettingsView(LoginRequiredMixin, View):
                         'is_active': False,
                     }
                 )
-            ctx['email_templates'] = EmailTemplate.objects.all()
+            ctx['email_templates'] = EmailTemplate.objects.select_related('signature').all()
+            ctx['email_signatures'] = EmailSignature.objects.all()
         return render(request, 'core/settings.html', ctx)
 
     def post(self, request):
@@ -3545,9 +3546,58 @@ class EmailTemplateUpdateView(LoginRequiredMixin, View):
         tmpl.subject_template = request.POST.get('subject_template', tmpl.subject_template).strip()
         tmpl.body_template = request.POST.get('body_template', tmpl.body_template).strip()
         tmpl.is_active = request.POST.get('is_active') == '1'
+        sig_id = request.POST.get('signature')
+        tmpl.signature_id = int(sig_id) if sig_id else None
         tmpl.save()
         messages.success(request, f'Email template "{tmpl.get_trigger_display()}" saved.')
         return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
+
+
+# --- Email Signatures ---
+
+def _sig_redirect():
+    return reverse('core:settings') + '?tab=email_templates'
+
+
+class EmailSignatureCreateView(LoginRequiredMixin, View):
+    def post(self, request):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        name = request.POST.get('name', '').strip()
+        body = request.POST.get('body', '').strip()
+        is_default = request.POST.get('is_default') == '1'
+        if name and body:
+            sig = EmailSignature(name=name, body=body, is_default=is_default)
+            sig.save()
+            messages.success(request, f'Signature "{name}" created.')
+        return redirect(_sig_redirect())
+
+
+class EmailSignatureUpdateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        sig = get_object_or_404(EmailSignature, pk=pk)
+        sig.name = request.POST.get('name', sig.name).strip()
+        sig.body = request.POST.get('body', sig.body).strip()
+        sig.is_default = request.POST.get('is_default') == '1'
+        sig.save()
+        messages.success(request, f'Signature "{sig.name}" saved.')
+        return redirect(_sig_redirect())
+
+
+class EmailSignatureDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        sig = get_object_or_404(EmailSignature, pk=pk)
+        name = sig.name
+        sig.delete()
+        messages.success(request, f'Signature "{name}" deleted.')
+        return redirect(_sig_redirect())
 
 
 # --- Status Management ---

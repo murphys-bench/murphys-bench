@@ -7,13 +7,39 @@ def _status_label(slug, entity_type):
     return sd.label if sd else slug.replace('_', ' ').title()
 
 
+def _build_html_email(body, signature_body, subject, ticket, site):
+    """Render the HTML email wrapper around a plain-text body."""
+    from django.template.loader import render_to_string
+    from django.contrib.sites.shortcuts import get_current_site
+    import re
+
+    logo_url = ''
+    if site.company_logo:
+        try:
+            logo_url = site.company_logo.url
+        except Exception:
+            pass
+
+    html = render_to_string('core/email/base_email.html', {
+        'subject': subject,
+        'body': body,
+        'signature': signature_body,
+        'company_name': site.company_name or "Murphy's Bench",
+        'logo_url': logo_url,
+        'title_bar_color': site.color_title_bar or '#1f2937',
+        'title_text_color': site.color_page_title or '#ffffff',
+        'ticket_number': ticket.ticket_number if ticket else '',
+    })
+    return html
+
+
 def send_ticket_email(trigger, ticket, extra_context=None, cc=None):
     """
     Send an automated email for a ticket event.
     Checks all three suppression layers before sending.
     Always writes an EmailSendLog entry for auditing.
     """
-    from .models import SiteSettings, EmailTemplate, SuppressedAddress, EmailSendLog
+    from .models import SiteSettings, EmailTemplate, EmailSignature, SuppressedAddress, EmailSendLog
 
     site = SiteSettings.get()
 
@@ -66,9 +92,13 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None):
         return
 
     # Get active template
-    template = EmailTemplate.objects.filter(trigger=trigger, is_active=True).first()
+    template = EmailTemplate.objects.filter(trigger=trigger, is_active=True).select_related('signature').first()
     if not template:
         return  # No template → no email, no log entry (intentionally quiet)
+
+    # Resolve signature: template's own → default → none
+    sig_obj = template.signature or EmailSignature.objects.filter(is_default=True).first()
+    signature_body = sig_obj.body if sig_obj else ''
 
     # Render subject and body as Django templates
     from django.template import Template, Context
@@ -77,7 +107,7 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None):
         'client': ticket.client,
         'tech_name': ticket.created_by.get_full_name() if ticket.created_by else '',
         'status': _status_label(ticket.status, 'ticket'),
-        'site_name': "Murphy's Bench",
+        'site_name': site.company_name or "Murphy's Bench",
     }
     if extra_context:
         ctx.update(extra_context)
@@ -89,8 +119,16 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None):
     except Exception:
         return  # Bad template syntax — fail silently
 
+    # Build HTML version
+    html_body = _build_html_email(body, signature_body, subject.strip(), ticket, site)
+
+    # Plain-text version appends signature below a separator
+    plain_body = body
+    if signature_body:
+        plain_body = f"{body}\n\n--\n{signature_body}"
+
     # Send via SMTP config from SiteSettings
-    from django.core.mail import EmailMessage, get_connection
+    from django.core.mail import EmailMultiAlternatives, get_connection
     from django.conf import settings as django_settings
 
     use_ssl = site.email_port == 465
@@ -108,14 +146,15 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None):
     from_email = site.email_from or django_settings.DEFAULT_FROM_EMAIL
 
     try:
-        msg = EmailMessage(
+        msg = EmailMultiAlternatives(
             subject=subject.strip(),
-            body=body,
+            body=plain_body,
             from_email=from_email,
             to=[to_email],
             cc=[e for e in (cc or []) if e and e != to_email],
             connection=connection,
         )
+        msg.attach_alternative(html_body, 'text/html')
         sent = msg.send(fail_silently=False)
         status = 'sent' if sent else 'failed'
         reason = '' if sent else 'send_error'

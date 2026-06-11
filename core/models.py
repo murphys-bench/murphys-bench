@@ -1238,6 +1238,29 @@ class CannedResponse(models.Model):
         return self.label
 
 
+class EmailSignature(models.Model):
+    """Reusable email signature blocks. One can be marked as default."""
+
+    name        = models.CharField(max_length=100, unique=True)
+    body        = models.TextField(help_text='Plain text. Use blank lines between paragraphs. Rendered with line breaks in HTML emails.')
+    is_default  = models.BooleanField(default=False, help_text='Used when a template has no signature assigned.')
+    created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'email_signatures'
+        ordering = ['-is_default', 'name']
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        # Enforce single default
+        if self.is_default:
+            EmailSignature.objects.exclude(pk=self.pk).update(is_default=False)
+        super().save(*args, **kwargs)
+
+
 class EmailTemplate(models.Model):
     """Trigger-based email templates sent to clients on ticket events."""
 
@@ -1255,6 +1278,13 @@ class EmailTemplate(models.Model):
     )
     body_template = models.TextField(
         help_text='Plain text body. Same template variables available.',
+    )
+    signature = models.ForeignKey(
+        'EmailSignature',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='templates',
+        help_text='Leave blank to use the default signature.',
     )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
