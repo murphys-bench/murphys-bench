@@ -4,7 +4,7 @@ from django.views.generic import ListView, DetailView, CreateView, UpdateView
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 from django.db.models import Q, F as models_F, Max as models_Max, Count
 from django.contrib.contenttypes.models import ContentType
 from django.http import FileResponse, Http404
