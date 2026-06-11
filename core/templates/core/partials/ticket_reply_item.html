@@ -8,12 +8,10 @@
             {% if reply.reply_type == 'internal' %}text-yellow-700
             {% elif not reply.created_by %}text-green-700
             {% else %}text-blue-700{% endif %}">
-            {% if reply.reply_type == 'internal' %}<span class="inline-flex items-center gap-1">{% icon "lock-closed" 3 %} Internal</span>{% elif not reply.created_by %}<span class="inline-flex items-center gap-1">{% icon "user" 3 %} Client Reply</span>{% else %}<span class="inline-flex items-center gap-1">{% icon "user" 3 %} Customer Visible</span>{% endif %}
+            {% if reply.reply_type == 'internal' %}<span class="inline-flex items-center gap-1">{% icon "lock-closed" 3 %} {{ reply.created_by.get_full_name|default:reply.created_by.username }} <span class="font-normal text-gray-400">· internal note</span></span>{% elif not reply.created_by %}<span class="inline-flex items-center gap-1">{% icon "user" 3 %} {% if reply.ticket.contact %}{{ reply.ticket.contact.first_name }} {{ reply.ticket.contact.last_name }}{% else %}Client{% endif %} <span class="font-normal text-gray-400">· client reply</span></span>{% else %}<span class="inline-flex items-center gap-1">{% icon "user" 3 %} {{ reply.created_by.get_full_name|default:reply.created_by.username }} <span class="font-normal text-gray-400">· to customer</span></span>{% endif %}
         </span>
         <div class="flex items-center gap-3">
-            <span class="text-xs text-gray-400">
-                {% if reply.created_by %}{{ reply.created_by.get_full_name|default:reply.created_by.username }}{% else %}Client{% endif %} — {{ reply.created_at|date:"M d, Y g:i A" }}
-            </span>
+            <span class="text-xs text-gray-400">{{ reply.created_at|date:"M d, Y g:i A" }}</span>
             {% if reply.reply_type == 'customer_visible' %}
             <div x-data="{ open: false }" class="relative">
                 <button @click="open = true" class="text-xs text-blue-500 hover:text-blue-700 font-medium">Resend</button>
