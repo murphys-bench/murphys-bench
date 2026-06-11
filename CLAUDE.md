@@ -72,9 +72,13 @@ Run with `venv/bin/python -m pytest`. The "tests for anything touching data" rul
    `--confirm "DELETE ALL OPERATIONAL DATA"`; runs in one transaction. Optional
    `--keep-users a,b`. Covered by tests. This is the clean cutover-from-OSTicket wipe.
    **Never use `manage.py flush`** — it destroys configuration too.
-6. **Production safety guards:** fail loudly if `DEBUG=False` and `SECRET_KEY` /
-   `FIELD_ENCRYPTION_KEY` are still the committed defaults; flip `DEBUG` default to `False`;
-   clear `manage.py check --deploy`.
+6. ✅ **DONE (session 27):** Production safety guards in settings.py. `DEBUG` now
+   defaults to `False` (local dev sets `DEBUG=True` in `.env` — a local `.env` was
+   created on Mike's Mac). Startup raises `ImproperlyConfigured` if `DEBUG=False` and
+   `SECRET_KEY`/`FIELD_ENCRYPTION_KEY` are still the committed defaults. Added
+   `SECURE_CONTENT_TYPE_NOSNIFF`; `SECURE_SSL_REDIRECT` + HSTS are opt-in via `.env`
+   (HSTS deliberately left off until HTTPS is confirmed end-to-end — it's hard to undo).
+   Prod verified already has DEBUG=False + real keys, so the guard passes there.
 7. **Backups:** nightly `pg_dump` to a file inside the Proxmox-backed-up filesystem
    (complements the VM snapshot; gives a clean, portable, restorable logical dump).
    Reminder: the DB backup and `FIELD_ENCRYPTION_KEY` are a matched pair — a backup
