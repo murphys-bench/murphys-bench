@@ -240,3 +240,26 @@ def test_email_contrast_text_color():
     assert _contrast_text_color('#111827') == '#ffffff'   # near-black bar -> white text
     assert _contrast_text_color('#ffffff') == '#1f2937'   # white bar -> dark text
     assert _contrast_text_color('') == '#ffffff'          # bad input -> safe default
+
+
+@pytest.mark.django_db
+def test_email_branding_falls_back_to_app_settings():
+    from core.email_utils import _email_header_color, _email_logo_field
+    from core.models import SiteSettings
+    s = SiteSettings.get()
+    s.email_header_color = ''
+    s.color_title_bar = '#123456'
+    s.save()
+    assert _email_header_color(s) == '#123456'    # blank -> app Title Bar color
+    s.email_header_color = '#abcdef'
+    s.save()
+    assert _email_header_color(s) == '#abcdef'     # dedicated email value wins
+    assert not _email_logo_field(s)                # no email/company logo -> falsy
+
+
+@pytest.mark.django_db
+def test_settings_email_templates_tab_renders(client, admin_user):
+    client.force_login(admin_user)
+    resp = client.get('/settings/?tab=email_templates')
+    assert resp.status_code == 200
+    assert b'Email Branding' in resp.content

@@ -1709,6 +1709,65 @@
                 <p class="text-sm text-gray-500 mt-1">Customise the automated emails sent to clients. Templates use Django template syntax — see the variable reference below.</p>
             </div>
 
+            <!-- Email Branding -->
+            <div class="bg-white rounded-lg shadow p-5"
+                 x-data="{
+                    color: '{{ email_header_color_effective|default:'#1f2937' }}',
+                    textColor(hex) {
+                        try {
+                            const h = (hex||'').replace('#','');
+                            const r=parseInt(h.substr(0,2),16), g=parseInt(h.substr(2,2),16), b=parseInt(h.substr(4,2),16);
+                            return ((0.299*r + 0.587*g + 0.114*b)/255) > 0.6 ? '#1f2937' : '#ffffff';
+                        } catch(e) { return '#ffffff'; }
+                    }
+                 }">
+                <h3 class="text-sm font-semibold text-gray-800 mb-1">Email Branding</h3>
+                <p class="text-xs text-gray-500 mb-4">Controls the look of outgoing client emails, independent of the app's colors. Leave a field blank to fall back to the Company logo / app Title Bar color. Header text color is chosen automatically for readability.</p>
+
+                <div class="grid md:grid-cols-2 gap-6">
+                    <!-- Form -->
+                    <form method="post" action="{% url 'core:email_branding_save' %}" enctype="multipart/form-data" class="space-y-4">
+                        {% csrf_token %}
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Email header color</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" :value="(color && color.length===7) ? color : '#1f2937'"
+                                       @input="color=$event.target.value"
+                                       class="h-9 w-12 border border-gray-300 rounded cursor-pointer">
+                                <input type="text" name="email_header_color" x-model="color" maxlength="7" placeholder="#rrggbb"
+                                       class="w-28 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            </div>
+                            <p class="text-[11px] text-gray-400 mt-1">Blank = use the app Title Bar color.</p>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Email logo</label>
+                            {% if settings.email_logo %}<p class="text-[11px] text-gray-500 mb-1">Current: {{ settings.email_logo.name }}</p>{% endif %}
+                            {{ email_branding_form.email_logo }}
+                            <p class="text-[11px] text-gray-400 mt-1">Blank = use the Company logo. Auto-resized for email.</p>
+                        </div>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700">Save Email Branding</button>
+                    </form>
+
+                    <!-- Live preview -->
+                    <div>
+                        <p class="text-xs font-medium text-gray-600 mb-2">Preview</p>
+                        <div class="border border-gray-200 rounded-lg overflow-hidden max-w-sm">
+                            {% if settings.email_logo %}
+                            <div class="text-center py-3 bg-white"><img src="{{ settings.email_logo.url }}" alt="logo" style="max-height:40px;display:inline-block;"></div>
+                            {% elif settings.company_logo %}
+                            <div class="text-center py-3 bg-white"><img src="{{ settings.company_logo.url }}" alt="logo" style="max-height:40px;display:inline-block;"></div>
+                            {% endif %}
+                            <div class="px-4 py-3" :style="`background-color:${(color && color.length===7) ? color : '#1f2937'}`">
+                                <span class="text-sm font-bold" :style="`color:${textColor(color)}`">{{ settings.company_name|default:"Murphy's Bench" }}</span>
+                            </div>
+                            <div class="bg-white px-4 py-4 text-xs text-gray-600 border-t border-gray-100">
+                                Hi Anon E Mouser,<br><br>The status of your ticket has been updated to: In Progress
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Variable reference -->
             <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
                 <p class="font-semibold text-blue-800 mb-2">Available template variables</p>

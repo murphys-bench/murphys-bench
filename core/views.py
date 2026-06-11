@@ -2979,6 +2979,10 @@ class SettingsView(LoginRequiredMixin, View):
                 )
             ctx['email_templates'] = EmailTemplate.objects.select_related('signature').all()
             ctx['email_signatures'] = EmailSignature.objects.all()
+            from .forms import EmailBrandingForm
+            from .email_utils import _email_header_color
+            ctx['email_branding_form'] = EmailBrandingForm(instance=site)
+            ctx['email_header_color_effective'] = _email_header_color(site)
         return render(request, 'core/settings.html', ctx)
 
     def post(self, request):
@@ -3598,6 +3602,25 @@ class EmailSignatureDeleteView(LoginRequiredMixin, View):
         sig.delete()
         messages.success(request, f'Signature "{name}" deleted.')
         return redirect(_sig_redirect())
+
+
+class EmailBrandingUpdateView(LoginRequiredMixin, View):
+    """Settings: outgoing-email header color + logo (Email Templates tab)."""
+
+    def post(self, request):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        from .forms import EmailBrandingForm
+        site = SiteSettings.get()
+        # Allow clearing the header color back to "use app Title Bar color".
+        form = EmailBrandingForm(request.POST, request.FILES, instance=site)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Email branding saved.')
+        else:
+            messages.error(request, 'Could not save email branding — check the values.')
+        return redirect(reverse('core:settings') + '?tab=email_templates')
 
 
 # --- Status Management ---

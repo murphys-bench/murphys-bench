@@ -1141,6 +1141,17 @@ class SiteSettings(models.Model):
         help_text='PNG, JPG, or SVG. Displayed on repair reports and the nav bar.',
     )
 
+    # Email branding — independent of the app's look. Blank values fall back to
+    # the company logo / app Title Bar color, so existing installs are unaffected.
+    email_logo = models.ImageField(
+        upload_to='email/', blank=True, null=True,
+        help_text='Logo shown in outgoing emails. Leave blank to use the company logo.',
+    )
+    email_header_color = models.CharField(
+        max_length=7, blank=True, default='',
+        help_text='Header bar color for outgoing emails (e.g. #1f5f5b). Leave blank to use the app Title Bar color.',
+    )
+
     # Mileage / Google Maps
     google_maps_api_key = models.CharField(
         max_length=255, blank=True,

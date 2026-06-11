@@ -143,6 +143,7 @@ urlpatterns = [
 
     # Settings — Email Templates
     path('settings/email-templates/<int:pk>/edit/', views.EmailTemplateUpdateView.as_view(), name='email_template_update'),
+    path('settings/email-branding/save/', views.EmailBrandingUpdateView.as_view(), name='email_branding_save'),
 
     # Settings — Email Signatures
     path('settings/email-signatures/new/', views.EmailSignatureCreateView.as_view(), name='email_sig_create'),

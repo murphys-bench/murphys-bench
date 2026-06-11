@@ -44,6 +44,17 @@ def _load_logo_resized(path, mime_type, max_px=480):
             return None
 
 
+def _email_header_color(site):
+    """The email header bar color — the dedicated email setting, else the app's
+    Title Bar color, else a dark fallback."""
+    return getattr(site, 'email_header_color', '') or site.color_title_bar or '#1f2937'
+
+
+def _email_logo_field(site):
+    """The logo to use in emails — the dedicated email logo, else the company logo."""
+    return getattr(site, 'email_logo', None) or site.company_logo
+
+
 def _build_html_email(body, signature_body, subject, ticket, site):
     """Render the HTML email wrapper. Returns (html_str, logo_data, logo_mime_type)."""
     from django.template.loader import render_to_string
@@ -53,9 +64,10 @@ def _build_html_email(body, signature_body, subject, ticket, site):
     logo_mime_type = 'image/png'
     has_logo = False
 
-    if site.company_logo:
+    logo_field = _email_logo_field(site)
+    if logo_field:
         try:
-            logo_path = site.company_logo.path
+            logo_path = logo_field.path
             if os.path.isfile(logo_path):
                 ext = os.path.splitext(logo_path)[1].lower()
                 logo_mime_type = {
@@ -68,7 +80,7 @@ def _build_html_email(body, signature_body, subject, ticket, site):
         except Exception:
             logger.exception('Failed to load company logo for email.')
 
-    title_bar_color = site.color_title_bar or '#1f2937'
+    title_bar_color = _email_header_color(site)
     html = render_to_string('core/email/base_email.html', {
         'subject': subject,
         'body': body,
