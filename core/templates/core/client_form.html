@@ -29,12 +29,18 @@
         </div>
         {% endif %}
 
-        <!-- Company Info -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-base font-semibold text-gray-900 mb-4">Company Info</h2>
+        <!-- Client Info -->
+        <div class="bg-white rounded-lg shadow p-6"
+             x-data="{ clientType: '{{ form.client_type.value|default:'business' }}' }"
+             @change="if ($event.target.name === 'client_type') clientType = $event.target.value">
+            <h2 class="text-base font-semibold text-gray-900 mb-4"
+                x-text="clientType === 'residential' ? 'Client Info' : 'Company Info'"></h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Company Name <span class="text-red-500">*</span></label>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">
+                        <span x-text="clientType === 'residential' ? 'Client Name' : 'Company Name'"></span>
+                        <span class="text-red-500">*</span>
+                    </label>
                     {{ form.name }}
                 </div>
                 <div>
