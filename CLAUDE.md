@@ -10,6 +10,94 @@
 
 ---
 
+## How We Work On This Project
+
+**Read this section first, every session. It governs everything below it.**
+
+Murphy's Bench is in **daily production use at SCS**. It is past the prototype stage.
+That single fact sets the rules below. The owner (Mike) is a non-developer and the
+domain expert / director; the AI assistant is the technical director. Mike holds the
+*intent*; the assistant holds the *implementation* — and is responsible for flagging when
+a request would compromise the codebase's health, not just executing it.
+
+### The prime directive: stabilize before adding
+We are in a **stabilization phase**, not a feature phase. Until the spine test suite
+exists and the safety guards are in place, **do not build new features** unless Mike
+explicitly overrides this. When asked for a new feature, the default response is to
+check it against this rule first. Breadth (more features, more configurability) is no
+longer the goal; depth (trustworthiness of what already exists) is.
+
+### Non-negotiable habits
+1. **Tests are required for anything touching data.** Any change to deletion, billing
+   state, ticket/WO lifecycle, email routing, number generation, or permissions ships
+   *with* a test that locks in the behavior. No exceptions. Tests are not "later" —
+   that era ended when the app went into production. Target the spine, not 70% coverage.
+2. **Plan before building anything non-trivial.** Use plan mode. Get the approach
+   approved *before* writing code. Most expensive mistakes are "built the wrong thing well."
+3. **Review before it goes live.** Run a real review pass on any change touching money,
+   credentials, permissions, or data deletion before it reaches the production VM.
+4. **Fail loud, not silent.** No new `except: pass` or `fail_silently` that hides a real
+   failure. Catch so the user isn't crashed, but log it so we find out.
+5. **Every config option is a permanent cost.** Default to a good hardcoded choice.
+   Do not add a toggle/setting/custom-field-type until a real user actually needs it.
+
+### Which model does what
+Model choice is secondary to the habits above — CLAUDE.md + tests are what keep the
+project coherent across sessions, not the model. That said, match model to task:
+- **Frontier reasoning model (Opus 4.8 / equivalent)** — planning, architecture
+  decisions, code review, gnarly debugging, and "are we on track" check-ins.
+- **Sonnet (fast, capable)** — routine implementation: forms, views, templates, CRUD.
+- Switch freely; the source-of-truth docs and tests make the handoff safe.
+
+### Known issues to fix first (stabilization backlog, in order)
+1. **Bug:** `TicketDeleteView` guard uses `hasattr(ticket, 'work_order')` — wrong related
+   name (`work_order_created`), so the "block delete when WO linked" guard never fires.
+2. **Bug:** `Device.serial_number` is `blank=True, unique=True` with no `null=True` —
+   only one device can have a blank serial; the second crashes on IntegrityError.
+   Fix: `null=True` + store `None` not `''`.
+3. **Bug:** ticket/WO number generation (`max()+1` in Python) has a race condition under
+   concurrent creation (e.g. back-to-back inbound emails). Use a retry-on-IntegrityError
+   or a DB sequence.
+4. **Bug/visibility:** silent `except`/`fail_silently` in email send + inbound logging —
+   route failures to the `core` logger.
+5. **`reset_operational_data` management command** (built test-first — bootstraps the test
+   suite): surgically deletes operational data (clients, contacts, devices, tickets, WOs,
+   mileage, attachments+files, logs, non-superuser users) while KEEPING all configuration
+   (settings, roles, statuses, help topics, SLA plans, repair types, checklists, canned
+   responses, templates, tiles, custom-field *definitions*, KB, org credentials) and the
+   superuser. Dry-run by default; requires typed `--confirm`; runs in a transaction.
+   This is the clean cutover-from-OSTicket wipe. **Never use `manage.py flush`** — it
+   destroys configuration too.
+6. **Production safety guards:** fail loudly if `DEBUG=False` and `SECRET_KEY` /
+   `FIELD_ENCRYPTION_KEY` are still the committed defaults; flip `DEBUG` default to `False`;
+   clear `manage.py check --deploy`.
+7. **Backups:** nightly `pg_dump` to a file inside the Proxmox-backed-up filesystem
+   (complements the VM snapshot; gives a clean, portable, restorable logical dump).
+   Reminder: the DB backup and `FIELD_ENCRYPTION_KEY` are a matched pair — a backup
+   without the key cannot decrypt stored credentials. Key lives in Bitwarden.
+
+### Roadmap re-prioritization (decided this session)
+- **Demoted / dropped** (enterprise-shaped or "for someone else," not needed at a solo/small
+  shop): Departments, Teams, ticket auto-routing, customer self-service portal, REST API,
+  more custom-field types, async email queue, email OAuth2, extra storage backends.
+- **Kept small:** Data Management — only the *export* + *soft-delete recovery* halves
+  (useful internal safety). Skip the import wizard.
+- **The one feature worth pursuing after stabilization:** Invoice Ninja bridge (real SCS
+  billing value) — but only *after* the test suite exists, since it moves money.
+- **"For others" hygiene** (LICENSE, README, fail-safe settings): cheap, do once when
+  convenient, but it does **not** drive feature work. MB becomes useful to others by being
+  bulletproof at one shop first — not by adding features for hypothetical users.
+
+### Design intent to preserve (don't "fix" these — they're deliberate)
+- A completed Work Order must **never** auto-close its Ticket. The ticket drives the
+  human-facing interaction and a person resolves it manually after real contact.
+  `AUTO_RESOLVE_TICKET_ON_WO_CLOSE` stays off by default. (The close-dependency block in
+  `TicketUpdateView` is correct and working — only the *delete* guard, item 1 above, is broken.)
+- A Work Order does **not** require a Ticket — work doesn't always arrive that way. But if
+  a ticket came first, it also owns the last interaction.
+
+---
+
 ## Current App State (What's Working)
 
 The app is running locally at `http://localhost:8000`. All views require login.
