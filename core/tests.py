@@ -309,3 +309,20 @@ def test_tech_dashboard_shows_my_mileage(client, client_obj, admin_user):
 
     client.force_login(admin_user)
     assert b'>My Mileage</h2>' not in client.get('/').content   # admin sees Team Workload instead
+
+
+@pytest.mark.django_db
+def test_mileage_list_scopes_to_own_for_techs(client, admin_user):
+    from core.models import Mileage
+    tech = User.objects.create_user(username='tech3', password='x', is_staff=False)
+    Mileage.objects.create(technician=tech, trip_date='2026-06-11', miles=5, purpose='Tech trip')
+    Mileage.objects.create(technician=admin_user, trip_date='2026-06-11', miles=99, purpose='Admin trip')
+
+    client.force_login(tech)
+    body = client.get('/mileage/').content
+    assert b'Tech trip' in body          # own entry
+    assert b'Admin trip' not in body     # must NOT see another tech's mileage
+
+    client.force_login(admin_user)
+    admin_body = client.get('/mileage/').content
+    assert b'Admin trip' in admin_body and b'Tech trip' in admin_body  # admin sees all
