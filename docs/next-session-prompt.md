@@ -6,69 +6,59 @@
 
 ---
 
-## What's already built and working (as of session 26):
+## IMPORTANT — read the "How We Work On This Project" section at the top of CLAUDE.md first.
+We are in a **stabilization phase**, not a feature phase. Default response to a new
+feature request is to check it against that rule. Tests are required for anything
+touching data. The model drives deploys/ops directly (incl. SSH); narrate; pause for a
+go/no-go only before destructive or production-affecting steps.
 
-- Django 4.2 app, 44 migrations applied
-- **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16
-- **Gunicorn service name**: `murphys-bench.service` — restart with `sudo systemctl restart murphys-bench`
-- **App path on server**: `/opt/murphys-bench/`
-- **SSH**: `ssh -i ~/.ssh/id_ed25519 scs-tech@10.58.58.82`
-- Deploy workflow: `git push` on Mac → SSH → `cd /opt/murphys-bench && git pull && source venv/bin/activate && python3 manage.py migrate` → `sudo systemctl restart murphys-bench`
-- Full CRUD views for work orders, clients, devices, mileage, contacts, tickets, KB, queues
+## What's already built and working (as of session 27):
 
-**Session 26 additions:**
+- Django 4.2 app, 45 migrations applied
+- **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16 (HTTP on LAN; no domain yet)
+- **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench` (scs-tech has NOPASSWD for restart/status of this service only)
+- **App path**: `/opt/murphys-bench/`  •  **SSH**: `ssh -i ~/.ssh/id_ed25519 scs-tech@10.58.58.82`  •  **venv Python 3.12**
+- Deploy: `git push` on Mac → SSH → `git pull && venv/bin/python manage.py migrate` → `sudo systemctl restart murphys-bench`
+- Full CRUD for work orders, clients, devices, mileage, contacts, tickets, KB, queues; HTML email + signatures; inbound email pipeline
 
-- **HTML email with signatures**: All outgoing ticket emails now send as HTML + plain text multipart. `base_email.html` template with company header (title bar color + text color), `white-space:pre-line` body, styled signature block with HR separator, ticket reference footer.
-- **EmailSignature model** (migration 0044): name, body, is_default with single-default enforcement in `save()`. `db_table = 'email_signatures'`.
-- **EmailTemplate.signature FK**: Per-template signature override; falls back to default signature when blank.
-- **Logo as CID inline attachment**: Logo read from disk, attached as `MIMEImage` with `Content-ID: logo`, referenced as `cid:logo` in template. Falls back to company name text when no logo uploaded. Will be superseded by public URL when Cloudflare is set up.
-- **Settings → Email Templates tab**: Signature dropdown on each template card. Signatures section below with inline add/edit/delete and default toggle.
-- **Quick status change on ticket detail**: Status dropdown + Set button in Quick Actions panel. `TicketStatusUpdateView` handles WO blocking and status change emails.
-- **Ticket client reassignment fix**: `TicketForm.__init__` now uses POSTed `client` value for contact queryset, not `instance.client_id`. Fixes contact validation when reassigning ticket to different client.
-- **HTML entity fix**: `Context(ctx, autoescape=False)` in `email_utils.py` — prevents `&#x27;` in plain text emails.
-- **Residential client labels**: Alpine.js reactive label swap on client form — "Company Name" ↔ "Client Name", "Company Info" ↔ "Client Info" based on client_type field.
-- **Free email domain grouping fix**: `_FREE_EMAIL_DOMAINS` set in `fetch_inbound_email.py` — Gmail/Yahoo/etc. senders get per-person clients instead of grouping under "gmail.com".
-- **Inbound email threading fix**: `TICKET_RE` regex updated to match sequential ticket numbers (`TKT-00005`) in addition to old date-based format (`TKT-20260610-0001`).
-- **Inbound email timer**: systemd service + timer files written to `/tmp` on production server — Mike needs to run 4 sudo commands to install (see Known Issues below).
-- **Security hardening**: `django-axes` (5 failures → 1hr lockout), `SECURE_PROXY_SSL_HEADER`, `USE_X_FORWARDED_HOST`, `CSRF_TRUSTED_ORIGINS` from env, `SESSION_COOKIE_SAMESITE='Lax'`, password min length 12.
+**Session 27 — Stabilization (all shipped + deployed):**
+
+- **Test harness bootstrapped**: `pytest.ini` + `core/tests.py` spine suite (10 tests). Run `venv/bin/python -m pytest`.
+- **Four data-integrity bugs fixed** (each test-covered): ticket-delete guard (was always-false `hasattr`); `Device.serial_number` now nullable so many serial-less devices coexist (migration 0045); collision-resistant ticket/WO number assignment (`_save_with_unique_number`); email/inbound failures now log to `core` logger instead of failing silently.
+- **`reset_operational_data` management command**: clean OSTicket-cutover wipe. Dry-run by default; destructive path needs `--confirm "DELETE ALL OPERATIONAL DATA"`. Deletes operational data, keeps all config + superusers.
+- **Production safety guards**: `DEBUG` now defaults False; startup refuses default `SECRET_KEY`/`FIELD_ENCRYPTION_KEY` when `DEBUG=False`; added nosniff; SSL-redirect/HSTS opt-in via `.env`. Local Mac `.env` created (DEBUG=True).
+- **Nightly DB backup**: `scripts/backup_db.sh` + `deploy/murphys-bench-backup.{service,timer}` (systemd, 02:15 nightly). Deployed; **timer install pending Mike's sudo** (see below).
 
 ---
 
 ## Pending / Known Issues
 
-- **Inbound email timer NOT yet installed on production**: Mike needs to run these on the server:
+- **Install the backup timer (one-time sudo, Mike)** — files are on the VM at `/opt/murphys-bench/deploy/`:
   ```bash
-  sudo cp /tmp/fetch-inbound-email.service /etc/systemd/system/
-  sudo cp /tmp/fetch-inbound-email.timer /etc/systemd/system/
+  sudo cp /opt/murphys-bench/deploy/murphys-bench-backup.service /etc/systemd/system/
+  sudo cp /opt/murphys-bench/deploy/murphys-bench-backup.timer   /etc/systemd/system/
   sudo systemctl daemon-reload
-  sudo systemctl enable --now fetch-inbound-email.timer
+  sudo systemctl enable --now murphys-bench-backup.timer
+  sudo systemctl list-timers murphys-bench-backup.timer
   ```
-  Verify with: `systemctl status fetch-inbound-email.timer`
-  Files were written to `/tmp` but `/tmp` may be cleared on reboot — if so, need to recreate them.
 
-- **Cloudflare setup pending**: When hostname chosen, add to `.env`:
-  - `ALLOWED_HOSTS=yourdomain.com,10.58.58.82`
-  - `SESSION_COOKIE_SECURE=True`
-  - `CSRF_COOKIE_SECURE=True`
-  - `CSRF_TRUSTED_ORIGINS=https://yourdomain.com`
-  Once live, logo in emails can switch from CID inline to public URL.
+- **⚠ Inbound email + SLA checks are NOT scheduled on the VM** — no cron, no timers exist.
+  Inbound email is therefore not being polled automatically. The session-26 `/tmp` units are
+  gone. Needs systemd timers for `fetch_inbound_email` (~every 2 min) and `check_sla_overdue`
+  (~every 15 min), same pattern as the backup units in `deploy/`. **High priority.**
 
-- **Stray tickets TKT-00007 and TKT-00008**: Created when inbound threading was broken. Can be deleted.
-
-- **Ticket client reassignment UX**: Works but Mike called it "clunky" — future task for inline reassignment on ticket detail without full edit form.
+- **HTTPS / Cloudflare cutover pending**: app is HTTP-on-LAN, so 4 `check --deploy` warnings
+  (secure cookies, SSL redirect, HSTS) are deliberately deferred. See the "Going HTTPS"
+  checklist in CLAUDE.md for the coordinated `.env` flip when the tunnel goes live.
 
 ---
 
-## What's next (session 26 options):
+## What's next (suggested priority order):
 
-### Option A — Inbound email overhaul
-Smarter intake: junk/noise filtering, unmatched sender handling, new ticket notifications (in-app badge + email alert), visual "unread" indicator on ticket list (bold row + dot, clears on first open).
-
-### Option B — Data Management
-Import wizard (CSV → map columns → preview → import), bulk export ZIP, deleted data recovery.
-
-### Option C — Something from daily use
-Any friction points or gaps SCS has noticed in actual use since deployment.
+1. **Schedule inbound email + SLA checks** (systemd timers) — the app's inbound pipeline is currently dormant. Highest-value fix.
+2. **Broaden the test suite** beyond the spine — convert/lifecycle, email routing, queue filters, permissions.
+3. **Invoice Ninja bridge** (the one approved post-stabilization feature) — only after tests are broader, since it moves money. Needs the API audit first.
+4. Demoted (do not build without explicit override): departments/teams/routing, customer portal, REST API, extra custom-field types, async queue, OAuth2, extra storage backends.
 
 ---
 
