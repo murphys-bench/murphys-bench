@@ -1278,6 +1278,10 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
             if wo and wo.status not in WO_CLOSED_STATUSES:
                 form.add_error('status', f'Cannot close this ticket — linked work order {wo.work_order_number} is still open.')
                 return self.form_invalid(form)
+        # If client changed, clear device (it belongs to the old client)
+        new_client = form.cleaned_data.get('client')
+        if new_client and self.object.client_id != new_client.pk:
+            form.instance.device = None
         old_status = self.object.status
         response = super().form_valid(form)
         fields = _get_custom_fields_for_ticket(self.object)

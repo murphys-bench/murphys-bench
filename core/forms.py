@@ -168,10 +168,14 @@ class TicketForm(forms.ModelForm):
         from .models import User as UserModel, StatusDefinition
         self.fields['client'].queryset = Client.objects.filter(is_active=True).order_by('name')
         self.fields['contact'].required = False
-        # Populate contact choices based on selected client (if editing an existing ticket)
+        # Use POSTed client_id when present so reassigning a ticket to a different client
+        # doesn't fail validation (old instance.client_id would scope contacts to the wrong client)
+        data = args[0] if args else kwargs.get('data')
+        posted_client_id = data.get('client') if data else None
         instance = kwargs.get('instance')
-        if instance and instance.client_id:
-            self.fields['contact'].queryset = Contact.objects.filter(client_id=instance.client_id, is_active=True).order_by('last_name', 'first_name')
+        effective_client_id = posted_client_id or (instance.client_id if instance else None)
+        if effective_client_id:
+            self.fields['contact'].queryset = Contact.objects.filter(client_id=effective_client_id, is_active=True).order_by('last_name', 'first_name')
         else:
             self.fields['contact'].queryset = Contact.objects.none()
         self.fields['device'].required = False
