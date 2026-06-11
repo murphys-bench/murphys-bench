@@ -1643,7 +1643,7 @@ class TicketDeleteView(LoginRequiredMixin, View):
         if not request.user.is_staff:
             return HttpResponse('Forbidden', status=403)
         ticket = get_object_or_404(Ticket, pk=pk)
-        if hasattr(ticket, 'work_order'):
+        if WorkOrder.objects.filter(ticket=ticket).exists():
             messages.error(request, f'Cannot delete {ticket.ticket_number} — it has a linked work order.')
             return redirect('core:ticket_detail', pk=pk)
         ticket_num = ticket.ticket_number

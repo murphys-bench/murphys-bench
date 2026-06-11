@@ -50,16 +50,19 @@ project coherent across sessions, not the model. That said, match model to task:
 - Switch freely; the source-of-truth docs and tests make the handoff safe.
 
 ### Known issues to fix first (stabilization backlog, in order)
-1. **Bug:** `TicketDeleteView` guard uses `hasattr(ticket, 'work_order')` — wrong related
-   name (`work_order_created`), so the "block delete when WO linked" guard never fires.
-2. **Bug:** `Device.serial_number` is `blank=True, unique=True` with no `null=True` —
-   only one device can have a blank serial; the second crashes on IntegrityError.
-   Fix: `null=True` + store `None` not `''`.
-3. **Bug:** ticket/WO number generation (`max()+1` in Python) has a race condition under
-   concurrent creation (e.g. back-to-back inbound emails). Use a retry-on-IntegrityError
-   or a DB sequence.
-4. **Bug/visibility:** silent `except`/`fail_silently` in email send + inbound logging —
-   route failures to the `core` logger.
+1. ✅ **DONE (session 27):** `TicketDeleteView` guard fixed — now uses
+   `WorkOrder.objects.filter(ticket=ticket).exists()`. Covered by tests.
+2. ✅ **DONE (session 27):** `Device.serial_number` now `null=True`; `Device.save()`
+   normalizes blank → `None`; migration 0045 converts existing blank → NULL. Covered by tests.
+3. ✅ **DONE (session 27):** number assignment is now collision-resistant via
+   `_save_with_unique_number()` helper + `save()` override on Ticket and WorkOrder
+   (retry-on-IntegrityError, re-reads DB each attempt). Covered by tests.
+4. ✅ **DONE (session 27):** silent email/inbound failures now log to the `core` logger
+   (lands in `murphys_bench.log`); bad templates also record a failed EmailSendLog. Covered by tests.
+
+**Test harness now exists** (session 27): `pytest.ini` + `core/tests.py` spine suite.
+Run with `venv/bin/python -m pytest`. The "tests for anything touching data" rule is now enforceable.
+
 5. **`reset_operational_data` management command** (built test-first — bootstraps the test
    suite): surgically deletes operational data (clients, contacts, devices, tickets, WOs,
    mileage, attachments+files, logs, non-superuser users) while KEEPING all configuration
