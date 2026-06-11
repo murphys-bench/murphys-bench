@@ -14,22 +14,39 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Environment and deployment mode
 ENVIRONMENT = config('ENVIRONMENT', default='development')
-DEBUG = config('DEBUG', default=True, cast=bool)
+# Production-safe default: DEBUG is OFF unless explicitly enabled. Local dev sets
+# DEBUG=True in .env; a forgotten DEBUG in production therefore fails safe (off).
+DEBUG = config('DEBUG', default=False, cast=bool)
 
 # SECURITY WARNING: keep the secret key used in production secret!
 # Generate with: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
-SECRET_KEY = config(
-    'SECRET_KEY',
-    default='django-insecure-change-me-in-production-@ddk6oxul(ace7rj@37hx-ieizb)@f1j+w5@8px%!r287b_ef&'
-)
+# This default is committed to the repo and is therefore NOT secret — the guard
+# below refuses to start with it when DEBUG=False.
+_DEFAULT_SECRET_KEY = 'django-insecure-change-me-in-production-@ddk6oxul(ace7rj@37hx-ieizb)@f1j+w5@8px%!r287b_ef&'
+SECRET_KEY = config('SECRET_KEY', default=_DEFAULT_SECRET_KEY)
 
 # Field-level encryption key for sensitive data (device credentials, email passwords).
 # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 # MUST be set in production .env — never use the default in production.
-FIELD_ENCRYPTION_KEY = config(
-    'FIELD_ENCRYPTION_KEY',
-    default='nCmoQA0nD3vW1siXNm3Gvp1lXzN8KItaIMQGwjgijpE='
-)
+_DEFAULT_FIELD_ENCRYPTION_KEY = 'nCmoQA0nD3vW1siXNm3Gvp1lXzN8KItaIMQGwjgijpE='
+FIELD_ENCRYPTION_KEY = config('FIELD_ENCRYPTION_KEY', default=_DEFAULT_FIELD_ENCRYPTION_KEY)
+
+# Fail loud rather than silently running production with publicly-known secrets.
+if not DEBUG:
+    from django.core.exceptions import ImproperlyConfigured
+    _insecure_defaults = []
+    if SECRET_KEY == _DEFAULT_SECRET_KEY:
+        _insecure_defaults.append('SECRET_KEY')
+    if FIELD_ENCRYPTION_KEY == _DEFAULT_FIELD_ENCRYPTION_KEY:
+        _insecure_defaults.append('FIELD_ENCRYPTION_KEY')
+    if _insecure_defaults:
+        raise ImproperlyConfigured(
+            'Refusing to start with DEBUG=False and default '
+            + ' and '.join(_insecure_defaults)
+            + '. Set real value(s) in .env before running in production.\n'
+            '  SECRET_KEY:           python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"\n'
+            '  FIELD_ENCRYPTION_KEY: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+        )
 
 # Allowed hosts for internal network
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
@@ -207,6 +224,16 @@ USE_X_FORWARDED_HOST = True
 
 if not DEBUG:
     SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    # HSTS and HTTPS-redirect are opt-in via .env. Enabling HSTS is hard to undo
+    # (browsers cache it), so turn it on only once HTTPS is confirmed end-to-end
+    # (Cloudflare + nginx). Defaults keep current behavior; flip in .env when ready:
+    #   SECURE_SSL_REDIRECT=True
+    #   SECURE_HSTS_SECONDS=31536000
+    SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=False, cast=bool)
+    SECURE_HSTS_SECONDS = config('SECURE_HSTS_SECONDS', default=0, cast=int)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = config('SECURE_HSTS_INCLUDE_SUBDOMAINS', default=True, cast=bool)
+    SECURE_HSTS_PRELOAD = config('SECURE_HSTS_PRELOAD', default=True, cast=bool)
 
 # CSRF trusted origins — required for any domain other than ALLOWED_HOSTS (e.g. Cloudflare tunnel URL).
 # Add your public hostname here: CSRF_TRUSTED_ORIGINS=https://mb.yourdomain.com
