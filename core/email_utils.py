@@ -10,9 +10,44 @@ def _status_label(slug, entity_type):
     return sd.label if sd else slug.replace('_', ' ').title()
 
 
+def _contrast_text_color(bg_hex):
+    """Return white or near-black so text stays readable on the given background."""
+    try:
+        h = (bg_hex or '').lstrip('#')
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+        return '#1f2937' if luminance > 0.6 else '#ffffff'
+    except Exception:
+        return '#ffffff'
+
+
+def _load_logo_resized(path, mime_type, max_px=480):
+    """Return logo bytes scaled to <= max_px on the long side (keeps emails small
+    and the header logo a sane size). Falls back to the original bytes on error."""
+    try:
+        import io
+        from PIL import Image
+        img = Image.open(path)
+        img.thumbnail((max_px, max_px))
+        fmt = {'image/jpeg': 'JPEG', 'image/png': 'PNG',
+               'image/gif': 'GIF', 'image/webp': 'WEBP'}.get(mime_type, 'PNG')
+        if fmt == 'JPEG' and img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+        buf = io.BytesIO()
+        img.save(buf, format=fmt)
+        return buf.getvalue()
+    except Exception:
+        try:
+            with open(path, 'rb') as f:
+                return f.read()
+        except Exception:
+            return None
+
+
 def _build_html_email(body, signature_body, subject, ticket, site):
     """Render the HTML email wrapper. Returns (html_str, logo_data, logo_mime_type)."""
     from django.template.loader import render_to_string
+    import os
 
     logo_data = None
     logo_mime_type = 'image/png'
@@ -20,29 +55,29 @@ def _build_html_email(body, signature_body, subject, ticket, site):
 
     if site.company_logo:
         try:
-            import os
             logo_path = site.company_logo.path
             if os.path.isfile(logo_path):
-                with open(logo_path, 'rb') as f:
-                    logo_data = f.read()
                 ext = os.path.splitext(logo_path)[1].lower()
                 logo_mime_type = {
                     '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
                     '.png': 'image/png', '.gif': 'image/gif',
                     '.webp': 'image/webp',
                 }.get(ext, 'image/png')
-                has_logo = True
+                logo_data = _load_logo_resized(logo_path, logo_mime_type)
+                has_logo = logo_data is not None
         except Exception:
-            pass
+            logger.exception('Failed to load company logo for email.')
 
+    title_bar_color = site.color_title_bar or '#1f2937'
     html = render_to_string('core/email/base_email.html', {
         'subject': subject,
         'body': body,
         'signature': signature_body,
         'company_name': site.company_name or "Murphy's Bench",
         'has_logo': has_logo,
-        'title_bar_color': site.color_title_bar or '#1f2937',
-        'title_text_color': site.color_page_title or '#ffffff',
+        'title_bar_color': title_bar_color,
+        # Contrast against the bar color — never the dark page-title color.
+        'title_text_color': _contrast_text_color(title_bar_color),
         'ticket_number': ticket.ticket_number if ticket else '',
     })
     return html, logo_data, logo_mime_type
@@ -181,6 +216,10 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None):
         msg.attach_alternative(html_body, 'text/html')
         if logo_data:
             from email.mime.image import MIMEImage
+            # 'related' (not the default 'mixed') so the image is bound to the HTML
+            # and `cid:logo` resolves inline — otherwise clients show it as a
+            # separate full-size attachment at the bottom of the message.
+            msg.mixed_subtype = 'related'
             img = MIMEImage(logo_data, _subtype=logo_mime_type.split('/')[-1])
             img.add_header('Content-ID', '<logo>')
             img.add_header('Content-Disposition', 'inline', filename='logo')

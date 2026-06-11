@@ -230,3 +230,13 @@ def test_reply_body_folds_quote_and_escapes_html():
     assert '<details' in html               # quote folded into a disclosure
     assert '&lt;script&gt;' in html          # user HTML escaped, not live
     assert '<script>' not in html
+
+
+# ── Email header: readable text on the title bar ────────────────────────────
+
+def test_email_contrast_text_color():
+    from core.email_utils import _contrast_text_color
+    assert _contrast_text_color('#1f5f5b') == '#ffffff'   # dark teal bar -> white text
+    assert _contrast_text_color('#111827') == '#ffffff'   # near-black bar -> white text
+    assert _contrast_text_color('#ffffff') == '#1f2937'   # white bar -> dark text
+    assert _contrast_text_color('') == '#ffffff'          # bad input -> safe default
