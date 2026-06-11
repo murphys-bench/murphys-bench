@@ -1235,6 +1235,9 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         context['client_open_wos'] = open_wos
         context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
         context['is_admin'] = _is_admin(self.request.user)
+        context['ticket_statuses'] = StatusDefinition.objects.filter(
+            entity_type='ticket', is_active=True
+        ).order_by('sort_order')
         return context
 
 
@@ -3900,3 +3903,29 @@ class CustomFieldChoiceDeleteView(LoginRequiredMixin, View):
             return HttpResponse('Forbidden', status=403)
         CustomFieldChoice.objects.filter(pk=pk).delete()
         return redirect(reverse_lazy(_CF_REDIRECT) + _CF_TAB)
+
+
+class TicketStatusUpdateView(LoginRequiredMixin, View):
+    """Quick status change from ticket detail page."""
+    def post(self, request, pk):
+        ticket = get_object_or_404(Ticket, pk=pk)
+        new_status = request.POST.get('status', '').strip()
+        if not new_status:
+            return redirect('core:ticket_detail', pk=pk)
+        if new_status in TICKET_CLOSED_STATUSES:
+            wo = getattr(ticket, 'work_order_created', None)
+            if wo and wo.status not in WO_CLOSED_STATUSES:
+                messages.error(request, f'Cannot close — linked work order {wo.work_order_number} is still open.')
+                return redirect('core:ticket_detail', pk=pk)
+        old_status = ticket.status
+        ticket.status = new_status
+        if new_status in TICKET_CLOSED_STATUSES and ticket.wo_complete:
+            ticket.wo_complete = False
+        ticket.save(update_fields=['status', 'wo_complete', 'updated_at'])
+        if new_status != old_status:
+            from .email_utils import send_ticket_email
+            send_ticket_email('status_changed', ticket, {'old_status': old_status})
+            if new_status == 'resolved':
+                send_ticket_email('ticket_resolved', ticket)
+        messages.success(request, f'Status updated to {new_status.replace("_", " ").title()}.')
+        return redirect('core:ticket_detail', pk=pk)
