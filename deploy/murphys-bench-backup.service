@@ -1,0 +1,9 @@
+[Unit]
+Description=Murphy's Bench nightly database backup
+After=postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+User=scs-tech
+ExecStart=/opt/murphys-bench/scripts/backup_db.sh
