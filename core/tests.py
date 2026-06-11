@@ -131,3 +131,68 @@ def test_bad_email_template_is_logged(client_obj, caplog):
 
     assert any('template' in r.message.lower() for r in caplog.records), \
         'A template render failure should be logged on the core logger.'
+
+
+# ── reset_operational_data: wipes operational data, keeps config + superusers ──
+
+@pytest.mark.django_db
+def test_reset_dry_run_changes_nothing(client_obj, admin_user):
+    from django.core.management import call_command
+
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    WorkOrder.objects.create(client=client_obj, ticket=ticket)
+
+    call_command('reset_operational_data')  # no --confirm → dry run
+
+    assert Client.objects.count() == 1
+    assert Ticket.objects.count() == 1
+    assert WorkOrder.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_reset_deletes_operational_keeps_config(client_obj, admin_user):
+    from django.core.management import call_command
+    from core.models import HelpTopic, StatusDefinition, Mileage, Device
+
+    # Operational data
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    WorkOrder.objects.create(client=client_obj, ticket=ticket)
+    Device.objects.create(client=client_obj, name='Box')
+    Mileage.objects.create(technician=admin_user, trip_date='2026-06-11', miles=10)
+    grunt = User.objects.create_user(username='tech', password='x')  # non-superuser
+
+    # Configuration that must survive
+    HelpTopic.objects.create(name='General')
+    status_count_before = StatusDefinition.objects.count()  # seeded by migration
+
+    call_command('reset_operational_data', confirm='DELETE ALL OPERATIONAL DATA')
+
+    # Operational data gone
+    assert Client.objects.count() == 0
+    assert Ticket.objects.count() == 0
+    assert WorkOrder.objects.count() == 0
+    assert Device.objects.count() == 0
+    assert Mileage.objects.count() == 0
+    assert not User.objects.filter(pk=grunt.pk).exists()
+
+    # Configuration + superuser preserved
+    assert User.objects.filter(pk=admin_user.pk).exists()
+    assert HelpTopic.objects.count() == 1
+    assert StatusDefinition.objects.count() == status_count_before
+
+
+@pytest.mark.django_db
+def test_reset_can_keep_named_user(client_obj, admin_user):
+    from django.core.management import call_command
+
+    keep = User.objects.create_user(username='dispatcher', password='x')
+    drop = User.objects.create_user(username='temp', password='x')
+
+    call_command(
+        'reset_operational_data',
+        confirm='DELETE ALL OPERATIONAL DATA',
+        keep_users='dispatcher',
+    )
+
+    assert User.objects.filter(pk=keep.pk).exists()
+    assert not User.objects.filter(pk=drop.pk).exists()
