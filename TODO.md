@@ -402,6 +402,8 @@ Full code review → shifted from feature-building to hardening. All shipped + d
 - Nightly DB backup (`scripts/backup_db.sh`) + systemd timer
 - systemd timers for `fetch_inbound_email` (2 min) and `check_sla_overdue` (15 min) — inbound
   email was unscheduled/dormant; now installed, active, and verified connecting to IMAP
+- Conversation-view polish: client replies colored green with contact name; quoted email history
+  folded into a collapsible blockquote; reply header shows who replied (not "Customer Visible")
 - **Action left for Mike:** point inbound mailbox from `testing@` to the real support inbox in Settings
 
 ---

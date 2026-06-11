@@ -27,7 +27,9 @@ go/no-go only before destructive or production-affecting steps.
 - **Four data-integrity bugs fixed** (each test-covered): ticket-delete guard (was always-false `hasattr`); `Device.serial_number` now nullable so many serial-less devices coexist (migration 0045); collision-resistant ticket/WO number assignment (`_save_with_unique_number`); email/inbound failures now log to `core` logger instead of failing silently.
 - **`reset_operational_data` management command**: clean OSTicket-cutover wipe. Dry-run by default; destructive path needs `--confirm "DELETE ALL OPERATIONAL DATA"`. Deletes operational data, keeps all config + superusers.
 - **Production safety guards**: `DEBUG` now defaults False; startup refuses default `SECRET_KEY`/`FIELD_ENCRYPTION_KEY` when `DEBUG=False`; added nosniff; SSL-redirect/HSTS opt-in via `.env`. Local Mac `.env` created (DEBUG=True).
-- **Nightly DB backup**: `scripts/backup_db.sh` + `deploy/murphys-bench-backup.{service,timer}` (systemd, 02:15 nightly). Deployed; **timer install pending Mike's sudo** (see below).
+- **Nightly DB backup**: `scripts/backup_db.sh` + systemd timer (02:15 nightly). Installed + active.
+- **systemd timers** for `fetch_inbound_email` (2 min) + `check_sla_overdue` (15 min) — installed + active; inbound verified connecting to IMAP.
+- **Conversation-view polish**: client replies render green with the contact name; quoted email history folds into a collapsible greyed blockquote; reply header shows "<Tech> · to customer" / "<Contact> · client reply" instead of "Customer Visible". (`reply_body`/`split_reply_quote` in `mb_icons.py`.)
 
 ---
 

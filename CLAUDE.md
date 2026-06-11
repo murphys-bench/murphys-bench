@@ -119,6 +119,20 @@ Then re-run `manage.py check --deploy` — it should come back clean.
   convenient, but it does **not** drive feature work. MB becomes useful to others by being
   bulletproof at one shop first — not by adding features for hypothetical users.
 
+### Conversation view (ticket replies) — deliberate rendering (session 27)
+`core/templates/core/partials/ticket_reply_item.html` + `reply_body`/`split_reply_quote`
+in `mb_icons.py`:
+- Reply side is keyed on `reply.created_by`: **empty = inbound client reply** (green,
+  shows `ticket.contact` name); set + `internal` = internal note (yellow); set +
+  `customer_visible` = staff→customer (blue). Header reads "<who> · <direction>", NOT
+  "Customer Visible".
+- `reply_body` filter: preserves newlines and **folds quoted email history** (everything
+  from the first `>`/`On … wrote:`/`--- Original Message ---` boundary) into a collapsible
+  greyed `<details>` blockquote. Content is HTML-escaped before markup is added — don't
+  remove the escaping. `split_reply_quote` is unit-tested; keep it pure.
+- `strip_quoted_replies` is intentionally OFF in prod (keep the full thread); the quote is
+  hidden at display time, not destroyed at ingestion.
+
 ### Design intent to preserve (don't "fix" these — they're deliberate)
 - A completed Work Order must **never** auto-close its Ticket. The ticket drives the
   human-facing interaction and a person resolves it manually after real contact.
