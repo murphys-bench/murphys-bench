@@ -1,0 +1,10 @@
+[Unit]
+Description=Murphy's Bench — fetch inbound email (IMAP/POP3 -> tickets)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=scs-tech
+WorkingDirectory=/opt/murphys-bench
+ExecStart=/opt/murphys-bench/venv/bin/python /opt/murphys-bench/manage.py fetch_inbound_email
