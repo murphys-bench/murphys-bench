@@ -45,7 +45,7 @@ from core.models import (
     Ticket, TicketReply,
 )
 
-TICKET_RE = re.compile(r'\[?(TKT-\d{8}-\d{4})\]?', re.IGNORECASE)
+TICKET_RE = re.compile(r'\[?(TKT-[\d-]+)\]?', re.IGNORECASE)
 
 # Common patterns that mark the start of quoted reply text
 QUOTE_PATTERNS = [
