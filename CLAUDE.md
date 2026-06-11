@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 10, 2026 (end of session 25)
+**Last Updated**: June 10, 2026 (end of session 26)
 **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench`
 **App path on server**: `/opt/murphys-bench/`
 
@@ -319,6 +319,18 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - Sidebar: shows last reply/note preview instead of subject/description; falls back gracefully if no notes
 - Mileage Calculate button: fixed CSRF token for production (was silently failing in prod)
 - Google Maps API confirmed working from production server (WAN IP restriction set in Cloud Console)
+
+### ✅ Session 26 — HTML Email, Signatures, Inbound Fixes (session 26 — COMPLETE)
+
+- **HTML email + signatures**: `EmailMultiAlternatives`, `base_email.html` with header/body/signature/footer. `EmailSignature` model (migration 0044), per-template FK override, default fallback. Settings → Email Templates has full signature CRUD.
+- **CID inline logo**: Logo read from disk, attached as `MIMEImage Content-ID: logo`. Falls back to company name text. Switches to public URL when Cloudflare is live.
+- **Quick status change on ticket detail**: dropdown + Set in Quick Actions; `TicketStatusUpdateView`.
+- **Ticket client reassignment fix**: uses POSTed `client` value for contact queryset.
+- **Residential client labels**: Alpine.js reactive label swap on client form.
+- **Free email domain fix**: `_FREE_EMAIL_DOMAINS` — Gmail/Yahoo/etc. get per-person clients.
+- **Inbound threading fix**: `TICKET_RE` matches sequential numbers (`TKT-00005`).
+- **Security hardening**: django-axes, proxy SSL headers, CSRF trusted origins, Lax cookie, password min 12.
+- **Inbound email timer**: systemd units written to `/tmp` — Mike to install with sudo.
 
 ### ✅ Session 22 — UI Polish, Dark Mode, KB Markdown (session 22 — COMPLETE)
 

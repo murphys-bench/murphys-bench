@@ -6,9 +6,9 @@
 
 ---
 
-## What's already built and working (as of session 25):
+## What's already built and working (as of session 26):
 
-- Django 4.2 app, 43 migrations applied
+- Django 4.2 app, 44 migrations applied
 - **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16
 - **Gunicorn service name**: `murphys-bench.service` — restart with `sudo systemctl restart murphys-bench`
 - **App path on server**: `/opt/murphys-bench/`
@@ -16,29 +16,53 @@
 - Deploy workflow: `git push` on Mac → SSH → `cd /opt/murphys-bench && git pull && source venv/bin/activate && python3 manage.py migrate` → `sudo systemctl restart murphys-bench`
 - Full CRUD views for work orders, clients, devices, mileage, contacts, tickets, KB, queues
 
-**Session 24 additions:**
+**Session 26 additions:**
 
-- **Django admin fully replaced** — all remaining admin-only models are now in native Settings UI
-- **Blocked Senders** (Settings → Inbound Email): fnmatch pattern filter for inbound email; migration 0042
-- **SLA Plans** (Settings → SLA Plans): full CRUD with inline Alpine.js edit; grace hours, active, transient, disable-alerts flags
-- **Help Topics** (Settings → Help Topics): full CRUD with inline edit; default SLA dropdown, sort order, active
-- **Tech Skills** (Settings → Tech Skills): add/delete skill tags for future routing
-- **Dashboard Tiles** (Settings → Dashboard Tiles): inline edit of label, status filter, visibility, sort, active
-- **Custom Fields** (Settings → Custom Fields): full CRUD; all field types; scope to help topic or repair type; per-field choice management for select type
-- **Django admin** is now break-glass only (superuser/is_staff flag changes and emergency data fixes)
-
-**Session 25 additions:**
-
-- **Section header text color** (Settings → Colors → Page Colors): new `color_section_header_text` field (migration 0043); controls h2/h3/span/a inside section header bars; light mode only
-- **Subtitle text follows title color**: `html:not(.dark) .page-title-bar p, p span` rule added — covers mileage total and other inline spans
-- **Reports page title bar**: added `page-title-bar` class so it respects the title bar background color setting
+- **HTML email with signatures**: All outgoing ticket emails now send as HTML + plain text multipart. `base_email.html` template with company header (title bar color + text color), `white-space:pre-line` body, styled signature block with HR separator, ticket reference footer.
+- **EmailSignature model** (migration 0044): name, body, is_default with single-default enforcement in `save()`. `db_table = 'email_signatures'`.
+- **EmailTemplate.signature FK**: Per-template signature override; falls back to default signature when blank.
+- **Logo as CID inline attachment**: Logo read from disk, attached as `MIMEImage` with `Content-ID: logo`, referenced as `cid:logo` in template. Falls back to company name text when no logo uploaded. Will be superseded by public URL when Cloudflare is set up.
+- **Settings → Email Templates tab**: Signature dropdown on each template card. Signatures section below with inline add/edit/delete and default toggle.
+- **Quick status change on ticket detail**: Status dropdown + Set button in Quick Actions panel. `TicketStatusUpdateView` handles WO blocking and status change emails.
+- **Ticket client reassignment fix**: `TicketForm.__init__` now uses POSTed `client` value for contact queryset, not `instance.client_id`. Fixes contact validation when reassigning ticket to different client.
+- **HTML entity fix**: `Context(ctx, autoescape=False)` in `email_utils.py` — prevents `&#x27;` in plain text emails.
+- **Residential client labels**: Alpine.js reactive label swap on client form — "Company Name" ↔ "Client Name", "Company Info" ↔ "Client Info" based on client_type field.
+- **Free email domain grouping fix**: `_FREE_EMAIL_DOMAINS` set in `fetch_inbound_email.py` — Gmail/Yahoo/etc. senders get per-person clients instead of grouping under "gmail.com".
+- **Inbound email threading fix**: `TICKET_RE` regex updated to match sequential ticket numbers (`TKT-00005`) in addition to old date-based format (`TKT-20260610-0001`).
+- **Inbound email timer**: systemd service + timer files written to `/tmp` on production server — Mike needs to run 4 sudo commands to install (see Known Issues below).
+- **Security hardening**: `django-axes` (5 failures → 1hr lockout), `SECURE_PROXY_SSL_HEADER`, `USE_X_FORWARDED_HOST`, `CSRF_TRUSTED_ORIGINS` from env, `SESSION_COOKIE_SAMESITE='Lax'`, password min length 12.
 
 ---
 
-## What's next (session 25 options):
+## Pending / Known Issues
+
+- **Inbound email timer NOT yet installed on production**: Mike needs to run these on the server:
+  ```bash
+  sudo cp /tmp/fetch-inbound-email.service /etc/systemd/system/
+  sudo cp /tmp/fetch-inbound-email.timer /etc/systemd/system/
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now fetch-inbound-email.timer
+  ```
+  Verify with: `systemctl status fetch-inbound-email.timer`
+  Files were written to `/tmp` but `/tmp` may be cleared on reboot — if so, need to recreate them.
+
+- **Cloudflare setup pending**: When hostname chosen, add to `.env`:
+  - `ALLOWED_HOSTS=yourdomain.com,10.58.58.82`
+  - `SESSION_COOKIE_SECURE=True`
+  - `CSRF_COOKIE_SECURE=True`
+  - `CSRF_TRUSTED_ORIGINS=https://yourdomain.com`
+  Once live, logo in emails can switch from CID inline to public URL.
+
+- **Stray tickets TKT-00007 and TKT-00008**: Created when inbound threading was broken. Can be deleted.
+
+- **Ticket client reassignment UX**: Works but Mike called it "clunky" — future task for inline reassignment on ticket detail without full edit form.
+
+---
+
+## What's next (session 26 options):
 
 ### Option A — Inbound email overhaul
-Smarter intake: junk/noise filtering, unmatched sender handling, new ticket notifications (in-app badge + email alert), visual "unread" indicator on ticket list (bold row + dot, clears on first open). The inbound timer runs every 5 min via systemd user timer (`mb-inbound.timer`). Log at `/home/scs-tech/mb-inbound.log`.
+Smarter intake: junk/noise filtering, unmatched sender handling, new ticket notifications (in-app badge + email alert), visual "unread" indicator on ticket list (bold row + dot, clears on first open).
 
 ### Option B — Data Management
 Import wizard (CSV → map columns → preview → import), bulk export ZIP, deleted data recovery.
@@ -80,9 +104,11 @@ Any friction points or gaps SCS has noticed in actual use since deployment.
 - **Production Python**: `python3` not `python`. Venv: `/opt/murphys-bench/venv/`
 - **mb_icons templatetag**: `{% load mb_icons %}` at top of any template that uses `{% icon %}`, `{% attr %}`, `{% getfield %}`, or `{% markdownify %}`. Partials need their own load tag.
 - **Email template variable reference**: Must use `{% verbatim %}...{% endverbatim %}` to display `{{ }}` tokens in templates.
-- **Inbound email timer**: systemd user timer as `scs-tech` — `mb-inbound.timer`, runs every 5 min. Log: `/home/scs-tech/mb-inbound.log`. Enabled linger: `loginctl enable-linger scs-tech`.
 - **Dark mode**: `dark` class is on `<html>` (documentElement), NOT `<body>`. Use `html:not(.dark)` for light-mode-only CSS rules, NOT `body:not(.dark)`.
 - **Tailwind CDN**: Loaded with `?plugins=typography` for KB prose rendering.
+- **reverse_lazy at module level**: Don't use `reverse_lazy('core:...')` in module-level variable assignments in views.py — causes circular import during URL loading. Use a helper function with `reverse()` called at request time instead.
+- **Email logo**: CID inline attachment (`Content-ID: logo`, `cid:logo` in template). Logo read from `site.company_logo.path`. Will switch to public URL once Cloudflare is live.
+- **Inbound email regex**: `TICKET_RE = re.compile(r'\[?(TKT-[\d-]+)\]?', re.IGNORECASE)` — matches both sequential (TKT-00005) and legacy date-based (TKT-20260610-0001) formats.
 
 ---
 
