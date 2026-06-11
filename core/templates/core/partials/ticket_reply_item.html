@@ -8,7 +8,7 @@
         </span>
         <div class="flex items-center gap-3">
             <span class="text-xs text-gray-400">
-                {{ reply.created_by.get_full_name|default:reply.created_by.username|default:"Unknown" }} — {{ reply.created_at|date:"M d, Y g:i A" }}
+                {% if reply.created_by %}{{ reply.created_by.get_full_name|default:reply.created_by.username }}{% else %}Client{% endif %} — {{ reply.created_at|date:"M d, Y g:i A" }}
             </span>
             {% if reply.reply_type == 'customer_visible' %}
             <div x-data="{ open: false }" class="relative">
