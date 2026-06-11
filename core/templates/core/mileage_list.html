@@ -38,7 +38,7 @@
                 <thead class="bg-gray-50">
                     <tr>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Technician</th>
+                        {% if is_admin %}<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Technician</th>{% endif %}
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">From</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">To</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Miles</th>
@@ -53,9 +53,9 @@
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                 {{ entry.trip_date|date:"M d, Y" }}
                             </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                            {% if is_admin %}<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                                 {{ entry.technician.get_full_name|default:entry.technician.username }}
-                            </td>
+                            </td>{% endif %}
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                                 {{ entry.from_location|default:"—" }}
                             </td>
@@ -88,7 +88,7 @@
                 <!-- Totals Row -->
                 <tfoot class="bg-gray-50 border-t-2 border-gray-300">
                     <tr>
-                        <td colspan="4" class="px-6 py-3 text-sm font-semibold text-gray-700 text-right">Total Miles:</td>
+                        <td colspan="{% if is_admin %}4{% else %}3{% endif %}" class="px-6 py-3 text-sm font-semibold text-gray-700 text-right">Total Miles:</td>
                         <td class="px-6 py-3 text-sm font-bold text-gray-900">{{ total_miles|floatformat:1 }}</td>
                         <td colspan="3"></td>
                     </tr>

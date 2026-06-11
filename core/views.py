@@ -768,10 +768,14 @@ class MileageListView(LoginRequiredMixin, ListView):
     def get_queryset(self):
         queryset = Mileage.objects.select_related('technician', 'work_order')
 
-        # Filter by technician
-        technician = self.request.GET.get('technician')
-        if technician:
-            queryset = queryset.filter(technician_id=technician)
+        # Non-admins only ever see their own mileage. Admins see all, with an
+        # optional per-technician filter.
+        if not _is_admin(self.request.user):
+            queryset = queryset.filter(technician=self.request.user)
+        else:
+            technician = self.request.GET.get('technician')
+            if technician:
+                queryset = queryset.filter(technician_id=technician)
 
         # Filter by month
         month = self.request.GET.get('month')
