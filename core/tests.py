@@ -294,3 +294,18 @@ def test_sidebar_order_and_admin_gating(client, admin_user):
         assert shown in body
     order = [body.index(b'title="%s"' % t) for t in (b'Dashboard', b'Tickets', b'Work Orders', b'Clients')]
     assert order == sorted(order)
+
+
+@pytest.mark.django_db
+def test_tech_dashboard_shows_my_mileage(client, client_obj, admin_user):
+    from core.models import Mileage
+    tech = User.objects.create_user(username='tech2', password='x', is_staff=False)
+    Mileage.objects.create(technician=tech, trip_date='2026-06-11', miles=12, purpose='Onsite call')
+
+    client.force_login(tech)
+    body = client.get('/').content
+    assert b'>My Mileage</h2>' in body      # tech sees the card heading
+    assert b'Onsite call' in body           # ...with their own entry
+
+    client.force_login(admin_user)
+    assert b'>My Mileage</h2>' not in client.get('/').content   # admin sees Team Workload instead

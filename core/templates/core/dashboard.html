@@ -245,6 +245,42 @@
 </div>
 {% endif %}
 
+<!-- Tech-only mileage card (their mileage entry point) -->
+{% if not is_admin %}
+<div class="bg-white rounded-lg shadow overflow-hidden">
+    <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-gray-900">My Mileage</h2>
+        <div class="flex items-center gap-3">
+            <span class="text-sm text-gray-500">This month: <span class="font-semibold text-gray-800">{{ my_mileage_total|floatformat:1 }} mi</span></span>
+            <a href="{% url 'core:mileage_create' %}" class="text-sm font-medium text-blue-600 hover:underline">Log Mileage</a>
+            <a href="{% url 'core:mileage_list' %}" class="text-sm text-gray-500 hover:underline">View all</a>
+        </div>
+    </div>
+    {% if my_mileage_recent %}
+    <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Miles</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Purpose</th>
+            </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-100">
+            {% for m in my_mileage_recent %}
+            <tr class="hover:bg-gray-50">
+                <td class="px-6 py-3 text-sm text-gray-700 whitespace-nowrap">{{ m.trip_date|date:"M d, Y" }}</td>
+                <td class="px-6 py-3 text-sm text-right font-semibold text-gray-800">{{ m.miles|floatformat:1 }}</td>
+                <td class="px-6 py-3 text-sm text-gray-600">{{ m.purpose|default:"—" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="px-6 py-6 text-sm text-gray-500">No mileage logged yet. <a href="{% url 'core:mileage_create' %}" class="text-blue-600 hover:underline">Log your first trip</a>.</div>
+    {% endif %}
+</div>
+{% endif %}
+
 <!-- Recently Closed -->
 {% if recently_closed %}
 <div class="bg-white rounded-lg shadow overflow-hidden">
