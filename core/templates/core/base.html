@@ -274,6 +274,12 @@
             {% icon 'home' 5 %}<span class="nav-label">Dashboard</span>
         </a>
 
+        <a href="{% url 'core:ticket_list' %}" title="Tickets"
+           class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
+                  {% if u and 'ticket' in u %}bg-white/15{% endif %}">
+            {% icon 'ticket' 5 %}<span class="nav-label">Tickets</span>
+        </a>
+
         <a href="{% url 'core:work_order_list' %}" title="Work Orders"
            class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
                   {% if u and 'work_order' in u %}bg-white/15{% endif %}">
@@ -286,12 +292,15 @@
             {% icon 'building' 5 %}<span class="nav-label">Clients</span>
         </a>
 
-        <a href="{% url 'core:ticket_list' %}" title="Tickets"
+        <a href="{% url 'core:kb_list' %}" title="Knowledge Base"
            class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
-                  {% if u and 'ticket' in u %}bg-white/15{% endif %}">
-            {% icon 'ticket' 5 %}<span class="nav-label">Tickets</span>
+                  {% if u and 'kb' in u %}bg-white/15{% endif %}">
+            {% icon 'book-open' 5 %}<span class="nav-label">KB</span>
         </a>
 
+        {# Admin-only: techs don't see these. Mileage stays here for now — techs #}
+        {# will need their own mileage view eventually (placement still TBD). #}
+        {% if is_admin %}
         <a href="{% url 'core:queue_list' %}" title="Queues"
            class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
                   {% if u and 'queue' in u %}bg-white/15{% endif %}">
@@ -304,17 +313,12 @@
             {% icon 'map-pin' 5 %}<span class="nav-label">Mileage</span>
         </a>
 
-        <a href="{% url 'core:kb_list' %}" title="Knowledge Base"
-           class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
-                  {% if u and 'kb' in u %}bg-white/15{% endif %}">
-            {% icon 'book-open' 5 %}<span class="nav-label">KB</span>
-        </a>
-
         <a href="{% url 'core:reports' %}" title="Reports"
            class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
                   {% if u and 'report' in u %}bg-white/15{% endif %}">
             {% icon 'chart-bar' 5 %}<span class="nav-label">Reports</span>
         </a>
+        {% endif %}
 
         {% endwith %}
     </div>
