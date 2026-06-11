@@ -79,10 +79,24 @@ Run with `venv/bin/python -m pytest`. The "tests for anything touching data" rul
    `SECURE_CONTENT_TYPE_NOSNIFF`; `SECURE_SSL_REDIRECT` + HSTS are opt-in via `.env`
    (HSTS deliberately left off until HTTPS is confirmed end-to-end — it's hard to undo).
    Prod verified already has DEBUG=False + real keys, so the guard passes there.
-7. **Backups:** nightly `pg_dump` to a file inside the Proxmox-backed-up filesystem
-   (complements the VM snapshot; gives a clean, portable, restorable logical dump).
-   Reminder: the DB backup and `FIELD_ENCRYPTION_KEY` are a matched pair — a backup
-   without the key cannot decrypt stored credentials. Key lives in Bitwarden.
+7. ✅ **DONE (session 27):** nightly `pg_dump` backup. Versioned script at
+   `scripts/backup_db.sh` (gzip, 14-day rotation, writes to `/opt/murphys-bench/backups/`,
+   which is gitignored). Installed on the VM as a `scs-tech` crontab entry running 02:15
+   nightly, logging to `backups/backup.log`. Complements the Proxmox VM snapshots with a
+   portable logical dump. Reminder: the dump holds *encrypted* ciphertext, not the
+   `FIELD_ENCRYPTION_KEY` — a restore needs dump + key (key in Bitwarden).
+
+### Going HTTPS (Cloudflare cutover checklist — NOT done yet, deliberately deferred)
+The app is currently served over plain HTTP on the LAN (`10.58.58.82`, no domain), so
+`manage.py check --deploy` shows 4 HTTPS-related warnings (HSTS, SSL redirect, secure
+session cookie, secure CSRF cookie). These are **correct to leave off** until HTTPS is
+end-to-end — turning them on now would break internal access. When the Cloudflare tunnel
+goes live, flip these together in the production `.env`:
+- `SESSION_COOKIE_SECURE=True`, `CSRF_COOKIE_SECURE=True`
+- `SECURE_SSL_REDIRECT=True`
+- `SECURE_HSTS_SECONDS=31536000` (only once HTTPS is confirmed everywhere — HSTS is hard to undo)
+- add the public hostname to `ALLOWED_HOSTS` and set `CSRF_TRUSTED_ORIGINS=https://<hostname>`
+Then re-run `manage.py check --deploy` — it should come back clean.
 
 ### Roadmap re-prioritization (decided this session)
 - **Demoted / dropped** (enterprise-shaped or "for someone else," not needed at a solo/small
