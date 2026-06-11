@@ -263,3 +263,12 @@ def test_settings_email_templates_tab_renders(client, admin_user):
     resp = client.get('/settings/?tab=email_templates')
     assert resp.status_code == 200
     assert b'Email Branding' in resp.content
+
+
+@pytest.mark.django_db
+def test_email_branding_save_post(client, admin_user):
+    from core.models import SiteSettings
+    client.force_login(admin_user)
+    resp = client.post('/settings/email-branding/save/', {'email_header_color': '#1f5f5b'})
+    assert resp.status_code == 302  # would have caught the missing reverse import
+    assert SiteSettings.get().email_header_color == '#1f5f5b'
