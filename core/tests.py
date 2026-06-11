@@ -272,3 +272,25 @@ def test_email_branding_save_post(client, admin_user):
     resp = client.post('/settings/email-branding/save/', {'email_header_color': '#1f5f5b'})
     assert resp.status_code == 302  # would have caught the missing reverse import
     assert SiteSettings.get().email_header_color == '#1f5f5b'
+
+
+# ── Sidebar nav: order + admin-only gating ──────────────────────────────────
+
+@pytest.mark.django_db
+def test_sidebar_order_and_admin_gating(client, admin_user):
+    # Tech (non-staff) does NOT see admin-only links.
+    tech = User.objects.create_user(username='tech1', password='x', is_staff=False)
+    client.force_login(tech)
+    tech_body = client.get('/').content
+    for hidden in (b'title="Queues"', b'title="Mileage"', b'title="Reports"'):
+        assert hidden not in tech_body
+    assert b'title="Tickets"' in tech_body          # core links still present
+    assert b'title="Knowledge Base"' in tech_body
+
+    # Admin sees them, and the top order is Dashboard, Tickets, Work Orders, Clients.
+    client.force_login(admin_user)
+    body = client.get('/').content
+    for shown in (b'title="Queues"', b'title="Mileage"', b'title="Reports"'):
+        assert shown in body
+    order = [body.index(b'title="%s"' % t) for t in (b'Dashboard', b'Tickets', b'Work Orders', b'Clients')]
+    assert order == sorted(order)
