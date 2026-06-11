@@ -133,6 +133,22 @@ in `mb_icons.py`:
 - `strip_quoted_replies` is intentionally OFF in prod (keep the full thread); the quote is
   hidden at display time, not destroyed at ingestion.
 
+### Email appearance (session 27)
+Client-facing HTML emails use `core/templates/core/email/base_email.html` via
+`email_utils._build_html_email`:
+- **Header text color is auto-computed** (`_contrast_text_color`) from the header bar color —
+  never a stored setting. Keeps it readable on any bar color. Don't reintroduce a manual
+  text-color field.
+- **Logo embeds inline via `multipart/related`** (`msg.mixed_subtype = 'related'`). Without
+  that, `cid:logo` doesn't resolve and clients dump the full image as an attachment. The logo
+  is downscaled with Pillow (`_load_logo_resized`) and placed above the bar.
+- **Email branding is editable** in Settings → Email Templates ("Email Branding" card):
+  `email_header_color` + `email_logo` (migration 0046). Both optional — blank falls back to the
+  app Title Bar color / company logo via `_email_header_color` / `_email_logo_field`. These are
+  decoupled from the app's own colors on purpose.
+- Gotcha fixed this session: `reverse` must be imported in `views.py` (it wasn't — 6 settings
+  save handlers were latent 500s). Test settings **POST** paths, not just GET.
+
 ### Design intent to preserve (don't "fix" these — they're deliberate)
 - A completed Work Order must **never** auto-close its Ticket. The ticket drives the
   human-facing interaction and a person resolves it manually after real contact.

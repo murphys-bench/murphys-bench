@@ -30,6 +30,7 @@ go/no-go only before destructive or production-affecting steps.
 - **Nightly DB backup**: `scripts/backup_db.sh` + systemd timer (02:15 nightly). Installed + active.
 - **systemd timers** for `fetch_inbound_email` (2 min) + `check_sla_overdue` (15 min) — installed + active; inbound verified connecting to IMAP.
 - **Conversation-view polish**: client replies render green with the contact name; quoted email history folds into a collapsible greyed blockquote; reply header shows "<Tech> · to customer" / "<Contact> · client reply" instead of "Customer Visible". (`reply_body`/`split_reply_quote` in `mb_icons.py`.)
+- **Email rendering fixes + Email Branding**: client emails now show white/contrast header text (was unreadable black-on-teal) and embed the logo inline (`multipart/related`) downscaled above the bar, instead of dumping a 695KB attachment. New "Email Branding" card (Settings → Email Templates) with `email_header_color` + `email_logo` (migration 0046), decoupled from app colors, with a live preview. Also fixed a latent missing-`reverse`-import bug that 500'd 6 settings save handlers.
 
 ---
 
