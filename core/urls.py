@@ -144,6 +144,11 @@ urlpatterns = [
     # Settings — Email Templates
     path('settings/email-templates/<int:pk>/edit/', views.EmailTemplateUpdateView.as_view(), name='email_template_update'),
 
+    # Settings — Email Signatures
+    path('settings/email-signatures/new/', views.EmailSignatureCreateView.as_view(), name='email_sig_create'),
+    path('settings/email-signatures/<int:pk>/edit/', views.EmailSignatureUpdateView.as_view(), name='email_sig_update'),
+    path('settings/email-signatures/<int:pk>/delete/', views.EmailSignatureDeleteView.as_view(), name='email_sig_delete'),
+
     # Settings — Org Credentials Vault
     path('settings/credentials/new/', views.OrgCredentialCreateView.as_view(), name='cred_create'),
     path('settings/credentials/<int:pk>/edit/', views.OrgCredentialUpdateView.as_view(), name='cred_update'),
