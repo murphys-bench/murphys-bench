@@ -260,6 +260,21 @@ class DashboardView(LoginRequiredMixin, View):
             needs_response_qs = needs_response_qs.filter(assigned_to=request.user)
         needs_response_count = needs_response_qs.count()
 
+        # Tech-only "My Mileage" card — techs have no Mileage nav link, so this is
+        # their entry point to log/view their own miles. (Admins see Team Workload.)
+        my_mileage_total = None
+        my_mileage_recent = []
+        if not is_admin:
+            from django.db.models import Sum
+            today = timezone.now().date()
+            my_mileage_total = Mileage.objects.filter(
+                technician=request.user,
+                trip_date__year=today.year, trip_date__month=today.month,
+            ).aggregate(t=Sum('miles'))['t'] or 0
+            my_mileage_recent = list(
+                Mileage.objects.filter(technician=request.user).order_by('-trip_date')[:5]
+            )
+
         context = {
             'ticket_tiles': ticket_tiles,
             'wo_tiles': wo_tiles,
@@ -271,6 +286,8 @@ class DashboardView(LoginRequiredMixin, View):
             'team_workload': team_workload,
             'needs_response_count': needs_response_count,
             'open_tickets': open_tickets,
+            'my_mileage_total': my_mileage_total,
+            'my_mileage_recent': my_mileage_recent,
         }
         return render(request, self.template_name, context)
 
