@@ -14,6 +14,29 @@ def attachment_upload_path(instance, filename):
     return f'attachments/{ct.app_label}/{ct.model}/{instance.object_id}/{filename}'
 
 
+def _save_with_unique_number(instance, number_field, generator, save_super, attempts=6):
+    """Insert `instance`, retrying number assignment if a concurrent insert
+    grabbed the same number first.
+
+    Without this, two near-simultaneous creates (e.g. back-to-back inbound
+    emails) can both compute the same `max()+1` number and the second insert
+    fails on the unique constraint. Each retry regenerates from a fresh read of
+    the database, so it picks up the number the winner just committed.
+    """
+    from django.db import IntegrityError, transaction
+    last_error = None
+    for _ in range(attempts):
+        if not getattr(instance, number_field):
+            setattr(instance, number_field, generator())
+        try:
+            with transaction.atomic():
+                return save_super()
+        except IntegrityError as exc:
+            last_error = exc
+            setattr(instance, number_field, '')  # force regeneration next loop
+    raise last_error
+
+
 class Role(models.Model):
     """Permission role assigned to users."""
 
@@ -278,7 +301,7 @@ class Device(models.Model):
     assigned_contact = models.ForeignKey('Contact', on_delete=models.SET_NULL, null=True, blank=True, related_name='devices')
     name = models.CharField(max_length=255, help_text="e.g., 'Mike\'s Laptop'")
     device_type = models.CharField(max_length=50, choices=DEVICE_TYPE_CHOICES, default='laptop')
-    serial_number = models.CharField(max_length=100, blank=True, unique=True)
+    serial_number = models.CharField(max_length=100, blank=True, null=True, unique=True)
     model = models.CharField(max_length=100, blank=True)
     manufacturer = models.CharField(max_length=100, blank=True)
     os = models.CharField(max_length=20, choices=OS_CHOICES, blank=True)
@@ -304,6 +327,13 @@ class Device(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.client.name})"
+
+    def save(self, *args, **kwargs):
+        # Store blank serials as NULL so the unique constraint permits many
+        # serial-less devices (NULLs are distinct; empty strings are not).
+        if not self.serial_number:
+            self.serial_number = None
+        super().save(*args, **kwargs)
 
 
 class SLAPlan(models.Model):
@@ -437,6 +467,14 @@ class Ticket(models.Model):
 
     def __str__(self):
         return f"{self.ticket_number}: {self.subject}"
+
+    def save(self, *args, **kwargs):
+        if self._state.adding:
+            return _save_with_unique_number(
+                self, 'ticket_number', self.generate_ticket_number,
+                lambda: super(Ticket, self).save(*args, **kwargs),
+            )
+        return super().save(*args, **kwargs)
 
     @classmethod
     def generate_ticket_number(cls):
@@ -583,6 +621,14 @@ class WorkOrder(models.Model):
 
     def __str__(self):
         return f"{self.work_order_number}: {self.client.name}"
+
+    def save(self, *args, **kwargs):
+        if self._state.adding:
+            return _save_with_unique_number(
+                self, 'work_order_number', self.generate_work_order_number,
+                lambda: super(WorkOrder, self).save(*args, **kwargs),
+            )
+        return super().save(*args, **kwargs)
 
     @classmethod
     def generate_work_order_number(cls, from_ticket_number=None):

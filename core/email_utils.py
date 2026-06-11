@@ -1,4 +1,7 @@
+import logging
 from fnmatch import fnmatch
+
+logger = logging.getLogger('core')
 
 
 def _status_label(slug, entity_type):
@@ -129,7 +132,16 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None):
         subject = Template(template.subject_template).render(context)
         body = Template(template.body_template).render(context)
     except Exception:
-        return  # Bad template syntax — fail silently
+        logger.exception(
+            'Email template render failed for trigger %s (ticket %s) — check the '
+            'template syntax in Settings → Email Templates.',
+            trigger, getattr(ticket, 'ticket_number', '?'),
+        )
+        EmailSendLog.objects.create(
+            ticket=ticket, to_email=to_email, trigger=trigger,
+            status='failed', reason='send_error', detail='template render error',
+        )
+        return
 
     # Build HTML version
     html_body, logo_data, logo_mime_type = _build_html_email(body, signature_body, subject.strip(), ticket, site)
@@ -176,7 +188,11 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None):
         sent = msg.send(fail_silently=False)
         status = 'sent' if sent else 'failed'
         reason = '' if sent else 'send_error'
-    except Exception as e:
+    except Exception:
+        logger.exception(
+            'SMTP send failed for trigger %s → %s (ticket %s).',
+            trigger, to_email, getattr(ticket, 'ticket_number', '?'),
+        )
         status = 'failed'
         reason = 'send_error'
 

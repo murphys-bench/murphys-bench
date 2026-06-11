@@ -11,9 +11,12 @@ Run via cron every 1-5 minutes:
 
 import email
 import imaplib
+import logging
 import poplib
 import re
 import traceback
+
+logger = logging.getLogger('core')
 from email.header import decode_header, make_header
 from email.utils import parseaddr
 
@@ -312,7 +315,9 @@ class Command(BaseCommand):
                     detail=detail,
                 )
             except Exception:
-                pass  # logging failure must not interrupt processing
+                # An InboundEmailLog write failure must not interrupt processing,
+                # but it should be visible rather than swallowed.
+                logger.exception('Failed to write InboundEmailLog row for a fetched message.')
 
             style = self.style.SUCCESS if status in ('new_ticket', 'reply') else self.style.WARNING
             if verbosity >= 1:
