@@ -81,7 +81,7 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None):
     }
     if extra_context:
         ctx.update(extra_context)
-    context = Context(ctx)
+    context = Context(ctx, autoescape=False)
 
     try:
         subject = Template(template.subject_template).render(context)
