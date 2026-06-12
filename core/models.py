@@ -114,6 +114,12 @@ class User(AbstractUser):
     phone = models.CharField(max_length=20, blank=True)
     skills = models.ManyToManyField(TechSkill, blank=True, related_name='users')
 
+    LEVEL_CHOICES = [(1, 'Level 1'), (2, 'Level 2'), (3, 'Level 3')]
+    level = models.PositiveSmallIntegerField(
+        default=1, choices=LEVEL_CHOICES,
+        help_text='Escalation level. Tickets escalate upward; higher levels can take over escalated tickets.',
+    )
+
     class Meta:
         db_table = 'users'
         ordering = ['first_name', 'last_name']
@@ -453,6 +459,11 @@ class Ticket(models.Model):
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='tickets_created')
     needs_response = models.BooleanField(default=False, db_index=True)
     wo_complete = models.BooleanField(default=False, db_index=True)
+    escalation_level = models.PositiveSmallIntegerField(
+        default=1, db_index=True,
+        help_text='Level required to take this ticket. Raised by Escalate; the current '
+                  'owner keeps it until a higher-level tech claims it.',
+    )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -527,6 +538,25 @@ class Ticket(models.Model):
         for link in links_b:
             results.append({'ticket': link.ticket_a, 'link_type': link.link_type, 'link_id': link.pk})
         return results
+
+    MAX_LEVEL = 3
+
+    def escalate(self):
+        """Raise the ticket one level (capped). The current owner keeps it until a
+        higher-level tech claims it, so the client is never left without a person."""
+        if self.escalation_level < self.MAX_LEVEL:
+            self.escalation_level += 1
+            self.save(update_fields=['escalation_level', 'updated_at'])
+            return True
+        return False
+
+    @property
+    def escalation_pending(self):
+        """True when the ticket has been escalated above its current owner's level —
+        i.e. it's owned, but waiting for someone higher to take over."""
+        if self.assigned_to_id is None:
+            return False
+        return self.escalation_level > (self.assigned_to.level or 1)
 
 
 class TicketReply(models.Model):

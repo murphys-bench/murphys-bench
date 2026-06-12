@@ -500,7 +500,7 @@ class UserCreateForm(forms.ModelForm):
     class Meta:
         from .models import User as _User
         model = _User
-        fields = ['first_name', 'last_name', 'username', 'email', 'phone', 'role_obj', 'is_staff', 'is_active']
+        fields = ['first_name', 'last_name', 'username', 'email', 'phone', 'level', 'role_obj', 'is_staff', 'is_active']
         widgets = {
             'first_name': forms.TextInput(attrs={'class': _INPUT}),
             'last_name': forms.TextInput(attrs={'class': _INPUT}),
@@ -508,6 +508,7 @@ class UserCreateForm(forms.ModelForm):
             'email': forms.EmailInput(attrs={'class': _INPUT}),
             'phone': forms.TextInput(attrs={'class': _INPUT}),
             'role_obj': forms.Select(attrs={'class': _INPUT}),
+            'level': forms.Select(attrs={'class': _INPUT}),
             'is_staff': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
             'is_active': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
         }
@@ -542,7 +543,7 @@ class UserEditForm(forms.ModelForm):
     class Meta:
         from .models import User as _User
         model = _User
-        fields = ['first_name', 'last_name', 'username', 'email', 'phone', 'role_obj', 'is_staff', 'is_active']
+        fields = ['first_name', 'last_name', 'username', 'email', 'phone', 'level', 'role_obj', 'is_staff', 'is_active']
         widgets = {
             'first_name': forms.TextInput(attrs={'class': _INPUT}),
             'last_name': forms.TextInput(attrs={'class': _INPUT}),
@@ -550,6 +551,7 @@ class UserEditForm(forms.ModelForm):
             'email': forms.EmailInput(attrs={'class': _INPUT}),
             'phone': forms.TextInput(attrs={'class': _INPUT}),
             'role_obj': forms.Select(attrs={'class': _INPUT}),
+            'level': forms.Select(attrs={'class': _INPUT}),
             'is_staff': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
             'is_active': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
         }

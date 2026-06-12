@@ -70,6 +70,11 @@
                     <label class="block text-sm font-medium text-gray-700 mb-1">Role</label>
                     {{ form.role_obj }}
                 </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Escalation Level</label>
+                    {{ form.level }}
+                    <p class="text-xs text-gray-400 mt-1">Tickets escalate upward; higher levels can take over escalated tickets.</p>
+                </div>
             </div>
             <div class="flex gap-6 pt-2">
                 <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700">

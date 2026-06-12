@@ -270,7 +270,7 @@ window.addEventListener('beforeunload', function() {
                     </dd>
                 </div>
                 {% endif %}
-                <!-- Assigned To -->
+                <!-- Assigned To / Escalation -->
                 <div x-data="{ editing: false }">
                     <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide flex items-center justify-between">
                         Assigned To
@@ -282,19 +282,27 @@ window.addEventListener('beforeunload', function() {
                                 <button type="submit" class="text-xs text-blue-600 hover:underline font-medium">Claim</button>
                             </form>
                             {% endif %}
-                            <button @click="editing = !editing" class="text-xs text-blue-500 hover:text-blue-400 underline">Assign</button>
+                            <button @click="editing = !editing" class="text-xs text-blue-500 hover:text-blue-400 underline">{% if is_admin %}Assign{% else %}Transfer{% endif %}</button>
+                            {% if ticket.escalation_level < 3 %}
+                            <form method="post" action="{% url 'core:ticket_escalate' ticket.pk %}">
+                                {% csrf_token %}
+                                <button type="submit" class="text-xs text-amber-600 hover:underline font-medium">Escalate &uarr;</button>
+                            </form>
+                            {% endif %}
                         </div>
                     </dt>
                     <dd class="text-sm text-gray-900 mt-1">
                         <span x-show="!editing">
                             {% if ticket.assigned_to %}{{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}{% else %}<span class="text-gray-400">Unassigned</span>{% endif %}
+                            <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-600">Level {{ ticket.escalation_level }}</span>
+                            {% if ticket.escalation_pending %}<span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-100 text-amber-700">Awaiting L{{ ticket.escalation_level }} pickup</span>{% endif %}
                         </span>
                         <form x-show="editing" x-cloak method="post" action="{% url 'core:ticket_assign' ticket.pk %}" class="flex gap-2 mt-1">
                             {% csrf_token %}
                             <select name="assigned_to" class="flex-1 text-sm px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
                                 <option value="">— Unassigned —</option>
                                 {% for u in all_users %}
-                                <option value="{{ u.pk }}" {% if ticket.assigned_to_id == u.pk %}selected{% endif %}>{{ u.get_full_name|default:u.username }}</option>
+                                <option value="{{ u.pk }}" {% if ticket.assigned_to_id == u.pk %}selected{% endif %}>{{ u.get_full_name|default:u.username }} (L{{ u.level }})</option>
                                 {% endfor %}
                             </select>
                             <button type="submit" class="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
