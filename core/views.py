@@ -1242,6 +1242,10 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
     def get(self, request, *args, **kwargs):
         response = super().get(request, *args, **kwargs)
         ticket = self.object
+        # Once the assignee opens it, it's no longer "new to you".
+        if ticket.assigned_to_id == request.user.id and ticket.assignment_unseen:
+            ticket.assignment_unseen = False
+            ticket.save(update_fields=['assignment_unseen'])
         try:
             lock = ticket.lock
             if lock.is_expired() or lock.locked_by == request.user:
@@ -1629,10 +1633,17 @@ class TicketAssignView(LoginRequiredMixin, View):
         ticket = get_object_or_404(_scope_tickets_for(Ticket.objects.all(), request.user), pk=pk)
         if request.POST.get('claim'):
             ticket.assigned_to = request.user
+            ticket.assignment_unseen = False
         else:
             uid = request.POST.get('assigned_to', '').strip()
-            ticket.assigned_to_id = uid if uid else None
-        ticket.save(update_fields=['assigned_to', 'updated_at'])
+            if uid:
+                ticket.assigned_to_id = int(uid)
+                # Flag "new to you" only when handed to someone other than the actor.
+                ticket.assignment_unseen = (int(uid) != request.user.id)
+            else:
+                ticket.assigned_to_id = None
+                ticket.assignment_unseen = False
+        ticket.save(update_fields=['assigned_to', 'assignment_unseen', 'updated_at'])
         # If they transferred it away and can no longer see it, send them to the list.
         if not _is_admin(request.user) and not _scope_tickets_for(
             Ticket.objects.filter(pk=pk), request.user

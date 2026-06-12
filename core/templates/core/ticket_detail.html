@@ -283,7 +283,7 @@ window.addEventListener('beforeunload', function() {
                             </form>
                             {% endif %}
                             <button @click="editing = !editing" class="text-xs text-blue-500 hover:text-blue-400 underline">{% if is_admin %}Assign{% else %}Transfer{% endif %}</button>
-                            {% if ticket.escalation_level < 3 %}
+                            {% if ticket.can_escalate %}
                             <form method="post" action="{% url 'core:ticket_escalate' ticket.pk %}">
                                 {% csrf_token %}
                                 <button type="submit" class="text-xs text-amber-600 hover:underline font-medium">Escalate &uarr;</button>
