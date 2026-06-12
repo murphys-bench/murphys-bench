@@ -302,7 +302,7 @@ window.addEventListener('beforeunload', function() {
                     <dd class="text-sm text-gray-900 mt-1">
                         <span x-show="!editing">
                             {% if ticket.assigned_to %}{{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}{% else %}<span class="text-gray-400">Unassigned</span>{% endif %}
-                            <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-600">Level {{ ticket.escalation_level }}</span>
+                            <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-600">{% if ticket.assigned_to %}L{{ ticket.assigned_to.level }}{% else %}Needs L{{ ticket.escalation_level }}{% endif %}</span>
                             {% if ticket.escalation_pending %}<span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-100 text-amber-700">Awaiting L{{ ticket.escalation_level }} pickup</span>{% endif %}
                         </span>
                         <form x-show="editing" x-cloak method="post" action="{% url 'core:ticket_assign' ticket.pk %}" class="flex gap-2 mt-1">
