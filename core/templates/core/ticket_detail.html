@@ -163,30 +163,38 @@ window.addEventListener('beforeunload', function() {
                       hx-target="#replies-list"
                       hx-swap="beforeend"
                       hx-encoding="multipart/form-data"
-                      hx-on:htmx:after-request="this.reset()"
-                      x-data="{ replyType: 'internal' }">
+                      hx-on:htmx:after-request="if(event.detail.successful){this.reset(); localStorage.removeItem('mb_draft_{{ ticket.pk }}')}"
+                      x-data="{ replyType: 'customer_visible' }">
                     {% csrf_token %}
                     <div class="mb-3 flex gap-4">
-                        <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
-                            <input type="radio" name="reply_type" value="internal" x-model="replyType" class="text-blue-600 focus:ring-blue-500">
-                            🔒 Internal Only
-                        </label>
                         <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
                             <input type="radio" name="reply_type" value="customer_visible" x-model="replyType" class="text-blue-600 focus:ring-blue-500">
                             👤 Customer Visible
                         </label>
+                        <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                            <input type="radio" name="reply_type" value="internal" x-model="replyType" class="text-blue-600 focus:ring-blue-500">
+                            🔒 Internal Only
+                        </label>
                     </div>
                     <div class="mb-3" x-show="replyType === 'customer_visible'" x-cloak>
-                        <label class="block text-xs font-medium text-gray-500 mb-1">CC (optional — comma-separated emails)</label>
-                        <input type="text" name="cc_emails"
-                               placeholder="e.g. someone@example.com, other@example.com"
-                               class="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Also send to (optional — comma-separated emails)</label>
+                        <div class="flex gap-2">
+                            <select name="cc_mode" class="text-sm border border-gray-300 rounded-md px-2 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="bcc" selected>BCC</option>
+                                <option value="cc">CC</option>
+                            </select>
+                            <input type="text" name="cc_emails"
+                                   placeholder="e.g. someone@example.com, other@example.com"
+                                   class="flex-1 text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
                     </div>
                     <div class="mb-3">
                         <textarea name="content"
-                                  rows="3"
+                                  rows="8"
                                   placeholder="Add a reply..."
-                                  class="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                                  x-init="$el.value = localStorage.getItem('mb_draft_{{ ticket.pk }}') || ''"
+                                  x-on:input="localStorage.setItem('mb_draft_{{ ticket.pk }}', $el.value)"
+                                  class="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                   required></textarea>
                     </div>
                     <div class="mb-3">

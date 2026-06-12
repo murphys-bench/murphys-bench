@@ -95,7 +95,7 @@ def _build_html_email(body, signature_body, subject, ticket, site):
     return html, logo_data, logo_mime_type
 
 
-def send_ticket_email(trigger, ticket, extra_context=None, cc=None):
+def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
     """
     Send an automated email for a ticket event.
     Checks all three suppression layers before sending.
@@ -223,6 +223,7 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None):
             from_email=from_email,
             to=[to_email],
             cc=[e for e in (cc or []) if e and e != to_email],
+            bcc=[e for e in (bcc or []) if e and e != to_email],
             connection=connection,
         )
         msg.attach_alternative(html_body, 'text/html')

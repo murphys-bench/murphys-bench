@@ -1414,11 +1414,14 @@ class TicketReplyCreateView(LoginRequiredMixin, View):
                 .order_by('created_at')
             )
             cc_raw = request.POST.get('cc_emails', '')
-            cc_list = [e.strip() for e in cc_raw.split(',') if e.strip()]
+            extra = [e.strip() for e in cc_raw.split(',') if e.strip()]
+            # Default to BCC; CC only when explicitly chosen.
+            mode = request.POST.get('cc_mode', 'bcc')
+            send_kwargs = {'cc': extra} if mode == 'cc' else {'bcc': extra}
             send_ticket_email('reply_added', ticket, {
                 'reply': reply,
                 'prior_replies': prior_replies,
-            }, cc=cc_list)
+            }, **send_kwargs)
         return render(request, 'core/partials/ticket_reply_item.html', {'reply': reply})
 
 
