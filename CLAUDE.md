@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 11, 2026 (end of session 27 — stabilization)
+**Last Updated**: June 12, 2026 (session 27 — stabilization + tech-experience/escalation; migrations through 0048)
 **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench`
 **App path on server**: `/opt/murphys-bench/`
 
@@ -148,6 +148,41 @@ Client-facing HTML emails use `core/templates/core/email/base_email.html` via
   decoupled from the app's own colors on purpose.
 - Gotcha fixed this session: `reverse` must be imported in `views.py` (it wasn't — 6 settings
   save handlers were latent 500s). Test settings **POST** paths, not just GET.
+
+### Tech experience: visibility scoping + escalation levels (session 27, Jun 12)
+The big shift this session — techs no longer see everything. Migrations 0046–0048.
+
+**Nav / dashboard by role** (`is_admin` now in the context processor = staff OR
+`can_manage_settings`):
+- Sidebar order: Dashboard, Tickets, Work Orders, Clients, KB, then **admin-only** Queues,
+  Mileage, Reports. Techs don't see the last three. (Hiding ≠ access control — those URLs
+  aren't blocked, just unlinked.)
+- Techs get a **"My Mileage"** dashboard card where admins see Team Workload (their mileage
+  entry point, since Mileage left their nav).
+
+**Visibility scoping (non-admins):**
+- Work orders (`_scope_assignable_for`): own + unclaimed pool. Mileage list: own only.
+- Tickets (`_scope_tickets_for`): own + unclaimed + tickets escalated above their owner's
+  level up to the viewer's level. Applied to ticket **list, tab counts, AND detail** (a tech
+  404s on another tech's ticket by URL). Admins see everything.
+
+**Escalation levels (1–3):** `User.level` (default 1, set in user edit form),
+`Ticket.escalation_level` (default 1).
+- Tech actions are **Claim / Transfer / Escalate**; admins **Assign**. ("Assign" is a
+  dispatcher verb — keep it off the tech view.)
+- `Ticket.escalate()` raises to one level **above whoever currently holds it** (an L2-owned
+  ticket jumps to L3, not L2). `can_escalate` hides the button when there's nowhere higher.
+- **No black hole (Mike's hard rule):** escalating KEEPS the current owner; ownership only
+  moves when a higher-level tech **Claims** it. `escalation_pending` = escalated above owner.
+- Escalations surface in three places (must stay consistent): ticket detail badge, ticket
+  list amber "Escalated → L#" badge, and the dashboard **"Escalated to You"** panel (the
+  dashboard ticket queries are level-aware, not just `assigned_to=user`).
+- **"New to you":** `Ticket.assignment_unseen` set when transferred/assigned by someone else
+  (not self-claim), cleared when the assignee opens it; blue badge on the ticket list.
+
+**Deliberately deferred** (don't build without a reason): retiring `TechSkill` (replaced in
+spirit by levels — strip once levels are proven), leveling Work Orders (kept simple), and
+bounding the unclaimed pool by level (techs still see all unclaimed).
 
 ### Design intent to preserve (don't "fix" these — they're deliberate)
 - A completed Work Order must **never** auto-close its Ticket. The ticket drives the

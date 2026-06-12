@@ -404,7 +404,14 @@ Full code review → shifted from feature-building to hardening. All shipped + d
   email was unscheduled/dormant; now installed, active, and verified connecting to IMAP
 - Conversation-view polish: client replies colored green with contact name; quoted email history
   folded into a collapsible blockquote; reply header shows who replied (not "Customer Visible")
-- **Action left for Mike:** point inbound mailbox from `testing@` to the real support inbox in Settings
+- Email rendering fixes (readable header, inline downscaled logo) + Email Branding settings section
+- Tech experience: role-based nav/dashboard, visibility scoping (techs see own + unclaimed), and
+  3-level ticket escalation (Claim/Transfer/Escalate, no-orphan handoff, dashboard/list surfacing).
+  Migrations 0046–0048.
+- **Open follow-ups:** retire `TechSkill` (superseded by levels), decide whether to level Work
+  Orders, finish the "audit every tech-facing list for correct scoping" pass.
+- **Action left for Mike:** point inbound mailbox from `testing@` to the real support inbox; set
+  user levels (Settings → Users) so escalation has somewhere to land.
 
 ---
 
