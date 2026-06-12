@@ -132,6 +132,13 @@ in `mb_icons.py`:
   remove the escaping. `split_reply_quote` is unit-tested; keep it pure.
 - `strip_quoted_replies` is intentionally OFF in prod (keep the full thread); the quote is
   hidden at display time, not destroyed at ingestion.
+- **Reply form deliberate defaults** (`ticket_detail.html`): reply type defaults to
+  **Customer Visible** (not internal); textarea is `rows=8` and resizable; the "also send to"
+  field has a **BCC/CC selector defaulting to BCC** (`cc_mode` → `send_ticket_email(bcc=…)`);
+  the draft **autosaves to `localStorage` per ticket** (`mb_draft_<pk>`) and restores on load,
+  so a status-change reload doesn't lose it — cleared on successful submit. Status change is
+  still a full POST/reload (the draft autosave is what protects the text; HTMX-ifying it is a
+  possible later polish, not needed).
 
 ### Email appearance (session 27)
 Client-facing HTML emails use `core/templates/core/email/base_email.html` via
