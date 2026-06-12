@@ -389,6 +389,36 @@ def test_escalate_caps_at_max_level(client_obj):
 
 
 @pytest.mark.django_db
+def test_escalate_is_relative_to_owner_level(client_obj):
+    # A ticket held by an L2 tech should jump to L3, not re-hit L2.
+    l2 = User.objects.create_user(username='owner2', password='x', is_staff=False, level=2)
+    t = Ticket.objects.create(client=client_obj, subject='r', description='d', assigned_to=l2)
+    assert t.escalation_level == 1
+    assert t.can_escalate is True
+    assert t.escalate() is True
+    assert t.escalation_level == 3
+    assert t.can_escalate is False     # nothing above L3
+
+
+@pytest.mark.django_db
+def test_transfer_flags_new_to_you_and_clears_on_open(client, client_obj):
+    a = User.objects.create_user(username='ta', password='x', is_staff=False, level=2)
+    b = User.objects.create_user(username='tb', password='x', is_staff=False, level=2)
+    t = Ticket.objects.create(client=client_obj, subject='handoff', description='d', assigned_to=a)
+
+    client.force_login(a)
+    client.post(f'/tickets/{t.pk}/assign/', {'assigned_to': str(b.pk)})  # transfer to B
+    t.refresh_from_db()
+    assert t.assigned_to == b and t.assignment_unseen is True
+
+    client.force_login(b)
+    assert b'New to you' in client.get('/tickets/').content   # badge on B's list
+    client.get(f'/tickets/{t.pk}/')                            # B opens it
+    t.refresh_from_db()
+    assert t.assignment_unseen is False                        # flag cleared
+
+
+@pytest.mark.django_db
 def test_tech_cannot_open_another_techs_ticket_by_url(client, client_obj):
     a = User.objects.create_user(username='da', password='x', is_staff=False, level=1)
     b = User.objects.create_user(username='db', password='x', is_staff=False, level=1)

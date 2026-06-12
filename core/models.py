@@ -464,6 +464,11 @@ class Ticket(models.Model):
         help_text='Level required to take this ticket. Raised by Escalate; the current '
                   'owner keeps it until a higher-level tech claims it.',
     )
+    assignment_unseen = models.BooleanField(
+        default=False, db_index=True,
+        help_text='True when transferred/assigned to a user by someone else, until that '
+                  'user first opens the ticket. Drives the "new to you" indicator.',
+    )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -541,11 +546,26 @@ class Ticket(models.Model):
 
     MAX_LEVEL = 3
 
+    def _holder_level(self):
+        """The level the ticket effectively sits at right now — its owner's level,
+        or its current escalation level if unassigned."""
+        if self.assigned_to_id:
+            return self.assigned_to.level or 1
+        return self.escalation_level
+
+    @property
+    def can_escalate(self):
+        """False once the ticket is already at (or above) the top level for whoever
+        currently holds it — there's nowhere higher to send it."""
+        return max(self.escalation_level, self._holder_level()) < self.MAX_LEVEL
+
     def escalate(self):
-        """Raise the ticket one level (capped). The current owner keeps it until a
-        higher-level tech claims it, so the client is never left without a person."""
-        if self.escalation_level < self.MAX_LEVEL:
-            self.escalation_level += 1
+        """Raise the ticket to one level above whoever currently holds it (capped).
+        The current owner keeps it until a higher-level tech claims it, so the client
+        is never left without a person. Returns False if already at the top."""
+        target = min(self.MAX_LEVEL, max(self.escalation_level, self._holder_level()) + 1)
+        if target > self.escalation_level:
+            self.escalation_level = target
             self.save(update_fields=['escalation_level', 'updated_at'])
             return True
         return False
