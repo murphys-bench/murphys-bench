@@ -110,6 +110,31 @@
 </a>
 {% endif %}
 
+<!-- Escalated to you — awaiting pickup -->
+{% if escalated_to_me %}
+<div class="bg-white rounded-lg shadow overflow-hidden mb-6 border-l-4 border-amber-400">
+    <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-amber-700">{% if is_admin %}Escalations Awaiting Pickup{% else %}Escalated to You{% endif %}</h2>
+        <span class="text-sm text-amber-600">{{ escalated_to_me|length }} waiting</span>
+    </div>
+    <table class="min-w-full divide-y divide-gray-200">
+        <tbody class="bg-white divide-y divide-gray-100">
+            {% for ticket in escalated_to_me %}
+            <tr class="hover:bg-amber-50 cursor-pointer" onclick="window.location='{% url 'core:ticket_detail' ticket.pk %}'">
+                <td class="px-6 py-3 text-sm font-medium text-gray-400 whitespace-nowrap"><a href="{% url 'core:ticket_detail' ticket.pk %}">{{ ticket.ticket_number }}</a></td>
+                <td class="px-6 py-3 text-sm text-gray-900"><div class="truncate max-w-xs">{{ ticket.subject }}</div></td>
+                <td class="px-6 py-3 text-sm text-gray-600">{{ ticket.client.name }}</td>
+                <td class="px-6 py-3 text-right whitespace-nowrap">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-700">Level {{ ticket.escalation_level }}</span>
+                    <span class="text-xs text-gray-400 ml-1">held by {{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}</span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
 <!-- Open Tickets -->
 <div class="bg-white rounded-lg shadow overflow-hidden mb-6">
     <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
