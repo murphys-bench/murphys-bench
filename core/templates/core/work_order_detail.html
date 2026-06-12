@@ -198,7 +198,10 @@
                             </form>
                             {% endif %}
                         </dt>
-                        <dd class="text-gray-900 mt-1">{{ work_order.assigned_to.get_full_name|default:"Unassigned" }}</dd>
+                        <dd class="text-gray-900 mt-1">
+                            {{ work_order.assigned_to.get_full_name|default:"Unassigned" }}
+                            {% if work_order.assigned_to %}<span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-600">L{{ work_order.assigned_to.level }}</span>{% endif %}
+                        </dd>
                     </div>
                     <div>
                         <dt class="text-xs font-medium text-gray-500 uppercase">Scheduled Date</dt>
@@ -246,7 +249,7 @@
                         <select name="assigned_to" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
                             <option value="">— Unassigned —</option>
                             {% for u in all_users %}
-                            <option value="{{ u.pk }}" {% if work_order.assigned_to_id == u.pk %}selected{% endif %}>{{ u.get_full_name|default:u.username }}</option>
+                            <option value="{{ u.pk }}" {% if work_order.assigned_to_id == u.pk %}selected{% endif %}>{{ u.get_full_name|default:u.username }} (L{{ u.level }})</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -536,7 +539,7 @@
                     <select name="assigned_to" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
                         <option value="">— Unassigned —</option>
                         {% for u in all_users %}
-                        <option value="{{ u.pk }}" {% if work_order.assigned_to_id == u.pk %}selected{% endif %}>{{ u.get_full_name|default:u.username }}</option>
+                        <option value="{{ u.pk }}" {% if work_order.assigned_to_id == u.pk %}selected{% endif %}>{{ u.get_full_name|default:u.username }} (L{{ u.level }})</option>
                         {% endfor %}
                     </select>
                 </div>
