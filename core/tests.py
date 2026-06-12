@@ -419,6 +419,21 @@ def test_transfer_flags_new_to_you_and_clears_on_open(client, client_obj):
 
 
 @pytest.mark.django_db
+def test_dashboard_surfaces_escalations_to_higher_level(client, client_obj):
+    l2 = User.objects.create_user(username='dl2', password='x', is_staff=False, level=2)
+    l3 = User.objects.create_user(username='dl3', password='x', is_staff=False, level=3)
+    Ticket.objects.create(client=client_obj, subject='escd', description='d',
+                          assigned_to=l2, escalation_level=3)
+
+    client.force_login(l3)                       # L3 it was escalated to
+    body = client.get('/').content
+    assert b'Escalated to You' in body and b'escd' in body
+
+    client.force_login(l2)                       # the holder doesn't see it as escalated-to-them
+    assert b'Escalated to You' not in client.get('/').content
+
+
+@pytest.mark.django_db
 def test_tech_cannot_open_another_techs_ticket_by_url(client, client_obj):
     a = User.objects.create_user(username='da', password='x', is_staff=False, level=1)
     b = User.objects.create_user(username='db', password='x', is_staff=False, level=1)

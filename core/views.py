@@ -290,6 +290,19 @@ class DashboardView(LoginRequiredMixin, View):
             needs_response_qs = needs_response_qs.filter(assigned_to=request.user)
         needs_response_count = needs_response_qs.count()
 
+        # Tickets escalated above their owner's level, awaiting pickup by someone higher.
+        # Admins see all of them; a tech sees those escalated up to their own level.
+        escalated_qs = (
+            Ticket.objects.select_related('client', 'assigned_to')
+            .filter(assigned_to__isnull=False, escalation_level__gt=models_F('assigned_to__level'))
+            .exclude(status__in=TICKET_CLOSED_STATUSES)
+        )
+        if not is_admin:
+            escalated_qs = escalated_qs.filter(
+                escalation_level__lte=request.user.level
+            ).exclude(assigned_to=request.user)
+        escalated_to_me = list(escalated_qs.order_by('-updated_at')[:10])
+
         # Tech-only "My Mileage" card — techs have no Mileage nav link, so this is
         # their entry point to log/view their own miles. (Admins see Team Workload.)
         my_mileage_total = None
@@ -316,6 +329,7 @@ class DashboardView(LoginRequiredMixin, View):
             'team_workload': team_workload,
             'needs_response_count': needs_response_count,
             'open_tickets': open_tickets,
+            'escalated_to_me': escalated_to_me,
             'my_mileage_total': my_mileage_total,
             'my_mileage_recent': my_mileage_recent,
         }
