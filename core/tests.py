@@ -450,3 +450,14 @@ def test_ticket_detail_renders_escalation_ui(client, client_obj, admin_user):
     assert resp.status_code == 200
     assert b'Escalate' in resp.content
     assert b'Level 1' in resp.content
+
+
+@pytest.mark.django_db
+def test_reply_form_defaults(client, client_obj, admin_user):
+    t = Ticket.objects.create(client=client_obj, subject='form', description='d', assigned_to=admin_user)
+    client.force_login(admin_user)
+    body = client.get(f'/tickets/{t.pk}/').content
+    assert b"replyType: 'customer_visible'" in body   # Customer Visible is the default
+    assert b'name="cc_mode"' in body                  # BCC/CC selector present
+    assert b'rows="8"' in body                         # larger reply box
+    assert b'mb_draft_' in body                        # draft autosave wired
