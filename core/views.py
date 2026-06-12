@@ -84,6 +84,36 @@ def _is_admin(user):
     return user.is_staff or user.has_perm_flag('can_manage_settings')
 
 
+def _scope_assignable_for(qs, user):
+    """Restrict an assignable queryset (Work Orders) for non-admins: they see their
+    own assigned items plus the unassigned pool — so they can still claim new work —
+    but never items claimed by another user. Admins see everything.
+    """
+    if _is_admin(user):
+        return qs
+    return qs.filter(Q(assigned_to=user) | Q(assigned_to__isnull=True))
+
+
+def _scope_tickets_for(qs, user):
+    """Ticket visibility for non-admins: their own + the unclaimed pool + tickets
+    escalated above their owner's level up to the viewer's level (so a higher-level
+    tech can take over an escalated ticket while its original owner still holds it).
+    Admins see everything.
+    """
+    if _is_admin(user):
+        return qs
+    return qs.filter(
+        Q(assigned_to=user)
+        | Q(assigned_to__isnull=True)
+        | (
+            Q(assigned_to__isnull=False)
+            & ~Q(assigned_to=user)
+            & Q(escalation_level__gt=models_F('assigned_to__level'))
+            & Q(escalation_level__lte=user.level)
+        )
+    )
+
+
 def _get_custom_fields_for_ticket(ticket_or_none):
     """Return active CustomFields applicable to a ticket (and its help topic if set)."""
     help_topic = getattr(ticket_or_none, 'help_topic', None) if ticket_or_none else None
@@ -304,6 +334,7 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         queryset = WorkOrder.objects.select_related('client', 'assigned_to', 'device')
+        queryset = _scope_assignable_for(queryset, self.request.user)
 
         status = self.request.GET.get('status')
         if status:
@@ -337,7 +368,7 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
             .order_by('sort_order').values_list('slug', 'label')
         )
         context['priority_choices'] = WorkOrder.PRIORITY_CHOICES
-        base_qs = WorkOrder.objects.all()
+        base_qs = _scope_assignable_for(WorkOrder.objects.all(), self.request.user)
         context['active_count'] = base_qs.exclude(status__in=WO_CLOSED_STATUSES).count()
         context['closed_count'] = base_qs.filter(status__in=WO_CLOSED_STATUSES).count()
         context['current_tab'] = self.request.GET.get('tab', 'active')
@@ -1144,6 +1175,7 @@ class TicketListView(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         queryset = Ticket.objects.select_related('client', 'device', 'created_by', 'assigned_to')
+        queryset = _scope_tickets_for(queryset, self.request.user)
 
         needs_response = self.request.GET.get('needs_response')
         if needs_response:
@@ -1187,7 +1219,7 @@ class TicketListView(LoginRequiredMixin, ListView):
             StatusDefinition.objects.filter(entity_type='ticket', is_active=True)
             .order_by('sort_order').values_list('slug', 'label')
         )
-        base_qs = Ticket.objects.all()
+        base_qs = _scope_tickets_for(Ticket.objects.all(), self.request.user)
         context['active_count'] = base_qs.exclude(status__in=TICKET_CLOSED_STATUSES).count()
         context['closed_count'] = base_qs.filter(status__in=TICKET_CLOSED_STATUSES).count()
         context['current_tab'] = self.request.GET.get('tab', 'active')
@@ -1201,9 +1233,11 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
     context_object_name = 'ticket'
 
     def get_queryset(self):
-        return Ticket.objects.select_related(
+        qs = Ticket.objects.select_related(
             'client', 'device', 'created_by'
         ).prefetch_related('replies', 'replies__created_by')
+        # A tech can't open another tech's ticket by URL — same rule as the list.
+        return _scope_tickets_for(qs, self.request.user)
 
     def get(self, request, *args, **kwargs):
         response = super().get(request, *args, **kwargs)
@@ -1587,16 +1621,42 @@ class TicketLinkRemoveView(LoginRequiredMixin, View):
 # ---------------------------------------------------------------------------
 
 class TicketAssignView(LoginRequiredMixin, View):
-    """Assign or claim a ticket. POST with assigned_to=<pk> or assigned_to='' to unassign, or claim=1 to self-assign."""
+    """Claim / Transfer / unassign a ticket. POST claim=1 to self-assign, or
+    assigned_to=<pk> (or '' to unassign) to transfer."""
 
     def post(self, request, pk):
-        ticket = get_object_or_404(Ticket, pk=pk)
+        # Can only act on a ticket the user is allowed to see.
+        ticket = get_object_or_404(_scope_tickets_for(Ticket.objects.all(), request.user), pk=pk)
         if request.POST.get('claim'):
             ticket.assigned_to = request.user
         else:
             uid = request.POST.get('assigned_to', '').strip()
             ticket.assigned_to_id = uid if uid else None
         ticket.save(update_fields=['assigned_to', 'updated_at'])
+        # If they transferred it away and can no longer see it, send them to the list.
+        if not _is_admin(request.user) and not _scope_tickets_for(
+            Ticket.objects.filter(pk=pk), request.user
+        ).exists():
+            return redirect('core:ticket_list')
+        return redirect('core:ticket_detail', pk=pk)
+
+
+class TicketEscalateView(LoginRequiredMixin, View):
+    """Raise a ticket one level. The current owner keeps it until a higher-level
+    tech claims it — so the client is never left without a person."""
+
+    def post(self, request, pk):
+        ticket = get_object_or_404(_scope_tickets_for(Ticket.objects.all(), request.user), pk=pk)
+        if ticket.escalate():
+            TicketReply.objects.create(
+                ticket=ticket, reply_type='internal',
+                content=f'[Escalated to Level {ticket.escalation_level}] by '
+                        f'{request.user.get_full_name() or request.user.username}',
+                created_by=request.user,
+            )
+            messages.success(request, f'{ticket.ticket_number} escalated to Level {ticket.escalation_level}.')
+        else:
+            messages.info(request, f'{ticket.ticket_number} is already at the highest level.')
         return redirect('core:ticket_detail', pk=pk)
 
 

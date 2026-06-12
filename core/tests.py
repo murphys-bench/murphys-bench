@@ -326,3 +326,82 @@ def test_mileage_list_scopes_to_own_for_techs(client, admin_user):
     client.force_login(admin_user)
     admin_body = client.get('/mileage/').content
     assert b'Admin trip' in admin_body and b'Tech trip' in admin_body  # admin sees all
+
+
+# ── Ticket scoping + escalation levels ──────────────────────────────────────
+
+@pytest.mark.django_db
+def test_ticket_scope_own_and_unclaimed_not_others(client_obj):
+    from core.views import _scope_tickets_for
+    a = User.objects.create_user(username='l1a', password='x', is_staff=False, level=1)
+    b = User.objects.create_user(username='l1b', password='x', is_staff=False, level=1)
+    Ticket.objects.create(client=client_obj, subject='mine', description='d', assigned_to=a)
+    Ticket.objects.create(client=client_obj, subject='other', description='d', assigned_to=b)
+    Ticket.objects.create(client=client_obj, subject='free', description='d')
+
+    visible = set(_scope_tickets_for(Ticket.objects.all(), a).values_list('subject', flat=True))
+    assert visible == {'mine', 'free'}     # never another tech's claimed ticket
+
+
+@pytest.mark.django_db
+def test_escalation_surfaces_up_and_keeps_owner(client_obj):
+    from core.views import _scope_tickets_for
+    l1 = User.objects.create_user(username='l1', password='x', is_staff=False, level=1)
+    l2 = User.objects.create_user(username='l2', password='x', is_staff=False, level=2)
+    t = Ticket.objects.create(client=client_obj, subject='hard', description='d', assigned_to=l1)
+
+    # Before escalation, an L2 cannot see an L1's claimed ticket.
+    assert 'hard' not in set(_scope_tickets_for(Ticket.objects.all(), l2).values_list('subject', flat=True))
+
+    assert t.escalate() is True
+    t.refresh_from_db()
+    # After: L2 can see it to take over, but L1 STILL owns it (no black hole).
+    assert 'hard' in set(_scope_tickets_for(Ticket.objects.all(), l2).values_list('subject', flat=True))
+    assert t.assigned_to == l1
+    assert t.escalation_level == 2
+    assert t.escalation_pending is True
+
+
+@pytest.mark.django_db
+def test_escalate_view_then_higher_claim_transfers(client, client_obj):
+    l1 = User.objects.create_user(username='l1c', password='x', is_staff=False, level=1)
+    l2 = User.objects.create_user(username='l2c', password='x', is_staff=False, level=2)
+    t = Ticket.objects.create(client=client_obj, subject='esc', description='d', assigned_to=l1)
+
+    client.force_login(l1)
+    client.post(f'/tickets/{t.pk}/escalate/')
+    t.refresh_from_db()
+    assert t.escalation_level == 2 and t.assigned_to == l1   # owner unchanged
+
+    client.force_login(l2)
+    client.post(f'/tickets/{t.pk}/assign/', {'claim': '1'})  # L2 takes it over
+    t.refresh_from_db()
+    assert t.assigned_to == l2
+    assert t.escalation_pending is False                     # resolved once the right level holds it
+
+
+@pytest.mark.django_db
+def test_escalate_caps_at_max_level(client_obj):
+    l1 = User.objects.create_user(username='l1d', password='x', is_staff=False, level=1)
+    t = Ticket.objects.create(client=client_obj, subject='cap', description='d', assigned_to=l1, escalation_level=3)
+    assert t.escalate() is False
+    assert t.escalation_level == 3
+
+
+@pytest.mark.django_db
+def test_tech_cannot_open_another_techs_ticket_by_url(client, client_obj):
+    a = User.objects.create_user(username='da', password='x', is_staff=False, level=1)
+    b = User.objects.create_user(username='db', password='x', is_staff=False, level=1)
+    t = Ticket.objects.create(client=client_obj, subject='secret', description='d', assigned_to=b)
+    client.force_login(a)
+    assert client.get(f'/tickets/{t.pk}/').status_code == 404
+
+
+@pytest.mark.django_db
+def test_ticket_detail_renders_escalation_ui(client, client_obj, admin_user):
+    t = Ticket.objects.create(client=client_obj, subject='render', description='d', assigned_to=admin_user)
+    client.force_login(admin_user)
+    resp = client.get(f'/tickets/{t.pk}/')
+    assert resp.status_code == 200
+    assert b'Escalate' in resp.content
+    assert b'Level 1' in resp.content
