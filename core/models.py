@@ -1381,7 +1381,7 @@ class EmailTemplate(models.Model):
     trigger = models.CharField(max_length=30, choices=TRIGGER_CHOICES, unique=True)
     subject_template = models.CharField(
         max_length=255,
-        help_text='Django template syntax. Variables: {{ ticket.ticket_number }}, {{ ticket.subject }}, {{ client.name }}, {{ status }}, {{ tech_name }}',
+        help_text='Django template syntax. Variables: {{ ticket.ticket_number }}, {{ ticket.subject }}, {{ customer_name }}, {{ client.name }}, {{ contact.first_name }}, {{ status }}, {{ tech_name }}',
     )
     body_template = models.TextField(
         help_text='Plain text body. Same template variables available.',

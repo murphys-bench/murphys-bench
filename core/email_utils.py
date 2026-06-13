@@ -95,6 +95,29 @@ def _build_html_email(body, signature_body, subject, ticket, site):
     return html, logo_data, logo_mime_type
 
 
+def _resolve_ticket_contact(ticket):
+    """The contact an automated ticket email is addressed to: the ticket's
+    assigned contact (when it has an email), else the client's primary contact,
+    else any active contact with an email, else the assigned contact as-is.
+    Pure given the ticket's related rows — kept separate so it's unit-testable."""
+    contact = ticket.contact if ticket.contact_id else None
+    if contact and contact.email:
+        return contact
+    return (ticket.client.contacts.filter(is_primary=True, is_active=True).first()
+            or ticket.client.contacts.filter(is_active=True, email__gt='').first()
+            or contact)
+
+
+def _greeting_name(client, contact):
+    """Name to greet in an email body. Residential clients get the contact's
+    first name ("Hi Wayne,"); business clients get the company name
+    ("Hi Acme Co,"). Falls back to the client name whenever there's no usable
+    contact first name, so behavior never regresses when no contact exists."""
+    if client.client_type == 'residential' and contact and contact.first_name:
+        return contact.first_name
+    return client.name
+
+
 def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
     """
     Send an automated email for a ticket event.
@@ -108,16 +131,14 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
     if not site.email_enabled:
         return
 
+    # Resolve the contact this email is addressed to (used for both the
+    # recipient address and the greeting name).
+    contact = _resolve_ticket_contact(ticket)
+
     # Allow explicit override (e.g. resend to a specific address)
     if extra_context and extra_context.get('_override_to'):
         to_email = extra_context.pop('_override_to')
-    # Resolve recipient — ticket's assigned contact first, then primary, then any, then client email
-    elif ticket.contact_id and ticket.contact and ticket.contact.email:
-        to_email = ticket.contact.email
     else:
-        contact = ticket.client.contacts.filter(is_primary=True, is_active=True).first()
-        if not contact:
-            contact = ticket.client.contacts.filter(is_active=True, email__gt='').first()
         to_email = (contact.email if contact else '') or ticket.client.email
 
     if not to_email:
@@ -167,6 +188,8 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
     ctx = {
         'ticket': ticket,
         'client': ticket.client,
+        'contact': contact,
+        'customer_name': _greeting_name(ticket.client, contact),
         'tech_name': ticket.created_by.get_full_name() if ticket.created_by else '',
         'status': _status_label(ticket.status, 'ticket'),
         'site_name': site.company_name or "Murphy's Bench",
