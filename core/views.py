@@ -3082,7 +3082,7 @@ class SettingsView(LoginRequiredMixin, View):
                     trigger=trigger,
                     defaults={
                         'subject_template': f'[{{{{ ticket.ticket_number }}}}] {{{{ ticket.subject }}}}',
-                        'body_template': f'Hi {{{{ client.name }}}},\n\nYour ticket {{{{ ticket.ticket_number }}}} has been updated.\n\nThank you,\n{{{{ tech_name }}}}',
+                        'body_template': f'Hi {{{{ customer_name }}}},\n\nYour ticket {{{{ ticket.ticket_number }}}} has been updated.\n\nThank you,\n{{{{ tech_name }}}}',
                         'is_active': False,
                     }
                 )

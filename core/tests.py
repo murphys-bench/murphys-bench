@@ -133,6 +133,51 @@ def test_bad_email_template_is_logged(client_obj, caplog):
         'A template render failure should be logged on the core logger.'
 
 
+# ── Email greeting name: residential → first name, business → company ───────
+
+@pytest.mark.django_db
+def test_greeting_uses_contact_first_name_for_residential():
+    """Residential clients are named after the customer's last name by our data
+    convention, so the greeting must come from the contact's FIRST name."""
+    from core.email_utils import _resolve_ticket_contact, _greeting_name
+
+    client = Client.objects.create(name='Davis', client_type='residential')
+    Contact.objects.create(
+        client=client, first_name='Wayne', last_name='Davis',
+        email='wayne@example.com', is_primary=True,
+    )
+    ticket = Ticket.objects.create(client=client, subject='S', description='D')
+
+    contact = _resolve_ticket_contact(ticket)
+    assert _greeting_name(client, contact) == 'Wayne'
+
+
+@pytest.mark.django_db
+def test_greeting_uses_company_name_for_business():
+    from core.email_utils import _resolve_ticket_contact, _greeting_name
+
+    client = Client.objects.create(name='Acme Co', client_type='business')
+    Contact.objects.create(
+        client=client, first_name='Jane', last_name='Smith',
+        email='jane@acme.example', is_primary=True,
+    )
+    ticket = Ticket.objects.create(client=client, subject='S', description='D')
+
+    contact = _resolve_ticket_contact(ticket)
+    assert _greeting_name(client, contact) == 'Acme Co'
+
+
+@pytest.mark.django_db
+def test_greeting_falls_back_to_client_name_without_contact():
+    from core.email_utils import _resolve_ticket_contact, _greeting_name
+
+    client = Client.objects.create(name='Davis', client_type='residential')
+    ticket = Ticket.objects.create(client=client, subject='S', description='D')
+
+    contact = _resolve_ticket_contact(ticket)
+    assert _greeting_name(client, contact) == 'Davis'
+
+
 # ── reset_operational_data: wipes operational data, keeps config + superusers ──
 
 @pytest.mark.django_db
@@ -449,7 +494,9 @@ def test_ticket_detail_renders_escalation_ui(client, client_obj, admin_user):
     resp = client.get(f'/tickets/{t.pk}/')
     assert resp.status_code == 200
     assert b'Escalate' in resp.content
-    assert b'Level 1' in resp.content
+    # Badge now shows the assigned tech's own level (admin_user defaults to L1),
+    # not the ticket's escalation_level — see ticket_detail.html assigned-to row.
+    assert b'L1' in resp.content
 
 
 @pytest.mark.django_db
