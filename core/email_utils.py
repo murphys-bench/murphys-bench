@@ -109,11 +109,11 @@ def _resolve_ticket_contact(ticket):
 
 
 def _greeting_name(client, contact):
-    """Name to greet in an email body. Residential clients get the contact's
-    first name ("Hi Wayne,"); business clients get the company name
-    ("Hi Acme Co,"). Falls back to the client name whenever there's no usable
-    contact first name, so behavior never regresses when no contact exists."""
-    if client.client_type == 'residential' and contact and contact.first_name:
+    """Name for a personal salutation in an email body. Always the contact's
+    first name when there's a contact on file ("Hi Wayne,") — for business
+    clients too, since the mail goes to a company but still greets a person.
+    Falls back to the client name only when no contact exists."""
+    if contact and contact.first_name:
         return contact.first_name
     return client.name
 
