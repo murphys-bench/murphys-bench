@@ -153,7 +153,8 @@ def test_greeting_uses_contact_first_name_for_residential():
 
 
 @pytest.mark.django_db
-def test_greeting_uses_company_name_for_business():
+def test_greeting_uses_contact_first_name_for_business_too():
+    """Business mail goes to a company but still greets a person by first name."""
     from core.email_utils import _resolve_ticket_contact, _greeting_name
 
     client = Client.objects.create(name='Acme Co', client_type='business')
@@ -164,7 +165,7 @@ def test_greeting_uses_company_name_for_business():
     ticket = Ticket.objects.create(client=client, subject='S', description='D')
 
     contact = _resolve_ticket_contact(ticket)
-    assert _greeting_name(client, contact) == 'Acme Co'
+    assert _greeting_name(client, contact) == 'Jane'
 
 
 @pytest.mark.django_db
