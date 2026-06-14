@@ -205,9 +205,11 @@ WO notes mean only "shows on the printed repair report" — passive, no email.)
   ticket detail else WO detail.
 - **`TechMessageView`** (`source='wo'`/`'ticket'`; URLs `wo_message_tech`/`ticket_message_tech`):
   stores the message as an **internal `TicketReply`** in the ticket thread (consolidated
-  record), then notifies the **counterpart** = whichever of {ticket.assigned_to,
-  work_order.assigned_to} isn't the sender; falls back to admins (`_notification_admins`);
-  never notifies the sender.
+  record), then notifies **directionally** — a WO message targets the ticket tech, a ticket
+  message targets the bench (WO) tech. If that target role is **unassigned** → fall back to
+  admins (`_notification_admins`, a dispatcher picks it up). If the target role is **held by
+  the sender** (one person working both ends) → notify no one (do NOT spam other admins about
+  a message sent to oneself). Never notify the sender.
 - **Sidebar bell** (`base.html`, new `bell` icon) with a red unread badge from an HTMX-polled
   fragment (`notification_count`, `load, every 60s`). `/notifications/` page: unread-first,
   click → `notification_open` marks read + redirects to target; `notification_read_all`.
