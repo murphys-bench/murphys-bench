@@ -910,14 +910,19 @@ class TechMessageView(LoginRequiredMixin, View):
             created_by=request.user,
         )
 
-        # Notify the counterpart(s): whichever of the ticket/WO assignees isn't
-        # the sender. No counterpart → fall back to admins. Never notify self.
-        recipients = set()
-        for u in (ticket.assigned_to, getattr(work_order, 'assigned_to', None)):
-            if u and u.id != request.user.id:
-                recipients.add(u)
-        if not recipients:
+        # Notify the OTHER role's tech: a message from the WO targets the ticket
+        # tech, and vice versa. If that role is unassigned, fall back to admins
+        # (a dispatcher picks it up). If that role is held by the sender (one
+        # person working both ends), there's no one to notify — and we must NOT
+        # spam other admins about a message someone sent to themselves.
+        target = (getattr(work_order, 'assigned_to', None)
+                  if self.source == 'ticket' else ticket.assigned_to)
+        if target is None:
             recipients = {u for u in _notification_admins() if u.id != request.user.id}
+        elif target.id != request.user.id:
+            recipients = {target}
+        else:
+            recipients = set()
 
         sender_name = request.user.get_full_name() or request.user.username
         ref = (work_order.work_order_number if work_order else ticket.ticket_number)

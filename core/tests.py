@@ -624,3 +624,21 @@ def test_notification_ui_surfaces(client, client_obj):
         reverse('core:work_order_detail', args=[wo.pk])).content             # WO affordance
     assert b'Message Bench Tech' in client.get(
         reverse('core:ticket_detail', args=[ticket.pk])).content            # ticket affordance
+
+
+@pytest.mark.django_db
+def test_no_notification_when_sender_holds_both_roles(client, client_obj):
+    """One person assigned to both the WO and the ticket → a message to the
+    'other' role is a message to themselves: no notification, and crucially no
+    spam to other admins."""
+    from core.models import Notification
+    me = User.objects.create_user(username='solo', password='x', is_staff=True)
+    User.objects.create_user(username='otheradmin', password='x', is_staff=True)
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D',
+                                   assigned_to=me)
+    wo = WorkOrder.objects.create(client=client_obj, ticket=ticket, assigned_to=me)
+    client.force_login(me)
+    resp = client.post(reverse('core:wo_message_tech', args=[wo.pk]),
+                       {'content': 'note to self'})
+    assert resp.status_code == 200
+    assert Notification.objects.count() == 0
