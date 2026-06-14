@@ -1,3 +1,4 @@
+import logging
 from django.shortcuts import render, get_object_or_404, redirect
 from django.views import View
 from django.views.generic import ListView, DetailView, CreateView, UpdateView
@@ -24,12 +25,15 @@ from .models import (
     SuppressedAddress,
     BlockedSender,
     SLAPlan, HelpTopic, TechSkill,
+    Notification,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
                     CompanySettingsForm, OutboundEmailSettingsForm, InboundEmailSettingsForm,
                     AttachmentSettingsForm, SecuritySettingsForm, MileageSettingsForm,
                     ColorSettingsForm)
+
+logger = logging.getLogger('core')
 
 
 def _audit_entries(obj):
@@ -863,6 +867,117 @@ class WorkOrderNoteCreateView(LoginRequiredMixin, View):
         )
         _save_attachments(request, note)
         return render(request, 'core/partials/note_item.html', {'note': note})
+
+
+# --- Internal tech-to-tech messaging + notifications ---
+
+def _notification_admins():
+    """Users who should catch a tech message when no specific counterpart is
+    assigned: staff or anyone whose role can manage settings."""
+    return list(User.objects.filter(
+        Q(is_staff=True) | Q(role_obj__can_manage_settings=True)
+    ).distinct())
+
+
+class TechMessageView(LoginRequiredMixin, View):
+    """Internal tech-to-tech message about a WO/ticket pair. Records the message
+    as an internal note in the ticket thread (the consolidated record) and
+    notifies the counterpart tech. One mechanism, two entry points: `source`
+    is 'wo' (from the work order) or 'ticket' (from the ticket)."""
+
+    source = 'wo'
+
+    def post(self, request, pk):
+        if self.source == 'ticket':
+            ticket = get_object_or_404(Ticket, pk=pk)
+            work_order = WorkOrder.objects.filter(ticket=ticket).first()
+        else:
+            work_order = get_object_or_404(WorkOrder, pk=pk)
+            ticket = work_order.ticket
+
+        if ticket is None:
+            return HttpResponse('No linked ticket to message about.', status=400)
+
+        content = request.POST.get('content', '').strip()
+        if not content:
+            return HttpResponse(status=204)
+
+        # The message lives as an internal note in the ticket thread.
+        reply = TicketReply.objects.create(
+            ticket=ticket,
+            reply_type='internal',
+            content=content,
+            created_by=request.user,
+        )
+
+        # Notify the counterpart(s): whichever of the ticket/WO assignees isn't
+        # the sender. No counterpart → fall back to admins. Never notify self.
+        recipients = set()
+        for u in (ticket.assigned_to, getattr(work_order, 'assigned_to', None)):
+            if u and u.id != request.user.id:
+                recipients.add(u)
+        if not recipients:
+            recipients = {u for u in _notification_admins() if u.id != request.user.id}
+
+        sender_name = request.user.get_full_name() or request.user.username
+        ref = (work_order.work_order_number if work_order else ticket.ticket_number)
+        snippet = content if len(content) <= 80 else content[:77] + '…'
+        for u in recipients:
+            Notification.objects.create(
+                recipient=u,
+                actor=request.user,
+                kind='tech_message',
+                text=f'{sender_name} · {ref}: {snippet}',
+                ticket=ticket,
+                work_order=work_order,
+            )
+
+        if self.source == 'ticket':
+            # Append to the visible ticket reply thread.
+            return render(request, 'core/partials/ticket_reply_item.html', {'reply': reply})
+        # From the WO: a small confirmation (the WO surfaces ticket activity via
+        # the cross-visibility panel rather than an inline thread).
+        return HttpResponse(
+            '<p class="text-sm text-green-700 py-2">✓ Message sent to the ticket tech.</p>'
+        )
+
+
+class NotificationListView(LoginRequiredMixin, View):
+    """The notification center page — unread first, then recent."""
+
+    def get(self, request):
+        notes = (request.user.notifications
+                 .select_related('actor', 'ticket', 'work_order')
+                 .order_by('is_read', '-created_at')[:100])
+        return render(request, 'core/notifications.html', {'notifications': notes})
+
+
+class NotificationCountView(LoginRequiredMixin, View):
+    """Sidebar bell badge fragment — polled via HTMX."""
+
+    def get(self, request):
+        count = request.user.notifications.filter(is_read=False).count()
+        return render(request, 'core/partials/notification_badge.html', {'count': count})
+
+
+class NotificationOpenView(LoginRequiredMixin, View):
+    """Mark a single notification read, then redirect to its target."""
+
+    def get(self, request, pk):
+        note = get_object_or_404(Notification, pk=pk, recipient=request.user)
+        if not note.is_read:
+            note.is_read = True
+            note.read_at = timezone.now()
+            note.save(update_fields=['is_read', 'read_at'])
+        return redirect(note.target_url)
+
+
+class NotificationMarkAllReadView(LoginRequiredMixin, View):
+    def post(self, request):
+        request.user.notifications.filter(is_read=False).update(
+            is_read=True, read_at=timezone.now()
+        )
+        return redirect('core:notifications')
 
 
 # --- Work Order Item Toggle (HTMX) ---

@@ -1,0 +1,51 @@
+{% extends "core/base.html" %}
+{% load mb_icons %}
+
+{% block title %}Notifications — Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow page-title-bar">
+    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
+        <div class="flex items-center gap-4">
+            <h1 class="text-2xl font-bold text-gray-900 shrink-0">Notifications</h1>
+            <div class="flex-1"></div>
+            <form method="post" action="{% url 'core:notification_read_all' %}">
+                {% csrf_token %}
+                <button type="submit"
+                        class="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-md text-sm hover:bg-gray-200 shrink-0">
+                    Mark all read
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto space-y-2">
+    {% for note in notifications %}
+    <a href="{% url 'core:notification_open' note.pk %}"
+       class="block bg-white rounded-lg shadow hover:shadow-md transition-shadow px-5 py-3
+              {% if not note.is_read %}border-l-4 border-blue-500{% endif %}">
+        <div class="flex items-start gap-3">
+            <span class="mt-0.5 {% if note.is_read %}text-gray-400{% else %}text-blue-600{% endif %}">
+                {% icon 'bell' 5 %}
+            </span>
+            <div class="flex-1 min-w-0">
+                <p class="text-sm {% if note.is_read %}text-gray-600{% else %}text-gray-900 font-medium{% endif %}">
+                    {{ note.text }}
+                </p>
+                <p class="text-xs text-gray-400 mt-0.5">{{ note.created_at|date:"M j, Y g:i A" }}</p>
+            </div>
+            {% if not note.is_read %}
+            <span class="shrink-0 mt-1 inline-block w-2 h-2 rounded-full bg-blue-500"></span>
+            {% endif %}
+        </div>
+    </a>
+    {% empty %}
+    <div class="bg-white rounded-lg shadow px-5 py-10 text-center text-gray-400 text-sm">
+        No notifications.
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
