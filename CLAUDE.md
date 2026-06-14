@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 12, 2026 (session 27 — stabilization + tech-experience/escalation; migrations through 0048)
+**Last Updated**: June 13, 2026 (session 28 — internal tech-to-tech messaging + notification center; migrations through 0051)
 **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench`
 **App path on server**: `/opt/murphys-bench/`
 
@@ -190,6 +190,31 @@ The big shift this session — techs no longer see everything. Migrations 0046�
 **Deliberately deferred** (don't build without a reason): retiring `TechSkill` (replaced in
 spirit by levels — strip once levels are proven), leveling Work Orders (kept simple), and
 bounding the unclaimed pool by level (techs still see all unclaimed).
+
+### Internal tech-to-tech messaging + notification center (session 28, Jun 13)
+**One face the client sees — the ticket tech.** The ticket is the single client-facing
+channel. A bench tech who needs the client contacted does NOT email/contact the client from
+the work order; they message the ticket tech **internally**, and the ticket tech makes the
+client contact through the normal ticket reply. (We briefly built the opposite — customer-
+visible WO notes emailing the client + mirroring to the ticket — and **reverted it**: it
+creates a second client-facing voice. **Do not make WO notes email clients.** Customer-visible
+WO notes mean only "shows on the printed repair report" — passive, no email.)
+
+- **`Notification` model** (migration 0051): per-user in-app alerts; generic so future
+  producers (escalations, SLAs, assignments) can feed the same bell. `target_url` → linked
+  ticket detail else WO detail.
+- **`TechMessageView`** (`source='wo'`/`'ticket'`; URLs `wo_message_tech`/`ticket_message_tech`):
+  stores the message as an **internal `TicketReply`** in the ticket thread (consolidated
+  record), then notifies the **counterpart** = whichever of {ticket.assigned_to,
+  work_order.assigned_to} isn't the sender; falls back to admins (`_notification_admins`);
+  never notifies the sender.
+- **Sidebar bell** (`base.html`, new `bell` icon) with a red unread badge from an HTMX-polled
+  fragment (`notification_count`, `load, every 60s`). `/notifications/` page: unread-first,
+  click → `notification_open` marks read + redirects to target; `notification_read_all`.
+- **Affordances:** amber "Message Ticket Tech" card on the WO (only when `work_order.ticket`);
+  reciprocal "Message Bench Tech" on the ticket (only when `ticket.work_order_created`).
+- **Known gap:** stand-alone WO (no ticket) has no ticket tech → action hidden there.
+- Covered by 7 tests in `core/tests.py` (suite at 40 passing).
 
 ### Design intent to preserve (don't "fix" these — they're deliberate)
 - A completed Work Order must **never** auto-close its Ticket. The ticket drives the
@@ -391,7 +416,7 @@ murphys-bench/
     └── next-session-prompt.md
 ```
 
-### Data Models (33 current, 33 migrations applied)
+### Data Models (34 current, migrations through 0051)
 - **Role** — permission role with 16 boolean flags; seeded: Administrator, Technician
 - **TechSkill** — skill tags M2M on User; captured for future skill-based routing
 - **User** — extended Django user; role CharField (legacy) + role_obj FK to Role + skills M2M
@@ -419,6 +444,7 @@ murphys-bench/
 - **SuppressedAddress** — exact email addresses that never receive automated email
 - **EmailSendLog** — audit trail for every outbound send attempt
 - **InboundEmailLog** — audit trail for every inbound message fetched
+- **Notification** — per-user in-app alert (sidebar bell + unread count); first producer is internal tech-to-tech messaging; generic for future producers
 - **KBCategory** — knowledge base category (admin-managed)
 - **KBArticle** — KB article; types: troubleshooting / how_to / vendor / internal; is_restricted flag
 - **TicketQueue** — Saved ticket filters; owner=null = system queue; filter_criteria JSONField

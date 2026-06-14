@@ -5,6 +5,12 @@ app_name = 'core'
 
 urlpatterns = [
     path('', views.DashboardView.as_view(), name='dashboard'),
+    path('notifications/', views.NotificationListView.as_view(), name='notifications'),
+    path('notifications/count/', views.NotificationCountView.as_view(), name='notification_count'),
+    path('notifications/read-all/', views.NotificationMarkAllReadView.as_view(), name='notification_read_all'),
+    path('notifications/<int:pk>/open/', views.NotificationOpenView.as_view(), name='notification_open'),
+    path('work-orders/<int:pk>/message-tech/', views.TechMessageView.as_view(source='wo'), name='wo_message_tech'),
+    path('tickets/<int:pk>/message-tech/', views.TechMessageView.as_view(source='ticket'), name='ticket_message_tech'),
     path('work-orders/', views.WorkOrderListView.as_view(), name='work_order_list'),
     path('work-orders/<int:pk>/', views.WorkOrderDetailView.as_view(), name='work_order_detail'),
     path('clients/', views.ClientListView.as_view(), name='client_list'),

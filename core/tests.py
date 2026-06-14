@@ -509,3 +509,118 @@ def test_reply_form_defaults(client, client_obj, admin_user):
     assert b'name="cc_mode"' in body                  # BCC/CC selector present
     assert b'rows="8"' in body                         # larger reply box
     assert b'mb_draft_' in body                        # draft autosave wired
+
+
+# ── Internal tech-to-tech messaging + notifications ─────────────────────────
+
+@pytest.mark.django_db
+def test_wo_message_notifies_ticket_tech_not_sender(client, client_obj):
+    from core.models import Notification, TicketReply
+    bench = User.objects.create_user(username='bench', password='x', is_staff=False)
+    ticket_tech = User.objects.create_user(username='tickettech', password='x', is_staff=False)
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D',
+                                   assigned_to=ticket_tech)
+    wo = WorkOrder.objects.create(client=client_obj, ticket=ticket, assigned_to=bench)
+
+    client.force_login(bench)
+    resp = client.post(reverse('core:wo_message_tech', args=[wo.pk]),
+                       {'content': 'Please call the client.'})
+    assert resp.status_code == 200
+    # Message lands as an internal note in the ticket thread.
+    assert TicketReply.objects.filter(
+        ticket=ticket, reply_type='internal', content='Please call the client.'
+    ).count() == 1
+    # Exactly one notification, to the ticket tech — never to the sender.
+    assert Notification.objects.count() == 1
+    assert Notification.objects.first().recipient == ticket_tech
+    assert Notification.objects.filter(recipient=bench).count() == 0
+
+
+@pytest.mark.django_db
+def test_ticket_message_notifies_bench_tech(client, client_obj):
+    from core.models import Notification
+    bench = User.objects.create_user(username='bench2', password='x', is_staff=False)
+    ticket_tech = User.objects.create_user(username='tt2', password='x', is_staff=False)
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D',
+                                   assigned_to=ticket_tech)
+    WorkOrder.objects.create(client=client_obj, ticket=ticket, assigned_to=bench)
+
+    client.force_login(ticket_tech)
+    resp = client.post(reverse('core:ticket_message_tech', args=[ticket.pk]),
+                       {'content': 'Go ahead.'})
+    assert resp.status_code == 200
+    assert Notification.objects.filter(recipient=bench).count() == 1
+    assert Notification.objects.filter(recipient=ticket_tech).count() == 0
+
+
+@pytest.mark.django_db
+def test_message_falls_back_to_admins_when_no_counterpart(client, client_obj, admin_user):
+    from core.models import Notification
+    bench = User.objects.create_user(username='bench3', password='x', is_staff=False)
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')  # unassigned
+    wo = WorkOrder.objects.create(client=client_obj, ticket=ticket, assigned_to=bench)
+
+    client.force_login(bench)
+    client.post(reverse('core:wo_message_tech', args=[wo.pk]), {'content': 'Need contact.'})
+    assert Notification.objects.filter(recipient=admin_user).count() == 1   # admin caught it
+    assert Notification.objects.filter(recipient=bench).count() == 0        # sender never
+
+
+@pytest.mark.django_db
+def test_notification_count_fragment_shows_unread(client, client_obj):
+    from core.models import Notification
+    u = User.objects.create_user(username='u4', password='x')
+    Notification.objects.create(recipient=u, text='a', kind='tech_message')
+    Notification.objects.create(recipient=u, text='b', kind='tech_message',
+                                is_read=True)
+    client.force_login(u)
+    body = client.get(reverse('core:notification_count')).content
+    assert b'>1<' in body                       # one unread → badge shows 1
+    assert u.notifications.filter(is_read=False).count() == 1
+
+
+@pytest.mark.django_db
+def test_opening_notification_marks_read_and_redirects(client, client_obj):
+    from core.models import Notification
+    from django.utils import timezone as _tz
+    u = User.objects.create_user(username='u5', password='x')
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    n = Notification.objects.create(recipient=u, text='hi', kind='tech_message',
+                                    ticket=ticket)
+    client.force_login(u)
+    resp = client.get(reverse('core:notification_open', args=[n.pk]))
+    assert resp.status_code == 302
+    assert resp.url == reverse('core:ticket_detail', args=[ticket.pk])
+    n.refresh_from_db()
+    assert n.is_read and n.read_at is not None
+
+    # A different user cannot open someone else's notification.
+    other = User.objects.create_user(username='u5b', password='x')
+    client.force_login(other)
+    assert client.get(reverse('core:notification_open', args=[n.pk])).status_code == 404
+
+
+@pytest.mark.django_db
+def test_standalone_wo_message_has_no_ticket_and_no_notification(client, client_obj):
+    from core.models import Notification
+    bench = User.objects.create_user(username='bench6', password='x')
+    wo = WorkOrder.objects.create(client=client_obj, assigned_to=bench)  # no ticket
+    client.force_login(bench)
+    resp = client.post(reverse('core:wo_message_tech', args=[wo.pk]), {'content': 'x'})
+    assert resp.status_code == 400
+    assert Notification.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_notification_ui_surfaces(client, client_obj):
+    u = User.objects.create_user(username='uui', password='x', is_staff=True)
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D',
+                                   assigned_to=u)
+    wo = WorkOrder.objects.create(client=client_obj, ticket=ticket, assigned_to=u)
+    client.force_login(u)
+    assert b'title="Notifications"' in client.get('/').content               # sidebar bell
+    assert client.get(reverse('core:notifications')).status_code == 200      # center page
+    assert b'Message Ticket Tech' in client.get(
+        reverse('core:work_order_detail', args=[wo.pk])).content             # WO affordance
+    assert b'Message Bench Tech' in client.get(
+        reverse('core:ticket_detail', args=[ticket.pk])).content            # ticket affordance

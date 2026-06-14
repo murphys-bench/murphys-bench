@@ -274,6 +274,14 @@
             {% icon 'home' 5 %}<span class="nav-label">Dashboard</span>
         </a>
 
+        <a href="{% url 'core:notifications' %}" title="Notifications"
+           class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
+                  {% if u and 'notification' in u %}bg-white/15{% endif %}">
+            {% icon 'bell' 5 %}<span class="nav-label">Notifications</span>
+            <span hx-get="{% url 'core:notification_count' %}" hx-trigger="load, every 60s"
+                  hx-swap="innerHTML" class="contents"></span>
+        </a>
+
         <a href="{% url 'core:ticket_list' %}" title="Tickets"
            class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
                   {% if u and 'ticket' in u %}bg-white/15{% endif %}">

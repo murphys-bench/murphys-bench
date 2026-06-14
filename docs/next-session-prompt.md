@@ -12,9 +12,20 @@ feature request is to check it against that rule. Tests are required for anythin
 touching data. The model drives deploys/ops directly (incl. SSH); narrate; pause for a
 go/no-go only before destructive or production-affecting steps.
 
-## What's already built and working (as of session 27):
+## What's already built and working (as of session 28):
 
-- Django 4.2 app, 45 migrations applied
+**Session 28 — Internal tech-to-tech messaging + notification center (shipped + deployed):**
+- One-face-to-the-client principle reinforced: bench techs do NOT contact clients from the WO —
+  they message the **ticket tech internally** (amber "Message Ticket Tech" card on the WO,
+  reciprocal "Message Bench Tech" on the ticket). Message is stored as an internal `TicketReply`
+  + notifies the counterpart tech (admin fallback; never the sender).
+- New generic `Notification` model (migration 0051) + **sidebar bell** with unread-count badge
+  (HTMX poll) + `/notifications/` page. Future producers (escalations/SLAs) can reuse the bell.
+- **An email-from-WO approach was built then reverted** — it created a 2nd client-facing voice.
+  Do NOT make WO notes email clients; customer-visible WO notes = repair-report content only.
+- 7 new tests; suite at 40 passing.
+
+- Django 4.2 app, migrations through 0051
 - **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16 (HTTP on LAN; no domain yet)
 - **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench` (scs-tech has NOPASSWD for restart/status of this service only)
 - **App path**: `/opt/murphys-bench/`  •  **SSH**: `ssh -i ~/.ssh/id_ed25519 scs-tech@10.58.58.82`  •  **venv Python 3.12**

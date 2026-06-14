@@ -1475,6 +1475,42 @@ class EmailSendLog(models.Model):
         return f'{self.trigger} → {self.to_email} [{self.status}]'
 
 
+class Notification(models.Model):
+    """An in-app alert for a user — e.g. an internal tech message that needs a
+    timely response. Surfaced via the sidebar bell with an unread count."""
+
+    KIND_CHOICES = [
+        ('tech_message', 'Tech Message'),
+    ]
+
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    kind = models.CharField(max_length=30, choices=KIND_CHOICES, default='tech_message')
+    text = models.CharField(max_length=255)
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    work_order = models.ForeignKey(WorkOrder, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    is_read = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'notifications'
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['recipient', 'is_read'])]
+
+    def __str__(self):
+        return f'{self.kind} → {self.recipient} [{"read" if self.is_read else "unread"}]'
+
+    @property
+    def target_url(self):
+        from django.urls import reverse
+        if self.ticket_id:
+            return reverse('core:ticket_detail', args=[self.ticket_id])
+        if self.work_order_id:
+            return reverse('core:work_order_detail', args=[self.work_order_id])
+        return reverse('core:notifications')
+
+
 class InboundEmailLog(models.Model):
     """Audit log for every message fetched from the inbound mailbox."""
 

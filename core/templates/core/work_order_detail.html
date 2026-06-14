@@ -385,6 +385,36 @@
         <!-- Activity -->
         <div id="tab-activity" class="bg-white rounded-lg shadow p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">Activity</h2>
+            {% if work_order.ticket %}
+            <div class="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4" x-data="{ open: false }">
+                <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-2 text-sm font-semibold text-amber-800">
+                        {% icon 'bell' 4 %} Message Ticket Tech
+                    </div>
+                    <button type="button" @click="open = !open"
+                            class="text-xs text-amber-700 hover:text-amber-900 font-medium"
+                            x-text="open ? 'Cancel' : 'Need the client contacted?'"></button>
+                </div>
+                <p class="text-xs text-amber-700 mt-1">
+                    Client contact goes through the ticket. Send an internal note to the ticket tech
+                    ({{ work_order.ticket.assigned_to.get_full_name|default:"unassigned" }}).
+                </p>
+                <form x-show="open" x-cloak class="mt-3"
+                      hx-post="{% url 'core:wo_message_tech' work_order.pk %}"
+                      hx-target="#wo-msg-result" hx-swap="innerHTML"
+                      hx-on:htmx:after-request="if(event.detail.successful){this.reset(); open=false;}">
+                    {% csrf_token %}
+                    <textarea name="content" rows="3" required
+                              placeholder="e.g. Please confirm with the client before I replace the drive."
+                              class="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500 resize-y"></textarea>
+                    <button type="submit"
+                            class="mt-2 px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-md hover:bg-amber-700">
+                        Send to Ticket Tech
+                    </button>
+                </form>
+                <div id="wo-msg-result"></div>
+            </div>
+            {% endif %}
             <div id="notes-list" class="space-y-4 mb-6">
                 {% for note in work_order.notes.all %}
                     {% include "core/partials/note_item.html" %}
@@ -427,7 +457,7 @@
                             <input type="radio" name="note_type" value="internal" x-model="noteType" class="accent-blue-600"> <span class="inline-flex items-center gap-1">{% icon "lock-closed" 3 %} Internal Only</span>
                         </label>
                         <label class="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
-                            <input type="radio" name="note_type" value="customer_visible" x-model="noteType" class="accent-blue-600"> 👤 Customer Visible
+                            <input type="radio" name="note_type" value="customer_visible" x-model="noteType" class="accent-blue-600"> <span class="inline-flex items-center gap-1">{% icon "user" 3 %} Customer Visible</span>
                         </label>
                     </div>
 
@@ -463,9 +493,9 @@
                     </div>
 
                     <div class="mb-3">
-                        <textarea name="content" rows="3" placeholder="Add a note..."
+                        <textarea name="content" rows="8" placeholder="Add a note..."
                                   x-ref="noteTextarea"
-                                  class="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                                  class="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
                                   required></textarea>
                     </div>
                     <div class="mb-3">
