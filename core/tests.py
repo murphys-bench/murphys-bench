@@ -642,3 +642,60 @@ def test_no_notification_when_sender_holds_both_roles(client, client_obj):
                        {'content': 'note to self'})
     assert resp.status_code == 200
     assert Notification.objects.count() == 0
+
+
+# ── Inbound: a client reply threads into its ticket, never spawns an orphan ──
+# Regression guard for the Jun 14 bug: replies to a 'converted' ticket were
+# falling through and creating brand-new tickets (TKT-00008/00009).
+
+def _raw_reply_email(ticket_number, body='Thanks, that works.', from_email='wayne@davis.example'):
+    import email.message
+    msg = email.message.EmailMessage()
+    msg['Subject'] = f'Re: [{ticket_number}] Fwd: 494793 You say my computer memory is full?'
+    msg['From'] = f'Wayne Davis <{from_email}>'
+    msg['To'] = 'support@example.com'
+    msg['Message-ID'] = f'<reply-{ticket_number}-unique@davis.example>'
+    msg.set_content(body)
+    return msg.as_bytes()
+
+
+@pytest.mark.django_db
+def test_reply_to_converted_ticket_threads_instead_of_new_ticket(client_obj):
+    from core.management.commands.fetch_inbound_email import _process_message
+    site = SiteSettings.get()
+    ticket = Ticket.objects.create(
+        client=client_obj, subject='S', description='D',
+        ticket_number='TKT-20260610-0001', status='converted',
+    )
+    before = Ticket.objects.count()
+
+    status, detail, result_ticket = _process_message(
+        _raw_reply_email('TKT-20260610-0001'), site, verbosity=0)
+
+    assert status == 'reply', f'Expected reply, got {status}: {detail}'
+    assert Ticket.objects.count() == before, 'Reply must not create a new ticket.'
+    ticket.refresh_from_db()
+    assert ticket.replies.count() == 1
+    assert ticket.status == 'converted', 'A converted ticket must stay converted.'
+    assert ticket.needs_response is True
+
+
+@pytest.mark.django_db
+def test_reply_to_closed_ticket_reopens_and_threads(client_obj):
+    from core.management.commands.fetch_inbound_email import _process_message
+    site = SiteSettings.get()
+    ticket = Ticket.objects.create(
+        client=client_obj, subject='S', description='D',
+        ticket_number='TKT-20260610-0002', status='closed',
+    )
+    before = Ticket.objects.count()
+
+    status, detail, _ = _process_message(
+        _raw_reply_email('TKT-20260610-0002'), site, verbosity=0)
+
+    assert status == 'reply', f'Expected reply, got {status}: {detail}'
+    assert Ticket.objects.count() == before
+    ticket.refresh_from_db()
+    assert ticket.replies.count() == 1
+    assert ticket.status == 'open', 'A reply to a closed ticket should reopen it.'
+    assert ticket.needs_response is True
