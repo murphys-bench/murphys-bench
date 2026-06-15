@@ -19,6 +19,8 @@ import traceback
 logger = logging.getLogger('core')
 from email.header import decode_header, make_header
 from email.utils import parseaddr
+from html import unescape
+from html.parser import HTMLParser
 
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.base import ContentFile
@@ -70,27 +72,115 @@ def _decode_header_str(value):
         return value
 
 
+# Block-level tags that should produce a line break when converting HTML→text.
+_HTML_BLOCK_TAGS = {
+    'p', 'div', 'br', 'tr', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'table', 'ul', 'ol', 'blockquote', 'header', 'footer', 'section', 'article',
+}
+# Tags whose contents are not human-readable body text.
+_HTML_SKIP_TAGS = {'style', 'script', 'head', 'title', 'meta', 'link'}
+
+
+class _HTMLToText(HTMLParser):
+    """Convert an HTML email body to readable plain text.
+
+    Deliberately lossy: we render inbound mail as text (never as live HTML), so
+    a malicious or malformed alert can't inject markup into the ticket view.
+    Block tags become newlines; table cells are separated so RMM-style key/value
+    tables stay readable; <style>/<script> content is dropped.
+    """
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._parts = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _HTML_SKIP_TAGS:
+            self._skip_depth += 1
+        elif tag in ('td', 'th'):
+            self._parts.append('\t')
+        elif tag in _HTML_BLOCK_TAGS:
+            self._parts.append('\n')
+
+    def handle_endtag(self, tag):
+        if tag in _HTML_SKIP_TAGS and self._skip_depth:
+            self._skip_depth -= 1
+        elif tag in _HTML_BLOCK_TAGS:
+            self._parts.append('\n')
+
+    def handle_data(self, data):
+        if self._skip_depth:
+            return
+        self._parts.append(data)
+
+    def get_text(self):
+        return ''.join(self._parts)
+
+
+def _html_to_text(html):
+    """Render an HTML fragment to collapsed, readable plain text."""
+    parser = _HTMLToText()
+    try:
+        parser.feed(html)
+        parser.close()
+        text = parser.get_text()
+    except Exception:
+        # Fall back to a crude tag strip rather than dumping raw markup.
+        logger.exception('HTML-to-text parse failed; falling back to tag strip.')
+        text = unescape(re.sub(r'<[^>]+>', ' ', html))
+    # Normalise whitespace: trim each line, drop runs of blank lines, tidy tabs.
+    lines = [re.sub(r'[ \t]+', ' ', ln).strip() for ln in text.splitlines()]
+    out = []
+    for ln in lines:
+        if ln or (out and out[-1]):
+            out.append(ln)
+    return '\n'.join(out).strip()
+
+
+def _decode_part(part):
+    """Decode a single email part's payload to a string."""
+    charset = part.get_content_charset() or 'utf-8'
+    try:
+        return part.get_payload(decode=True).decode(charset, errors='replace')
+    except Exception:
+        try:
+            return part.get_payload(decode=True).decode('utf-8', errors='replace')
+        except Exception:
+            return str(part.get_payload())
+
+
 def _get_body(msg):
-    """Extract plain-text body from a (possibly multipart) email.Message."""
-    body = ''
+    """Extract a readable text body from a (possibly multipart) email.Message.
+
+    Prefers a real text/plain part. If the message is HTML-only (e.g. many RMM
+    alerts), the HTML is converted to plain text rather than stored as raw markup.
+    """
+    plain = ''
+    html = ''
     if msg.is_multipart():
         for part in msg.walk():
             ct = part.get_content_type()
             cd = str(part.get('Content-Disposition', ''))
-            if ct == 'text/plain' and 'attachment' not in cd:
-                charset = part.get_content_charset() or 'utf-8'
-                try:
-                    body = part.get_payload(decode=True).decode(charset, errors='replace')
-                except Exception:
-                    body = part.get_payload(decode=True).decode('utf-8', errors='replace')
-                break
+            if 'attachment' in cd:
+                continue
+            if ct == 'text/plain' and not plain:
+                plain = _decode_part(part)
+            elif ct == 'text/html' and not html:
+                html = _decode_part(part)
     else:
-        charset = msg.get_content_charset() or 'utf-8'
-        try:
-            body = msg.get_payload(decode=True).decode(charset, errors='replace')
-        except Exception:
-            body = str(msg.get_payload())
-    return body.strip()
+        ct = msg.get_content_type()
+        decoded = _decode_part(msg)
+        if ct == 'text/html':
+            html = decoded
+        else:
+            plain = decoded
+
+    if plain.strip():
+        return plain.strip()
+    if html.strip():
+        return _html_to_text(html)
+    return ''
 
 
 def _strip_quotes(text):

@@ -699,3 +699,92 @@ def test_reply_to_closed_ticket_reopens_and_threads(client_obj):
     assert ticket.replies.count() == 1
     assert ticket.status == 'open', 'A reply to a closed ticket should reopen it.'
     assert ticket.needs_response is True
+
+
+# ── HTML-only inbound email (RMM alerts) renders as readable text, not markup ─
+
+@pytest.mark.django_db
+def test_html_only_email_becomes_readable_text():
+    """An HTML-only alert (e.g. MSP360 RMM) must not store raw HTML markup as the
+    ticket description — it should be converted to plain text."""
+    import email.message
+    from core.management.commands.fetch_inbound_email import _process_message
+
+    site = SiteSettings.get()
+    html = (
+        '<html><body>'
+        '<style>td { color: #242c3b; }</style>'
+        '<table><tr><td>RMM Alert</td><td>06/15/2026 09:07:37</td></tr></table>'
+        '<table><tr><td>Product version:</td><td>2.5.0.67</td></tr>'
+        '<tr><td>Provider:</td><td>Shamrock Computer Services, LLC</td></tr></table>'
+        '</body></html>'
+    )
+    msg = email.message.EmailMessage()
+    msg['Subject'] = 'RMM Alert - GENELAPTOP: High Memory Usage'
+    msg['From'] = 'MSP360 <alerts@msp360.example>'
+    msg['To'] = 'support@example.com'
+    msg['Message-ID'] = '<rmm-alert-1@msp360.example>'
+    msg.set_content('   ')                     # empty/whitespace plain part (as RMM alerts send)
+    msg.add_alternative(html, subtype='html')  # ...then make it multipart/alternative
+
+    status, detail, ticket = _process_message(msg.as_bytes(), site, verbosity=0)
+
+    assert status == 'new_ticket', f'{status}: {detail}'
+    desc = ticket.description
+    assert '<td' not in desc and '<table' not in desc, 'Raw HTML leaked into description'
+    assert 'border-collapse' not in desc and 'color:' not in desc, 'CSS leaked into description'
+    assert 'RMM Alert' in desc
+    assert 'Product version:' in desc and '2.5.0.67' in desc
+
+
+@pytest.mark.django_db
+def test_html_only_singlepart_email_is_converted():
+    """A single-part text/html message (no plain alternative at all) is still
+    converted to text rather than stored as markup."""
+    import email.message
+    from core.management.commands.fetch_inbound_email import _process_message
+
+    site = SiteSettings.get()
+    msg = email.message.EmailMessage()
+    msg['Subject'] = 'HTML only alert'
+    msg['From'] = 'alerts@msp360.example'
+    msg['To'] = 'support@example.com'
+    msg['Message-ID'] = '<rmm-alert-2@msp360.example>'
+    msg.set_content('<p>A problem occurred on <b>GeneLaptop</b>: High Memory Usage</p>',
+                    subtype='html')
+
+    status, detail, ticket = _process_message(msg.as_bytes(), site, verbosity=0)
+
+    assert status == 'new_ticket', f'{status}: {detail}'
+    assert '<p>' not in ticket.description and '<b>' not in ticket.description
+    assert 'A problem occurred on GeneLaptop: High Memory Usage' in ticket.description
+
+
+# ── clean_html_bodies: retroactively convert stored raw HTML to plain text ────
+
+@pytest.mark.django_db
+def test_clean_html_bodies_converts_only_html(client_obj):
+    from django.core.management import call_command
+    from core.models import Ticket
+
+    htmlish = Ticket.objects.create(
+        client=client_obj, ticket_number='TKT-HTML-1', status='new',
+        subject='RMM Alert',
+        description='<html><body><table><tr><td>Product version:</td>'
+                    '<td>2.5.0.67</td></tr></table></body></html>',
+    )
+    plain = Ticket.objects.create(
+        client=client_obj, ticket_number='TKT-PLAIN-1', status='new',
+        subject='Normal', description='CPU load < 5 is fine. No tags here.',
+    )
+
+    call_command('clean_html_bodies', verbosity=0)          # dry run: no change
+    htmlish.refresh_from_db()
+    assert '<td>' in htmlish.description
+
+    call_command('clean_html_bodies', '--apply', verbosity=0)
+    htmlish.refresh_from_db()
+    plain.refresh_from_db()
+    assert '<td>' not in htmlish.description and '<table' not in htmlish.description
+    assert 'Product version:' in htmlish.description and '2.5.0.67' in htmlish.description
+    assert plain.description == 'CPU load < 5 is fine. No tags here.'
