@@ -211,7 +211,12 @@ def _process_message(raw_msg_bytes, settings, verbosity):
     if ticket_match:
         ticket_number = ticket_match.group(1).upper()
         ticket = Ticket.objects.filter(ticket_number=ticket_number).first()
-        if ticket and ticket.status not in ('closed', 'converted'):
+        if ticket:
+            # A client reply always threads into the matched ticket — including
+            # 'converted' and 'closed'. The ticket is the single client-facing
+            # channel; a reply must never spawn an orphan ticket just because the
+            # ticket moved on. We do NOT un-convert a converted ticket (it's a WO
+            # now) — we only flag it for response so the tech sees the reply.
             reply = TicketReply.objects.create(
                 ticket=ticket,
                 reply_type='customer_visible',
@@ -221,7 +226,9 @@ def _process_message(raw_msg_bytes, settings, verbosity):
             _save_attachments(reply, msg)
             update_fields = ['needs_response', 'updated_at']
             ticket.needs_response = True
-            if ticket.status in ('resolved', 'waiting_on_customer'):
+            # Reopen tickets that had been considered done; leave 'converted'
+            # alone (the active record is the work order, not the ticket status).
+            if ticket.status in ('resolved', 'waiting_on_customer', 'closed'):
                 ticket.status = 'open'
                 update_fields.append('status')
             ticket.save(update_fields=update_fields)
