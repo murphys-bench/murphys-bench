@@ -72,11 +72,13 @@ def _decode_header_str(value):
         return value
 
 
-# Block-level tags that should produce a line break when converting HTML→text.
-_HTML_BLOCK_TAGS = {
+# Tags that start a new line (one per logical block / table row).
+_HTML_LINE_TAGS = {
     'p', 'div', 'br', 'tr', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-    'table', 'ul', 'ol', 'blockquote', 'header', 'footer', 'section', 'article',
+    'blockquote', 'header', 'footer', 'section', 'article',
 }
+# Tags that should leave a blank line around their content (major sections).
+_HTML_SECTION_TAGS = {'table', 'ul', 'ol'}
 # Tags whose contents are not human-readable body text.
 _HTML_SKIP_TAGS = {'style', 'script', 'head', 'title', 'meta', 'link'}
 
@@ -86,36 +88,62 @@ class _HTMLToText(HTMLParser):
 
     Deliberately lossy: we render inbound mail as text (never as live HTML), so
     a malicious or malformed alert can't inject markup into the ticket view.
-    Block tags become newlines; table cells are separated so RMM-style key/value
-    tables stay readable; <style>/<script> content is dropped.
+
+    The key behaviour for RMM-style alerts: a table *row* becomes one line and
+    its *cells* are joined with a separator, so "Product version:" and "2.5.0.67"
+    stay together as "Product version: 2.5.0.67" instead of splitting across
+    lines. Whitespace inside a cell is collapsed (HTML treats newlines as spaces
+    anyway). <style>/<script> content is dropped.
     """
+
+    CELL_SEP = '  '  # between cells of the same row
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self._parts = []
+        self._lines = []        # finished output lines
+        self._cur = []          # data fragments for the current line
         self._skip_depth = 0
+
+    def _flush_line(self):
+        text = re.sub(r'[ \t]+', ' ', ''.join(self._cur)).strip()
+        if text:
+            self._lines.append(text)
+        self._cur = []
+
+    def _blank_line(self):
+        self._flush_line()
+        if self._lines and self._lines[-1] != '':
+            self._lines.append('')
 
     def handle_starttag(self, tag, attrs):
         if tag in _HTML_SKIP_TAGS:
             self._skip_depth += 1
         elif tag in ('td', 'th'):
-            self._parts.append('\t')
-        elif tag in _HTML_BLOCK_TAGS:
-            self._parts.append('\n')
+            if self._cur:
+                self._cur.append(self.CELL_SEP)
+        elif tag in _HTML_SECTION_TAGS:
+            self._blank_line()
+        elif tag in _HTML_LINE_TAGS:
+            self._flush_line()
 
     def handle_endtag(self, tag):
         if tag in _HTML_SKIP_TAGS and self._skip_depth:
             self._skip_depth -= 1
-        elif tag in _HTML_BLOCK_TAGS:
-            self._parts.append('\n')
+        elif tag in _HTML_SECTION_TAGS:
+            self._blank_line()
+        elif tag in _HTML_LINE_TAGS:
+            self._flush_line()
 
     def handle_data(self, data):
         if self._skip_depth:
             return
-        self._parts.append(data)
+        # Collapse intra-element whitespace (incl. newlines) so cell content
+        # stays on one line.
+        self._cur.append(re.sub(r'\s+', ' ', data))
 
-    def get_text(self):
-        return ''.join(self._parts)
+    def get_lines(self):
+        self._flush_line()
+        return self._lines
 
 
 def _html_to_text(html):
@@ -124,13 +152,13 @@ def _html_to_text(html):
     try:
         parser.feed(html)
         parser.close()
-        text = parser.get_text()
+        lines = parser.get_lines()
     except Exception:
         # Fall back to a crude tag strip rather than dumping raw markup.
         logger.exception('HTML-to-text parse failed; falling back to tag strip.')
-        text = unescape(re.sub(r'<[^>]+>', ' ', html))
-    # Normalise whitespace: trim each line, drop runs of blank lines, tidy tabs.
-    lines = [re.sub(r'[ \t]+', ' ', ln).strip() for ln in text.splitlines()]
+        stripped = unescape(re.sub(r'<[^>]+>', ' ', html))
+        lines = [re.sub(r'[ \t]+', ' ', ln).strip() for ln in stripped.splitlines()]
+    # Drop runs of blank lines down to a single separator.
     out = []
     for ln in lines:
         if ln or (out and out[-1]):

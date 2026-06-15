@@ -734,7 +734,9 @@ def test_html_only_email_becomes_readable_text():
     assert '<td' not in desc and '<table' not in desc, 'Raw HTML leaked into description'
     assert 'border-collapse' not in desc and 'color:' not in desc, 'CSS leaked into description'
     assert 'RMM Alert' in desc
-    assert 'Product version:' in desc and '2.5.0.67' in desc
+    # A table row's key and value must stay on ONE line, not split across lines.
+    assert 'Product version: 2.5.0.67' in desc, \
+        f'Key/value should be on one line. Got:\n{desc}'
 
 
 @pytest.mark.django_db
