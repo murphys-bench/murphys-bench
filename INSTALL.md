@@ -237,6 +237,22 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ## 9. Cloudflare Tunnel (public HTTPS)
 
+> **Network posture — decide first, it changes this section.**
+> - **Internal-only instance (e.g. a production shop box):** skip this entire
+>   step. Don't run a tunnel and don't set a public hostname — keep it reachable
+>   on the LAN only. Leave the HTTPS-redirect/HSTS settings off; nothing is
+>   exposed.
+> - **Demo/test instance for outside testers:** run the tunnel for the public
+>   hostname, **but keep local LAN access working too** so admins can debug what
+>   testers find. Use this posture:
+>   - Terminate TLS at the Cloudflare edge; **leave `SECURE_SSL_REDIRECT` OFF**
+>     (otherwise plain-HTTP LAN requests get bounced to an invalid-cert URL).
+>   - Put **both** the LAN IP and the public hostname in `ALLOWED_HOSTS`.
+>   - **Do not enable HSTS** — it locks browsers into HTTPS-only for that host
+>     and is hard to undo.
+>   - Enforce HTTPS for outside visitors with Cloudflare's "Always Use HTTPS" at
+>     the edge instead of Django's redirect.
+
 This exposes the box over HTTPS without opening any inbound firewall ports.
 
 ```bash
