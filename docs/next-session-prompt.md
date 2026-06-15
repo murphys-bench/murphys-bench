@@ -12,7 +12,17 @@ feature request is to check it against that rule. Tests are required for anythin
 touching data. The model drives deploys/ops directly (incl. SSH); narrate; pause for a
 go/no-go only before destructive or production-affecting steps.
 
-## What's already built and working (as of session 28):
+## What's already built and working (as of session 29):
+
+**Session 29 — Inbound reply threading fix (shipped + deployed):**
+- Client replies to **converted** or **closed** tickets were spawning orphan tickets
+  (the production TKT-00008/00009 bug). Fixed the status guard in
+  `fetch_inbound_email._process_message`: a subject-matched reply now always threads.
+  Converted stays converted (just `needs_response`); closed reopens to `open`. 2 regression
+  tests; suite at 43 passing. Orphans reconciled by hand.
+- Mike switched inbound IMAP → **POP3 delete-from-server** to stop the duplication source.
+  Inbound still points at `testing@…` — **switch to the real support inbox** when confident
+  (carried over from session 27, still the one open action).
 
 **Session 28 — Internal tech-to-tech messaging + notification center (shipped + deployed):**
 - One-face-to-the-client principle reinforced: bench techs do NOT contact clients from the WO —

@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 13, 2026 (session 28 — internal tech-to-tech messaging + notification center; migrations through 0051)
+**Last Updated**: June 14, 2026 (session 29 — inbound reply threading fix: converted/closed tickets no longer spawn orphan tickets; migrations through 0051)
 **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench`
 **App path on server**: `/opt/murphys-bench/`
 
@@ -217,6 +217,26 @@ WO notes mean only "shows on the printed repair report" — passive, no email.)
   reciprocal "Message Bench Tech" on the ticket (only when `ticket.work_order_created`).
 - **Known gap:** stand-alone WO (no ticket) has no ticket tech → action hidden there.
 - Covered by 7 tests in `core/tests.py` (suite at 40 passing).
+
+### Inbound reply threading — converted/closed tickets (session 29, Jun 14)
+**Bug found in production:** a client reply to a **converted** ticket (and a closed one)
+was falling through and creating a brand-new ticket instead of threading. Root cause was
+the status guard in `fetch_inbound_email._process_message`:
+`if ticket and ticket.status not in ('closed', 'converted')`. Once a ticket converted to a
+WO, the next client reply failed the check → new ticket. The IMAP "leave on server" setting
+then re-ran it every poll (forwarded mail had no usable `Message-ID` for the dedup guard),
+multiplying one wrong ticket into several (TKT-00008/00009).
+- **Fix:** a subject-matched reply now **always threads into its ticket.** Converted tickets
+  stay `converted` (just flagged `needs_response` — never un-convert a live WO). Closed tickets
+  **reopen to `open`** on reply. The matcher reads the `[TKT-…]` subject token, not headers —
+  it never relied on `In-Reply-To`/`References`.
+- Covered by 2 regression tests in `core/tests.py` (suite at 43 passing).
+- **Mike's side:** switched inbound from IMAP to **POP3 (delete-from-server)** to stop the
+  duplication at the source. Tradeoff: MB becomes the only copy of inbound mail — no server
+  backup. Inbound is still pointed at `testing@…`; switch to the real support inbox once
+  confident (the one open action carried over from session 27).
+- The two orphan tickets were reconciled by hand: Wayne's reply was appended to
+  TKT-20260610-0001 with its original timestamp, then TKT-00008/00009 were deleted.
 
 ### Design intent to preserve (don't "fix" these — they're deliberate)
 - A completed Work Order must **never** auto-close its Ticket. The ticket drives the
