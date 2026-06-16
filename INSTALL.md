@@ -4,10 +4,10 @@ This guide installs Murphy's Bench on a fresh Ubuntu 24.04 server, served over
 HTTPS behind a Cloudflare Tunnel. It targets a self-hosted instance on an
 internal network or a small VM.
 
-> **Status of this document:** first draft, written from the SCS production
-> setup. It is being validated by performing a clean install on a separate
-> demo VM. Sections marked **⚠ VERIFY** are expected to be corrected during
-> that install — if a step doesn't work, fix the step here, don't work around it.
+> **Status of this document:** validated by a clean install on a demo VM
+> (Ubuntu 24.04, 10.58.58.223) on Jun 16 2026. Known-good Gunicorn + Nginx
+> configs live in [`deploy/demo/`](deploy/demo/). A few items below are noted
+> where a third-party install differs from how the demo box was seeded.
 
 ---
 
@@ -56,16 +56,25 @@ python3 --version   # expect 3.12.x
 
 Create a dedicated service user and put the app under `/opt`:
 
+The app runs as the existing **`scs-tech` login user** (same as prod — a normal
+login user, so it can hold an SSH key). Create the app dir owned by it:
+
 ```bash
-sudo adduser --system --group --home /opt/murphys-bench scs-tech   # ⚠ VERIFY: prod uses a login user 'scs-tech'; a --system user may differ
-sudo git clone <REPO_URL> /opt/murphys-bench
-sudo chown -R scs-tech:scs-tech /opt/murphys-bench
+sudo mkdir -p /opt/murphys-bench
+sudo chown scs-tech:scs-tech /opt/murphys-bench
 ```
 
-> **⚠ VERIFY:** On the SCS prod box the owning user is `scs-tech` and is a
-> normal login user (so it can hold an SSH key and run `git pull`). Decide
-> deliberately whether the demo box uses a login user or a locked system user,
-> and write down the choice here.
+Then get the code into `/opt/murphys-bench`:
+
+- **Public/clone access:** `git clone <REPO_URL> /opt/murphys-bench`.
+- **Private repo with no creds on the box (how the demo box was done):** seed it
+  by `rsync` from a working checkout, or add a GitHub **deploy key** / PAT first.
+  Example rsync from a local checkout (excludes venv, secrets, local DB):
+  ```bash
+  rsync -az --delete --exclude venv/ --exclude .git/ --exclude .env \
+    --exclude db.sqlite3 --exclude '__pycache__/' --exclude media/ \
+    --exclude staticfiles/ ./ scs-tech@<HOST>:/opt/murphys-bench/
+  ```
 
 ---
 
@@ -169,11 +178,9 @@ venv/bin/python -m pytest                   # spine test suite should pass
 
 ## 8. Gunicorn + Nginx
 
-> **⚠ VERIFY — capture from prod during the demo install.** The exact Gunicorn
-> systemd unit and Nginx site config live on the SCS production VM, not in the
-> repo. The templates below are a starting point; replace them with the real,
-> working versions once confirmed on the demo box, and consider committing them
-> to `deploy/` so the next install is copy-paste.
+> **Known-good configs are in [`deploy/demo/`](deploy/demo/)** — copy them in
+> rather than retyping (`deploy/demo/README.md` has the exact commands). The
+> versions below are shown inline for reference.
 
 **Gunicorn unit** — `/etc/systemd/system/murphys-bench.service`:
 
@@ -186,18 +193,16 @@ After=network.target postgresql.service
 User=scs-tech
 Group=scs-tech
 WorkingDirectory=/opt/murphys-bench
-ExecStart=/opt/murphys-bench/venv/bin/gunicorn \
-    --workers 3 \
-    --bind unix:/opt/murphys-bench/murphys-bench.sock \
-    murphys_bench.wsgi:application
+ExecStart=/opt/murphys-bench/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:8001 murphys_bench.wsgi:application
 Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-> Note: `gunicorn` is **not currently in `requirements.txt`** — install it into
-> the venv (`venv/bin/pip install gunicorn`) and add it to requirements. **⚠ VERIFY**
+> Note: `gunicorn` is in `requirements.txt` as of this validation. If installing
+> an older checkout, `venv/bin/pip install gunicorn` into the venv.
 
 ```bash
 sudo systemctl daemon-reload
@@ -212,14 +217,15 @@ server {
     listen 80;
     server_name demo.example.com;
 
+    client_max_body_size 25M;
     location /static/ {
-        alias /opt/murphys-bench/staticfiles/;   # ⚠ VERIFY STATIC_ROOT path
+        alias /opt/murphys-bench/staticfiles/;
     }
     location /media/ {
         alias /opt/murphys-bench/media/;
     }
     location / {
-        proxy_pass http://unix:/opt/murphys-bench/murphys-bench.sock;
+        proxy_pass http://127.0.0.1:8001;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

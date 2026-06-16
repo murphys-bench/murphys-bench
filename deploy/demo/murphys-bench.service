@@ -1,0 +1,14 @@
+[Unit]
+Description=Murphy's Bench (Gunicorn)
+After=network.target postgresql.service
+
+[Service]
+User=scs-tech
+Group=scs-tech
+WorkingDirectory=/opt/murphys-bench
+ExecStart=/opt/murphys-bench/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:8001 murphys_bench.wsgi:application
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
