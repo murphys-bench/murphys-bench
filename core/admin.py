@@ -6,7 +6,7 @@ from .models import (
     Role, TechSkill, SLAPlan, HelpTopic, KBCategory, KBArticle,
     InboundEmailLog, TicketQueue, DashboardTile,
     CustomField, CustomFieldChoice, CustomFieldValue,
-    QuickLaborItem, WorkPerformed, ContactPhone,
+    QuickLaborItem, WorkPerformed, ContactPhone, MFAResetLog,
 )
 
 
@@ -375,6 +375,20 @@ class InboundEmailLogAdmin(admin.ModelAdmin):
     list_filter = ['status', 'created_at']
     search_fields = ['from_email', 'subject', 'ticket__ticket_number', 'message_id']
     readonly_fields = ['message_id', 'from_email', 'subject', 'ticket', 'status', 'detail', 'created_at']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(MFAResetLog)
+class MFAResetLogAdmin(admin.ModelAdmin):
+    list_display = ['created_at', 'target', 'actor', 'source', 'note']
+    list_filter = ['source', 'created_at']
+    search_fields = ['target__username', 'actor__username', 'note']
+    readonly_fields = ['target', 'actor', 'source', 'note', 'created_at']
 
     def has_add_permission(self, request):
         return False

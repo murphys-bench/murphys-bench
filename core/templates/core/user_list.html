@@ -83,7 +83,7 @@
                                class="text-xs text-blue-600 hover:text-blue-800 hover:underline">Edit</a>
                             <a href="{% url 'core:user_set_password' row.user.pk %}"
                                class="text-xs text-gray-500 hover:text-gray-700 hover:underline">Set Password</a>
-                            {% if row.has_mfa and row.user != request.user %}
+                            {% if row.has_mfa and row.user != request.user and can_reset_mfa %}
                                 <form method="post" action="{% url 'core:user_mfa_reset' row.user.pk %}"
                                       onsubmit="return confirm('Reset MFA for {{ row.user.get_full_name|default:row.user.username }}? They will need to re-enroll on next login.')">
                                     {% csrf_token %}

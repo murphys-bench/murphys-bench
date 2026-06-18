@@ -88,6 +88,13 @@ def _is_admin(user):
     return user.is_staff or user.has_perm_flag('can_manage_settings')
 
 
+def _can_reset_mfa(user):
+    """Who may reset another user's two-factor devices. Gated on the dedicated
+    can_reset_user_mfa flag; superusers always qualify so the reset capability
+    can never be fully locked out."""
+    return user.is_superuser or user.has_perm_flag('can_reset_user_mfa')
+
+
 def _scope_assignable_for(qs, user):
     """Restrict an assignable queryset (Work Orders) for non-admins: they see their
     own assigned items plus the unassigned pool — so they can still claim new work —
@@ -2502,24 +2509,28 @@ class UserListView(LoginRequiredMixin, View):
         return render(request, 'core/user_list.html', {
             'user_rows': user_rows,
             'require_mfa': SiteSettings.get().require_mfa,
+            'can_reset_mfa': _can_reset_mfa(request.user),
         })
 
 
 class AdminMFAResetView(LoginRequiredMixin, View):
-    """Admin-only: clear all OTP devices for a user (lost device recovery)."""
+    """Clear all OTP devices for a user (lost device recovery).
+
+    Gated on the can_reset_user_mfa flag (superusers always qualify); every
+    reset is recorded via reset_user_mfa -> MFAResetLog.
+    """
 
     def dispatch(self, request, *args, **kwargs):
-        if request.user.is_authenticated and not _is_admin(request.user):
+        if request.user.is_authenticated and not _can_reset_mfa(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
 
     def post(self, request, pk):
-        from django_otp import devices_for_user
         from django.contrib import messages
+        from .models import reset_user_mfa
         target = get_object_or_404(User, pk=pk)
-        for device in list(devices_for_user(target)):
-            device.delete()
+        reset_user_mfa(target, actor=request.user, source='web')
         messages.success(
             request,
             f'MFA reset for {target.get_full_name() or target.username}. '
@@ -2646,6 +2657,7 @@ _ROLE_FLAGS = [
     ('can_view_restricted_kb',     'View Restricted KB'),
     ('can_manage_kb',              'Manage KB'),
     ('can_view_device_credentials','View Device Credentials'),
+    ('can_reset_user_mfa',         'Reset User MFA'),
 ]
 
 

@@ -622,7 +622,7 @@ class RoleForm(forms.ModelForm):
             'can_manage_users', 'can_view_reports', 'can_view_restricted_kb',
             'can_manage_kb', 'can_create_ticket', 'can_edit_ticket',
             'can_delete_ticket', 'can_assign_ticket', 'can_reply_internal',
-            'can_reply_customer', 'can_view_device_credentials',
+            'can_reply_customer', 'can_view_device_credentials', 'can_reset_user_mfa',
             'can_create_workorder', 'can_edit_workorder', 'can_close_workorder',
         ]
         widgets = {
