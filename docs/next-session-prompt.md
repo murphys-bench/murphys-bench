@@ -29,19 +29,14 @@ the running service was restarted after it.
 prod itself — Mike runs `sudo systemctl restart murphys-bench`. Optional future: a narrow
 passwordless-sudo rule for just that command.
 
-**MFA reset hardening (planned, tested — apply to BOTH demo and internal prod):**
-- Audit-log every MFA reset (actor, target, timestamp) — web `AdminMFAResetView` AND a new
-  `manage.py reset_mfa <username>` break-glass command. Today resets write NO record (the real gap).
-- Gate the reset on a dedicated `can_reset_user_mfa` permission flag instead of a blanket admin
-  check (lays a delegation seam without building any admin hierarchy).
-- NOTE: SCS is genuinely **single-operator** (Mike). Jim is a TESTER with admin-for-testing on the
-  DEMO box only — NOT a real backup admin. So on **internal prod the `reset_mfa` CLI command is the
-  actual lockout recovery path**, not just belt-and-suspenders. Prioritize it for prod.
-- Add tests for the view + the command (CLAUDE.md requires tests for permission-touching code).
-- NOT building SuperAdmin/role tiers — SCS is single-operator; flat Administrator is correct.
-- Full context in memory `project_mb_mfa_reset_hardening`.
-- Note: the per-user "Reset MFA" button already exists in `user_list.html` but only shows for
-  OTHER users who are already enrolled (hidden for self + unenrolled) — that's by design.
+**MFA reset hardening — ✅ DONE + DEPLOYED (Jun 18, migration 0053, commit 66582df, suite 43→55).**
+`MFAResetLog` audit record on every reset (via shared `reset_user_mfa()` helper); `can_reset_user_mfa`
+Role flag gates the web view (`_can_reset_mfa` = superuser OR flag); `manage.py reset_mfa <username>`
+break-glass auto-stamps shell identity (os-user + SSH source IP) into the audit note instead of an
+anonymous null actor. Seed turns the flag on for admin roles. Log is read-only in Django admin.
+Deployed to demo (live) + prod (migrated+seeded). **One trivial open item:** confirm prod was
+restarted to `66582df` (`sudo systemctl restart murphys-bench` — Mike, prod sudo needs a password).
+Full context in memory `project_mb_mfa_reset_hardening`.
 
 **Infra note:** the **demo** instance (MB2, `10.58.35.223`) is now live behind Cloudflare at
 `https://mbdemo.scs-tech.net` with Cloudflare Access. Internal prod (`10.58.58.82`) stays LAN-only.

@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 18, 2026 (login/logo branding LIVE on prod + demo, migration 0052; repair-report 500 fixed (custom Work Performed entries) + print-tab UX; demo box Cloudflare-live + git-deploy via deploy key; migrations through 0052)
+**Last Updated**: June 18, 2026 (MFA reset hardening LIVE — migration 0053: MFAResetLog audit + `can_reset_user_mfa` flag gate + `manage.py reset_mfa` break-glass that stamps shell identity; deployed demo+prod, prod restart pending Mike. Earlier Jun 18: login/logo branding migration 0052; repair-report 500 fix + print-tab UX. Migrations through 0053; test suite 55 passing)
 **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench`
 **App path on server**: `/opt/murphys-bench/`
 
@@ -696,9 +696,13 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - **Cloudflare tunnel** — ✅ LIVE for the **demo** instance (MB2, `10.58.35.223`) at
   `https://mbdemo.scs-tech.net`, gated by Cloudflare Access (Mike + Jim). Internal prod
   (`10.58.58.82`) stays LAN-only/unexposed by choice. See `~/Documents/Claude/MB2-Cloudflare-Setup.md`.
-- **MFA reset hardening** (next session) — audit-log every reset (web + a new `manage.py reset_mfa`
-  break-glass), gate on a `can_reset_user_mfa` flag, add tests. Apply to demo AND internal prod.
-  NOT building admin tiers. See memory `project_mb_mfa_reset_hardening`.
+- **MFA reset hardening** — ✅ DONE + deployed (migration 0053, Jun 18). `MFAResetLog` audit record
+  on every reset (shared `reset_user_mfa()` helper); `can_reset_user_mfa` Role flag gates the web
+  view (`_can_reset_mfa` = superuser OR flag); `manage.py reset_mfa <username>` break-glass that
+  auto-stamps the shell identity (os-user + SSH source IP) into the audit note rather than logging
+  an anonymous null actor — the CLI is the highest-risk path so it's made traceable, not faceless.
+  Seed flags admin roles on; log read-only in Django admin; 5 tests. Live on demo; prod
+  migrated+seeded (prod restart pending). NOT building admin tiers. See `project_mb_mfa_reset_hardening`.
 - **Login/logo branding** — ✅ LIVE on **prod + demo** (migration 0052). `login_logo` field +
   Settings upload; login page renders it (fallback to text), logo wrapper decoupled from the form
   (`max-w-[640px]`, logo max-height 560px, form pinned `max-w-md`); sidebar uses ratio-preserving
