@@ -12,6 +12,24 @@ feature request is to check it against that rule. Tests are required for anythin
 touching data. The model drives deploys/ops directly (incl. SSH); narrate; pause for a
 go/no-go only before destructive or production-affecting steps.
 
+## Top of the queue for next session:
+
+**MFA reset hardening (planned, tested — apply to BOTH demo and internal prod):**
+- Audit-log every MFA reset (actor, target, timestamp) — web `AdminMFAResetView` AND a new
+  `manage.py reset_mfa <username>` break-glass command. Today resets write NO record (the real gap).
+- Gate the reset on a dedicated `can_reset_user_mfa` permission flag instead of a blanket admin
+  check (lays a delegation seam without building any admin hierarchy — both SCS admins keep it).
+- Add tests for the view + the command (CLAUDE.md requires tests for permission-touching code).
+- NOT building SuperAdmin/role tiers — SCS is single-operator; flat Administrator is correct.
+- Full context in memory `project_mb_mfa_reset_hardening`.
+- Note: the per-user "Reset MFA" button already exists in `user_list.html` but only shows for
+  OTHER users who are already enrolled (hidden for self + unenrolled) — that's by design.
+
+**Infra note:** the **demo** instance (MB2, `10.58.35.223`) is now live behind Cloudflare at
+`https://mbdemo.scs-tech.net` with Cloudflare Access. Internal prod (`10.58.58.82`) stays LAN-only.
+
+---
+
 ## What's already built and working (as of session 29):
 
 **Session 29 — Inbound reply threading fix (shipped + deployed):**

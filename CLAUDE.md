@@ -693,7 +693,12 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 
 ### Remaining / Future
 - **Testing suite** (deferred — will write after real-world use surfaces actual edge cases)
-- **Cloudflare tunnel** — external access when ready
+- **Cloudflare tunnel** — ✅ LIVE for the **demo** instance (MB2, `10.58.35.223`) at
+  `https://mbdemo.scs-tech.net`, gated by Cloudflare Access (Mike + Jim). Internal prod
+  (`10.58.58.82`) stays LAN-only/unexposed by choice. See `~/Documents/Claude/MB2-Cloudflare-Setup.md`.
+- **MFA reset hardening** (next session) — audit-log every reset (web + a new `manage.py reset_mfa`
+  break-glass), gate on a `can_reset_user_mfa` flag, add tests. Apply to demo AND internal prod.
+  NOT building admin tiers. See memory `project_mb_mfa_reset_hardening`.
 - **Site-wide icon audit** — replace remaining text symbols (×, etc.) with SVG icons
 
 ---
