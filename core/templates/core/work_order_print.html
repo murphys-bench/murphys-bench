@@ -170,7 +170,8 @@
 <!-- Screen-only controls -->
 <div class="print-controls">
     <button class="btn-print" onclick="window.print()">Print</button>
-    <a class="btn-back" href="{% url 'core:work_order_detail' work_order.pk %}">← Back to Work Order</a>
+    <a class="btn-back" href="{% url 'core:work_order_detail' work_order.pk %}"
+       onclick="window.close(); setTimeout(function(){ window.location.href='{% url 'core:work_order_detail' work_order.pk %}'; }, 150); return false;">← Close</a>
 </div>
 
 <div class="page">
