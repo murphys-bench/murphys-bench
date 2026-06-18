@@ -1188,7 +1188,7 @@ class SiteSettings(models.Model):
     company_email = models.EmailField(blank=True, default='')
     company_logo = models.ImageField(
         upload_to='company/', blank=True, null=True,
-        help_text='PNG, JPG, or SVG. Displayed on repair reports and the nav bar.',
+        help_text='PNG, JPG, or SVG. Displayed on repair reports.',
     )
 
     # Email branding — independent of the app's look. Blank values fall back to
@@ -1224,6 +1224,13 @@ class SiteSettings(models.Model):
     site_logo = models.ImageField(
         upload_to='site/', blank=True, null=True,
         help_text='Logo shown in the nav bar. PNG or SVG recommended. Leave blank to show text.',
+    )
+
+    # Login page logo (its own slot — the login screen has room for a richer/larger mark
+    # than the small nav bar; detailed logos look good here, simple ones in the nav).
+    login_logo = models.ImageField(
+        upload_to='login/', blank=True, null=True,
+        help_text='Logo shown on the login page. Leave blank to show text. Detailed logos work well here.',
     )
 
     # Site palette

@@ -790,3 +790,35 @@ def test_clean_html_bodies_converts_only_html(client_obj):
     assert '<td>' not in htmlish.description and '<table' not in htmlish.description
     assert 'Product version:' in htmlish.description and '2.5.0.67' in htmlish.description
     assert plain.description == 'CPU load < 5 is fine. No tags here.'
+
+
+# ---------------------------------------------------------------------------
+# Logo upload size guard (login_logo / site_logo branding)
+# ---------------------------------------------------------------------------
+
+def _png_upload(w, h, name='logo.png'):
+    import io
+    from PIL import Image
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    buf = io.BytesIO()
+    Image.new('RGB', (w, h), 'white').save(buf, 'PNG')
+    return SimpleUploadedFile(name, buf.getvalue(), content_type='image/png')
+
+
+def test_oversized_logo_rejected():
+    from django import forms
+    from core.forms import validate_logo_upload, MAX_LOGO_DIMENSION
+    with pytest.raises(forms.ValidationError):
+        validate_logo_upload(_png_upload(MAX_LOGO_DIMENSION + 500, 100))
+
+
+def test_reasonable_logo_accepted():
+    from core.forms import validate_logo_upload
+    f = _png_upload(1254, 1254)
+    assert validate_logo_upload(f) is f
+
+
+def test_non_upload_value_passes_through():
+    # an existing stored file (or None) is not a fresh upload — must pass untouched
+    from core.forms import validate_logo_upload
+    assert validate_logo_upload(None) is None
