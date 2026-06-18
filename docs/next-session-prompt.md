@@ -18,7 +18,10 @@ go/no-go only before destructive or production-affecting steps.
 - Audit-log every MFA reset (actor, target, timestamp) — web `AdminMFAResetView` AND a new
   `manage.py reset_mfa <username>` break-glass command. Today resets write NO record (the real gap).
 - Gate the reset on a dedicated `can_reset_user_mfa` permission flag instead of a blanket admin
-  check (lays a delegation seam without building any admin hierarchy — both SCS admins keep it).
+  check (lays a delegation seam without building any admin hierarchy).
+- NOTE: SCS is genuinely **single-operator** (Mike). Jim is a TESTER with admin-for-testing on the
+  DEMO box only — NOT a real backup admin. So on **internal prod the `reset_mfa` CLI command is the
+  actual lockout recovery path**, not just belt-and-suspenders. Prioritize it for prod.
 - Add tests for the view + the command (CLAUDE.md requires tests for permission-touching code).
 - NOT building SuperAdmin/role tiers — SCS is single-operator; flat Administrator is correct.
 - Full context in memory `project_mb_mfa_reset_hardening`.
