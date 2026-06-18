@@ -29,14 +29,17 @@ the running service was restarted after it.
 prod itself — Mike runs `sudo systemctl restart murphys-bench`. Optional future: a narrow
 passwordless-sudo rule for just that command.
 
-**MFA reset hardening — ✅ DONE + DEPLOYED (Jun 18, migration 0053, commit 66582df, suite 43→55).**
+**MFA reset hardening — ✅ DONE + FULLY LIVE (Jun 18, migration 0053, commit 66582df, suite 43→55).**
 `MFAResetLog` audit record on every reset (via shared `reset_user_mfa()` helper); `can_reset_user_mfa`
 Role flag gates the web view (`_can_reset_mfa` = superuser OR flag); `manage.py reset_mfa <username>`
 break-glass auto-stamps shell identity (os-user + SSH source IP) into the audit note instead of an
 anonymous null actor. Seed turns the flag on for admin roles. Log is read-only in Django admin.
-Deployed to demo (live) + prod (migrated+seeded). **One trivial open item:** confirm prod was
-restarted to `66582df` (`sudo systemctl restart murphys-bench` — Mike, prod sudo needs a password).
-Full context in memory `project_mb_mfa_reset_hardening`.
+Deployed + restarted on both demo and prod. Full context in memory `project_mb_mfa_reset_hardening`.
+
+**Infra hardening (Jun 18, not in repo — recorded in memory `reference_ssh_access`):** rotated Claude's
+SSH key (fresh `~/.ssh/claude-code`, old key removed from prod), and made **demo SSH key-only** to
+match prod (both boxes now `PasswordAuthentication no`; verified). Claude connects with
+`-i ~/.ssh/claude-code`; Mike's manual `ssh` uses his own Mac key (kept separate for audit).
 
 **Infra note:** the **demo** instance (MB2, `10.58.35.223`) is now live behind Cloudflare at
 `https://mbdemo.scs-tech.net` with Cloudflare Access. Internal prod (`10.58.58.82`) stays LAN-only.

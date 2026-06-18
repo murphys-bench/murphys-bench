@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 18, 2026 (MFA reset hardening LIVE — migration 0053: MFAResetLog audit + `can_reset_user_mfa` flag gate + `manage.py reset_mfa` break-glass that stamps shell identity; deployed demo+prod, prod restart pending Mike. Earlier Jun 18: login/logo branding migration 0052; repair-report 500 fix + print-tab UX. Migrations through 0053; test suite 55 passing)
+**Last Updated**: June 18, 2026 (MFA reset hardening FULLY LIVE — migration 0053: MFAResetLog audit + `can_reset_user_mfa` flag gate + `manage.py reset_mfa` break-glass that stamps shell identity; deployed+restarted demo+prod. Infra: rotated Claude's SSH key + made demo SSH key-only to match prod (see memory `reference_ssh_access`). Earlier Jun 18: login/logo branding migration 0052; repair-report 500 fix + print-tab UX. Migrations through 0053; test suite 55 passing)
 **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench`
 **App path on server**: `/opt/murphys-bench/`
 
