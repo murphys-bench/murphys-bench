@@ -2845,7 +2845,9 @@ class WorkOrderPrintView(LoginRequiredMixin, View):
         )
         categories = {}
         for entry in wp_entries:
-            cat = entry.labor_item.category
+            # Custom/quick-labor entries have no linked labor_item (it's nullable) —
+            # group them under "Other" instead of crashing on None.category.
+            cat = entry.labor_item.category if entry.labor_item else 'Other'
             categories.setdefault(cat, []).append(entry)
 
         # Repair type tags
