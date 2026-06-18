@@ -26,9 +26,12 @@ sudo nginx -t && sudo systemctl reload nginx
 ## Notes carried back into the install knowledge
 - **Login user:** the app runs as the existing `scs-tech` login user (same as prod);
   no separate `--system` user was created.
-- **Private repo:** the demo box has no GitHub credentials, so code was seeded by
-  `rsync` from a local checkout rather than `git clone`. A real third-party install
-  needs a deploy key or PAT instead.
+- **Private repo / deploy (updated Jun 18 2026):** originally rsync-seeded, the demo box
+  now has a **read-only GitHub deploy key** (`~/.ssh/github_deploy`; ssh config Host
+  github.com → that key; public half registered in the repo's Deploy keys, write access
+  OFF). `/opt/murphys-bench` is a real git checkout tracking `origin/main`, so the demo
+  deploys exactly like prod: `git pull` → `migrate` → `sudo systemctl restart murphys-bench`.
+  This is also the pattern a real third-party self-hoster would use.
 - **gunicorn** is NOT in `requirements.txt` — it was `pip install`ed into the venv
   separately. (Worth adding to requirements.)
 - **Network posture (demo):** `.env` sets `SECURE_SSL_REDIRECT=False`,

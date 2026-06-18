@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 14, 2026 (session 29 — inbound reply threading fix: converted/closed tickets no longer spawn orphan tickets; migrations through 0051)
+**Last Updated**: June 18, 2026 (login/logo branding — `login_logo` field + ratio-preserving fit rule, migration 0052; demo box now Cloudflare-live + git-deploy via deploy key; migrations through 0052)
 **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench`
 **App path on server**: `/opt/murphys-bench/`
 
@@ -699,11 +699,12 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - **MFA reset hardening** (next session) — audit-log every reset (web + a new `manage.py reset_mfa`
   break-glass), gate on a `can_reset_user_mfa` flag, add tests. Apply to demo AND internal prod.
   NOT building admin tiers. See memory `project_mb_mfa_reset_hardening`.
-- **Login/logo branding** (spec ready, next session) — add a `login_logo` field + Settings upload;
-  wire the login page (`_base_focus.html`, currently hard-coded `🔧 Murphy's Bench` text); replace
-  the sidebar's hard-coded resize with a ratio-preserving fit rule (fix width 232px, float height,
-  cap ~160px, hide when collapsed); verify `site_logo` vs `company_logo` field→space mapping first.
-  Per-space logo slots (detail-vs-size). See memory `project_mb_login_branding`.
+- **Login/logo branding** — ✅ BUILT & deployed to **demo** (migration 0052). `login_logo` field +
+  Settings upload; login page renders it (fallback to text), logo wrapper decoupled from the form
+  (`max-w-[640px]`, logo max-height 560px, form pinned `max-w-md`); sidebar uses ratio-preserving
+  fit (232px wide, 160px cap, hide when collapsed) replacing the old hard-coded 90px crush; upload
+  guard rejects >2000×2000 (3 tests). **PENDING: deploy to internal prod** (git pull + migrate 0052
+  + restart, then upload SCS logos). See memory `project_mb_login_branding`.
 - **Site-wide icon audit** — replace remaining text symbols (×, etc.) with SVG icons
 
 ---
