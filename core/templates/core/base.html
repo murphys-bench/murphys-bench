@@ -75,6 +75,8 @@
 
         /* Hide text when collapsed */
         html[data-sidebar-collapsed="true"] .nav-label    { display: none; }
+        /* Hide the logo entirely when collapsed (it would shrink to an illegible 40px) */
+        html[data-sidebar-collapsed="true"] .sidebar-logo-box { display: none; }
 
         /* Collapse/expand chevron direction */
         .nav-icon-collapse { display: flex; align-items: center; }
@@ -252,14 +254,14 @@
      }">
 
     <!-- Logo -->
-    <div class="flex-shrink-0 border-b"
-         style="border-color:rgba(255,255,255,0.1);height:90px;padding:6px 0;">
-        <a href="{% url 'core:dashboard' %}" style="display:block;width:100%;height:100%;">
+    <div class="flex-shrink-0 border-b sidebar-logo-box"
+         style="border-color:rgba(255,255,255,0.1);padding:10px 12px;">
+        <a href="{% url 'core:dashboard' %}" style="display:block;text-align:center;">
             {% if site_settings.site_logo %}
                 <img src="{{ site_settings.site_logo.url }}" alt=""
-                     style="display:block;width:100%;height:100%;object-fit:contain;object-position:center;">
+                     style="display:inline-block;max-width:100%;max-height:160px;width:auto;height:auto;">
             {% else %}
-                <span class="font-bold text-lg text-center leading-tight px-1">{{ site_settings.company_name|default:"Murphy's Bench" }}</span>
+                <span class="font-bold text-lg text-center leading-tight px-1 block">{{ site_settings.company_name|default:"Murphy's Bench" }}</span>
             {% endif %}
         </a>
     </div>

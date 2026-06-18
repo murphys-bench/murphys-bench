@@ -1219,6 +1219,22 @@
                            class="text-sm text-gray-600 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200">
                 </div>
 
+                <!-- Login Page Logo -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-lg font-semibold text-gray-900 mb-1">Login Page Logo</h2>
+                    <p class="text-sm text-gray-500 mb-4">Shown on the sign-in page. The login screen has room for a larger, more detailed logo than the nav bar. Leave blank to show your company name as text. Max 2000&times;2000&nbsp;px.</p>
+                    {% if settings.login_logo %}
+                    <div class="mb-3 flex items-center gap-4">
+                        <img src="{{ settings.login_logo.url }}" alt="Current login logo" class="h-16 object-contain border border-gray-200 rounded p-1">
+                        <label class="flex items-center gap-1 text-sm text-red-600 cursor-pointer">
+                            <input type="checkbox" name="colors-login_logo-clear"> Remove logo
+                        </label>
+                    </div>
+                    {% endif %}
+                    <input type="file" name="colors-login_logo" accept="image/*"
+                           class="text-sm text-gray-600 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200">
+                </div>
+
                 <!-- Site Palette -->
                 <div class="bg-white rounded-lg shadow p-6">
                     <h2 class="text-lg font-semibold text-gray-900 mb-1">Nav Bar Colors</h2>

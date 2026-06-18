@@ -1,5 +1,29 @@
 from django import forms
+from django.core.files.uploadedfile import UploadedFile
 from .models import WorkOrder, Client, Contact, ContactPhone, Device, Ticket, RepairType, HelpTopic, SLAPlan, KBCategory, KBArticle, Mileage, SiteSettings
+
+
+MAX_LOGO_DIMENSION = 2000  # px on either side — generous; we display-fit anything under this
+
+
+def validate_logo_upload(f):
+    """Reject a newly-uploaded logo larger than MAX_LOGO_DIMENSION on either side.
+    Only fresh uploads are checked; an existing stored file passes through untouched."""
+    if not isinstance(f, UploadedFile):
+        return f
+    from PIL import Image
+    try:
+        img = Image.open(f)
+        w, h = img.size
+        f.seek(0)
+    except Exception:
+        raise forms.ValidationError('That file does not appear to be a valid image.')
+    if w > MAX_LOGO_DIMENSION or h > MAX_LOGO_DIMENSION:
+        raise forms.ValidationError(
+            f'Image can be no larger than {MAX_LOGO_DIMENSION} × {MAX_LOGO_DIMENSION} px '
+            f'(yours is {w} × {h}). Please downsize it and re-upload.'
+        )
+    return f
 
 
 class WorkOrderForm(forms.ModelForm):
@@ -451,7 +475,7 @@ class ColorSettingsForm(forms.ModelForm):
     class Meta:
         model = SiteSettings
         fields = [
-            'site_logo',
+            'site_logo', 'login_logo',
             'color_primary', 'color_nav_text', 'color_accent',
             'color_sidebar_bg', 'color_sidebar_text',
             'color_page_bg', 'color_page_title', 'color_title_bar', 'color_section_header', 'color_section_header_text',
@@ -467,6 +491,12 @@ class ColorSettingsForm(forms.ModelForm):
         ]
         widgets = {f: forms.TextInput(attrs={'class': _HEX_INPUT, 'maxlength': 7, 'placeholder': '#rrggbb'})
                    for f in _hex_fields}
+
+    def clean_site_logo(self):
+        return validate_logo_upload(self.cleaned_data.get('site_logo'))
+
+    def clean_login_logo(self):
+        return validate_logo_upload(self.cleaned_data.get('login_logo'))
 
 
 class EmailBrandingForm(forms.ModelForm):
