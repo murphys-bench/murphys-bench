@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 18, 2026 (login/logo branding — `login_logo` field + ratio-preserving fit rule, migration 0052; demo box now Cloudflare-live + git-deploy via deploy key; migrations through 0052)
+**Last Updated**: June 18, 2026 (login/logo branding LIVE on prod + demo, migration 0052; repair-report 500 fixed (custom Work Performed entries) + print-tab UX; demo box Cloudflare-live + git-deploy via deploy key; migrations through 0052)
 **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench`
 **App path on server**: `/opt/murphys-bench/`
 
@@ -699,12 +699,16 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - **MFA reset hardening** (next session) — audit-log every reset (web + a new `manage.py reset_mfa`
   break-glass), gate on a `can_reset_user_mfa` flag, add tests. Apply to demo AND internal prod.
   NOT building admin tiers. See memory `project_mb_mfa_reset_hardening`.
-- **Login/logo branding** — ✅ BUILT & deployed to **demo** (migration 0052). `login_logo` field +
+- **Login/logo branding** — ✅ LIVE on **prod + demo** (migration 0052). `login_logo` field +
   Settings upload; login page renders it (fallback to text), logo wrapper decoupled from the form
   (`max-w-[640px]`, logo max-height 560px, form pinned `max-w-md`); sidebar uses ratio-preserving
   fit (232px wide, 160px cap, hide when collapsed) replacing the old hard-coded 90px crush; upload
-  guard rejects >2000×2000 (3 tests). **PENDING: deploy to internal prod** (git pull + migrate 0052
-  + restart, then upload SCS logos). See memory `project_mb_login_branding`.
+  guard rejects >2000×2000 (3 tests). See memory `project_mb_login_branding`.
+- **Repair report fixes (Jun 18, live on both)** — `WorkOrderPrintView` 500'd on custom Work
+  Performed entries (`labor_item=None` → `.category` AttributeError); now grouped under "Other",
+  template shows `custom_label`/`notes` for custom entries, regression test added. Print page's
+  return link now **closes** the new print tab instead of opening a 2nd WO tab. (Prod restart for
+  the cosmetic tab-close change may still be pending — confirm `git log` HEAD is `4942f22`.)
 - **Site-wide icon audit** — replace remaining text symbols (×, etc.) with SVG icons
 
 ---

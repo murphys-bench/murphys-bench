@@ -14,14 +14,20 @@ go/no-go only before destructive or production-affecting steps.
 
 ## Top of the queue for next session:
 
-**Login / logo branding — ✅ BUILT & deployed to DEMO (migration 0052). PENDING internal prod.**
-- `login_logo` field + Settings upload card; login page renders it (fallback to text); sidebar uses
-  a ratio-preserving fit (232px wide, 160px cap, hide when collapsed) replacing the old 90px crush;
-  login logo wrapper decoupled from the form (`max-w-[640px]`, logo max-height 560px); upload guard
-  rejects >2000×2000 (3 tests). Confirmed: sidebar = `site_logo`, login = `login_logo`, reports =
-  `company_logo`, email = `email_logo`.
-- **To finish:** deploy to internal prod (10.58.58.82) — `git pull` + `migrate` (0052) + restart,
-  then upload prod logos (SCS shamrock mark for the internal instance). Numbers are adjustable.
+**Login / logo branding — ✅ LIVE on prod + demo (migration 0052).** `login_logo` field + Settings
+upload; sidebar ratio-preserving fit (232/160, hide-collapsed) replacing the 90px crush; login logo
+wrapper decoupled from form (`max-w-[640px]`, height 560); upload guard >2000² (3 tests). Field→space:
+sidebar=`site_logo`, login=`login_logo`, reports=`company_logo`, email=`email_logo`. Numbers adjustable.
+
+**Repair report fixes (Jun 18, live on both):** print 500 on custom Work Performed entries fixed
+(`labor_item=None` guard + template `custom_label`/`notes`, regression test); print page "Close" now
+closes the new tab instead of opening a 2nd WO tab. **One trivial open item:** prod restart for the
+cosmetic tab-close template change may be pending — verify prod `git log` HEAD = `4942f22` and that
+the running service was restarted after it.
+
+**Heads-up:** prod `scs-tech` sudo needs a password (demo is passwordless), so Claude can't restart
+prod itself — Mike runs `sudo systemctl restart murphys-bench`. Optional future: a narrow
+passwordless-sudo rule for just that command.
 
 **MFA reset hardening (planned, tested — apply to BOTH demo and internal prod):**
 - Audit-log every MFA reset (actor, target, timestamp) — web `AdminMFAResetView` AND a new
