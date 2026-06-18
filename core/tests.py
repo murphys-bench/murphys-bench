@@ -822,3 +822,22 @@ def test_non_upload_value_passes_through():
     # an existing stored file (or None) is not a fresh upload — must pass untouched
     from core.forms import validate_logo_upload
     assert validate_logo_upload(None) is None
+
+
+# ---------------------------------------------------------------------------
+# Repair report must not crash on custom Work Performed entries (no labor_item)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_repair_report_prints_with_custom_labor_entry(client, client_obj, admin_user):
+    # A custom/quick-labor Work Performed entry has labor_item=None; the print
+    # report grouped by labor_item.category and 500'd on None. Regression guard.
+    from core.models import WorkPerformed
+    wo = WorkOrder.objects.create(client=client_obj)
+    WorkPerformed.objects.create(
+        work_order=wo, labor_item=None, custom_label='Reseated RAM', notes='Was loose',
+    )
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:work_order_print', args=[wo.pk]))
+    assert resp.status_code == 200
+    assert b'Reseated RAM' in resp.content

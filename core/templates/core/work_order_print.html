@@ -278,9 +278,11 @@
         <div class="work-category">
             <div class="work-category-name">{{ category }}</div>
             {% for entry in entries %}
-            <div class="work-item">{{ entry.labor_item.label }}</div>
+            <div class="work-item">{{ entry.labor_item.label|default:entry.custom_label }}</div>
             {% if entry.labor_item.print_description %}
             <div class="work-item-desc">{{ entry.labor_item.print_description }}</div>
+            {% elif entry.notes %}
+            <div class="work-item-desc">{{ entry.notes }}</div>
             {% endif %}
             {% endfor %}
         </div>
