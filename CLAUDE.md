@@ -699,6 +699,11 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - **MFA reset hardening** (next session) — audit-log every reset (web + a new `manage.py reset_mfa`
   break-glass), gate on a `can_reset_user_mfa` flag, add tests. Apply to demo AND internal prod.
   NOT building admin tiers. See memory `project_mb_mfa_reset_hardening`.
+- **Login/logo branding** (spec ready, next session) — add a `login_logo` field + Settings upload;
+  wire the login page (`_base_focus.html`, currently hard-coded `🔧 Murphy's Bench` text); replace
+  the sidebar's hard-coded resize with a ratio-preserving fit rule (fix width 232px, float height,
+  cap ~160px, hide when collapsed); verify `site_logo` vs `company_logo` field→space mapping first.
+  Per-space logo slots (detail-vs-size). See memory `project_mb_login_branding`.
 - **Site-wide icon audit** — replace remaining text symbols (×, etc.) with SVG icons
 
 ---

@@ -14,6 +14,21 @@ go/no-go only before destructive or production-affecting steps.
 
 ## Top of the queue for next session:
 
+**Login / logo branding (spec ready — design fully worked out, just build it):**
+- Add a `login_logo` ImageField to SiteSettings (+ migration) and a Settings upload control. The
+  login page (`templates/two_factor/_base_focus.html`, currently hard-coded `🔧 Murphy's Bench`
+  text ~line 31) renders it, fallback to the text if unset.
+- Replace the sidebar's **hard-coded resize** (`core/templates/core/base.html` ~line 258) with a
+  ratio-preserving fit rule: fix width (232px = 256 − 12px inset each side), preserve aspect ratio,
+  let height float, cap ~160px, center when capped, sidebar bg as the border. **Hide logo when the
+  sidebar is collapsed (64px).**
+- Per-space logo slots (rich scene for login/print, simpler mark for sidebar) — the reason is
+  detail-vs-size, not aspect ratio. Asset ratios span 0.80 (portrait) → 1.77 (landscape) → 1.0 (square).
+- Upload size cap with a friendly message (~2000×2000, generous); downscale stored copy via Pillow.
+- **VERIFY FIRST:** sidebar reads `site_logo` but Mike's uploaded file landed in `media/company/`
+  (`company_logo`) — confirm which field drives which space; that mismatch is likely why the current
+  logo "doesn't look right." Full context in memory `project_mb_login_branding`.
+
 **MFA reset hardening (planned, tested — apply to BOTH demo and internal prod):**
 - Audit-log every MFA reset (actor, target, timestamp) — web `AdminMFAResetView` AND a new
   `manage.py reset_mfa <username>` break-glass command. Today resets write NO record (the real gap).
