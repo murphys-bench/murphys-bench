@@ -26,7 +26,7 @@
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
-    <div class="w-full max-w-md">
+    <div class="w-full max-w-[600px] mx-auto">
         <div class="text-center mb-6">
             {% if site_settings.login_logo %}
                 <a href="/"><img src="{{ site_settings.login_logo.url }}" alt="{{ site_settings.company_name|default:'Murphy&#39;s Bench' }}"
@@ -35,7 +35,7 @@
                 <a href="/" class="text-2xl font-bold text-gray-900 hover:text-gray-700">🔧 Murphy's Bench</a>
             {% endif %}
         </div>
-        <div class="bg-white rounded-lg shadow-md p-8">
+        <div class="bg-white rounded-lg shadow-md p-8 max-w-md mx-auto">
             {% if messages %}
                 {% for message in messages %}
                     <div class="mb-4 px-4 py-3 rounded text-sm
