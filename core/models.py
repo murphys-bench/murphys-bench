@@ -62,6 +62,7 @@ class Role(models.Model):
     can_reply_internal = models.BooleanField(default=True)
     can_reply_customer = models.BooleanField(default=True)
     can_view_device_credentials = models.BooleanField(default=False, help_text='Reveal encrypted device credentials (username/password).')
+    can_reset_user_mfa = models.BooleanField(default=False, help_text='Reset (clear) another user\'s two-factor devices for lost-device recovery.')
     can_create_workorder = models.BooleanField(default=True)
     can_edit_workorder = models.BooleanField(default=True)
     can_close_workorder = models.BooleanField(default=True)
@@ -888,6 +889,53 @@ class DeviceCredentialAccessLog(models.Model):
 
     def __str__(self):
         return f'{self.user} {self.action} credentials on "{self.device.name}" at {self.accessed_at}'
+
+
+class MFAResetLog(models.Model):
+    """Audit record — every reset (clearing) of a user's two-factor devices.
+
+    Resets are lost-device recovery and a sensitive action, so each one is
+    recorded: who was reset, who did it (null = CLI break-glass), and how.
+    """
+
+    SOURCE_CHOICES = [
+        ('web', 'Web (admin)'),
+        ('cli', 'CLI (break-glass)'),
+    ]
+
+    target     = models.ForeignKey(User, on_delete=models.CASCADE, related_name='mfa_resets')
+    actor      = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name='mfa_resets_performed',
+                                   help_text='User who performed the reset. Null = CLI break-glass.')
+    source     = models.CharField(max_length=10, choices=SOURCE_CHOICES, default='web')
+    note       = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        who = self.actor or 'CLI break-glass'
+        return f'MFA reset for {self.target} by {who} ({self.source}) at {self.created_at}'
+
+
+def reset_user_mfa(target, actor=None, source='web', note=''):
+    """Clear all OTP devices for ``target`` and record an MFAResetLog.
+
+    Shared by the admin web view and the reset_mfa break-glass command so both
+    paths leave an identical audit trail. Returns the created MFAResetLog.
+    """
+    from django_otp import devices_for_user
+    count = 0
+    for device in list(devices_for_user(target)):
+        device.delete()
+        count += 1
+    if note:
+        note = note[:255]
+    log = MFAResetLog.objects.create(
+        target=target, actor=actor, source=source, note=note,
+    )
+    return log, count
 
 
 class StatusDefinition(models.Model):

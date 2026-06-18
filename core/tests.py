@@ -841,3 +841,97 @@ def test_repair_report_prints_with_custom_labor_entry(client, client_obj, admin_
     resp = client.get(reverse('core:work_order_print', args=[wo.pk]))
     assert resp.status_code == 200
     assert b'Reseated RAM' in resp.content
+
+
+# ---------------------------------------------------------------------------
+# MFA reset hardening — audit log, flag gate, break-glass CLI command
+# ---------------------------------------------------------------------------
+
+def _enroll_totp(user):
+    """Give a user a confirmed TOTP device so a reset has something to clear."""
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    return TOTPDevice.objects.create(user=user, name='default', confirmed=True)
+
+
+@pytest.mark.django_db
+def test_web_reset_clears_devices_and_writes_log(client, admin_user):
+    from django_otp import devices_for_user
+    from core.models import MFAResetLog
+    target = User.objects.create_user(username='lostphone', password='x')
+    _enroll_totp(target)
+    assert list(devices_for_user(target))  # enrolled
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:user_mfa_reset', args=[target.pk]))
+
+    assert resp.status_code == 302
+    assert not list(devices_for_user(target)), 'Reset must clear all OTP devices.'
+    log = MFAResetLog.objects.get(target=target)
+    assert log.actor == admin_user
+    assert log.source == 'web'
+
+
+@pytest.mark.django_db
+def test_web_reset_denied_without_flag(client):
+    """A non-admin without can_reset_user_mfa is forbidden and writes no log."""
+    from core.models import Role, MFAResetLog
+    role = Role.objects.create(name='Plain Tech')  # all flags default False
+    actor = User.objects.create_user(username='plain', password='x',
+                                     is_staff=False, role_obj=role)
+    target = User.objects.create_user(username='victim', password='x')
+    _enroll_totp(target)
+
+    client.force_login(actor)
+    resp = client.post(reverse('core:user_mfa_reset', args=[target.pk]))
+
+    assert resp.status_code == 403
+    assert not MFAResetLog.objects.filter(target=target).exists()
+
+
+@pytest.mark.django_db
+def test_web_reset_allowed_with_flag_only(client):
+    """A delegated non-admin holding only can_reset_user_mfa may reset."""
+    from django_otp import devices_for_user
+    from core.models import Role
+    role = Role.objects.create(name='Helpdesk', can_reset_user_mfa=True)
+    actor = User.objects.create_user(username='helpdesk', password='x',
+                                     is_staff=False, role_obj=role)
+    target = User.objects.create_user(username='locked', password='x')
+    _enroll_totp(target)
+
+    client.force_login(actor)
+    resp = client.post(reverse('core:user_mfa_reset', args=[target.pk]))
+
+    assert resp.status_code == 302
+    assert not list(devices_for_user(target))
+
+
+@pytest.mark.django_db
+def test_cli_reset_clears_devices_and_logs_shell_identity(monkeypatch):
+    from django.core.management import call_command
+    from django_otp import devices_for_user
+    from core.models import MFAResetLog
+    target = User.objects.create_user(username='soleadmin', password='x')
+    _enroll_totp(target)
+
+    monkeypatch.setattr('getpass.getuser', lambda: 'scs-tech')
+    monkeypatch.setenv('SSH_CONNECTION', 'REDACTED-IP 51234 REDACTED-IP 22')
+
+    call_command('reset_mfa', 'soleadmin', '--note', 'lost authenticator')
+
+    assert not list(devices_for_user(target)), 'CLI reset must clear devices.'
+    log = MFAResetLog.objects.get(target=target)
+    assert log.actor is None            # no authenticated web user on the CLI path
+    assert log.source == 'cli'
+    # Highest-risk path stays traceable: stamp who/where, not an anonymous null.
+    assert 'scs-tech' in log.note
+    assert 'REDACTED-IP' in log.note
+    assert 'lost authenticator' in log.note
+
+
+@pytest.mark.django_db
+def test_cli_reset_unknown_user_errors():
+    from django.core.management import call_command
+    from django.core.management.base import CommandError
+    with pytest.raises(CommandError):
+        call_command('reset_mfa', 'nobody-here')
