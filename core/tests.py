@@ -842,6 +842,113 @@ def test_blocked_sender_creates_no_ticket():
     assert Ticket.objects.count() == before
 
 
+# ── Inbound: T2 / Helpdesk Buttons relay is unwrapped to the real end user ───
+# Button tickets arrive from the no-reply relay email-connector@tier2tickets.com
+# with the real sender in a forwarded-message header in the body. MB must
+# attribute to that real contact (so replies route to them), not the relay.
+
+def _raw_t2_email(real_name='Mike McCall', real_email='redacted@example.com',
+                  subject='Fwd: E.2YVLMWK Test-2', message_id='<t2-1@tier2tickets.com>',
+                  include_from=True):
+    import email.message
+    forwarded_from = f'From: "{real_name}" <{real_email}>\n' if include_from else ''
+    body = (
+        '---------- Forwarded message ---------\n'
+        f'{forwarded_from}'
+        'Date: Fri, Jun 19, 2026 at 04:37 PM\n'
+        'Subject: Test-2\n'
+        'To: "Button Ticket" <email-connector@tier2tickets.com>\n\n'
+        'https://account.helpdeskbuttons.com/pressView.php?pressID=abc123\n\n'
+        '[message]\nTest-2\n'
+    )
+    msg = email.message.EmailMessage()
+    msg['Subject'] = subject
+    msg['From'] = '"Button Ticket" <email-connector@tier2tickets.com>'
+    msg['To'] = 'support@example.com'
+    msg['Message-ID'] = message_id
+    msg.set_content(body)
+    return msg.as_bytes()
+
+
+def test_extract_forwarded_sender_parses_and_handles_missing():
+    from core.management.commands.fetch_inbound_email import _extract_forwarded_sender
+    body = '--- Forwarded message ---\nFrom: "Mike McCall" <redacted@example.com>\nDate: x\n'
+    assert _extract_forwarded_sender(body) == ('Mike McCall', 'redacted@example.com')
+    assert _extract_forwarded_sender('no headers here') == (None, None)
+    assert _extract_forwarded_sender('') == (None, None)
+
+
+@pytest.mark.django_db
+def test_t2_email_maps_to_existing_contact_not_relay(client_obj):
+    """A button ticket whose forwarded sender is a known contact files under that
+    contact's client — never under the tier2tickets relay."""
+    from core.management.commands.fetch_inbound_email import _process_message
+    contact = Contact.objects.create(
+        client=client_obj, first_name='Mike', last_name='McCall',
+        email='redacted@example.com', is_primary=True,
+    )
+    site = SiteSettings.get()
+
+    status, _, ticket = _process_message(_raw_t2_email(), site, verbosity=0)
+
+    assert status == 'new_ticket'
+    assert ticket.contact_id == contact.id
+    assert ticket.client_id == client_obj.id
+    assert not Client.objects.filter(name__icontains='tier2tickets').exists(), \
+        'A button ticket must never create a tier2tickets relay client.'
+
+
+@pytest.mark.django_db
+def test_t2_email_unknown_sender_uses_normal_fallback():
+    """An unknown button-ticket sender falls through to MB's normal new-sender
+    handling on the REAL address (free-email -> per-person client), not the relay."""
+    from core.management.commands.fetch_inbound_email import _process_message
+    site = SiteSettings.get()
+
+    status, _, ticket = _process_message(_raw_t2_email(), site, verbosity=0)
+
+    assert status == 'new_ticket'
+    assert ticket.contact.email == 'redacted@example.com'
+    assert not Client.objects.filter(name__icontains='tier2tickets').exists()
+    # gmail is a free-email domain -> the sender gets their own client
+    assert Client.objects.filter(name='Mike McCall').exists()
+
+
+@pytest.mark.django_db
+def test_t2_email_unparseable_falls_back_and_logs(caplog):
+    """If the forwarded sender can't be parsed, attribute to the relay (current
+    behavior) but log a warning so the bad attribution is visible — fail loud."""
+    from core.management.commands.fetch_inbound_email import _process_message
+    site = SiteSettings.get()
+
+    with caplog.at_level('WARNING', logger='core'):
+        status, _, ticket = _process_message(
+            _raw_t2_email(include_from=False), site, verbosity=0)
+
+    assert status == 'new_ticket'
+    assert ticket.contact.email == 'email-connector@tier2tickets.com'
+    assert any('no parseable forwarded sender' in r.message for r in caplog.records)
+
+
+@pytest.mark.django_db
+def test_normal_email_is_unaffected_by_t2_unwrap(client_obj):
+    """Regression guard: a normal (non-T2) email still attributes to its own
+    envelope From, even if its body happens to contain a 'From:' line."""
+    from core.management.commands.fetch_inbound_email import _process_message
+    contact = Contact.objects.create(
+        client=client_obj, first_name='Wayne', last_name='Davis',
+        email='wayne@davis.example', is_primary=True,
+    )
+    site = SiteSettings.get()
+    # body contains a quoted 'From:' line that must be ignored for a non-relay sender
+    status, _, ticket = _process_message(
+        _raw_new_email(body='Earlier you wrote:\nFrom: someone@else.example\nthanks'),
+        site, verbosity=0)
+
+    assert status == 'new_ticket'
+    assert ticket.contact_id == contact.id, 'Non-T2 email must use its envelope From.'
+
+
 # ── HTML-only inbound email (RMM alerts) renders as readable text, not markup ─
 
 @pytest.mark.django_db
