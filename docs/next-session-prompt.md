@@ -14,6 +14,19 @@ go/no-go only before destructive or production-affecting steps.
 
 ## Top of the queue for next session:
 
+**Inbound email — ✅ FULLY LIVE on the real support inbox (Jun 19).** Mike pointed production
+inbound at the real support mailbox — this closes the "switch to the real support inbox" action
+that had carried from session 27 → 29. Prod verified current (`git log` HEAD includes print-tab
+fix `4942f22`; service active; all three timers healthy: fetch-email 2min / sla-check 15min /
+backup nightly 02:15; last fetch connected cleanly). **Inbound test coverage broadened** (suite
+55→61): fresh-email→new-ticket, reply-to-open threading, Message-ID dedup guard (the
+orphan-multiplication safeguard), returning-sender routing, business-domain vs free-email
+resolution, blocked-sender. Test-only commit `952db73`, no migration, deployed to prod (no restart).
+
+**Next item to pick up:** the **Invoice Ninja bridge** — the one approved post-stabilization
+feature. Needs the IN API audit FIRST (it moves money, so plan + review before building). Everything
+ahead of it on the stabilization list is now done. See "What's next" priority list below.
+
 **Login / logo branding — ✅ LIVE on prod + demo (migration 0052).** `login_logo` field + Settings
 upload; sidebar ratio-preserving fit (232/160, hide-collapsed) replacing the 90px crush; login logo
 wrapper decoupled from form (`max-w-[640px]`, height 560); upload guard >2000² (3 tests). Field→space:
