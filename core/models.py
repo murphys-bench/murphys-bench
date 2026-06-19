@@ -162,6 +162,12 @@ class Client(models.Model):
         default=False,
         help_text='Suppress all automated outbound emails to this client.',
     )
+    is_unsorted = models.BooleanField(
+        default=False,
+        help_text='System "Unsorted / Unverified" bucket: holds inbound tickets '
+                  'from senders not yet matched to a real client, pending triage. '
+                  'There should only ever be one.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -173,8 +179,20 @@ class Client(models.Model):
             models.Index(fields=['is_active']),
         ]
 
+    UNSORTED_NAME = 'Unsorted / Unverified'
+
     def __str__(self):
         return self.name
+
+    @classmethod
+    def get_unsorted(cls):
+        """The single system bucket for unmatched inbound senders awaiting triage."""
+        client = cls.objects.filter(is_unsorted=True).first()
+        if client:
+            return client
+        return cls.objects.create(
+            name=cls.UNSORTED_NAME, is_unsorted=True, is_active=True,
+        )
 
 
 class Contact(models.Model):

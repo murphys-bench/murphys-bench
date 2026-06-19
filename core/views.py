@@ -301,6 +301,15 @@ class DashboardView(LoginRequiredMixin, View):
             needs_response_qs = needs_response_qs.filter(assigned_to=request.user)
         needs_response_count = needs_response_qs.count()
 
+        # Unsorted/Unverified triage bucket (admin only) — inbound from senders
+        # not yet matched to a real client, awaiting onboarding or rejection.
+        triage_count = 0
+        if is_admin:
+            triage_count = (
+                Ticket.objects.filter(client__is_unsorted=True)
+                .exclude(status__in=TICKET_CLOSED_STATUSES).count()
+            )
+
         # Tickets escalated above their owner's level, awaiting pickup by someone higher.
         # Admins see all of them; a tech sees those escalated up to their own level.
         escalated_qs = (
@@ -334,11 +343,12 @@ class DashboardView(LoginRequiredMixin, View):
             'wo_tiles': wo_tiles,
             'open_work_orders': open_work_orders,
             'recently_closed': recently_closed,
-            'active_clients': Client.objects.filter(is_active=True).count(),
+            'active_clients': Client.objects.filter(is_active=True, is_unsorted=False).count(),
             'total_devices': Device.objects.filter(is_active=True).count(),
             'is_admin': is_admin,
             'team_workload': team_workload,
             'needs_response_count': needs_response_count,
+            'triage_count': triage_count,
             'open_tickets': open_tickets,
             'escalated_to_me': escalated_to_me,
             'my_mileage_total': my_mileage_total,
@@ -1160,6 +1170,12 @@ class ClientUpdateView(LoginRequiredMixin, UpdateView):
     def get_success_url(self):
         return reverse_lazy('core:client_detail', kwargs={'pk': self.object.pk})
 
+    def form_valid(self, form):
+        # The system triage bucket must stay active so inbound can always reach it.
+        if self.object.is_unsorted:
+            form.instance.is_active = True
+        return super().form_valid(form)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['title'] = f'Edit {self.object.name}'
@@ -1172,6 +1188,12 @@ class ClientUpdateView(LoginRequiredMixin, UpdateView):
 class ClientDeleteView(LoginRequiredMixin, View):
     def post(self, request, pk):
         client = get_object_or_404(Client, pk=pk)
+        if client.is_unsorted:
+            messages.error(
+                request,
+                f'{client.name} is the system triage bucket and cannot be deleted.'
+            )
+            return redirect('core:client_edit', pk=pk)
         wo_count = client.work_orders.count()
         if wo_count > 0:
             messages.error(
@@ -1318,8 +1340,12 @@ class TicketListView(LoginRequiredMixin, ListView):
         queryset = Ticket.objects.select_related('client', 'device', 'created_by', 'assigned_to')
         queryset = _scope_tickets_for(queryset, self.request.user)
 
+        triage = self.request.GET.get('triage')
         needs_response = self.request.GET.get('needs_response')
-        if needs_response:
+        if triage:
+            # Unsorted/Unverified bucket — inbound senders awaiting onboarding.
+            queryset = queryset.filter(client__is_unsorted=True)
+        elif needs_response:
             queryset = queryset.filter(needs_response=True)
             if not _is_admin(self.request.user):
                 queryset = queryset.filter(assigned_to=self.request.user)
@@ -1365,6 +1391,7 @@ class TicketListView(LoginRequiredMixin, ListView):
         context['closed_count'] = base_qs.filter(status__in=TICKET_CLOSED_STATUSES).count()
         context['current_tab'] = self.request.GET.get('tab', 'active')
         context['needs_response_filter'] = self.request.GET.get('needs_response', '')
+        context['triage_filter'] = self.request.GET.get('triage', '')
         return context
 
 
