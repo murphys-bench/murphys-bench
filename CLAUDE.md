@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 18, 2026 (MFA reset hardening FULLY LIVE — migration 0053: MFAResetLog audit + `can_reset_user_mfa` flag gate + `manage.py reset_mfa` break-glass that stamps shell identity; deployed+restarted demo+prod. Infra: rotated Claude's SSH key + made demo SSH key-only to match prod (see memory `reference_ssh_access`). Earlier Jun 18: login/logo branding migration 0052; repair-report 500 fix + print-tab UX. Migrations through 0053; test suite 55 passing)
+**Last Updated**: June 19, 2026 (Session 30 — T2/Helpdesk Buttons moved off OSTicket API to T2's Email Connector; MB unwraps the no-reply relay `email-connector@tier2tickets.com` to the real contact via forwarded `From:`; unmatched inbound now parks in an "Unsorted/Unverified" triage bucket (migration 0054, `Client.is_unsorted`) instead of auto-creating junk clients, with an admin dashboard card + `/tickets/?triage=1`. Inbound fully live on the real support inbox. Migrations through 0054; test suite 71 passing. Prod: Claude restarts it directly — NOPASSWD for `systemctl restart murphys-bench`.)
 **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench`
 **App path on server**: `/opt/murphys-bench/`
 
@@ -237,6 +237,34 @@ multiplying one wrong ticket into several (TKT-00008/00009).
   confident (the one open action carried over from session 27).
 - The two orphan tickets were reconciled by hand: Wayne's reply was appended to
   TKT-20260610-0001 with its original timestamp, then TKT-00008/00009 were deleted.
+
+### T2/Helpdesk Buttons ingestion + Unsorted triage bucket (session 30, Jun 19)
+**Tier2Tickets is the button-press front door, moved off OSTicket's API onto T2's Email Connector.**
+T2 posts every button ticket from a fixed no-reply relay **`email-connector@tier2tickets.com`** with
+the real end user carried in a **forwarded `From:` header inside the body** (plus report/remote links,
+hostname, username, businessName, `[message]`, `[selections]`). Subject is `Fwd: E.xxxxx <subj>` —
+that `E.xxxxx` is T2's own ticket ID (kept on purpose; clients are told it) and does NOT match MB's
+`TICKET_RE`, so button tickets always create a new ticket, never mis-thread.
+- **Adapter** (`fetch_inbound_email`): when the envelope sender ∈ `_T2_RELAY_ADDRESSES`,
+  `_extract_forwarded_sender(body)` parses the first `From:` line **from the raw body before quote
+  stripping**, and resolution runs on the REAL address. Unparseable → fall back to the relay address
+  **and `logger.warning`** (fail loud). Blocked-sender + Message-ID dedup checks run *after* the unwrap
+  so they apply to the real sender. **The reliable identity key is the contact email, not businessName**
+  (businessName is first-use-only at SCS). T2 is ingestion-only — once the ticket exists, replies flow
+  support-email ↔ contact directly; MB needn't know T2 was involved. Device/hostname extraction was
+  deliberately deferred.
+- **Unsorted/Unverified triage bucket** (migration 0054): an unmatched inbound sender no longer
+  auto-creates a junk named client. The old per-person/free-email + domain-grouping fallback is GONE
+  (`_FREE_EMAIL_DOMAINS` deleted). Instead `Client.is_unsorted` + `Client.get_unsorted()` route the
+  ticket under one system "Unsorted / Unverified" client (real name/email still kept on the contact for
+  reply routing + onboarding). A configured `inbound_default_client_name` catch-all still overrides.
+  **Never hide a ticket** — it's visible and workable; only the *client record* is held pending triage.
+  Surfacing: admin dashboard card "Unsorted — needs triage: N" → `/tickets/?triage=1` (indigo banner).
+  Bucket is excluded from the Active-Clients stat and **cannot be deleted/deactivated** via the UI.
+  **Onboard** = existing Edit-ticket reassignment (change client → contact dropdown cascades);
+  **reject** = existing ticket delete + Settings → BlockedSenders (v1; no combined button). Policy is
+  uniform for ALL unmatched inbound, not just T2. `reset_operational_data` wipes the bucket with
+  everything else and `get_unsorted()` recreates it lazily on the next unmatched inbound.
 
 ### Design intent to preserve (don't "fix" these — they're deliberate)
 - A completed Work Order must **never** auto-close its Ticket. The ticket drives the

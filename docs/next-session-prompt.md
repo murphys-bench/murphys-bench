@@ -14,14 +14,27 @@ go/no-go only before destructive or production-affecting steps.
 
 ## Top of the queue for next session:
 
-**Inbound email — ✅ FULLY LIVE on the real support inbox (Jun 19).** Mike pointed production
-inbound at the real support mailbox — this closes the "switch to the real support inbox" action
-that had carried from session 27 → 29. Prod verified current (`git log` HEAD includes print-tab
-fix `4942f22`; service active; all three timers healthy: fetch-email 2min / sla-check 15min /
-backup nightly 02:15; last fetch connected cleanly). **Inbound test coverage broadened** (suite
-55→61): fresh-email→new-ticket, reply-to-open threading, Message-ID dedup guard (the
-orphan-multiplication safeguard), returning-sender routing, business-domain vs free-email
-resolution, blocked-sender. Test-only commit `952db73`, no migration, deployed to prod (no restart).
+**SESSION 30 (Jun 19) — T2 ingestion + Unsorted triage bucket, all LIVE on prod. Suite 55→71.**
+Inbound is fully live on the real support inbox (closed the carried-over action from sessions 27→29),
+and Tier2Tickets (Helpdesk Buttons) is moved off OSTicket's API onto MB via T2's **Email Connector**.
+Three things shipped + deployed (full detail in memory `project_mb_session30`):
+- **Inbound test broadening** (commit `952db73`, →61): new-ticket, reply-to-open, Message-ID dedup,
+  returning-sender, blocked-sender.
+- **T2 ingestion adapter** (commit `e540498`, →66): T2 posts from no-reply relay
+  `email-connector@tier2tickets.com` with the real end user in a forwarded `From:` in the body. MB
+  unwraps it (`_extract_forwarded_sender` in `fetch_inbound_email`) and resolves the real contact.
+  Subject `Fwd: E.xxxxx` kept (T2's ticket ID; doesn't collide with `TKT-`). **Contact email is the
+  reliable key, not businessName.** T2 is ingestion-only; replies flow support↔contact directly.
+- **Unsorted/Unverified triage bucket** (commit `f5627eb`, migration `0054`, →71): unmatched inbound
+  no longer mints junk clients (removed per-person/free-email/domain grouping). `Client.is_unsorted`
+  + `get_unsorted()`; unknown sender parks under one "Unsorted / Unverified" bucket. Admin dashboard
+  card "Unsorted — needs triage: N" → `/tickets/?triage=1`. Onboard = Edit-ticket reassignment;
+  reject = delete + BlockedSenders. Bucket excluded from Active-Clients, can't be deleted.
+
+**Open cleanup (Mike, low-priority):** delete the two test junk clients (`tier2tickets.com`,
+`Mike McCall`) and reassign test tickets TKT-00009/00010/00011 to real clients via Edit. Load
+remaining client contacts into MB so future T2 senders straight-match (until then they correctly
+land in the triage bucket).
 
 **Next item to pick up:** the **Invoice Ninja bridge** — the one approved post-stabilization
 feature. Needs the IN API audit FIRST (it moves money, so plan + review before building). Everything
@@ -38,9 +51,12 @@ closes the new tab instead of opening a 2nd WO tab. **One trivial open item:** p
 cosmetic tab-close template change may be pending — verify prod `git log` HEAD = `4942f22` and that
 the running service was restarted after it.
 
-**Heads-up:** prod `scs-tech` sudo needs a password (demo is passwordless), so Claude can't restart
-prod itself — Mike runs `sudo systemctl restart murphys-bench`. Optional future: a narrow
-passwordless-sudo rule for just that command.
+**Prod restart — Claude CAN do it (verified Jun 19):** `scs-tech` has NOPASSWD for
+`systemctl restart/status murphys-bench` on prod, so Claude deploys end-to-end (`git pull` +
+`venv/bin/python manage.py migrate` + `sudo -n systemctl restart murphys-bench`). Earlier notes
+claiming "prod needs a password, Mike must restart" were STALE — disregard. Health-check with the
+correct Host header: `curl -H "Host: 10.58.58.82" http://127.0.0.1/account/login/` → 200 (a bare
+`curl 127.0.0.1` gives 400 DisallowedHost, which is correct, not a fault).
 
 **MFA reset hardening — ✅ DONE + FULLY LIVE (Jun 18, migration 0053, commit 66582df, suite 43→55).**
 `MFAResetLog` audit record on every reset (via shared `reset_user_mfa()` helper); `can_reset_user_mfa`
