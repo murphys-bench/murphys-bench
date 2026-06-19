@@ -22,6 +22,7 @@ urlpatterns = [
     path('mileage/', views.MileageListView.as_view(), name='mileage_list'),
     path('mileage/new/', views.MileageCreateView.as_view(), name='mileage_create'),
     path('mileage/<int:pk>/edit/', views.MileageUpdateView.as_view(), name='mileage_edit'),
+    path('mileage/<int:pk>/delete/', views.MileageDeleteView.as_view(), name='mileage_delete'),
     path('mileage/calculate/', views.MileageDistanceView.as_view(), name='mileage_calculate'),
     path('work-orders/<int:pk>/add-mileage/', views.WorkOrderMileageCreateView.as_view(), name='wo_mileage_create'),
     path('work-orders/new/', views.WorkOrderCreateView.as_view(), name='work_order_create'),

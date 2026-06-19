@@ -79,7 +79,15 @@
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
                                 {% if entry.technician == request.user or request.user.is_staff %}
-                                    <a href="{% url 'core:mileage_edit' entry.pk %}" class="text-gray-400 hover:text-blue-600">Edit</a>
+                                    <div class="flex items-center justify-end gap-3">
+                                        <a href="{% url 'core:mileage_edit' entry.pk %}" class="text-gray-400 hover:text-blue-600">Edit</a>
+                                        <form method="post" action="{% url 'core:mileage_delete' entry.pk %}"
+                                              onsubmit="return confirm('Delete this mileage entry ({{ entry.miles }} mi on {{ entry.trip_date|date:'M d, Y' }})? This cannot be undone.');"
+                                              class="inline">
+                                            {% csrf_token %}
+                                            <button type="submit" class="text-gray-400 hover:text-red-600">Delete</button>
+                                        </form>
+                                    </div>
                                 {% endif %}
                             </td>
                         </tr>

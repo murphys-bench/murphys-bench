@@ -777,6 +777,16 @@ class MileageUpdateView(LoginRequiredMixin, View):
         return render(request, 'core/mileage_form.html', {'form': form, 'entry': entry})
 
 
+class MileageDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        entry = get_object_or_404(Mileage, pk=pk)
+        if not _is_admin(request.user) and entry.technician != request.user:
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        entry.delete()
+        return redirect('core:mileage_list')
+
+
 class WorkOrderMileageCreateView(LoginRequiredMixin, View):
     """Mileage entry form launched from a Work Order detail page."""
 
