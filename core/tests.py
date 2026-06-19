@@ -375,6 +375,43 @@ def test_mileage_list_scopes_to_own_for_techs(client, admin_user):
     assert b'Admin trip' in admin_body and b'Tech trip' in admin_body  # admin sees all
 
 
+@pytest.mark.django_db
+def test_mileage_owner_can_delete_own_entry(client, admin_user):
+    from core.models import Mileage
+    tech = User.objects.create_user(username='miletech', password='x', is_staff=False)
+    entry = Mileage.objects.create(technician=tech, trip_date='2026-06-11', miles=7)
+
+    client.force_login(tech)
+    resp = client.post(reverse('core:mileage_delete', args=[entry.pk]))
+    assert resp.status_code == 302
+    assert not Mileage.objects.filter(pk=entry.pk).exists()
+
+
+@pytest.mark.django_db
+def test_mileage_admin_can_delete_any_entry(client, admin_user):
+    from core.models import Mileage
+    tech = User.objects.create_user(username='miletech2', password='x', is_staff=False)
+    entry = Mileage.objects.create(technician=tech, trip_date='2026-06-11', miles=7)
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:mileage_delete', args=[entry.pk]))
+    assert resp.status_code == 302
+    assert not Mileage.objects.filter(pk=entry.pk).exists()
+
+
+@pytest.mark.django_db
+def test_mileage_tech_cannot_delete_others_entry(client, admin_user):
+    from core.models import Mileage
+    owner = User.objects.create_user(username='mileowner', password='x', is_staff=False)
+    other = User.objects.create_user(username='mileother', password='x', is_staff=False)
+    entry = Mileage.objects.create(technician=owner, trip_date='2026-06-11', miles=7)
+
+    client.force_login(other)
+    resp = client.post(reverse('core:mileage_delete', args=[entry.pk]))
+    assert resp.status_code == 403
+    assert Mileage.objects.filter(pk=entry.pk).exists()  # untouched
+
+
 # ── Ticket scoping + escalation levels ──────────────────────────────────────
 
 @pytest.mark.django_db
