@@ -45,6 +45,15 @@ _FREE_EMAIL_DOMAINS = {
     'fastmail.com',
 }
 
+# T2 / Helpdesk Buttons posts every button ticket from a fixed no-reply relay
+# address; the real end user is carried in a forwarded-message header inside the
+# body. We unwrap that so the ticket attributes to the actual contact instead of
+# the relay. Add other T2 relay addresses here if they ever change.
+_T2_RELAY_ADDRESSES = {'email-connector@tier2tickets.com'}
+
+# First "From:" line inside a forwarded body (T2 wraps the original sender).
+_FORWARDED_FROM_RE = re.compile(r'^\s*From:\s*(.+)$', re.IGNORECASE | re.MULTILINE)
+
 from core.models import (
     Attachment, BlockedSender, Client, Contact, InboundEmailLog, SiteSettings,
     Ticket, TicketReply,
@@ -293,6 +302,21 @@ def _resolve_client_contact(from_email, from_name, settings):
     return client, contact
 
 
+def _extract_forwarded_sender(body):
+    """T2/Helpdesk Buttons wraps the real sender in a forwarded-message header
+    inside the body. Return (name, email) parsed from the first 'From:' line, or
+    (None, None) if there isn't a usable one."""
+    if not body:
+        return None, None
+    match = _FORWARDED_FROM_RE.search(body)
+    if not match:
+        return None, None
+    name, addr = parseaddr(match.group(1).strip())
+    if not addr or '@' not in addr:
+        return None, None
+    return (name or ''), addr
+
+
 def _process_message(raw_msg_bytes, settings, verbosity):
     """Parse and process one raw email message. Returns (status, detail, ticket)."""
     try:
@@ -309,7 +333,29 @@ def _process_message(raw_msg_bytes, settings, verbosity):
     if verbosity >= 2:
         print(f'  Processing: "{subject}" from {from_email}')
 
-    # Blocked sender check
+    body = _get_body(msg)
+
+    # T2 / Helpdesk Buttons relay: the envelope sender is a no-reply relay, so
+    # unwrap the real end user from the forwarded body (before any quote
+    # stripping) and attribute to them — that's what makes replies route to the
+    # actual contact instead of the relay. If we can't parse it, fall back to the
+    # relay address but log loudly so the bad attribution is visible.
+    if from_email in _T2_RELAY_ADDRESSES:
+        real_name, real_email = _extract_forwarded_sender(body)
+        if real_email:
+            from_name, from_email = real_name, real_email.lower().strip()
+        else:
+            logger.warning(
+                'T2 relay email had no parseable forwarded sender; attributing '
+                'to the relay address. Message-ID=%s subject=%r',
+                message_id or '(none)', subject)
+
+    if settings.strip_quoted_replies:
+        body = _strip_quotes(body)
+    if not body:
+        body = '(No message body)'
+
+    # Blocked sender check (runs on the real sender once a T2 relay is unwrapped)
     blocked_patterns = list(BlockedSender.objects.values_list('pattern', flat=True))
     if any(fnmatch(from_email, p.lower()) for p in blocked_patterns):
         return 'error', f'Blocked sender: {from_email}', None
@@ -317,12 +363,6 @@ def _process_message(raw_msg_bytes, settings, verbosity):
     # Duplicate guard on Message-ID
     if message_id and InboundEmailLog.objects.filter(message_id=message_id).exclude(status='error').exists():
         return 'duplicate', f'Already processed message-id {message_id}', None
-
-    body = _get_body(msg)
-    if settings.strip_quoted_replies:
-        body = _strip_quotes(body)
-    if not body:
-        body = '(No message body)'
 
     # --- Threading: check subject for existing ticket number ---
     ticket_match = TICKET_RE.search(subject)
