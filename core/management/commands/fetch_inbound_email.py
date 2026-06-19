@@ -30,21 +30,6 @@ from django.utils import timezone
 from fnmatch import fnmatch
 
 # Free/consumer email providers where domain ≠ company.
-# Senders from these get their own per-person client record instead of being
-# grouped under the domain name (e.g. two Gmail users → two clients, not one).
-_FREE_EMAIL_DOMAINS = {
-    'gmail.com', 'googlemail.com',
-    'yahoo.com', 'yahoo.co.uk', 'yahoo.ca', 'yahoo.com.au', 'ymail.com',
-    'hotmail.com', 'hotmail.co.uk', 'hotmail.ca', 'hotmail.com.au',
-    'outlook.com', 'outlook.co.uk',
-    'live.com', 'live.co.uk', 'live.ca',
-    'msn.com',
-    'icloud.com', 'me.com', 'mac.com',
-    'aol.com',
-    'protonmail.com', 'proton.me',
-    'fastmail.com',
-}
-
 # T2 / Helpdesk Buttons posts every button ticket from a fixed no-reply relay
 # address; the real end user is carried in a forwarded-message header inside the
 # body. We unwrap that so the ticket attributes to the actual contact instead of
@@ -262,35 +247,33 @@ def _save_attachments(obj, msg):
 
 
 def _resolve_client_contact(from_email, from_name, settings):
-    """Return (client, contact) for the sender. Creates records if needed."""
+    """Return (client, contact) for the sender. Creates records if needed.
+
+    A returning sender (matched by contact email) routes to their existing
+    client. An unmatched sender is parked under the system "Unsorted / Unverified"
+    bucket for triage — we never auto-create a junk named client from a cold
+    email. An admin-configured ``inbound_default_client_name`` catch-all still
+    wins over the bucket if set."""
     # Returning sender — already in the system
     contact = Contact.objects.filter(email__iexact=from_email).select_related('client').first()
     if contact:
         return contact.client, contact
 
-    # Parse sender name parts now — needed for both client name and contact creation
+    # Parse sender name parts for the new contact record
     parts = from_name.strip().split() if from_name and from_name.strip() else []
     first = parts[0] if parts else ''
     last = ' '.join(parts[1:]) if len(parts) > 1 else ''
-
-    domain = from_email.split('@')[-1].lower() if '@' in from_email else from_email
-    local  = from_email.split('@')[0] if '@' in from_email else from_email
+    local = from_email.split('@')[0] if '@' in from_email else from_email
 
     if settings.inbound_default_client_name:
-        # Admin has configured a catch-all client for unknown senders
-        client_name = settings.inbound_default_client_name
-    elif domain in _FREE_EMAIL_DOMAINS:
-        # Consumer address — each sender gets their own client record.
-        # Use "First Last" if available, fall back to the local part of the address.
-        client_name = from_name.strip() if from_name and from_name.strip() else local
+        # Admin-configured catch-all wins over the Unsorted bucket
+        client, _ = Client.objects.get_or_create(
+            name=settings.inbound_default_client_name,
+            defaults={'email': '', 'is_active': True},
+        )
     else:
-        # Business domain — group everyone from the same domain under one client
-        client_name = domain
-
-    client, _ = Client.objects.get_or_create(
-        name=client_name,
-        defaults={'email': '', 'is_active': True},
-    )
+        # Unmatched sender → hold under the system triage bucket for onboarding
+        client = Client.get_unsorted()
 
     contact = Contact.objects.create(
         client=client,

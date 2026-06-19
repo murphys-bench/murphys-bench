@@ -40,7 +40,12 @@
 {% block content %}
 
     <!-- Tabs -->
-    {% if not needs_response_filter %}
+    {% if triage_filter %}
+    <div class="flex items-center justify-between mb-4 px-1">
+        <span class="text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md px-3 py-1.5">Unsorted / Unverified — onboard the client (Edit ticket) or reject</span>
+        <a href="{% url 'core:ticket_list' %}" class="text-sm text-gray-500 hover:text-gray-700">← Back to all tickets</a>
+    </div>
+    {% elif not needs_response_filter %}
     <div class="flex border-b border-gray-200 mb-4 bg-white rounded-t-lg shadow px-4">
         <a href="?tab=active{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}"
            class="px-4 py-3 text-sm font-medium border-b-2 -mb-px {% if current_tab == 'active' %}border-blue-600 text-blue-600{% else %}border-transparent text-gray-500 hover:text-gray-700{% endif %}">

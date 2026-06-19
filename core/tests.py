@@ -187,10 +187,11 @@ def test_reset_dry_run_changes_nothing(client_obj, admin_user):
 
     ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
     WorkOrder.objects.create(client=client_obj, ticket=ticket)
+    clients_before = Client.objects.count()
 
     call_command('reset_operational_data')  # no --confirm → dry run
 
-    assert Client.objects.count() == 1
+    assert Client.objects.count() == clients_before
     assert Ticket.objects.count() == 1
     assert WorkOrder.objects.count() == 1
 
@@ -736,6 +737,8 @@ def test_fresh_email_creates_new_ticket():
     assert ticket.source == 'email'
     assert ticket.contact is not None
     assert ticket.contact.email == 'wayne@davis.example'
+    # An unknown sender is parked in the Unsorted bucket for triage.
+    assert ticket.client.is_unsorted is True
 
 
 @pytest.mark.django_db
@@ -803,28 +806,84 @@ def test_returning_sender_reuses_existing_contact(client_obj):
 
 
 @pytest.mark.django_db
-def test_business_domain_groups_senders_free_email_is_per_person():
-    """Two senders at the same business domain land under one client; a consumer
-    (free-email) sender gets their own client record."""
+def test_unmatched_senders_all_land_in_one_unsorted_bucket():
+    """Unknown senders are parked under the single 'Unsorted/Unverified' bucket
+    for triage — never auto-created as junk named clients."""
     from core.management.commands.fetch_inbound_email import _process_message
     site = SiteSettings.get()
 
-    _process_message(_raw_new_email(
+    _, _, t1 = _process_message(_raw_new_email(
         from_email='alice@acmecorp.example', from_name='Alice A',
         message_id='<biz-1@acmecorp.example>'), site, verbosity=0)
-    _process_message(_raw_new_email(
-        from_email='bob@acmecorp.example', from_name='Bob B',
-        message_id='<biz-2@acmecorp.example>'), site, verbosity=0)
-    assert Client.objects.filter(name='acmecorp.example').count() == 1
-    biz = Client.objects.get(name='acmecorp.example')
-    assert biz.contacts.count() == 2, 'Same business domain groups under one client.'
-
-    _process_message(_raw_new_email(
+    _, _, t2 = _process_message(_raw_new_email(
         from_email='someone@gmail.com', from_name='Jane Doe',
         message_id='<free-1@gmail.com>'), site, verbosity=0)
-    assert not Client.objects.filter(name='gmail.com').exists(), \
-        'A free-email sender must NOT be grouped under the provider domain.'
-    assert Client.objects.filter(name='Jane Doe').exists()
+
+    assert t1.client.is_unsorted and t2.client.is_unsorted
+    assert t1.client_id == t2.client_id, 'There is exactly one Unsorted bucket.'
+    assert Client.objects.filter(is_unsorted=True).count() == 1
+    # No junk named clients from the senders' names/domains.
+    assert not Client.objects.filter(name__in=['acmecorp.example', 'gmail.com', 'Jane Doe']).exists()
+    # The real contacts are still recorded under the bucket for onboarding/reply.
+    assert t1.contact.email == 'alice@acmecorp.example'
+    assert t2.contact.email == 'someone@gmail.com'
+
+
+@pytest.mark.django_db
+def test_inbound_default_client_name_overrides_unsorted_bucket():
+    """An admin-configured catch-all client still wins over the Unsorted bucket."""
+    from core.management.commands.fetch_inbound_email import _process_message
+    site = SiteSettings.get()
+    site.inbound_default_client_name = 'Catch-All Co'
+    site.save(update_fields=['inbound_default_client_name'])
+
+    _, _, ticket = _process_message(_raw_new_email(), site, verbosity=0)
+
+    assert ticket.client.name == 'Catch-All Co'
+    assert ticket.client.is_unsorted is False
+
+
+@pytest.mark.django_db
+def test_get_unsorted_is_idempotent_and_unique():
+    # Migration 0054 seeds exactly one bucket; get_unsorted() reuses it.
+    a = Client.get_unsorted()
+    b = Client.get_unsorted()
+    assert a.id == b.id
+    assert Client.objects.filter(is_unsorted=True).count() == 1
+
+
+@pytest.mark.django_db
+def test_unsorted_bucket_cannot_be_deleted(client, admin_user):
+    bucket = Client.get_unsorted()
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:client_delete', args=[bucket.pk]),
+                       {'confirm_name': bucket.name})
+    assert Client.objects.filter(pk=bucket.pk).exists(), 'Triage bucket must survive a delete attempt.'
+
+
+@pytest.mark.django_db
+def test_dashboard_shows_triage_card_for_admin(client, admin_user):
+    bucket = Client.get_unsorted()
+    Ticket.objects.create(client=bucket, subject='unsorted', description='d',
+                          ticket_number='TKT-D-1', status='new')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:dashboard'))
+    assert resp.status_code == 200
+    assert 'Unsorted — needs triage' in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_triage_filter_lists_only_unsorted_tickets(client, client_obj, admin_user):
+    bucket = Client.get_unsorted()
+    Ticket.objects.create(client=bucket, subject='unsorted one', description='d',
+                          ticket_number='TKT-T-1', status='new')
+    Ticket.objects.create(client=client_obj, subject='normal one', description='d',
+                          ticket_number='TKT-T-2', status='new')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:ticket_list') + '?triage=1')
+    body = resp.content.decode()
+    assert 'unsorted one' in body
+    assert 'normal one' not in body
 
 
 @pytest.mark.django_db
@@ -899,9 +958,9 @@ def test_t2_email_maps_to_existing_contact_not_relay(client_obj):
 
 
 @pytest.mark.django_db
-def test_t2_email_unknown_sender_uses_normal_fallback():
-    """An unknown button-ticket sender falls through to MB's normal new-sender
-    handling on the REAL address (free-email -> per-person client), not the relay."""
+def test_t2_email_unknown_sender_lands_in_unsorted_bucket():
+    """An unknown button-ticket sender is parked in the Unsorted bucket under the
+    REAL forwarded address — never under the tier2tickets relay."""
     from core.management.commands.fetch_inbound_email import _process_message
     site = SiteSettings.get()
 
@@ -909,9 +968,8 @@ def test_t2_email_unknown_sender_uses_normal_fallback():
 
     assert status == 'new_ticket'
     assert ticket.contact.email == 'redacted@example.com'
+    assert ticket.client.is_unsorted is True
     assert not Client.objects.filter(name__icontains='tier2tickets').exists()
-    # gmail is a free-email domain -> the sender gets their own client
-    assert Client.objects.filter(name='Mike McCall').exists()
 
 
 @pytest.mark.django_db
