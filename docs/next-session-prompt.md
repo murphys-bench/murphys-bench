@@ -36,9 +36,29 @@ Three things shipped + deployed (full detail in memory `project_mb_session30`):
 remaining client contacts into MB so future T2 senders straight-match (until then they correctly
 land in the triage bucket).
 
-**Next item to pick up:** the **Invoice Ninja bridge** — the one approved post-stabilization
-feature. Needs the IN API audit FIRST (it moves money, so plan + review before building). Everything
-ahead of it on the stabilization list is now done. See "What's next" priority list below.
+**Next item to pick up: Phase A of the billing work — a priced line-item primitive** (NOT the IN
+push yet). Decided in a long technical-director discussion Jun 19 (full detail in memory
+`project_mb_pricing_architecture` + `project_in_integration`; both carry the rationale — don't
+re-litigate). The IN API audit is already DONE and validated against IN v5 (in `project_in_integration`).
+
+The decision in short:
+- MB captures NO pricing today (`WorkPerformed`/`QuickLaborItem` are description-only;
+  `WorkOrderItem.unit_price` nullable/unused; `Invoice.amount` is a lone manual total). That's the
+  one schema gap that's expensive-to-reverse-with-live-data, so it lands FIRST.
+- **Phase A (next session, self-contained, low-risk):** a GENERIC/attachable priced line-item model
+  (description, qty, unit_price, item_type labor/part — sharable with a future Quote, NOT hard-welded
+  to WorkOrder), optional default price on `QuickLaborItem` (buttons prefill), parts priced too,
+  computed WO total on WO detail + repair report. No new screens. Migration + tests (billing data →
+  tests required). Prove it on real WOs before wiring money out.
+- **Phase B (later session):** the **Invoice Ninja push** built on the real priced lines — manual
+  "Send to IN" button, find-or-create client (type-aware name mapping, store IN client_id), create
+  invoice as a DRAFT (IN owns assembly + mints the number; stamp WO# into po_number), duplicate guard
+  on the returned IN id, editable stored ref, create-only/no-auto-email. See the push-gaps note in
+  `project_in_integration` (a WO may be only part of a combined invoice — handled by draft-push, not
+  by making MB model combined invoices).
+- **Deferred (documented, not now):** the Quote/Project layer (priced lines + approval gate + WO
+  lifecycle on the same primitive). Additive net-new tables → no live-data clock → wait until real
+  project workflow shapes it. Tax is a non-issue (Oregon, no sales tax).
 
 **Login / logo branding — ✅ LIVE on prod + demo (migration 0052).** `login_logo` field + Settings
 upload; sidebar ratio-preserving fit (232/160, hide-collapsed) replacing the 90px crush; login logo
@@ -145,10 +165,15 @@ match prod (both boxes now `PasswordAuthentication no`; verified). Claude connec
 
 ## What's next (suggested priority order):
 
-1. **Schedule inbound email + SLA checks** (systemd timers) — the app's inbound pipeline is currently dormant. Highest-value fix.
-2. **Broaden the test suite** beyond the spine — convert/lifecycle, email routing, queue filters, permissions.
-3. **Invoice Ninja bridge** (the one approved post-stabilization feature) — only after tests are broader, since it moves money. Needs the API audit first.
-4. Demoted (do not build without explicit override): departments/teams/routing, customer portal, REST API, extra custom-field types, async queue, OAuth2, extra storage backends.
+1. **Phase A — priced line-item primitive** (next). Generic/attachable priced lines + WO total +
+   tests. The expensive-to-reverse schema piece; lands before the push. See
+   `project_mb_pricing_architecture`.
+2. **Phase B — Invoice Ninja push** built on the priced lines (draft-push, IN owns assembly). API
+   audit already done; see `project_in_integration`.
+3. **Deferred (documented, not now):** Quote/Project layer (approval-gated, on the same line-item
+   primitive) — wait for real project workflow.
+4. Demoted (do not build without explicit override): departments/teams/routing, customer portal,
+   REST API, extra custom-field types, async queue, OAuth2, extra storage backends.
 
 ---
 

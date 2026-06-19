@@ -1,11 +1,35 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 11, 2026 (session 27 — stabilization)
+**Last Updated**: June 19, 2026 (session 30 + billing-architecture decision)
 **Current Phase**: Phase 1 — SCS Internal — **STABILIZATION** (see "How We Work" in CLAUDE.md)
 
 > ⚠ We are in a stabilization phase, not a feature phase. New features are paused until
 > the test suite is broader and the spine is solid. Default response to a feature request
 > is to check it against the stabilization rule in CLAUDE.md first.
+
+---
+
+## Billing work (decided Jun 19 2026 — see memory `project_mb_pricing_architecture` + `project_in_integration`)
+
+The one approved post-stabilization feature (Invoice Ninja bridge), staged into two phases
+after a long technical-director discussion. MB captures NO pricing today — that schema gap is
+the expensive-to-reverse-with-live-data piece, so it lands FIRST.
+
+- [ ] **Phase A — priced line-item primitive** (next, self-contained, low-risk). GENERIC/attachable
+      priced line-item model (description, qty, unit_price, item_type labor/part — sharable with a
+      future Quote, NOT hard-welded to WorkOrder). Optional default price on `QuickLaborItem`
+      (buttons prefill). Parts priced too. Computed WO total on WO detail + repair report. No new
+      screens. Migration + tests (billing data → tests required). Prove on real WOs first.
+- [ ] **Phase B — Invoice Ninja push** built on the priced lines. IN v5 API audit already done.
+      Manual "Send to IN" button; find-or-create client (type-aware name mapping, store IN client_id);
+      create invoice as a **draft** (IN owns assembly + mints number; stamp WO# → po_number);
+      duplicate guard on returned IN id; editable stored ref; create-only / no auto-email. See the
+      push-gaps note in `project_in_integration`.
+- [ ] **Deferred (documented, NOT now):** Quote/Project layer — priced lines + approval gate + WO
+      lifecycle on the SAME primitive. Additive net-new tables → no live-data clock → wait until
+      real project workflow shapes the approval state machine.
+
+Tax: non-issue (Oregon, no sales tax) — MB sends pre-tax line totals, IN handles the receipt.
 
 ---
 
