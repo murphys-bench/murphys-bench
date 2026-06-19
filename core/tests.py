@@ -701,6 +701,147 @@ def test_reply_to_closed_ticket_reopens_and_threads(client_obj):
     assert ticket.needs_response is True
 
 
+# ── Inbound: the everyday paths — new ticket, reply threading, dedup, routing ─
+# These cover the common cases the converted/closed regression tests above don't:
+# a fresh email becomes a ticket, a reply to a live ticket threads, the same
+# message is only processed once, and senders resolve to the right client/contact.
+
+def _raw_new_email(subject='My computer won\'t boot',
+                   body='Please help, it just beeps.',
+                   from_email='wayne@davis.example',
+                   from_name='Wayne Davis',
+                   message_id='<fresh-001@davis.example>'):
+    import email.message
+    msg = email.message.EmailMessage()
+    msg['Subject'] = subject
+    msg['From'] = f'{from_name} <{from_email}>'
+    msg['To'] = 'support@example.com'
+    if message_id:
+        msg['Message-ID'] = message_id
+    msg.set_content(body)
+    return msg.as_bytes()
+
+
+@pytest.mark.django_db
+def test_fresh_email_creates_new_ticket():
+    from core.management.commands.fetch_inbound_email import _process_message
+    site = SiteSettings.get()
+    before = Ticket.objects.count()
+
+    status, detail, ticket = _process_message(_raw_new_email(), site, verbosity=0)
+
+    assert status == 'new_ticket', f'Expected new_ticket, got {status}: {detail}'
+    assert Ticket.objects.count() == before + 1
+    assert ticket.status == 'new'
+    assert ticket.source == 'email'
+    assert ticket.contact is not None
+    assert ticket.contact.email == 'wayne@davis.example'
+
+
+@pytest.mark.django_db
+def test_reply_to_open_ticket_threads_and_keeps_open(client_obj):
+    """The everyday case: a reply to a live (open) ticket threads in, flags
+    needs_response, and does NOT change the status away from open."""
+    from core.management.commands.fetch_inbound_email import _process_message
+    site = SiteSettings.get()
+    ticket = Ticket.objects.create(
+        client=client_obj, subject='S', description='D',
+        ticket_number='TKT-20260610-0050', status='open',
+    )
+    before = Ticket.objects.count()
+
+    status, detail, _ = _process_message(
+        _raw_reply_email('TKT-20260610-0050'), site, verbosity=0)
+
+    assert status == 'reply', f'Expected reply, got {status}: {detail}'
+    assert Ticket.objects.count() == before
+    ticket.refresh_from_db()
+    assert ticket.replies.count() == 1
+    assert ticket.status == 'open'
+    assert ticket.needs_response is True
+
+
+@pytest.mark.django_db
+def test_duplicate_message_id_is_skipped():
+    """The orphan-multiplication guard: a Message-ID already recorded in
+    InboundEmailLog (non-error) is never processed again. This is what stops a
+    'leave on server' poll from re-creating the same ticket on every cycle."""
+    from core.management.commands.fetch_inbound_email import _process_message
+    from core.models import InboundEmailLog
+    site = SiteSettings.get()
+    InboundEmailLog.objects.create(
+        message_id='<fresh-001@davis.example>', status='new_ticket',
+        from_email='wayne@davis.example', subject='x',
+    )
+    before = Ticket.objects.count()
+
+    status, detail, ticket = _process_message(_raw_new_email(), site, verbosity=0)
+
+    assert status == 'duplicate', f'Expected duplicate, got {status}: {detail}'
+    assert ticket is None
+    assert Ticket.objects.count() == before, 'A duplicate must not create a ticket.'
+
+
+@pytest.mark.django_db
+def test_returning_sender_reuses_existing_contact(client_obj):
+    """A known sender (matched by email) routes to their existing client/contact
+    rather than spawning a duplicate client."""
+    from core.management.commands.fetch_inbound_email import _process_message
+    contact = Contact.objects.create(
+        client=client_obj, first_name='Wayne', last_name='Davis',
+        email='wayne@davis.example', is_primary=True,
+    )
+    site = SiteSettings.get()
+    clients_before = Client.objects.count()
+
+    status, _, ticket = _process_message(_raw_new_email(), site, verbosity=0)
+
+    assert status == 'new_ticket'
+    assert Client.objects.count() == clients_before, 'Known sender must not create a new client.'
+    assert ticket.contact_id == contact.id
+    assert ticket.client_id == client_obj.id
+
+
+@pytest.mark.django_db
+def test_business_domain_groups_senders_free_email_is_per_person():
+    """Two senders at the same business domain land under one client; a consumer
+    (free-email) sender gets their own client record."""
+    from core.management.commands.fetch_inbound_email import _process_message
+    site = SiteSettings.get()
+
+    _process_message(_raw_new_email(
+        from_email='alice@acmecorp.example', from_name='Alice A',
+        message_id='<biz-1@acmecorp.example>'), site, verbosity=0)
+    _process_message(_raw_new_email(
+        from_email='bob@acmecorp.example', from_name='Bob B',
+        message_id='<biz-2@acmecorp.example>'), site, verbosity=0)
+    assert Client.objects.filter(name='acmecorp.example').count() == 1
+    biz = Client.objects.get(name='acmecorp.example')
+    assert biz.contacts.count() == 2, 'Same business domain groups under one client.'
+
+    _process_message(_raw_new_email(
+        from_email='someone@gmail.com', from_name='Jane Doe',
+        message_id='<free-1@gmail.com>'), site, verbosity=0)
+    assert not Client.objects.filter(name='gmail.com').exists(), \
+        'A free-email sender must NOT be grouped under the provider domain.'
+    assert Client.objects.filter(name='Jane Doe').exists()
+
+
+@pytest.mark.django_db
+def test_blocked_sender_creates_no_ticket():
+    from core.management.commands.fetch_inbound_email import _process_message
+    from core.models import BlockedSender
+    BlockedSender.objects.create(pattern='*@davis.example')
+    site = SiteSettings.get()
+    before = Ticket.objects.count()
+
+    status, detail, ticket = _process_message(_raw_new_email(), site, verbosity=0)
+
+    assert status == 'error', f'Expected error (blocked), got {status}: {detail}'
+    assert ticket is None
+    assert Ticket.objects.count() == before
+
+
 # ── HTML-only inbound email (RMM alerts) renders as readable text, not markup ─
 
 @pytest.mark.django_db
