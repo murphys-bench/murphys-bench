@@ -2655,6 +2655,31 @@ class AdminMFAResetView(LoginRequiredMixin, View):
         return redirect('core:user_list')
 
 
+class UserDeleteView(LoginRequiredMixin, View):
+    """Admin-only: permanently delete a user. Guards against removing yourself or
+    the last superuser. Operational records (tickets/WOs/line items they touched)
+    survive — those FKs are SET_NULL, so history is kept, just unattributed."""
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+    def post(self, request, pk):
+        target = get_object_or_404(User, pk=pk)
+        if target.pk == request.user.pk:
+            messages.error(request, 'You cannot delete your own account.')
+            return redirect('core:user_list')
+        if target.is_superuser and User.objects.filter(is_superuser=True).count() <= 1:
+            messages.error(request, 'Cannot delete the only superuser account.')
+            return redirect('core:user_list')
+        label = target.get_full_name() or target.username
+        target.delete()
+        messages.success(request, f'User "{label}" permanently deleted.')
+        return redirect('core:user_list')
+
+
 # ---------------------------------------------------------------------------
 # User CRUD (admin only)
 # ---------------------------------------------------------------------------

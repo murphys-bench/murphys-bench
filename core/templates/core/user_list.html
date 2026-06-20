@@ -90,6 +90,13 @@
                                     <button type="submit" class="text-xs text-red-500 hover:text-red-700 hover:underline">Reset MFA</button>
                                 </form>
                             {% endif %}
+                            {% if row.user != request.user %}
+                                <form method="post" action="{% url 'core:user_delete' row.user.pk %}"
+                                      onsubmit="return confirm('Permanently delete {{ row.user.get_full_name|default:row.user.username }}? This cannot be undone.')">
+                                    {% csrf_token %}
+                                    <button type="submit" class="text-xs text-red-500 hover:text-red-700 hover:underline">Delete</button>
+                                </form>
+                            {% endif %}
                         </div>
                     </td>
                 </tr>

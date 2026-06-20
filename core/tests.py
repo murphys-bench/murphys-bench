@@ -1664,3 +1664,39 @@ def test_workorder_delete_denied_for_non_admin(client, client_obj):
     resp = client.post(reverse('core:work_order_delete', args=[wo.pk]))
     assert resp.status_code == 403
     assert WorkOrder.objects.filter(pk=wo.pk).exists()
+
+
+# ── Admin user delete (guards: not self, not last superuser) ────────────────
+
+@pytest.mark.django_db
+def test_user_delete_removes_test_account(client, admin_user):
+    victim = User.objects.create_user(username='testacct', password='x', is_staff=False)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:user_delete', args=[victim.pk]))
+    assert resp.status_code == 302
+    assert not User.objects.filter(pk=victim.pk).exists()
+
+
+@pytest.mark.django_db
+def test_user_delete_blocks_self_and_last_superuser(client, admin_user):
+    # admin_user is the only superuser; cannot delete self
+    client.force_login(admin_user)
+    client.post(reverse('core:user_delete', args=[admin_user.pk]))
+    assert User.objects.filter(pk=admin_user.pk).exists()
+    # A second superuser deleting the other is fine, but never the last one
+    su2 = User.objects.create_user(username='su2', password='x', is_staff=True, is_superuser=True)
+    client.force_login(su2)
+    client.post(reverse('core:user_delete', args=[admin_user.pk]))   # now 1 left
+    assert User.objects.filter(is_superuser=True).count() == 1
+    resp = client.post(reverse('core:user_delete', args=[su2.pk]))    # deleting self anyway blocked
+    assert User.objects.filter(pk=su2.pk).exists()
+
+
+@pytest.mark.django_db
+def test_user_delete_denied_for_non_admin(client):
+    tech = User.objects.create_user(username='udel-tech', password='x', is_staff=False)
+    victim = User.objects.create_user(username='udel-victim', password='x', is_staff=False)
+    client.force_login(tech)
+    resp = client.post(reverse('core:user_delete', args=[victim.pk]))
+    assert resp.status_code in (403, 302)
+    assert User.objects.filter(pk=victim.pk).exists()
