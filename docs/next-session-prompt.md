@@ -14,6 +14,30 @@ go/no-go only before destructive or production-affecting steps.
 
 ## Top of the queue for next session:
 
+**SESSION 33 (Jun 20) — Phase A billing primitive shipped to prod. Suite 84→88. Commit `0534b30`.**
+New generic `LineItem` (GenericFK — WorkOrder now, future Quote later; kind labor/part, qty,
+unit_price, computed line_total) is now THE billable-work record. Unified `WorkPerformed` into it
+(migrated all rows → labor LineItems, rewired the log/edit/delete UI, deleted the model).
+`QuickLaborItem.default_price` prefills buttons; WO total on detail + repair report; custom entry
+does labor/part with price. MB captures+totals, IN stays billing authority. Migrations 0058/0059/0060.
+Deployed to prod (3 rows migrated cleanly). Detail in memory `project_mb_session33_phase_a`.
+- **Mike to verify in-browser:** WO Work Performed section (priced rows + Total), custom Part w/ price,
+  edit a line's price, repair report prints with total, Settings → Quick Labor Default Price column.
+
+### ▶ NEXT REAL ITEM: Phase B — Invoice Ninja push (builds on Phase A's priced lines)
+Manual "Send to IN" button, find-or-create client (type-aware name mapping, store IN client_id),
+create invoice as a **draft** (IN mints the number, owns assembly + payment; stamp WO# → po_number),
+duplicate guard on returned IN id, editable stored ref, create-only/no auto-email. IN v5 API audit
+already done. Full detail + push-gaps in memory `project_in_integration`. Plan before building.
+
+### ⚠ ALSO TRACKED: Real DB backup (current pg_dump backup is BROKEN — empty dumps)
+`scripts/backup_db.sh` + timer produce empty dumps (~394 bytes) while reporting "OK" — it was tabled
+pending location/retention and never worked. **DB recovery currently relies on PBS whole-VM backups.**
+Mike wants a real, versatile backup (off-box location options, retention, verify-on-write, fail loud).
+Details + decision list in TODO.md "Real DB backup". CLAUDE.md item 7 corrected to stop claiming it works.
+
+---
+
 ### ✅ MB2 demo attachment security — DONE (Jun 20, session 32)
 Both prod AND the MB2 demo (`10.58.35.223`) now have the attachment fix. MB2 pulled to current, migrations
 0054–0057 applied, restarted, verified: localhost `/media/attachments/...` → 404, app → 302. MB2 had 0

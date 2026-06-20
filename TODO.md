@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 20, 2026 (session 32 — attachment security review acted on; prod + MB2 demo both fixed; suite →84)
+**Last Updated**: June 20, 2026 (session 33 — Phase A billing primitive (LineItem) shipped to prod; pg_dump backup found broken/empty → real backup now a tracked TODO; suite →88)
 **Current Phase**: Phase 1 — SCS Internal — **STABILIZATION** (see "How We Work" in CLAUDE.md)
 
 > ⚠ We are in a stabilization phase, not a feature phase. New features are paused until
@@ -15,11 +15,11 @@ The one approved post-stabilization feature (Invoice Ninja bridge), staged into 
 after a long technical-director discussion. MB captures NO pricing today — that schema gap is
 the expensive-to-reverse-with-live-data piece, so it lands FIRST.
 
-- [ ] **Phase A — priced line-item primitive** (next, self-contained, low-risk). GENERIC/attachable
-      priced line-item model (description, qty, unit_price, item_type labor/part — sharable with a
-      future Quote, NOT hard-welded to WorkOrder). Optional default price on `QuickLaborItem`
-      (buttons prefill). Parts priced too. Computed WO total on WO detail + repair report. No new
-      screens. Migration + tests (billing data → tests required). Prove on real WOs first.
+- [x] **Phase A — priced line-item primitive** ✅ DONE (session 33, Jun 20, live on prod).
+      New generic `LineItem` (GenericFK, kind labor/part, qty, unit_price, computed line_total),
+      `QuickLaborItem.default_price` prefill, WO total on detail + repair report. Unified
+      `WorkPerformed` into LineItem (migrated + deleted). Migrations 0058/0059/0060, suite →88.
+      Mike to eyeball the UI in-browser. Full detail in memory `project_mb_session33_phase_a`.
 - [ ] **Phase B — Invoice Ninja push** built on the priced lines. IN v5 API audit already done.
       Manual "Send to IN" button; find-or-create client (type-aware name mapping, store IN client_id);
       create invoice as a **draft** (IN owns assembly + mints number; stamp WO# → po_number);
@@ -30,6 +30,26 @@ the expensive-to-reverse-with-live-data piece, so it lands FIRST.
       real project workflow shapes the approval state machine.
 
 Tax: non-issue (Oregon, no sales tax) — MB sends pre-tax line totals, IN handles the receipt.
+
+---
+
+## Real DB backup (tracked — pg_dump backup is currently BROKEN)
+
+> ⚠ Discovered Jun 20 2026 (session 33): `scripts/backup_db.sh` + the systemd timer produce
+> **empty dumps** (~394 bytes, no data) while reporting "backup OK". It was tabled pending
+> location/retention decisions and never actually worked. **DB recovery currently relies on PBS
+> whole-VM nightly backups.** CLAUDE.md item 7 corrected to stop claiming it works.
+
+- [ ] **Build a real, versatile DB backup** (Mike: "must be real, with options… versatile enough
+      to be useful"). Decisions to make when we get there:
+      - **Diagnose** why the current dump is empty (likely the `.env` DB_NAME/DB_USER the script
+        reads doesn't match the app's actual connection, or it's dumping an empty DB).
+      - **Location** (off-box — local-only is near-useless since PBS already covers VM-death):
+        NAS, the PBS host, or cloud (B2/S3 — adds a credential to manage). Make it configurable.
+      - **Retention**: simple N-day vs grandfather-father-son (daily/weekly/monthly).
+      - **Verify-on-write**: fail loud if a dump is empty/short (the current silent "OK" is the trap).
+      - Restore doc: dump holds *encrypted* ciphertext — a working restore needs dump +
+        `FIELD_ENCRYPTION_KEY` (Bitwarden).
 
 ---
 

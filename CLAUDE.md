@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 20, 2026 (Session 32 — attachment security review acted on: attachments now stored OUTSIDE the web root (`PRIVATE_MEDIA_ROOT=BASE_DIR/protected`) so nginx's /media/ alias can't serve them — the authenticated download view is the only path; download view now authorizes per-object (resolves owning Ticket/TicketReply/WorkOrder/WorkOrderNote + applies visibility scoping, closing an IDOR); inbound email attachments now enforce the blocked-extension list + size cap (untrusted path previously enforced neither). Migration 0057 (state-only), conftest isolates media roots. Deployed to PROD + verified: old /media/attachments URL → 404, auth view → login. Suite 80→84. PROD + MB2 demo both fixed+verified (demo also sits behind Cloudflare Access). // Session 31 — device/WO usability: ticket device dropdown now scopes to the selected client (form queryset + HTMX OOB cascade); Device gained free-text CPU/RAM/storage; WorkOrder snapshots those specs at creation as an "as-serviced" record and syncs edits back to the device master (migrations 0055/0056); device-detail back-link now returns to the device's client instead of the dead-end device list. All live on prod. Suite 71→80. // Prior: Billing-architecture decision — the Invoice Ninja bridge is staged into a priced line-item primitive FIRST (Phase A, generic/attachable line items + WO total + tests — the expensive-to-reverse-with-live-data piece), THEN the IN push (Phase B, draft-push so IN owns invoice assembly). Quote/Project approval layer deferred (additive, no live-data clock). No tax (Oregon). Full rationale in memory `project_mb_pricing_architecture` + `project_in_integration` and in TODO.md "Billing work". // Session 30 — T2/Helpdesk Buttons moved off OSTicket API to T2's Email Connector; MB unwraps the no-reply relay `email-connector@tier2tickets.com` to the real contact via forwarded `From:`; unmatched inbound now parks in an "Unsorted/Unverified" triage bucket (migration 0054, `Client.is_unsorted`) instead of auto-creating junk clients, with an admin dashboard card + `/tickets/?triage=1`. Inbound fully live on the real support inbox. Migrations through 0054; test suite 71 passing. Prod: Claude restarts it directly — NOPASSWD for `systemctl restart murphys-bench`.)
+**Last Updated**: June 20, 2026 (Session 33 — Phase A billing primitive shipped: new generic `LineItem` model (GenericFK — WorkOrder now, future Quote later; kind labor/part, qty, unit_price, computed line_total) is now THE billable-work record. Unified `WorkPerformed` INTO it (migrated all rows → labor LineItems, rewired the log/edit/delete UI, deleted WorkPerformed). `QuickLaborItem.default_price` prefills the buttons; WO total shows on detail + repair report; custom entry does labor/part w/ price. MB captures+totals prices, Invoice Ninja stays the billing authority (sets up Phase B push). Migrations 0058/0059/0060. Deployed to PROD (3 WorkPerformed rows migrated cleanly) + verified data/service; Mike to eyeball the UI in-browser. Suite 84→88. ⚠ ALSO corrected a false doc claim: the pg_dump backup never worked (empty dumps) — PBS whole-VM backup is the real safety net; real DB backup tracked as a TODO. // Session 32 — attachment security review acted on: attachments now stored OUTSIDE the web root (`PRIVATE_MEDIA_ROOT=BASE_DIR/protected`) so nginx's /media/ alias can't serve them — the authenticated download view is the only path; download view now authorizes per-object (resolves owning Ticket/TicketReply/WorkOrder/WorkOrderNote + applies visibility scoping, closing an IDOR); inbound email attachments now enforce the blocked-extension list + size cap (untrusted path previously enforced neither). Migration 0057 (state-only), conftest isolates media roots. Deployed to PROD + verified: old /media/attachments URL → 404, auth view → login. Suite 80→84. PROD + MB2 demo both fixed+verified (demo also sits behind Cloudflare Access). // Session 31 — device/WO usability: ticket device dropdown now scopes to the selected client (form queryset + HTMX OOB cascade); Device gained free-text CPU/RAM/storage; WorkOrder snapshots those specs at creation as an "as-serviced" record and syncs edits back to the device master (migrations 0055/0056); device-detail back-link now returns to the device's client instead of the dead-end device list. All live on prod. Suite 71→80. // Prior: Billing-architecture decision — the Invoice Ninja bridge is staged into a priced line-item primitive FIRST (Phase A, generic/attachable line items + WO total + tests — the expensive-to-reverse-with-live-data piece), THEN the IN push (Phase B, draft-push so IN owns invoice assembly). Quote/Project approval layer deferred (additive, no live-data clock). No tax (Oregon). Full rationale in memory `project_mb_pricing_architecture` + `project_in_integration` and in TODO.md "Billing work". // Session 30 — T2/Helpdesk Buttons moved off OSTicket API to T2's Email Connector; MB unwraps the no-reply relay `email-connector@tier2tickets.com` to the real contact via forwarded `From:`; unmatched inbound now parks in an "Unsorted/Unverified" triage bucket (migration 0054, `Client.is_unsorted`) instead of auto-creating junk clients, with an admin dashboard card + `/tickets/?triage=1`. Inbound fully live on the real support inbox. Migrations through 0054; test suite 71 passing. Prod: Claude restarts it directly — NOPASSWD for `systemctl restart murphys-bench`.)
 **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench`
 **App path on server**: `/opt/murphys-bench/`
 
@@ -79,19 +79,25 @@ Run with `venv/bin/python -m pytest`. The "tests for anything touching data" rul
    `SECURE_CONTENT_TYPE_NOSNIFF`; `SECURE_SSL_REDIRECT` + HSTS are opt-in via `.env`
    (HSTS deliberately left off until HTTPS is confirmed end-to-end — it's hard to undo).
    Prod verified already has DEBUG=False + real keys, so the guard passes there.
-7. ✅ **DONE (session 27):** nightly `pg_dump` backup. Versioned script at
-   `scripts/backup_db.sh` (gzip, 14-day rotation, writes to `/opt/murphys-bench/backups/`,
-   gitignored). Test-run on the VM produces a valid dump. **This VM has no cron**, so
-   scheduling uses a systemd timer: `deploy/murphys-bench-backup.{service,timer}` (02:15
-   nightly, `Persistent=true`). **Installed + active on the VM** (verified). Complements the
-   Proxmox VM snapshots. Reminder: the dump holds *encrypted* ciphertext, not the
-   `FIELD_ENCRYPTION_KEY` — a restore needs dump + key (key in Bitwarden).
+7. ⚠️ **NOT DONE — the pg_dump backup does NOT work (corrected Jun 20, session 33).**
+   `scripts/backup_db.sh` + `deploy/murphys-bench-backup.{service,timer}` exist and the timer
+   runs, but **the dumps are EMPTY** (header/footer only, ~394 bytes, zero tables/data) while the
+   script reports "backup OK" — a silent false positive. It was effectively *tabled*, pending
+   decisions on **backup location and retention**, and never actually produced data. Do NOT trust
+   it. **The real safety net is PBS (Proxmox Backup Server) whole-VM nightly backups**, which is
+   what DB recovery currently relies on. Root cause of the empty dump not yet diagnosed (likely the
+   `.env` DB_NAME/DB_USER the script reads doesn't match the app's actual connection, or it dumps an
+   empty DB). **Tracked as a real follow-up** (TODO "Real DB backup") — Mike wants it built properly
+   and *versatile*: off-box location (NAS / PBS host / cloud), sensible retention (N-day or GFS),
+   portable + granular restore. Note for whoever builds it: the dump holds *encrypted* ciphertext,
+   not the `FIELD_ENCRYPTION_KEY` — a restore needs dump + key (key in Bitwarden).
 
    ✅ **Related gap CLOSED + VERIFIED (session 27):** `fetch_inbound_email` (every 2 min)
    and `check_sla_overdue` (every 15 min) systemd timers (`deploy/`) are **installed and
    active** on the VM. Confirmed working end-to-end: the fetch service ran and connected to
-   IMAP `mail.shamrockcomputerservices.com` (status 0/SUCCESS). All three MB timers
-   (backup, fetch-email, sla-check) are `active`/`enabled`.
+   IMAP `mail.shamrockcomputerservices.com` (status 0/SUCCESS). The fetch-email and sla-check
+   timers are `active`/`enabled` and working. (The backup timer is also active but its dumps are
+   EMPTY — see item 7 above; don't count it as a working backup.)
    ⚠ **One action left for Mike:** the inbound mailbox is `testing@…` — point it at the
    real support inbox in Settings → Inbound Email so customer emails become tickets.
 
@@ -237,6 +243,15 @@ multiplying one wrong ticket into several (TKT-00008/00009).
   confident (the one open action carried over from session 27).
 - The two orphan tickets were reconciled by hand: Wayne's reply was appended to
   TKT-20260610-0001 with its original timestamp, then TKT-00008/00009 were deleted.
+
+### Phase A — priced line-item primitive (session 33, Jun 20)
+First step of the billing roadmap (memory `project_mb_pricing_architecture`). The schema gap that's expensive-to-reverse-with-live-data, so it lands before the Invoice Ninja push. Deployed to prod; suite 84→88.
+- **`LineItem`** (new, generic/attachable via GenericFK so a future Quote reuses it; `db_table='line_items'`): `kind` labor/part, `description`, `quantity`, `unit_price` (nullable = unpriced), computed `line_total` (None when unpriced), `source_labor_item` FK→QuickLaborItem (for the report's print-description fallback), `logged_by/at`. `WorkOrder.line_items` GenericRelation (cascades on WO delete) + `line_items_total` property (sums priced lines, ignores unpriced).
+- **Unify (Mike's call):** `WorkPerformed` was migrated INTO `LineItem` and **deleted**. Migration 0059 copies every WorkPerformed → labor LineItem (price blank — price-less history isn't backfilled), 0060 drops the table. The log/custom/edit/delete endpoints + the Work Performed UI now operate on LineItem. View class names + URL names kept (`work_performed_*`) to avoid churn — they now act on LineItem.
+- **`QuickLaborItem.default_price`** (optional) prefills a labor line's price when the button is clicked. New Default Price column in Settings → Quick Labor.
+- **UI:** WO detail Work Performed section shows labor + parts with per-line qty/price + a running Total; custom-entry form gained kind (labor/part) + qty + price; repair report prints priced lines + total. **No "estimate" label** — Mike didn't want it (he's unconcerned about the UI implying authority; the boundary is enforced by Phase B pushing a *draft* to IN).
+- **Authority boundary intact:** MB captures + totals prices; Invoice Ninja stays the system of record. Phase B (the IN draft-push) builds on these priced lines. See `project_in_integration`.
+- **Migration gotcha (fixed):** the data migration uses `ContentType.objects.get_or_create` + an early-return on empty DB, because ContentTypes aren't populated mid-migration on a fresh build (test DB).
 
 ### Attachment security review — acted on (session 32, Jun 20)
 Audited inbound/served attachment handling against a 4-point checklist; found and fixed real issues. All live on prod + verified; suite 80→84. Memory `project_mb_attachment_security_review` + `project_mb_session32`.
