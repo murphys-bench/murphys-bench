@@ -14,6 +14,27 @@ go/no-go only before destructive or production-affecting steps.
 
 ## Top of the queue for next session:
 
+**SESSION 34 (Jun 20) — Phase B (Invoice Ninja push) shipped + live-verified; WO delete added. Suite 88→96.**
+The billing loop is closed. `core/invoice_ninja.py` (requests, IN v5). "Send to Invoice Ninja" on a WO →
+DRAFT invoice from priced lines, IN assigns the number, WO# → po_number; type-aware find-or-create client
+(stores `Client.invoice_ninja_id`); WO-scoped duplicate guard; editable ref; fail-loud. Disabled by default;
+Mike configured the live token (Cloud Enterprise, `https://invoicing.co`) and ran a real push — works.
+Also added **WO hard-delete** (admin only — there was none; cleans attachment files, reopens converted ticket,
+cascades the rest). Migration 0061. Commits `03badde` (Phase B) + `a35bf97` (WO delete). Detail in memory
+`project_mb_session34_phase_b`.
+
+### What's left on the billing thread (small, optional)
+- **Square-as-IN-gateway** (zero-code, config in IN — NOT an MB task): lets IN record payments + send hosted
+  pay-now links. Confirm Square exposes API creds. See `project_in_integration`.
+- Optional MB later: on-demand "check payment status" button; email-on-push toggle.
+- **Quote/Project approval layer** still deferred (additive, no live-data clock — wait for real project workflow).
+
+### ⚠ STILL TRACKED: Real DB backup (current pg_dump backup is BROKEN — empty dumps)
+DB recovery relies on PBS whole-VM backups. Mike wants a real, versatile backup (off-box location options,
+retention, verify-on-write/fail-loud). Decision list in TODO.md "Real DB backup". See memory `project_mb_backup_broken`.
+
+---
+
 **SESSION 33 (Jun 20) — Phase A billing primitive shipped to prod. Suite 84→88. Commit `0534b30`.**
 New generic `LineItem` (GenericFK — WorkOrder now, future Quote later; kind labor/part, qty,
 unit_price, computed line_total) is now THE billable-work record. Unified `WorkPerformed` into it

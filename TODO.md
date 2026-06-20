@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 20, 2026 (session 33 — Phase A billing primitive (LineItem) shipped to prod; pg_dump backup found broken/empty → real backup now a tracked TODO; suite →88)
+**Last Updated**: June 20, 2026 (session 34 — Phase B Invoice Ninja draft push shipped + live-verified; WO hard-delete added; suite →96)
 **Current Phase**: Phase 1 — SCS Internal — **STABILIZATION** (see "How We Work" in CLAUDE.md)
 
 > ⚠ We are in a stabilization phase, not a feature phase. New features are paused until
@@ -20,11 +20,15 @@ the expensive-to-reverse-with-live-data piece, so it lands FIRST.
       `QuickLaborItem.default_price` prefill, WO total on detail + repair report. Unified
       `WorkPerformed` into LineItem (migrated + deleted). Migrations 0058/0059/0060, suite →88.
       Browser-verified by Mike. Full detail in memory `project_mb_session33_phase_a`.
-- [ ] **Phase B — Invoice Ninja push** built on the priced lines. IN v5 API audit already done.
-      Manual "Send to IN" button; find-or-create client (type-aware name mapping, store IN client_id);
-      create invoice as a **draft** (IN owns assembly + mints number; stamp WO# → po_number);
-      duplicate guard on returned IN id; editable stored ref; create-only / no auto-email. See the
-      push-gaps note in `project_in_integration`.
+- [x] **Phase B — Invoice Ninja push** ✅ DONE + live-verified (session 34, Jun 20). Manual
+      "Send to Invoice Ninja" on a WO → draft invoice from priced lines, IN assigns number, WO# →
+      po_number; type-aware find-or-create client (stores IN client_id); WO-scoped duplicate guard;
+      editable ref; create-only/no auto-email; fail-loud. `core/invoice_ninja.py`, migration 0061,
+      suite →96. Detail in memory `project_mb_session34_phase_b`.
+      - [ ] **Companion (zero-code, do anytime):** configure **Square as a payment gateway inside IN**
+            so IN records payments + can send hosted pay-now links. Not an MB task — config in IN.
+            (Confirm Square account exposes API creds.) See `project_in_integration`.
+      - [ ] Optional later: on-demand "check payment status" button; email-on-push toggle.
 - [ ] **Deferred (documented, NOT now):** Quote/Project layer — priced lines + approval gate + WO
       lifecycle on the SAME primitive. Additive net-new tables → no live-data clock → wait until
       real project workflow shapes the approval state machine.
