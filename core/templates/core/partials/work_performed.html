@@ -1,6 +1,6 @@
 {% comment %}
-HTMX partial — rendered by WorkPerformed* views.
-Shows logged entries as editable rows.
+HTMX partial — rendered by the WorkPerformed* (LineItem) views.
+Shows logged line items (labor + parts) as editable, priced rows + a total.
 {% endcomment %}
 {% if entries %}
 <div class="space-y-1">
@@ -11,11 +11,17 @@ Shows logged entries as editable rows.
         <!-- Collapsed row -->
         <div class="flex items-start gap-2 px-3 py-2" x-show="!editing">
             <div class="flex-1 min-w-0">
-                <p class="text-sm font-semibold text-gray-800 leading-snug">{{ entry.label }}</p>
-                {% if entry.description %}
-                <p class="text-xs text-gray-500 mt-0.5 leading-snug">{{ entry.description }}</p>
+                <p class="text-sm font-semibold text-gray-800 leading-snug">
+                    {% if entry.kind == 'part' %}<span class="text-xs font-medium text-emerald-600 mr-1">[Part]</span>{% endif %}{{ entry.description }}
+                    {% if entry.quantity != 1 %}<span class="text-xs font-normal text-gray-400">× {{ entry.quantity|floatformat:"-2" }}</span>{% endif %}
+                </p>
+                {% if entry.notes %}
+                <p class="text-xs text-gray-500 mt-0.5 leading-snug">{{ entry.notes }}</p>
                 {% endif %}
                 <p class="text-xs text-gray-400 mt-0.5">{{ entry.logged_at|date:"M d, Y g:i A" }}{% if entry.logged_by %} · {{ entry.logged_by.get_full_name|default:entry.logged_by.username }}{% endif %}</p>
+            </div>
+            <div class="text-sm text-gray-700 shrink-0 mt-0.5 text-right min-w-[64px]">
+                {% if entry.line_total != None %}${{ entry.line_total|floatformat:2 }}{% else %}<span class="text-xs text-gray-300 italic">no price</span>{% endif %}
             </div>
             <div class="flex gap-2 shrink-0 mt-0.5">
                 <button type="button" @click="editing = true" title="Edit"
@@ -51,12 +57,24 @@ Shows logged entries as editable rows.
                   hx-swap="innerHTML"
                   class="space-y-2">
                 {% csrf_token %}
-                <input type="text" name="custom_label" value="{{ entry.label }}"
+                <input type="text" name="custom_label" value="{{ entry.description }}"
                        placeholder="Label"
                        class="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
                        required>
                 <textarea name="notes" rows="2" placeholder="Details (optional)"
-                          class="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none">{{ entry.description }}</textarea>
+                          class="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none">{{ entry.notes }}</textarea>
+                <div class="flex gap-2">
+                    <label class="flex-1">
+                        <span class="block text-xs text-gray-400 mb-0.5">Qty</span>
+                        <input type="number" name="quantity" value="{{ entry.quantity|floatformat:'-2' }}" min="0" step="0.01"
+                               class="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </label>
+                    <label class="flex-1">
+                        <span class="block text-xs text-gray-400 mb-0.5">Unit price ($)</span>
+                        <input type="number" name="unit_price" value="{% if entry.unit_price != None %}{{ entry.unit_price|floatformat:2 }}{% endif %}" min="0" step="0.01" placeholder="—"
+                               class="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </label>
+                </div>
                 <div class="flex gap-2">
                     <button type="submit"
                             class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">Save</button>
@@ -67,6 +85,10 @@ Shows logged entries as editable rows.
         </div>
     </div>
     {% endfor %}
+</div>
+<div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-200 text-sm">
+    <span class="text-gray-500">Total</span>
+    <span class="font-semibold text-gray-800">${{ work_order.line_items_total|floatformat:2 }}</span>
 </div>
 {% else %}
 <p class="text-sm text-gray-400 italic">No work logged yet.</p>

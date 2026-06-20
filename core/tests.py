@@ -1173,13 +1173,10 @@ def test_non_upload_value_passes_through():
 
 @pytest.mark.django_db
 def test_repair_report_prints_with_custom_labor_entry(client, client_obj, admin_user):
-    # A custom/quick-labor Work Performed entry has labor_item=None; the print
-    # report grouped by labor_item.category and 500'd on None. Regression guard.
-    from core.models import WorkPerformed
+    # A custom labor line has no source_labor_item; the print report groups by
+    # category and must not 500 on it (groups under "Other"). Regression guard.
     wo = WorkOrder.objects.create(client=client_obj)
-    WorkPerformed.objects.create(
-        work_order=wo, labor_item=None, custom_label='Reseated RAM', notes='Was loose',
-    )
+    wo.line_items.create(kind='labor', description='Reseated RAM', notes='Was loose')
     client.force_login(admin_user)
     resp = client.get(reverse('core:work_order_print', args=[wo.pk]))
     assert resp.status_code == 200
@@ -1465,3 +1462,64 @@ def test_inbound_attachment_blocks_dangerous_ext_and_oversize():
     assert 'ok.txt' in names
     assert 'evil.exe' not in names
     assert 'big.txt' not in names
+
+
+# ── Phase A: priced line items + WO total + QuickLabor default price ─────────
+
+@pytest.mark.django_db
+def test_line_item_total_math_and_unpriced(client_obj):
+    from decimal import Decimal
+    wo = WorkOrder.objects.create(client=client_obj)
+    priced = wo.line_items.create(kind='labor', description='Tune-up', quantity=2, unit_price=Decimal('50.00'))
+    unpriced = wo.line_items.create(kind='labor', description='Diagnosis')  # no price
+    assert priced.line_total == Decimal('100.00')
+    assert unpriced.line_total is None
+    # WO total counts only priced lines
+    assert wo.line_items_total == Decimal('100.00')
+
+
+@pytest.mark.django_db
+def test_quicklabor_button_prefills_default_price(client, client_obj, admin_user):
+    from decimal import Decimal
+    from core.models import QuickLaborItem, LineItem
+    wo = WorkOrder.objects.create(client=client_obj)
+    item = QuickLaborItem.objects.create(label='Virus Removal', category='Software',
+                                         default_price=Decimal('120.00'))
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:work_performed_log', args=[wo.pk, item.pk]))
+    assert resp.status_code == 200
+    li = LineItem.objects.get(object_id=wo.pk, description='Virus Removal')
+    assert li.kind == 'labor'
+    assert li.unit_price == Decimal('120.00')
+    assert li.source_labor_item_id == item.pk
+
+
+@pytest.mark.django_db
+def test_custom_part_line_with_price(client, client_obj, admin_user):
+    from decimal import Decimal
+    from core.models import LineItem
+    wo = WorkOrder.objects.create(client=client_obj)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:work_performed_custom', args=[wo.pk]), {
+        'custom_label': '1TB SSD', 'kind': 'part', 'quantity': '2', 'unit_price': '75.50', 'notes': 'Samsung',
+    })
+    assert resp.status_code == 200
+    li = LineItem.objects.get(object_id=wo.pk, description='1TB SSD')
+    assert li.kind == 'part'
+    assert li.line_total == Decimal('151.00')
+    assert wo.line_items_total == Decimal('151.00')
+
+
+@pytest.mark.django_db
+def test_line_item_update_sets_price(client, client_obj, admin_user):
+    from decimal import Decimal
+    from core.models import LineItem
+    wo = WorkOrder.objects.create(client=client_obj)
+    li = wo.line_items.create(kind='labor', description='Cleanup')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:work_performed_update', args=[li.pk]), {
+        'custom_label': 'Cleanup', 'quantity': '1', 'unit_price': '40', 'notes': '',
+    })
+    assert resp.status_code == 200
+    li.refresh_from_db()
+    assert li.unit_price == Decimal('40')
