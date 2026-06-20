@@ -32,7 +32,7 @@ from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, De
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
                     CompanySettingsForm, OutboundEmailSettingsForm, InboundEmailSettingsForm,
                     AttachmentSettingsForm, SecuritySettingsForm, MileageSettingsForm,
-                    ColorSettingsForm)
+                    ColorSettingsForm, InvoiceNinjaSettingsForm)
 
 logger = logging.getLogger('core')
 
@@ -3123,6 +3123,7 @@ SETTINGS_TABS = [
     ('attachments',  'Attachments',    AttachmentSettingsForm),
     ('security',     'Security',       SecuritySettingsForm),
     ('mileage',      'Mileage',        MileageSettingsForm),
+    ('invoice_ninja', 'Invoice Ninja', InvoiceNinjaSettingsForm),
     ('repair_types',     'Repair Types',     None),
     ('canned_responses', 'Canned Responses', None),
     ('quick_labor',      'Quick Labor',      None),
@@ -3244,6 +3245,48 @@ class EmailTestInboundView(LoginRequiredMixin, View):
                 return HttpResponse(f'<p class="text-green-600 text-sm mt-2">✓ Connected. {count} message(s) in mailbox.</p>')
         except Exception as e:
             return HttpResponse(f'<p class="text-red-600 text-sm mt-2">✗ Failed: {e}</p>')
+
+
+class InvoiceNinjaTestView(LoginRequiredMixin, View):
+    """Settings 'Test Connection' — admin only. Hits IN's API and reports back."""
+
+    def post(self, request):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        from . import invoice_ninja
+        try:
+            msg = invoice_ninja.test_connection()
+            messages.success(request, msg)
+        except invoice_ninja.InvoiceNinjaError as e:
+            messages.error(request, f'Invoice Ninja test failed: {e}')
+        return redirect('/settings/?tab=invoice_ninja')
+
+
+class WorkOrderSendToINView(LoginRequiredMixin, View):
+    """Push a work order's priced lines to Invoice Ninja as a draft invoice.
+    User-triggered so failures are visible in context (fail loud)."""
+
+    def post(self, request, pk):
+        wo = get_object_or_404(WorkOrder, pk=pk)
+        from . import invoice_ninja
+        from .models import SiteSettings
+        if not SiteSettings.get().invoice_ninja_enabled:
+            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
+            return redirect('core:work_order_detail', pk=pk)
+        # Duplicate guard: already pushed and not an explicit confirmed re-send.
+        if wo.invoice_ninja_id and request.POST.get('confirm_resend') != '1':
+            messages.warning(
+                request,
+                f'{wo.work_order_number} was already sent to Invoice Ninja '
+                f'(#{wo.invoice_ninja_ref or wo.invoice_ninja_id}). Use "Re-send" to push again.'
+            )
+            return redirect('core:work_order_detail', pk=pk)
+        try:
+            ref = invoice_ninja.push_work_order(wo)
+            messages.success(request, f'Sent to Invoice Ninja as a draft — invoice #{ref}.')
+        except invoice_ninja.InvoiceNinjaError as e:
+            messages.error(request, f'Could not send to Invoice Ninja: {e}')
+        return redirect('core:work_order_detail', pk=pk)
 
 
 class SettingsView(LoginRequiredMixin, View):

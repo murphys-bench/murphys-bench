@@ -572,6 +572,52 @@
             </form>
         </div>
 
+        {% elif active_tab == 'invoice_ninja' %}
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-1">Invoice Ninja</h2>
+            <p class="text-sm text-gray-500 mb-6">
+                Push a finished work order's priced lines to Invoice Ninja as a <strong>draft</strong> invoice.
+                MB captures and totals prices; Invoice Ninja stays the billing authority (it assigns the
+                invoice number and owns payment). One-directional — nothing flows back.
+            </p>
+
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="tab" value="invoice_ninja">
+                <div class="space-y-4">
+                    <label class="flex items-center gap-2">
+                        {{ forms.invoice_ninja.invoice_ninja_enabled }}
+                        <span class="text-sm text-gray-700">Enable “Send to Invoice Ninja” on work orders</span>
+                    </label>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">API Base URL</label>
+                        {{ forms.invoice_ninja.invoice_ninja_url }}
+                        <p class="text-xs text-gray-400 mt-1">Cloud: <code>https://invoicing.co</code>. Self-hosted: your server URL.</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">API Token</label>
+                        {{ forms.invoice_ninja.invoice_ninja_token }}
+                        <p class="text-xs text-gray-400 mt-1">IN → Settings → Account Management → Integrations → API Tokens. Stored encrypted.</p>
+                    </div>
+                </div>
+                <div class="mt-6 pt-4 border-t border-gray-200 flex items-center gap-3">
+                    <button type="submit"
+                            class="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+                        Save Invoice Ninja Settings
+                    </button>
+                </div>
+            </form>
+
+            <form method="post" action="{% url 'core:invoice_ninja_test' %}" class="mt-3">
+                {% csrf_token %}
+                <button type="submit"
+                        class="px-5 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-200">
+                    Test Connection
+                </button>
+                <span class="text-xs text-gray-400 ml-2">Save first, then test. Makes one read-only API call.</span>
+            </form>
+        </div>
+
         {% endif %}
 
         <!-- ── Repair Types ────────────────────────────────────────── -->

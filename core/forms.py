@@ -483,6 +483,17 @@ class MileageSettingsForm(forms.ModelForm):
         }
 
 
+class InvoiceNinjaSettingsForm(forms.ModelForm):
+    class Meta:
+        model = SiteSettings
+        fields = ['invoice_ninja_enabled', 'invoice_ninja_url', 'invoice_ninja_token']
+        widgets = {
+            'invoice_ninja_enabled': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
+            'invoice_ninja_url': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'https://invoicing.co'}),
+            'invoice_ninja_token': forms.PasswordInput(attrs={'class': _SS_INPUT, 'placeholder': '••••••••'}, render_value=True),
+        }
+
+
 _HEX_INPUT = 'w-20 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500'
 
 

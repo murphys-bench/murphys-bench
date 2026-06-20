@@ -1523,3 +1523,114 @@ def test_line_item_update_sets_price(client, client_obj, admin_user):
     assert resp.status_code == 200
     li.refresh_from_db()
     assert li.unit_price == Decimal('40')
+
+
+# ── Phase B: Invoice Ninja push (API mocked — no live calls) ────────────────
+
+def _enable_in(monkeypatch=None):
+    s = SiteSettings.get()
+    s.invoice_ninja_enabled = True
+    s.invoice_ninja_url = 'https://invoicing.co'
+    s.invoice_ninja_token = 'test-token'
+    s.save()
+    return s
+
+
+@pytest.mark.django_db
+def test_in_client_name_is_type_aware():
+    from core import invoice_ninja
+    # Business → business name
+    biz = Client.objects.create(name='Acme LLC', client_type='business')
+    Contact.objects.create(client=biz, first_name='Jane', last_name='Doe', is_primary=True)
+    assert invoice_ninja.in_client_name(biz) == 'Acme LLC'
+    # Residential (MB files by bare last name) → primary contact's full name
+    res = Client.objects.create(name='Dorkleputz', client_type='residential')
+    Contact.objects.create(client=res, first_name='Winky', last_name='Dorkleputz', is_primary=True)
+    assert invoice_ninja.in_client_name(res) == 'Winky Dorkleputz'
+
+
+@pytest.mark.django_db
+def test_push_blocks_when_no_priced_lines(client_obj):
+    from core import invoice_ninja
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj)
+    wo.line_items.create(kind='labor', description='Diagnosis')  # unpriced
+    with pytest.raises(invoice_ninja.InvoiceNinjaError):
+        invoice_ninja.push_work_order(wo)
+
+
+@pytest.mark.django_db
+def test_push_sends_draft_with_priced_lines_and_stores_ref(client_obj, monkeypatch):
+    from decimal import Decimal
+    from core import invoice_ninja
+    _enable_in()
+    client_obj.invoice_ninja_id = '42'  # already linked → no client lookup
+    client_obj.save()
+    wo = WorkOrder.objects.create(client=client_obj)
+    wo.line_items.create(kind='labor', description='Tune-up', quantity=1, unit_price=Decimal('80'))
+    wo.line_items.create(kind='part', description='SSD', quantity=2, unit_price=Decimal('50'))
+    wo.line_items.create(kind='labor', description='Diag (internal)')  # unpriced → excluded
+
+    captured = {}
+    def fake_request(method, path, *, params=None, json=None):
+        captured['method'] = method; captured['path'] = path; captured['json'] = json
+        return {'data': {'id': 999, 'number': 'INV-0007'}}
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+
+    ref = invoice_ninja.push_work_order(wo)
+    wo.refresh_from_db()
+    assert wo.invoice_ninja_id == '999'
+    assert wo.invoice_ninja_ref == 'INV-0007'
+    assert ref == 'INV-0007'
+    # Payload: draft (no number/email), WO# in po_number, only the 2 priced lines
+    body = captured['json']
+    assert captured['path'] == '/invoices'
+    assert body['client_id'] == '42'
+    assert body['po_number'] == wo.work_order_number
+    assert 'number' not in body
+    assert len(body['line_items']) == 2
+
+
+@pytest.mark.django_db
+def test_push_failure_leaves_wo_clean(client_obj, monkeypatch):
+    from decimal import Decimal
+    from core import invoice_ninja
+    _enable_in()
+    client_obj.invoice_ninja_id = '42'; client_obj.save()
+    wo = WorkOrder.objects.create(client=client_obj)
+    wo.line_items.create(kind='labor', description='Tune-up', unit_price=Decimal('80'))
+
+    def boom(*a, **k):
+        raise invoice_ninja.InvoiceNinjaError('401')
+    monkeypatch.setattr(invoice_ninja, '_request', boom)
+
+    with pytest.raises(invoice_ninja.InvoiceNinjaError):
+        invoice_ninja.push_work_order(wo)
+    wo.refresh_from_db()
+    assert wo.invoice_ninja_id == ''   # nothing saved → clean retry
+
+
+@pytest.mark.django_db
+def test_send_to_in_duplicate_guard(client, client_obj, admin_user, monkeypatch):
+    from core import invoice_ninja
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, invoice_ninja_id='123', invoice_ninja_ref='INV-1')
+    calls = []
+    monkeypatch.setattr(invoice_ninja, 'push_work_order', lambda w: calls.append(w))
+    client.force_login(admin_user)
+    # Already pushed, no confirm → no second push
+    client.post(reverse('core:work_order_send_in', args=[wo.pk]))
+    assert calls == []
+    # Confirmed re-send → pushes
+    client.post(reverse('core:work_order_send_in', args=[wo.pk]), {'confirm_resend': '1'})
+    assert len(calls) == 1
+
+
+@pytest.mark.django_db
+def test_find_or_create_uses_stored_id(client_obj, monkeypatch):
+    from core import invoice_ninja
+    _enable_in()
+    client_obj.invoice_ninja_id = '77'; client_obj.save()
+    # Should NOT call the API at all when id is already stored
+    monkeypatch.setattr(invoice_ninja, '_request', lambda *a, **k: pytest.fail('should not call API'))
+    assert invoice_ninja.find_or_create_client(client_obj) == '77'
