@@ -192,6 +192,9 @@ class Client(models.Model):
                   'from senders not yet matched to a real client, pending triage. '
                   'There should only ever be one.',
     )
+    # Invoice Ninja client id, saved after the first push (link once, don't sync).
+    # Later pushes use this directly — no re-search, no duplicate IN clients.
+    invoice_ninja_id = models.CharField(max_length=64, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -701,7 +704,9 @@ class WorkOrder(models.Model):
     storage = models.CharField(max_length=150, blank=True, help_text="Disk as serviced")
     notes_internal = models.TextField(blank=True, help_text="Technician-only notes")
     notes_customer_visible = models.TextField(blank=True, help_text="What the customer sees")
-    invoice_ninja_ref = models.CharField(max_length=100, blank=True, help_text='Invoice Ninja invoice reference number')
+    invoice_ninja_ref = models.CharField(max_length=100, blank=True, help_text='Invoice Ninja invoice number (editable — record where the work actually landed if a draft was merged in IN)')
+    # IN invoice id returned by the push — the duplicate-guard key. Set = pushed.
+    invoice_ninja_id = models.CharField(max_length=64, blank=True, default='')
     # Device credentials — encrypted at rest (AES-256), never shown on printed reports
     device_username = EncryptedCharField(max_length=255, blank=True)
     device_password = EncryptedCharField(max_length=255, blank=True)
@@ -1395,6 +1400,20 @@ class SiteSettings(models.Model):
     shop_address = models.CharField(
         max_length=255, blank=True,
         help_text='Shop address used as the origin for onsite mileage calculations (e.g. 235 Coolidge St. Silverton Oregon 97381).',
+    )
+
+    # Invoice Ninja integration (Phase B — one-directional draft push from a WO).
+    # MB captures/totals prices; IN stays the billing authority.
+    invoice_ninja_enabled = models.BooleanField(
+        default=False, help_text='Enable the "Send to Invoice Ninja" action on work orders.',
+    )
+    invoice_ninja_url = models.CharField(
+        max_length=255, blank=True,
+        help_text='Invoice Ninja API base URL. Cloud: https://invoicing.co — self-hosted: your server URL.',
+    )
+    invoice_ninja_token = EncryptedCharField(
+        max_length=255, blank=True,
+        help_text='IN API token (Settings → Account Management → Integrations → API Tokens). Stored encrypted.',
     )
 
     # Status badge colors — hex values rendered as CSS variables

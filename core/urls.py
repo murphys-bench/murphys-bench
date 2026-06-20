@@ -88,6 +88,10 @@ urlpatterns = [
     path('roles/<int:pk>/edit/', views.RoleEditView.as_view(), name='role_edit'),
     path('roles/<int:pk>/delete/', views.RoleDeleteView.as_view(), name='role_delete'),
 
+    # Invoice Ninja (Phase B)
+    path('settings/invoice-ninja/test/', views.InvoiceNinjaTestView.as_view(), name='invoice_ninja_test'),
+    path('work-orders/<int:pk>/send-to-invoice-ninja/', views.WorkOrderSendToINView.as_view(), name='work_order_send_in'),
+
     # Quick Labor / Work Performed (HTMX)
     path('work-orders/<int:wo_pk>/log-labor/<int:item_pk>/', views.WorkPerformedLogView.as_view(), name='work_performed_log'),
     path('work-orders/<int:wo_pk>/log-custom/', views.WorkPerformedCustomLogView.as_view(), name='work_performed_custom'),
