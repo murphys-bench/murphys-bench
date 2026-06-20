@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 20, 2026 (session 32 — attachment security review acted on; ⚠ MB2 demo relocation still pending; suite →84)
+**Last Updated**: June 20, 2026 (session 32 — attachment security review acted on; prod + MB2 demo both fixed; suite →84)
 **Current Phase**: Phase 1 — SCS Internal — **STABILIZATION** (see "How We Work" in CLAUDE.md)
 
 > ⚠ We are in a stabilization phase, not a feature phase. New features are paused until
