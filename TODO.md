@@ -19,7 +19,7 @@ the expensive-to-reverse-with-live-data piece, so it lands FIRST.
       New generic `LineItem` (GenericFK, kind labor/part, qty, unit_price, computed line_total),
       `QuickLaborItem.default_price` prefill, WO total on detail + repair report. Unified
       `WorkPerformed` into LineItem (migrated + deleted). Migrations 0058/0059/0060, suite →88.
-      Mike to eyeball the UI in-browser. Full detail in memory `project_mb_session33_phase_a`.
+      Browser-verified by Mike. Full detail in memory `project_mb_session33_phase_a`.
 - [ ] **Phase B — Invoice Ninja push** built on the priced lines. IN v5 API audit already done.
       Manual "Send to IN" button; find-or-create client (type-aware name mapping, store IN client_id);
       create invoice as a **draft** (IN owns assembly + mints number; stamp WO# → po_number);

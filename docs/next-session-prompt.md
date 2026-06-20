@@ -20,9 +20,8 @@ unit_price, computed line_total) is now THE billable-work record. Unified `WorkP
 (migrated all rows → labor LineItems, rewired the log/edit/delete UI, deleted the model).
 `QuickLaborItem.default_price` prefills buttons; WO total on detail + repair report; custom entry
 does labor/part with price. MB captures+totals, IN stays billing authority. Migrations 0058/0059/0060.
-Deployed to prod (3 rows migrated cleanly). Detail in memory `project_mb_session33_phase_a`.
-- **Mike to verify in-browser:** WO Work Performed section (priced rows + Total), custom Part w/ price,
-  edit a line's price, repair report prints with total, Settings → Quick Labor Default Price column.
+Deployed to prod (3 rows migrated cleanly) and **browser-verified by Mike — looks good**. Detail in
+memory `project_mb_session33_phase_a`. Phase A fully closed out.
 
 ### ▶ NEXT REAL ITEM: Phase B — Invoice Ninja push (builds on Phase A's priced lines)
 Manual "Send to IN" button, find-or-create client (type-aware name mapping, store IN client_id),
