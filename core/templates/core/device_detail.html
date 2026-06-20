@@ -124,6 +124,30 @@
                     <dd class="text-sm text-gray-900 mt-1 font-mono">{{ device.serial_number }}</dd>
                 </div>
                 {% endif %}
+                {% if device.os %}
+                <div>
+                    <dt class="text-xs font-medium text-gray-500 uppercase">Operating System</dt>
+                    <dd class="text-sm text-gray-900 mt-1">{{ device.get_os_display }}{% if device.os_version %} {{ device.os_version }}{% endif %}</dd>
+                </div>
+                {% endif %}
+                {% if device.cpu %}
+                <div>
+                    <dt class="text-xs font-medium text-gray-500 uppercase">Processor</dt>
+                    <dd class="text-sm text-gray-900 mt-1">{{ device.cpu }}</dd>
+                </div>
+                {% endif %}
+                {% if device.ram %}
+                <div>
+                    <dt class="text-xs font-medium text-gray-500 uppercase">Memory (RAM)</dt>
+                    <dd class="text-sm text-gray-900 mt-1">{{ device.ram }}</dd>
+                </div>
+                {% endif %}
+                {% if device.storage %}
+                <div>
+                    <dt class="text-xs font-medium text-gray-500 uppercase">Storage</dt>
+                    <dd class="text-sm text-gray-900 mt-1">{{ device.storage }}</dd>
+                </div>
+                {% endif %}
                 {% if device.repair_type %}
                 <div>
                     <dt class="text-xs font-medium text-gray-500 uppercase">Default Repair Type</dt>

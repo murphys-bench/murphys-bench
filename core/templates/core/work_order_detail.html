@@ -144,6 +144,15 @@
                         {% if work_order.device.condition_at_intake %}
                         <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">Condition</dt><dd>{{ work_order.device.get_condition_at_intake_display }}</dd></div>
                         {% endif %}
+                        {% if work_order.cpu %}
+                        <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">CPU</dt><dd>{{ work_order.cpu }}</dd></div>
+                        {% endif %}
+                        {% if work_order.ram %}
+                        <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">RAM</dt><dd>{{ work_order.ram }}</dd></div>
+                        {% endif %}
+                        {% if work_order.storage %}
+                        <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">Storage</dt><dd>{{ work_order.storage }}</dd></div>
+                        {% endif %}
                     </dl>
                     {% else %}
                     <p class="text-sm text-gray-400 italic">No device assigned.</p>
