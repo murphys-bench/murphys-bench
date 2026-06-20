@@ -720,9 +720,23 @@ class WorkOrder(models.Model):
         ]
 
     attachments = GenericRelation('Attachment')
+    line_items = GenericRelation('LineItem')
 
     def __str__(self):
         return f"{self.work_order_number}: {self.client.name}"
+
+    @property
+    def line_items_total(self):
+        """Sum of priced line items on this work order. Unpriced lines (no
+        unit_price set) are ignored. MB captures/totals prices only — Invoice
+        Ninja remains the billing authority."""
+        from decimal import Decimal
+        total = Decimal('0')
+        for li in self.line_items.all():
+            lt = li.line_total
+            if lt is not None:
+                total += lt
+        return total
 
     SPEC_FIELDS = ('cpu', 'ram', 'storage')
 
@@ -1171,13 +1185,18 @@ class TicketLink(models.Model):
 
 
 class QuickLaborItem(models.Model):
-    """Admin-managed labor buttons shown on WO detail. Clicking one logs a WorkPerformed entry."""
+    """Admin-managed labor buttons shown on WO detail. Clicking one logs a labor LineItem."""
 
     label = models.CharField(max_length=100, help_text='Button label shown to techs, e.g. "Virus / Malware Removal"')
     category = models.CharField(max_length=100, help_text='Groups buttons by category, e.g. "Software"')
     print_description = models.TextField(
         blank=True,
         help_text='Client-facing description printed on the repair report. Leave blank to use the label.',
+    )
+    default_price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(0)],
+        help_text='Optional. Prefills the price when this button logs a line item. Leave blank for no price.',
     )
     is_active = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
@@ -1193,28 +1212,65 @@ class QuickLaborItem(models.Model):
         return self.print_description.strip() if self.print_description.strip() else self.label
 
 
-class WorkPerformed(models.Model):
-    """Records work logged against a work order — from quick labor bank or custom entry."""
+class LineItem(models.Model):
+    """A priced line on a work order (and, in a future phase, a quote).
 
-    work_order = models.ForeignKey('WorkOrder', on_delete=models.CASCADE, related_name='work_performed')
-    labor_item = models.ForeignKey(QuickLaborItem, on_delete=models.PROTECT, null=True, blank=True, related_name='logged_entries')
-    custom_label = models.CharField(max_length=200, blank=True)
+    Deliberately GENERIC/attachable via a GenericForeignKey so the same primitive
+    can hang off a WorkOrder now and a Quote later without a rebuild. MB captures
+    and totals prices here; Invoice Ninja remains the billing authority — MB only
+    suggests, it does not invoice."""
+
+    KIND_CHOICES = [
+        ('labor', 'Labor'),
+        ('part', 'Part / Material'),
+    ]
+
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.PositiveIntegerField()
+    content_object = GenericForeignKey('content_type', 'object_id')
+
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES, default='labor', db_index=True)
+    description = models.CharField(max_length=255, help_text='Line label, e.g. "Virus removal" or "1TB SSD".')
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=1, validators=[MinValueValidator(0)])
+    unit_price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(0)],
+        help_text='Per-unit price. Blank = unpriced (not counted in the total).',
+    )
+    # Where a labor line came from (a QuickLabor button), kept for the report's
+    # client-facing print description fallback. Null for custom or part lines.
+    source_labor_item = models.ForeignKey(
+        QuickLaborItem, on_delete=models.SET_NULL, null=True, blank=True, related_name='line_items',
+    )
     notes = models.TextField(blank=True)
-    logged_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='work_performed_logged')
+    logged_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='line_items_logged')
     logged_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'work_performed'
+        db_table = 'line_items'
         ordering = ['logged_at']
-
-    def label(self):
-        return self.custom_label or (self.labor_item.label if self.labor_item else '—')
-
-    def description(self):
-        return self.notes or (self.labor_item.print_description if self.labor_item else '')
+        indexes = [
+            models.Index(fields=['content_type', 'object_id']),
+            models.Index(fields=['kind']),
+        ]
 
     def __str__(self):
-        return f"{self.work_order.work_order_number} — {self.label()}"
+        return f"{self.get_kind_display()}: {self.description}"
+
+    @property
+    def line_total(self):
+        """quantity × unit_price, or None when the line is unpriced."""
+        if self.unit_price is None:
+            return None
+        return self.quantity * self.unit_price
+
+    def print_description(self):
+        """Client-facing description for the repair report: explicit notes win,
+        else the source button's print description."""
+        if self.notes.strip():
+            return self.notes.strip()
+        if self.source_labor_item:
+            return self.source_labor_item.get_print_description()
+        return ''
 
 
 class SiteSettings(models.Model):

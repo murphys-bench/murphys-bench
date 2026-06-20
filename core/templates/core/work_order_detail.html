@@ -340,11 +340,30 @@
                       hx-on:htmx:after-request="customOpen = false"
                       class="space-y-2">
                     {% csrf_token %}
-                    <input type="text" name="custom_label" placeholder="What was done…"
-                           class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                           required>
+                    <div class="flex gap-2">
+                        <select name="kind"
+                                class="text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            <option value="labor">Labor</option>
+                            <option value="part">Part</option>
+                        </select>
+                        <input type="text" name="custom_label" placeholder="What was done / part name…"
+                               class="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                               required>
+                    </div>
                     <textarea name="notes" rows="2" placeholder="Details (optional)"
                               class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"></textarea>
+                    <div class="flex gap-2">
+                        <label class="flex-1">
+                            <span class="block text-xs text-gray-400 mb-0.5">Qty</span>
+                            <input type="number" name="quantity" value="1" min="0" step="0.01"
+                                   class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        </label>
+                        <label class="flex-1">
+                            <span class="block text-xs text-gray-400 mb-0.5">Unit price ($)</span>
+                            <input type="number" name="unit_price" min="0" step="0.01" placeholder="optional"
+                                   class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        </label>
+                    </div>
                     <button type="submit"
                             class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Log</button>
                 </form>

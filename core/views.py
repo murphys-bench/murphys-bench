@@ -16,7 +16,7 @@ from .models import (
     Ticket, TicketReply, TicketLock, TicketLink, Attachment, SiteSettings,
     KBCategory, KBArticle, TicketQueue, DashboardTile, User,
     CustomField, CustomFieldChoice, CustomFieldValue,
-    QuickLaborItem, WorkPerformed, ContactPhone,
+    QuickLaborItem, LineItem, ContactPhone,
     Contact, RepairType, RepairTypeCategory,
     CannedResponseCategory, CannedResponse, Invoice,
     OrgCredential, CredentialAccessLog,
@@ -466,7 +466,7 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         for item in labor_items:
             labor_by_category.setdefault(item.category, []).append(item)
         context['labor_by_category'] = labor_by_category
-        context['wp_entries'] = _wp_entries_for(self.object)
+        context['wp_entries'] = _line_items_for(self.object)
         # Inline update form data
         context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
         context['all_repair_types'] = RepairType.objects.filter(is_active=True).order_by('name')
@@ -2831,78 +2831,105 @@ class RoleDeleteView(LoginRequiredMixin, View):
 # Quick Labor / Work Performed
 # ---------------------------------------------------------------------------
 
-def _wp_entries_for(work_order):
+def _line_items_for(work_order):
     return (
-        WorkPerformed.objects
-        .filter(work_order=work_order)
-        .select_related('labor_item', 'logged_by')
-        .order_by('logged_at')
+        work_order.line_items
+        .select_related('source_labor_item', 'logged_by')
+        .order_by('kind', 'logged_at')
     )
 
 
+def _parse_price(val):
+    """Parse a money string to a non-negative Decimal, or None if blank/invalid."""
+    from decimal import Decimal, InvalidOperation
+    val = (val or '').strip()
+    if not val:
+        return None
+    try:
+        d = Decimal(val)
+    except InvalidOperation:
+        return None
+    return d if d >= 0 else None
+
+
+def _parse_qty(val):
+    """Parse a quantity to a non-negative Decimal, defaulting to 1."""
+    d = _parse_price(val)
+    return d if d is not None else None
+
+
+def _render_work_performed(request, work_order):
+    return render(request, 'core/partials/work_performed.html', {
+        'work_order': work_order,
+        'entries': _line_items_for(work_order),
+    })
+
+
 class WorkPerformedLogView(LoginRequiredMixin, View):
-    """HTMX: log a QuickLaborItem against a WorkOrder."""
+    """HTMX: log a QuickLaborItem against a WorkOrder as a labor line item.
+    The button's optional default_price prefills the line price."""
 
     def post(self, request, wo_pk, item_pk):
         work_order = get_object_or_404(WorkOrder, pk=wo_pk)
         item = get_object_or_404(QuickLaborItem, pk=item_pk, is_active=True)
-        WorkPerformed.objects.create(
-            work_order=work_order,
-            labor_item=item,
+        work_order.line_items.create(
+            kind='labor',
+            description=item.label[:255],
+            quantity=1,
+            unit_price=item.default_price,
+            source_labor_item=item,
             logged_by=request.user,
         )
-        return render(request, 'core/partials/work_performed.html', {
-            'work_order': work_order,
-            'entries': _wp_entries_for(work_order),
-        })
+        return _render_work_performed(request, work_order)
 
 
 class WorkPerformedDeleteView(LoginRequiredMixin, View):
-    """HTMX: remove a logged WorkPerformed entry."""
+    """HTMX: remove a logged line item."""
 
     def post(self, request, pk):
-        entry = get_object_or_404(WorkPerformed, pk=pk)
-        work_order = entry.work_order
+        entry = get_object_or_404(LineItem, pk=pk)
+        work_order = entry.content_object
         entry.delete()
-        return render(request, 'core/partials/work_performed.html', {
-            'work_order': work_order,
-            'entries': _wp_entries_for(work_order),
-        })
+        return _render_work_performed(request, work_order)
 
 
 class WorkPerformedUpdateView(LoginRequiredMixin, View):
-    """HTMX: update label and notes on a logged WorkPerformed entry."""
+    """HTMX: update label, notes, quantity and price on a logged line item."""
 
     def post(self, request, pk):
-        entry = get_object_or_404(WorkPerformed, pk=pk)
-        entry.custom_label = request.POST.get('custom_label', '').strip()
+        entry = get_object_or_404(LineItem, pk=pk)
+        label = request.POST.get('custom_label', '').strip()
+        if label:
+            entry.description = label[:255]
         entry.notes = request.POST.get('notes', '').strip()
-        entry.save()
-        return render(request, 'core/partials/work_performed.html', {
-            'work_order': entry.work_order,
-            'entries': _wp_entries_for(entry.work_order),
-        })
+        qty = _parse_qty(request.POST.get('quantity'))
+        entry.quantity = qty if qty is not None else 1
+        entry.unit_price = _parse_price(request.POST.get('unit_price'))
+        entry.save(update_fields=['description', 'notes', 'quantity', 'unit_price'])
+        return _render_work_performed(request, entry.content_object)
 
 
 class WorkPerformedCustomLogView(LoginRequiredMixin, View):
-    """HTMX: log a fully custom (free-text) work entry."""
+    """HTMX: log a fully custom line item — labor or part — with optional price."""
 
     def post(self, request, wo_pk):
         work_order = get_object_or_404(WorkOrder, pk=wo_pk)
         label = request.POST.get('custom_label', '').strip()
         notes = request.POST.get('notes', '').strip()
+        kind = request.POST.get('kind', 'labor')
+        if kind not in ('labor', 'part'):
+            kind = 'labor'
+        qty = _parse_qty(request.POST.get('quantity'))
         if label:
-            WorkPerformed.objects.create(
-                work_order=work_order,
-                labor_item=None,
-                custom_label=label,
+            work_order.line_items.create(
+                kind=kind,
+                description=label[:255],
+                quantity=qty if qty is not None else 1,
+                unit_price=_parse_price(request.POST.get('unit_price')),
                 notes=notes,
                 logged_by=request.user,
             )
-        return render(request, 'core/partials/work_performed.html', {
-            'work_order': work_order,
-            'entries': _wp_entries_for(work_order),
-        })
+        return _render_work_performed(request, work_order)
 
 
 # ---------------------------------------------------------------------------
@@ -2925,18 +2952,21 @@ class WorkOrderPrintView(LoginRequiredMixin, View):
         # Customer-visible notes only
         notes = work_order.notes.filter(note_type='customer_visible').order_by('created_at')
 
-        # Work performed entries grouped by category
-        wp_entries = (
-            WorkPerformed.objects
-            .filter(work_order=work_order)
-            .select_related('labor_item')
-            .order_by('labor_item__category', 'labor_item__label')
+        # Line items grouped by category for the report. Labor lines group under
+        # their source button's category; parts under "Parts"; custom labor under "Other".
+        line_items = (
+            work_order.line_items
+            .select_related('source_labor_item')
+            .order_by('kind', 'logged_at')
         )
         categories = {}
-        for entry in wp_entries:
-            # Custom/quick-labor entries have no linked labor_item (it's nullable) —
-            # group them under "Other" instead of crashing on None.category.
-            cat = entry.labor_item.category if entry.labor_item else 'Other'
+        for entry in line_items:
+            if entry.kind == 'part':
+                cat = 'Parts'
+            elif entry.source_labor_item:
+                cat = entry.source_labor_item.category
+            else:
+                cat = 'Other'
             categories.setdefault(cat, []).append(entry)
 
         # Repair type tags
@@ -3620,6 +3650,7 @@ class QuickLaborCreateView(LoginRequiredMixin, View):
                 label=label,
                 category=category,
                 print_description=print_description,
+                default_price=_parse_price(request.POST.get('default_price')),
             )
         return redirect(reverse_lazy(QL_REDIRECT) + QL_TAB)
 
@@ -3637,7 +3668,8 @@ class QuickLaborUpdateView(LoginRequiredMixin, View):
             item.category = category
             item.print_description = print_description
             item.is_active = is_active
-            item.save(update_fields=['label', 'category', 'print_description', 'is_active'])
+            item.default_price = _parse_price(request.POST.get('default_price'))
+            item.save(update_fields=['label', 'category', 'print_description', 'is_active', 'default_price'])
         return redirect(reverse_lazy(QL_REDIRECT) + QL_TAB)
 
 

@@ -6,7 +6,7 @@ from .models import (
     Role, TechSkill, SLAPlan, HelpTopic, KBCategory, KBArticle,
     InboundEmailLog, TicketQueue, DashboardTile,
     CustomField, CustomFieldChoice, CustomFieldValue,
-    QuickLaborItem, WorkPerformed, ContactPhone, MFAResetLog,
+    QuickLaborItem, LineItem, ContactPhone, MFAResetLog,
 )
 
 
@@ -493,10 +493,10 @@ class QuickLaborItemAdmin(admin.ModelAdmin):
     ordering = ['category', 'sort_order', 'label']
 
 
-@admin.register(WorkPerformed)
-class WorkPerformedAdmin(admin.ModelAdmin):
-    list_display = ['work_order', 'labor_item', 'logged_by', 'logged_at']
-    list_filter = ['labor_item__category']
+@admin.register(LineItem)
+class LineItemAdmin(admin.ModelAdmin):
+    list_display = ['content_object', 'kind', 'description', 'quantity', 'unit_price', 'logged_by', 'logged_at']
+    list_filter = ['kind']
     readonly_fields = ['logged_at']
 
 

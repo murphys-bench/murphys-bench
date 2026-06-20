@@ -909,7 +909,7 @@
                 <h2 class="text-lg font-semibold text-gray-900 mb-1">Quick Labor Items</h2>
                 <p class="text-sm text-gray-500 mb-5">Buttons shown on the Work Order detail page. Clicking one logs a Work Performed entry.</p>
 
-                <form method="post" action="{% url 'core:ql_create' %}" class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+                <form method="post" action="{% url 'core:ql_create' %}" class="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
                     {% csrf_token %}
                     <div>
                         <label class="block text-xs font-medium text-gray-600 mb-1">Button Label</label>
@@ -928,6 +928,11 @@
                     <div class="sm:col-span-1">
                         <label class="block text-xs font-medium text-gray-600 mb-1">Print Description <span class="text-gray-400">(optional)</span></label>
                         <input type="text" name="print_description" placeholder="Client-facing text on report…"
+                               class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Default Price <span class="text-gray-400">(optional)</span></label>
+                        <input type="number" name="default_price" min="0" step="0.01" placeholder="—"
                                class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
                     </div>
                     <div>
@@ -954,6 +959,7 @@
                             <tr class="text-xs text-gray-500 uppercase tracking-wide bg-gray-50">
                                 <th class="px-5 py-2 text-left font-medium">Label</th>
                                 <th class="px-5 py-2 text-left font-medium">Print Description</th>
+                                <th class="px-4 py-2 text-right font-medium w-24">Price</th>
                                 <th class="px-4 py-2 text-center font-medium w-20">Active</th>
                                 <th class="px-4 py-2 w-24"></th>
                             </tr>
@@ -967,6 +973,9 @@
                                 </td>
                                 <td x-show="!editing" class="px-5 py-2.5 text-gray-500 text-xs">
                                     {{ item.print_description|default:"—" }}
+                                </td>
+                                <td x-show="!editing" class="px-4 py-2.5 text-right text-gray-700 text-xs">
+                                    {% if item.default_price != None %}${{ item.default_price|floatformat:2 }}{% else %}—{% endif %}
                                 </td>
                                 <td x-show="!editing" class="px-4 py-2.5 text-center">
                                     {% if item.is_active %}
@@ -986,9 +995,9 @@
                                 </td>
 
                                 <!-- Edit row (spans all columns) -->
-                                <td x-show="editing" colspan="4" class="px-5 py-3">
+                                <td x-show="editing" colspan="5" class="px-5 py-3">
                                     <form method="post" action="{% url 'core:ql_update' item.pk %}"
-                                          class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+                                          class="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
                                         {% csrf_token %}
                                         <div>
                                             <label class="block text-xs font-medium text-gray-500 mb-1">Label</label>
@@ -1007,6 +1016,12 @@
                                         <div>
                                             <label class="block text-xs font-medium text-gray-500 mb-1">Print Description</label>
                                             <input type="text" name="print_description" value="{{ item.print_description }}"
+                                                   class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-medium text-gray-500 mb-1">Default Price</label>
+                                            <input type="number" name="default_price" min="0" step="0.01" placeholder="—"
+                                                   value="{% if item.default_price != None %}{{ item.default_price|floatformat:2 }}{% endif %}"
                                                    class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
                                         </div>
                                         <div class="flex items-end gap-3">
