@@ -5,6 +5,8 @@ from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
 from django.core.validators import MinValueValidator
 from encrypted_model_fields.fields import EncryptedCharField, EncryptedTextField
+from django.conf import settings as django_settings
+from django.core.files.storage import FileSystemStorage
 import uuid
 import os
 
@@ -12,6 +14,28 @@ import os
 def attachment_upload_path(instance, filename):
     ct = instance.content_type
     return f'attachments/{ct.app_label}/{ct.model}/{instance.object_id}/{filename}'
+
+
+class PrivateMediaStorage(FileSystemStorage):
+    """Filesystem storage rooted at PRIVATE_MEDIA_ROOT, which is deliberately
+    OUTSIDE MEDIA_ROOT so nginx's /media/ alias can never serve these files — the
+    authenticated, authorization-checked download view is the only way to them.
+    Location is resolved dynamically (not cached at import) so tests can point it
+    at a temp dir via the settings fixture."""
+
+    @property
+    def base_location(self):
+        return django_settings.PRIVATE_MEDIA_ROOT
+
+    @property
+    def location(self):
+        return os.path.abspath(self.base_location)
+
+
+def private_attachment_storage():
+    """Return the private attachment storage. Passed as a callable so Django keeps
+    the storage out of migrations."""
+    return PrivateMediaStorage()
 
 
 def _save_with_unique_number(instance, number_field, generator, save_super, attempts=6):
@@ -1378,7 +1402,7 @@ class Attachment(models.Model):
     object_id = models.PositiveIntegerField()
     content_object = GenericForeignKey('content_type', 'object_id')
 
-    file = models.FileField(upload_to=attachment_upload_path)
+    file = models.FileField(upload_to=attachment_upload_path, storage=private_attachment_storage)
     original_filename = models.CharField(max_length=255)
     mime_type = models.CharField(max_length=100, blank=True)
     size_bytes = models.PositiveIntegerField(default=0)

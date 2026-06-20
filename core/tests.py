@@ -1375,3 +1375,93 @@ def test_workorder_later_device_spec_change_does_not_alter_past_wo(client_obj):
     wo.refresh_from_db()
     # The WO keeps its as-serviced snapshot
     assert wo.ram == '8 GB'
+
+
+# ── Attachment security: storage location, access control, inbound parity ───
+
+def _make_attachment(obj, data=b'hello', filename='note.txt'):
+    from django.contrib.contenttypes.models import ContentType
+    from django.core.files.base import ContentFile
+    from core.models import Attachment
+    a = Attachment(
+        content_type=ContentType.objects.get_for_model(obj),
+        object_id=obj.pk,
+        original_filename=filename,
+        size_bytes=len(data),
+    )
+    a.file.save(filename, ContentFile(data), save=True)
+    return a
+
+
+@pytest.mark.django_db
+def test_attachment_stored_outside_media_root(client_obj):
+    from django.conf import settings
+    ticket = Ticket.objects.create(client=client_obj, subject='s', description='d',
+                                   ticket_number='TKT-ATT-1', status='new')
+    a = _make_attachment(ticket)
+    path = a.file.path
+    assert str(settings.PRIVATE_MEDIA_ROOT) in path
+    assert str(settings.MEDIA_ROOT) not in path
+
+
+@pytest.mark.django_db
+def test_attachment_download_denied_for_unauthorized_tech(client, client_obj):
+    """A non-admin tech must not be able to download an attachment on a ticket
+    they can't see (closes the IDOR alongside the nginx fix)."""
+    owner = User.objects.create_user(username='att-owner', password='x', is_staff=False, level=1)
+    intruder = User.objects.create_user(username='att-intruder', password='x', is_staff=False, level=1)
+    ticket = Ticket.objects.create(client=client_obj, subject='s', description='d',
+                                   ticket_number='TKT-ATT-2', status='open', assigned_to=owner)
+    a = _make_attachment(ticket)
+    url = reverse('core:attachment_download', kwargs={'pk': a.pk})
+
+    client.force_login(intruder)
+    assert client.get(url).status_code == 404
+
+    client.force_login(owner)
+    assert client.get(url).status_code == 200
+
+
+@pytest.mark.django_db
+def test_attachment_download_allowed_for_admin(client, client_obj, admin_user):
+    ticket = Ticket.objects.create(client=client_obj, subject='s', description='d',
+                                   ticket_number='TKT-ATT-3', status='open')
+    a = _make_attachment(ticket)
+    client.force_login(admin_user)
+    assert client.get(reverse('core:attachment_download', kwargs={'pk': a.pk})).status_code == 200
+
+
+def _raw_email_with_attachments(parts, subject='Has files', from_email='wayne@davis.example'):
+    """parts = list of (data_bytes, filename, subtype)."""
+    import email.message
+    msg = email.message.EmailMessage()
+    msg['Subject'] = subject
+    msg['From'] = f'Wayne Davis <{from_email}>'
+    msg['To'] = 'support@example.com'
+    msg['Message-ID'] = '<att-test@davis.example>'
+    msg.set_content('See attached.')
+    for data, filename, subtype in parts:
+        msg.add_attachment(data, maintype='application', subtype=subtype, filename=filename)
+    return msg.as_bytes()
+
+
+@pytest.mark.django_db
+def test_inbound_attachment_blocks_dangerous_ext_and_oversize():
+    from core.management.commands.fetch_inbound_email import _process_message
+    from core.models import Attachment
+    site = SiteSettings.get()
+    site.max_attachment_size_mb = 1
+    site.save()
+    oversized = b'x' * (2 * 1024 * 1024)  # 2 MB, over the 1 MB cap
+    raw = _raw_email_with_attachments([
+        (b'MZ harmless test', 'evil.exe', 'octet-stream'),   # blocked extension
+        (oversized, 'big.txt', 'octet-stream'),              # over cap
+        (b'real note', 'ok.txt', 'octet-stream'),            # should be kept
+    ])
+    status, detail, ticket = _process_message(raw, site, verbosity=0)
+    assert ticket is not None
+    names = set(Attachment.objects.filter(
+        object_id=ticket.pk).values_list('original_filename', flat=True))
+    assert 'ok.txt' in names
+    assert 'evil.exe' not in names
+    assert 'big.txt' not in names

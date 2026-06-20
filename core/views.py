@@ -106,6 +106,28 @@ def _scope_assignable_for(qs, user):
     return qs.filter(Q(assigned_to=user) | Q(assigned_to__isnull=True))
 
 
+def _can_access_attachment(user, attachment):
+    """True if `user` may download `attachment`, by resolving its owning object
+    (Ticket/TicketReply/WorkOrder/WorkOrderNote) and applying the same visibility
+    scoping used on the list/detail views. Admins see everything."""
+    if _is_admin(user):
+        return True
+    obj = attachment.content_object
+    if obj is None:
+        return False
+    # Resolve to the governing ticket or work order
+    if isinstance(obj, Ticket):
+        return _scope_tickets_for(Ticket.objects.all(), user).filter(pk=obj.pk).exists()
+    if isinstance(obj, TicketReply):
+        return _scope_tickets_for(Ticket.objects.all(), user).filter(pk=obj.ticket_id).exists()
+    if isinstance(obj, WorkOrder):
+        return _scope_assignable_for(WorkOrder.objects.all(), user).filter(pk=obj.pk).exists()
+    if isinstance(obj, WorkOrderNote):
+        return _scope_assignable_for(WorkOrder.objects.all(), user).filter(pk=obj.work_order_id).exists()
+    # Unknown owner type — deny by default
+    return False
+
+
 def _scope_tickets_for(qs, user):
     """Ticket visibility for non-admins: their own + the unclaimed pool + tickets
     escalated above their owner's level up to the viewer's level (so a higher-level
@@ -1758,6 +1780,8 @@ class AttachmentDownloadView(LoginRequiredMixin, View):
 
     def get(self, request, pk):
         attachment = get_object_or_404(Attachment, pk=pk)
+        if not _can_access_attachment(request.user, attachment):
+            raise Http404
         from django.conf import settings as django_settings
         if getattr(django_settings, 'ATTACHMENT_STORAGE_BACKEND', 'local') == 's3':
             import boto3
