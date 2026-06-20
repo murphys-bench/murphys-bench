@@ -178,6 +178,12 @@ STATICFILES_DIRS = [BASE_DIR / 'static']
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# Private attachment storage — deliberately OUTSIDE MEDIA_ROOT so nginx never
+# serves these files directly. All attachment access goes through the
+# authenticated, authorization-checked AttachmentDownloadView. See the
+# attachment security review (memory project_mb_attachment_security_review).
+PRIVATE_MEDIA_ROOT = BASE_DIR / 'protected'
+
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

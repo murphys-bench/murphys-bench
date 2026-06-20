@@ -232,10 +232,24 @@ def _get_attachments(msg):
                 yield filename, ct, data
 
 
-def _save_attachments(obj, msg):
-    """Save email attachments to the Attachment model."""
+def _save_attachments(obj, msg, settings):
+    """Save email attachments to the Attachment model.
+
+    Inbound is the UNtrusted path (anyone who can email support), so it enforces
+    the same guards as manual upload: the blocked-extension list and the size cap.
+    Skips are logged (fail loud) rather than silently dropped."""
     ct = ContentType.objects.get_for_model(obj)
+    blocked = settings.get_blocked_extensions()
+    max_bytes = settings.max_attachment_size_mb * 1024 * 1024
     for filename, mime_type, data in _get_attachments(msg):
+        ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+        if ext in blocked:
+            logger.warning('Inbound attachment %r blocked by extension (.%s); skipped.', filename, ext)
+            continue
+        if len(data) > max_bytes:
+            logger.warning('Inbound attachment %r is %d bytes, over the %d MB cap; skipped.',
+                           filename, len(data), settings.max_attachment_size_mb)
+            continue
         a = Attachment(
             content_type=ct,
             object_id=obj.pk,
@@ -364,7 +378,7 @@ def _process_message(raw_msg_bytes, settings, verbosity):
                 content=body,
                 created_by=None,
             )
-            _save_attachments(reply, msg)
+            _save_attachments(reply, msg, settings)
             update_fields = ['needs_response', 'updated_at']
             ticket.needs_response = True
             # Reopen tickets that had been considered done; leave 'converted'
@@ -392,7 +406,7 @@ def _process_message(raw_msg_bytes, settings, verbosity):
         created_by=None,
     )
     ticket.save()
-    _save_attachments(ticket, msg)
+    _save_attachments(ticket, msg, settings)
     return 'new_ticket', f'Created {ticket.ticket_number} for {client.name}', ticket
 
 
