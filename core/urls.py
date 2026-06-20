@@ -27,6 +27,7 @@ urlpatterns = [
     path('work-orders/<int:pk>/add-mileage/', views.WorkOrderMileageCreateView.as_view(), name='wo_mileage_create'),
     path('work-orders/new/', views.WorkOrderCreateView.as_view(), name='work_order_create'),
     path('work-orders/<int:pk>/edit/', views.WorkOrderUpdateView.as_view(), name='work_order_edit'),
+    path('work-orders/<int:pk>/delete/', views.WorkOrderDeleteView.as_view(), name='work_order_delete'),
     path('work-orders/<int:pk>/notes/add/', views.WorkOrderNoteCreateView.as_view(), name='work_order_note_add'),
     path('work-orders/<int:pk>/add-time/', views.WorkOrderAddTimeView.as_view(), name='work_order_add_time'),
     path('work-orders/<int:pk>/quick-update/', views.WorkOrderQuickUpdateView.as_view(), name='work_order_quick_update'),

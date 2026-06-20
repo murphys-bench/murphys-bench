@@ -1185,6 +1185,45 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
         return context
 
 
+class WorkOrderDeleteView(LoginRequiredMixin, View):
+    """Hard-delete a work order. Admin only.
+
+    Cleans up attachment files (their rows cascade with the WO, but the files on
+    disk don't), reopens a linked ticket stuck in 'converted' so it isn't
+    orphaned, then cascades the rest (line items, notes, items, invoice). Mileage
+    entries survive (work_order set null) — they're a travel log, not WO-owned.
+    """
+
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        wo = get_object_or_404(WorkOrder, pk=pk)
+        wo_num = wo.work_order_number
+        had_in_push = bool(wo.invoice_ninja_id)
+        ticket = wo.ticket  # captured before delete; the ticket row is not removed
+
+        # Delete attachment files from storage first (rows cascade with the WO).
+        for att in wo.attachments.all():
+            try:
+                if att.file:
+                    att.file.delete(save=False)
+            except Exception:
+                logger.warning('Could not delete an attachment file while deleting %s', wo_num)
+
+        wo.delete()
+
+        # A converted ticket whose WO is gone would be stuck in limbo — reopen it.
+        if ticket and ticket.status == 'converted':
+            ticket.status = 'open'
+            ticket.save(update_fields=['status', 'updated_at'])
+
+        msg = f'{wo_num} permanently deleted.'
+        if had_in_push:
+            msg += ' Note: an Invoice Ninja draft may still exist there — remove it in IN if needed.'
+        messages.success(request, msg)
+        return redirect('core:work_order_list')
+
+
 # --- Client Create / Edit ---
 
 class ClientCreateView(LoginRequiredMixin, CreateView):

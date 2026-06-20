@@ -24,6 +24,14 @@
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap flex items-center gap-1">{% icon "printer" 4 %} Repair Report</a>
             <a href="{% url 'core:work_order_print' work_order.pk %}?type=claim" target="_blank"
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Claim Ticket</a>
+            {% if is_admin %}
+            <form method="post" action="{% url 'core:work_order_delete' work_order.pk %}" class="inline"
+                  onsubmit="return confirm('Permanently delete {{ work_order.work_order_number }}? This removes its line items, notes, and attachments. This cannot be undone.');">
+                {% csrf_token %}
+                <button type="submit"
+                        class="px-3 py-3 hover:bg-red-700 text-red-300 hover:text-white transition-colors whitespace-nowrap">Delete WO</button>
+            </form>
+            {% endif %}
             <!-- Quick status update -->
             <form method="post" action="{% url 'core:work_order_quick_update' work_order.pk %}" class="ml-auto flex items-center">
                 {% csrf_token %}
