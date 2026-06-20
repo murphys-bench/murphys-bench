@@ -14,6 +14,25 @@ go/no-go only before destructive or production-affecting steps.
 
 ## Top of the queue for next session:
 
+**SESSION 35 (Jun 20) — Security posture pass. Suite 96→99.** Audited prod (`check --deploy` + settings)
+and acted: **admin user-delete** (guards self/last-superuser — Mike removed the 3 test accounts, only
+`admin` remains); file perms tightened (`.env` 600; `protected/`+`backups/` 750); runtime CVE dep upgrades
+**Pillow 12.2 / requests 2.33 / cryptography 48.0.1** (validated by full suite on prod's Py3.12). Verdict:
+app layer solid, gaps are infra. Detail in memory `project_mb_session35_security`.
+
+### Mike wants to DISCUSS these (understand before building):
+- **TLS** — prod is plain HTTP on LAN (cleartext cookies/creds). Mike gun-shy after a past LE exposure;
+  safe path is DNS-01 → private 10.x IP (no open ports). Off the table until he decides on exposure.
+- **Easy patch/update mechanism** — repeatable pip-audit→bump→test-on-3.12→deploy loop; prereq is
+  **aligning the dev venv (Py3.9) to prod (Py3.12)** so upgrades can be tested locally.
+
+### Tracked infra work (not yet done):
+- **SSH/VM hardening (sudo-gated, pair with Mike):** key-only SSH, fail2ban, OS patch cadence.
+- **Real DB backup** (pg_dump is broken/empty; PBS whole-VM is the only net) — see below + `project_mb_backup_broken`.
+- Inbound-attachment ClamAV scan (deferred ceiling).
+
+---
+
 **SESSION 34 (Jun 20) — Phase B (Invoice Ninja push) shipped + live-verified; WO delete added. Suite 88→96.**
 The billing loop is closed. `core/invoice_ninja.py` (requests, IN v5). "Send to Invoice Ninja" on a WO →
 DRAFT invoice from priced lines, IN assigns the number, WO# → po_number; type-aware find-or-create client

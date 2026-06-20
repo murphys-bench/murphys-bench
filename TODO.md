@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 20, 2026 (session 34 — Phase B Invoice Ninja draft push shipped + live-verified; WO hard-delete added; suite →96)
+**Last Updated**: June 20, 2026 (session 35 — security posture pass: admin user-delete, file-perm tightening, runtime CVE dep upgrades; infra gaps + discussion items tracked below; suite →99)
 **Current Phase**: Phase 1 — SCS Internal — **STABILIZATION** (see "How We Work" in CLAUDE.md)
 
 > ⚠ We are in a stabilization phase, not a feature phase. New features are paused until
@@ -36,6 +36,29 @@ the expensive-to-reverse-with-live-data piece, so it lands FIRST.
 Tax: non-issue (Oregon, no sales tax) — MB sends pre-tax line totals, IN handles the receipt.
 
 ---
+
+## Security & infrastructure (from the session-35 posture pass)
+
+App-layer security is solid; these are the infra/operational gaps + things Mike wants to discuss.
+Detail in memory `project_mb_session35_security`.
+
+- [ ] **SSH / VM hardening (sudo-gated — pair with Mike).** Key-only SSH (disable password auth),
+      `fail2ban`, disable root SSH login, OS patch cadence (`unattended-upgrades`). Biggest infra
+      lever — contains "secrets live on the box → VM compromise = full exposure." Doesn't affect
+      local app access. Claude can't do it (needs the sudo password); produce copy-paste commands.
+- [ ] **TLS — DISCUSS FIRST (Mike gun-shy).** Prod is plain HTTP on the LAN, so session cookies +
+      credential-vault reveals cross the LAN in cleartext. Mike saw foreign IPs hammering a past
+      Let's Encrypt setup — that was *box exposure*. The safe path: LE **DNS-01** challenge on a
+      subdomain whose A record points at the **private 10.x IP** (no open ports, no public front
+      door, auto-renew, trusted cert, LAN-only). Off the table until Mike decides on exposure.
+- [ ] **Easy patch/update mechanism (Mike wants this).** A repeatable loop: `pip-audit` → bump →
+      test on **Py3.12** → deploy. Prereq/companion: **align the dev venv to prod Python** — dev is
+      3.9, prod is 3.12, so prod-pinned deps (gunicorn 26, Pillow 12…) can't install or be tested
+      locally. Either get 3.12 on the Mac + rebuild the venv, or standardize on validating on prod's env.
+- [ ] **Inbound-attachment malware scan (ClamAV)** — deferred ceiling from the attachment review;
+      force-download already protects the app, this is defense-in-depth for the tech's machine.
+- Done this session: admin user-delete; `.env` 600 + `protected/`/`backups/` 750; runtime CVE dep
+  upgrades (Pillow 12.2 / requests 2.33 / cryptography 48.0.1).
 
 ## Real DB backup (tracked — pg_dump backup is currently BROKEN)
 
