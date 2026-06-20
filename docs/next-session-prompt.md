@@ -14,6 +14,25 @@ go/no-go only before destructive or production-affecting steps.
 
 ## Top of the queue for next session:
 
+**SESSION 31 (Jun 20) — Device/WO hardware specs + nav fixes, all LIVE on prod. Suite 71→80.**
+Usability pass (full detail in memory `project_mb_session31`). Commits `cd9caae` + `25166ac`.
+- **Ticket device dropdown scoped to client** — onboarding an Unsorted ticket no longer lists every
+  device. `TicketForm.device` queryset scoped to the effective client + HTMX OOB device `<select>` from
+  `TicketContactsByClientView` so it re-narrows on client change.
+- **Device CPU/RAM/storage** (free text, migration 0055) on device form + detail (OS now shown on detail too).
+- **WO snapshot + sync-back** (migration 0056): WO copies device specs at creation (as-serviced), edits
+  sync back to the device master, device reassign re-snapshots, past WOs stay frozen. On WO form/detail/print.
+  Only mutable specs snapshot; manufacturer/model/serial stay live read-through. Existing rows are blank
+  until filled — snapshot only fires on new WO creation.
+- **Device-detail back-link** now returns to the device's client (was the dead-end device list). List still
+  reachable from the dashboard "Devices on File" tile.
+
+**Possible follow-ups (only if Mike raises them):** snapshot manufacturer/model/serial too; add CPU/RAM/
+storage to the repair report's spec block (already done) for stand-alone Device print; structured
+number+unit spec entry if sorting/filtering by RAM/disk is ever wanted.
+
+---
+
 **SESSION 30 (Jun 19) — T2 ingestion + Unsorted triage bucket, all LIVE on prod. Suite 55→71.**
 Inbound is fully live on the real support inbox (closed the carried-over action from sessions 27→29),
 and Tier2Tickets (Helpdesk Buttons) is moved off OSTicket's API onto MB via T2's **Email Connector**.

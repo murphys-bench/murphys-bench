@@ -4,7 +4,7 @@
 **Tech Stack**: Python 3.12 / Django 4.2 / HTMX / Alpine.js / Tailwind CSS (CDN)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, PostgreSQL 16)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
-**Last Updated**: June 19, 2026 (Billing-architecture decision — the Invoice Ninja bridge is staged into a priced line-item primitive FIRST (Phase A, generic/attachable line items + WO total + tests — the expensive-to-reverse-with-live-data piece), THEN the IN push (Phase B, draft-push so IN owns invoice assembly). Quote/Project approval layer deferred (additive, no live-data clock). No tax (Oregon). Full rationale in memory `project_mb_pricing_architecture` + `project_in_integration` and in TODO.md "Billing work". // Session 30 — T2/Helpdesk Buttons moved off OSTicket API to T2's Email Connector; MB unwraps the no-reply relay `email-connector@tier2tickets.com` to the real contact via forwarded `From:`; unmatched inbound now parks in an "Unsorted/Unverified" triage bucket (migration 0054, `Client.is_unsorted`) instead of auto-creating junk clients, with an admin dashboard card + `/tickets/?triage=1`. Inbound fully live on the real support inbox. Migrations through 0054; test suite 71 passing. Prod: Claude restarts it directly — NOPASSWD for `systemctl restart murphys-bench`.)
+**Last Updated**: June 20, 2026 (Session 31 — device/WO usability: ticket device dropdown now scopes to the selected client (form queryset + HTMX OOB cascade); Device gained free-text CPU/RAM/storage; WorkOrder snapshots those specs at creation as an "as-serviced" record and syncs edits back to the device master (migrations 0055/0056); device-detail back-link now returns to the device's client instead of the dead-end device list. All live on prod. Suite 71→80. // Prior: Billing-architecture decision — the Invoice Ninja bridge is staged into a priced line-item primitive FIRST (Phase A, generic/attachable line items + WO total + tests — the expensive-to-reverse-with-live-data piece), THEN the IN push (Phase B, draft-push so IN owns invoice assembly). Quote/Project approval layer deferred (additive, no live-data clock). No tax (Oregon). Full rationale in memory `project_mb_pricing_architecture` + `project_in_integration` and in TODO.md "Billing work". // Session 30 — T2/Helpdesk Buttons moved off OSTicket API to T2's Email Connector; MB unwraps the no-reply relay `email-connector@tier2tickets.com` to the real contact via forwarded `From:`; unmatched inbound now parks in an "Unsorted/Unverified" triage bucket (migration 0054, `Client.is_unsorted`) instead of auto-creating junk clients, with an admin dashboard card + `/tickets/?triage=1`. Inbound fully live on the real support inbox. Migrations through 0054; test suite 71 passing. Prod: Claude restarts it directly — NOPASSWD for `systemctl restart murphys-bench`.)
 **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench`
 **App path on server**: `/opt/murphys-bench/`
 
@@ -237,6 +237,28 @@ multiplying one wrong ticket into several (TKT-00008/00009).
   confident (the one open action carried over from session 27).
 - The two orphan tickets were reconciled by hand: Wayne's reply was appended to
   TKT-20260610-0001 with its original timestamp, then TKT-00008/00009 were deleted.
+
+### Device/WO hardware specs + navigation fixes (session 31, Jun 20)
+Usability pass surfaced while onboarding Unsorted tickets and entering device data. All live on prod; suite 71→80.
+- **Ticket device dropdown scoped to client** — onboarding an Unsorted/Unverified ticket no longer shows
+  every device in the system. `TicketForm` scopes the `device` queryset to the effective client (same
+  pattern as `contact`), and the client→contacts HTMX cascade (`TicketContactsByClientView`) now also
+  returns an **out-of-band `<select id="id_device">`** so the device list re-narrows live on client change.
+- **Device hardware specs** — added free-text `cpu`/`ram`/`storage` to `Device` (migration 0055). Free
+  text on purpose (MSP values vary too widely to constrain; structured number+unit deferred unless
+  sorting/filtering is needed). Shown on the device form ("Hardware Details") + device detail; OS is now
+  also displayed on detail (was captured, never shown).
+- **WO snapshot + sync-back** (migration 0056) — `WorkOrder` gained `cpu`/`ram`/`storage`. On creation
+  (`save()` when `_state.adding`, via `apply_device_specs()`) the WO copies the device's specs as an
+  **as-serviced** record — covers the create view, ticket-convert, and any programmatic create. Editing
+  specs on the WO syncs back to the device master (`sync_specs_to_device()` from `WorkOrderUpdateView`);
+  reassigning the device on the inline panel re-snapshots (`apply_device_specs(force=True)`). Past WOs
+  stay frozen — later device edits don't rewrite history. Shown on WO form/detail/print. Only the
+  *mutable* specs are snapshotted; manufacturer/model/serial stay live read-through (device identity).
+  **Note:** existing devices/WOs are blank until filled; snapshot only fires on new WO creation.
+- **Device-detail back-link fix** — "← Devices" landed on the device list, a dead end (Devices isn't in
+  the nav). Now reads "← <client>" and returns to the device's client (client-centric model). The device
+  list is still reachable from the dashboard "Devices on File" tile — kept by choice, no nav entry needed.
 
 ### T2/Helpdesk Buttons ingestion + Unsorted triage bucket (session 30, Jun 19)
 **Tier2Tickets is the button-press front door, moved off OSTicket's API onto T2's Email Connector.**

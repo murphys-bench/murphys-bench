@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 19, 2026 (session 30 + billing-architecture decision)
+**Last Updated**: June 20, 2026 (session 31 — device/WO hardware specs + nav fixes; suite →80)
 **Current Phase**: Phase 1 — SCS Internal — **STABILIZATION** (see "How We Work" in CLAUDE.md)
 
 > ⚠ We are in a stabilization phase, not a feature phase. New features are paused until
