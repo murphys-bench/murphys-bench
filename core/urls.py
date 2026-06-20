@@ -82,6 +82,7 @@ urlpatterns = [
     path('users/new/', views.UserCreateView.as_view(), name='user_create'),
     path('users/<int:pk>/edit/', views.UserEditView.as_view(), name='user_edit'),
     path('users/<int:pk>/set-password/', views.UserSetPasswordView.as_view(), name='user_set_password'),
+    path('users/<int:pk>/delete/', views.UserDeleteView.as_view(), name='user_delete'),
     path('users/<int:pk>/reset-mfa/', views.AdminMFAResetView.as_view(), name='user_mfa_reset'),
     # Role management (admin only)
     path('roles/', views.RoleListView.as_view(), name='role_list'),
