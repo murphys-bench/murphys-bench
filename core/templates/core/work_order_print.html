@@ -249,6 +249,24 @@
                     <span>{{ work_order.device.get_condition_at_intake_display }}</span>
                 </div>
                 {% endif %}
+                {% if work_order.cpu %}
+                <div class="field-row">
+                    <span class="field-label">CPU: </span>
+                    <span>{{ work_order.cpu }}</span>
+                </div>
+                {% endif %}
+                {% if work_order.ram %}
+                <div class="field-row">
+                    <span class="field-label">RAM: </span>
+                    <span>{{ work_order.ram }}</span>
+                </div>
+                {% endif %}
+                {% if work_order.storage %}
+                <div class="field-row">
+                    <span class="field-label">Storage: </span>
+                    <span>{{ work_order.storage }}</span>
+                </div>
+                {% endif %}
                 {% else %}
                 <div class="field-sub">No device on file</div>
                 {% endif %}

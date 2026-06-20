@@ -331,6 +331,10 @@ class Device(models.Model):
     manufacturer = models.CharField(max_length=100, blank=True)
     os = models.CharField(max_length=20, choices=OS_CHOICES, blank=True)
     os_version = models.CharField(max_length=100, blank=True)
+    # Hardware specs — free text; values vary too widely to constrain
+    cpu = models.CharField(max_length=150, blank=True, help_text="Processor, e.g. 'Intel Core i7-1185G7' or 'Apple M2'")
+    ram = models.CharField(max_length=100, blank=True, help_text="Physical memory, e.g. '16 GB'")
+    storage = models.CharField(max_length=150, blank=True, help_text="Disk, e.g. '512 GB SSD' or '1 TB NVMe + 2 TB HDD'")
     condition_at_intake = models.CharField(max_length=20, choices=CONDITION_CHOICES, blank=True)
     notes = models.TextField(blank=True)
     # Encrypted device credentials — stored AES-256, revealed via HTMX eye icon
@@ -666,6 +670,11 @@ class WorkOrder(models.Model):
     time_spent_minutes = models.IntegerField(default=0, validators=[MinValueValidator(0)])
     scheduled_date = models.DateField(null=True, blank=True)
     completed_date = models.DateTimeField(null=True, blank=True)
+    # Hardware specs — snapshotted from the device at WO creation so the WO/report
+    # reflects the machine as serviced; edits here sync back to the device master.
+    cpu = models.CharField(max_length=150, blank=True, help_text="Processor as serviced")
+    ram = models.CharField(max_length=100, blank=True, help_text="Physical memory as serviced")
+    storage = models.CharField(max_length=150, blank=True, help_text="Disk as serviced")
     notes_internal = models.TextField(blank=True, help_text="Technician-only notes")
     notes_customer_visible = models.TextField(blank=True, help_text="What the customer sees")
     invoice_ninja_ref = models.CharField(max_length=100, blank=True, help_text='Invoice Ninja invoice reference number')
@@ -691,8 +700,38 @@ class WorkOrder(models.Model):
     def __str__(self):
         return f"{self.work_order_number}: {self.client.name}"
 
+    SPEC_FIELDS = ('cpu', 'ram', 'storage')
+
+    def apply_device_specs(self, force=False):
+        """Copy hardware specs from the linked device onto this WO.
+        Fills blank targets only, unless force=True (used when the device is (re)assigned)."""
+        if not self.device_id:
+            return
+        device = self.device
+        for f in self.SPEC_FIELDS:
+            if force or not getattr(self, f):
+                setattr(self, f, getattr(device, f, '') or '')
+
+    def sync_specs_to_device(self):
+        """Write this WO's hardware specs back to the device master so it stays current.
+        Only non-blank values overwrite; returns the list of fields changed on the device."""
+        if not self.device_id:
+            return []
+        device = self.device
+        changed = []
+        for f in self.SPEC_FIELDS:
+            val = getattr(self, f)
+            if val and getattr(device, f) != val:
+                setattr(device, f, val)
+                changed.append(f)
+        if changed:
+            device.save(update_fields=changed + ['updated_at'])
+        return changed
+
     def save(self, *args, **kwargs):
         if self._state.adding:
+            # Snapshot the device's hardware specs onto the WO at creation
+            self.apply_device_specs()
             return _save_with_unique_number(
                 self, 'work_order_number', self.generate_work_order_number,
                 lambda: super(WorkOrder, self).save(*args, **kwargs),

@@ -40,6 +40,7 @@ class WorkOrderForm(forms.ModelForm):
             'client', 'contact', 'device', 'repair_type', 'assigned_to',
             'service_type', 'status', 'priority', 'scheduled_date',
             'time_spent_minutes', 'invoice_ninja_ref',
+            'cpu', 'ram', 'storage',
             'notes_customer_visible', 'notes_internal',
         ]
         widgets = {
@@ -54,6 +55,9 @@ class WorkOrderForm(forms.ModelForm):
             'scheduled_date': forms.DateInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'type': 'date'}),
             'time_spent_minutes': forms.NumberInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'invoice_ninja_ref': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'e.g. INV-0042'}),
+            'cpu': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'e.g. Intel Core i7-1185G7'}),
+            'ram': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'e.g. 16 GB'}),
+            'storage': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'e.g. 512 GB SSD'}),
             'notes_customer_visible': forms.Textarea(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'rows': 4}),
             'notes_internal': forms.Textarea(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'rows': 4}),
         }
@@ -70,6 +74,9 @@ class WorkOrderForm(forms.ModelForm):
         self.fields['scheduled_date'].required = False
         self.fields['time_spent_minutes'].required = False
         self.fields['invoice_ninja_ref'].required = False
+        self.fields['cpu'].required = False
+        self.fields['ram'].required = False
+        self.fields['storage'].required = False
         # Dynamic status choices from StatusDefinition
         wo_statuses = list(StatusDefinition.objects.filter(
             entity_type='workorder', is_active=True
@@ -120,7 +127,7 @@ class DeviceForm(forms.ModelForm):
         fields = [
             'client', 'assigned_contact', 'name', 'device_type', 'repair_type',
             'manufacturer', 'model', 'serial_number',
-            'os', 'os_version', 'condition_at_intake',
+            'os', 'os_version', 'cpu', 'ram', 'storage', 'condition_at_intake',
             'notes', 'is_active',
         ]
         widgets = {
@@ -134,6 +141,9 @@ class DeviceForm(forms.ModelForm):
             'serial_number': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'os': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'os_version': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'e.g. 11 Pro 10.0.26200.0'}),
+            'cpu': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'e.g. Intel Core i7-1185G7'}),
+            'ram': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'e.g. 16 GB'}),
+            'storage': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'e.g. 512 GB SSD'}),
             'condition_at_intake': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'notes': forms.Textarea(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'rows': 3}),
             'is_active': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
@@ -149,6 +159,9 @@ class DeviceForm(forms.ModelForm):
         self.fields['serial_number'].required = False
         self.fields['os'].required = False
         self.fields['os_version'].required = False
+        self.fields['cpu'].required = False
+        self.fields['ram'].required = False
+        self.fields['storage'].required = False
         self.fields['condition_at_intake'].required = False
         self.fields['notes'].required = False
 
@@ -200,8 +213,10 @@ class TicketForm(forms.ModelForm):
         effective_client_id = posted_client_id or (instance.client_id if instance else None)
         if effective_client_id:
             self.fields['contact'].queryset = Contact.objects.filter(client_id=effective_client_id, is_active=True).order_by('last_name', 'first_name')
+            self.fields['device'].queryset = Device.objects.filter(client_id=effective_client_id, is_active=True).order_by('name')
         else:
             self.fields['contact'].queryset = Contact.objects.none()
+            self.fields['device'].queryset = Device.objects.none()
         self.fields['device'].required = False
         self.fields['help_topic'].queryset = HelpTopic.objects.filter(is_active=True).order_by('sort_order', 'name')
         self.fields['help_topic'].required = False

@@ -1278,3 +1278,100 @@ def test_cli_reset_unknown_user_errors():
     from django.core.management.base import CommandError
     with pytest.raises(CommandError):
         call_command('reset_mfa', 'nobody-here')
+
+
+# ── Ticket form device dropdown is scoped to the selected client ────────────
+
+@pytest.mark.django_db
+def test_ticket_form_device_queryset_scoped_to_client(client_obj):
+    """Onboarding an unsorted ticket: the device dropdown must only offer the
+    selected client's devices, not every device in the system."""
+    from core.forms import TicketForm
+    other = Client.objects.create(name='Other Co')
+    mine = Device.objects.create(client=client_obj, name='My Laptop')
+    theirs = Device.objects.create(client=other, name='Their Laptop')
+
+    form = TicketForm(data={'client': client_obj.pk})
+    device_ids = set(form.fields['device'].queryset.values_list('pk', flat=True))
+    assert mine.pk in device_ids
+    assert theirs.pk not in device_ids
+
+
+@pytest.mark.django_db
+def test_contacts_by_client_returns_scoped_device_options(client, client_obj, admin_user):
+    """The HTMX cascade returns an out-of-band device <select> narrowed to the
+    chosen client's devices."""
+    other = Client.objects.create(name='Other Co')
+    mine = Device.objects.create(client=client_obj, name='My Laptop')
+    theirs = Device.objects.create(client=other, name='Their Laptop')
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:ticket_contacts_by_client') + f'?client={client_obj.pk}')
+    body = resp.content.decode()
+    assert 'hx-swap-oob="true"' in body
+    assert f'<option value="{mine.pk}">' in body
+    assert f'<option value="{theirs.pk}">' not in body
+
+
+# ── Device hardware spec fields persist ─────────────────────────────────────
+
+@pytest.mark.django_db
+def test_device_form_saves_hardware_specs(client_obj):
+    from core.forms import DeviceForm
+    form = DeviceForm(data={
+        'client': client_obj.pk,
+        'name': 'Spec Box',
+        'device_type': 'desktop',
+        'cpu': 'Intel Core i7-1185G7',
+        'ram': '16 GB',
+        'storage': '512 GB SSD',
+        'is_active': True,
+    })
+    assert form.is_valid(), form.errors
+    device = form.save()
+    device.refresh_from_db()
+    assert device.cpu == 'Intel Core i7-1185G7'
+    assert device.ram == '16 GB'
+    assert device.storage == '512 GB SSD'
+
+
+# ── WO snapshots device specs on creation and syncs edits back ──────────────
+
+@pytest.mark.django_db
+def test_workorder_snapshots_device_specs_on_create(client_obj):
+    device = Device.objects.create(
+        client=client_obj, name='Box', cpu='Ryzen 5', ram='8 GB', storage='256 GB SSD',
+    )
+    wo = WorkOrder.objects.create(client=client_obj, device=device)
+    assert wo.cpu == 'Ryzen 5'
+    assert wo.ram == '8 GB'
+    assert wo.storage == '256 GB SSD'
+
+
+@pytest.mark.django_db
+def test_workorder_spec_edit_syncs_back_to_device(client_obj):
+    device = Device.objects.create(
+        client=client_obj, name='Box', cpu='Ryzen 5', ram='8 GB', storage='256 GB SSD',
+    )
+    wo = WorkOrder.objects.create(client=client_obj, device=device)
+    # Tech upgrades the RAM during the repair
+    wo.ram = '16 GB'
+    wo.save()
+    changed = wo.sync_specs_to_device()
+    device.refresh_from_db()
+    assert 'ram' in changed
+    assert device.ram == '16 GB'
+    # Untouched specs are unaffected
+    assert device.cpu == 'Ryzen 5'
+
+
+@pytest.mark.django_db
+def test_workorder_later_device_spec_change_does_not_alter_past_wo(client_obj):
+    device = Device.objects.create(client=client_obj, name='Box', ram='8 GB')
+    wo = WorkOrder.objects.create(client=client_obj, device=device)
+    # Device is later upgraded outside this WO
+    device.ram = '32 GB'
+    device.save()
+    wo.refresh_from_db()
+    # The WO keeps its as-serviced snapshot
+    assert wo.ram == '8 GB'

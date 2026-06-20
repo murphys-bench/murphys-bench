@@ -51,6 +51,26 @@
             </div>
         </div>
 
+        <!-- Hardware (as serviced) -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-base font-semibold text-gray-900 mb-1">Hardware (as serviced)</h2>
+            <p class="text-xs text-gray-400 mb-4">Pulled from the device when this work order was created. Edits here also update the device record.</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Processor (CPU)</label>
+                    {{ form.cpu }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Memory (RAM)</label>
+                    {{ form.ram }}
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Storage</label>
+                    {{ form.storage }}
+                </div>
+            </div>
+        </div>
+
         <!-- Assignment -->
         <div class="bg-white rounded-lg shadow p-6">
             <h2 class="text-base font-semibold text-gray-900 mb-4">Assignment & Status</h2>

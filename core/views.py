@@ -10,6 +10,7 @@ from django.db.models import Q, F as models_F, Max as models_Max, Count
 from django.contrib.contenttypes.models import ContentType
 from django.http import FileResponse, Http404
 from django.utils import timezone
+from django.utils.html import escape
 from .models import (
     WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist, ChecklistItem,
     Ticket, TicketReply, TicketLock, TicketLink, Attachment, SiteSettings,
@@ -511,7 +512,12 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
         wo.contact_id = contact_id if contact_id else None
 
         device_id = p.get('device')
-        wo.device_id = device_id if device_id else None
+        new_device_id = int(device_id) if device_id else None
+        device_changed = new_device_id != wo.device_id
+        wo.device_id = new_device_id
+        # Reassigning the device re-snapshots its hardware specs onto the WO
+        if device_changed:
+            wo.apply_device_specs(force=True)
 
         repair_type_id = p.get('repair_type')
         if repair_type_id == 'custom':
@@ -1131,6 +1137,8 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
     def form_valid(self, form):
         old_status = WorkOrder.objects.get(pk=self.object.pk).status
         response = super().form_valid(form)
+        # Push any edited hardware specs back to the device master so it stays current
+        self.object.sync_specs_to_device()
         _flag_ticket_wo_complete(self.object)
 
         # Optionally append checklist items from the flat bank filtered by device type
@@ -1886,11 +1894,19 @@ class TicketContactsByClientView(LoginRequiredMixin, View):
     def get(self, request):
         client_id = request.GET.get('client_id') or request.GET.get('client')
         contacts = []
+        devices = []
         if client_id:
             contacts = Contact.objects.filter(client_id=client_id, is_active=True).order_by('last_name', 'first_name')
+            devices = Device.objects.filter(client_id=client_id, is_active=True).order_by('name')
         opts = '<option value="">---------</option>'
         for c in contacts:
-            opts += f'<option value="{c.pk}">{c.first_name} {c.last_name}</option>'
+            opts += f'<option value="{c.pk}">{escape(c.first_name)} {escape(c.last_name)}</option>'
+        # Out-of-band swap to narrow the device dropdown to this client's devices.
+        dev_opts = '<option value="">---------</option>'
+        for d in devices:
+            dev_opts += f'<option value="{d.pk}">{escape(str(d))}</option>'
+        select_cls = 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'
+        opts += f'<select name="device" id="id_device" hx-swap-oob="true" class="{select_cls}">{dev_opts}</select>'
         return HttpResponse(opts)
 
 
