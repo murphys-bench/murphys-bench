@@ -1634,3 +1634,33 @@ def test_find_or_create_uses_stored_id(client_obj, monkeypatch):
     # Should NOT call the API at all when id is already stored
     monkeypatch.setattr(invoice_ninja, '_request', lambda *a, **k: pytest.fail('should not call API'))
     assert invoice_ninja.find_or_create_client(client_obj) == '77'
+
+
+# ── Work order hard-delete (admin only, cleans up + reopens converted ticket) ─
+
+@pytest.mark.django_db
+def test_workorder_delete_admin_cascades_and_reopens_ticket(client, client_obj, admin_user):
+    from decimal import Decimal
+    from core.models import Ticket, LineItem
+    ticket = Ticket.objects.create(client=client_obj, subject='s', description='d',
+                                   ticket_number='TKT-DEL-1', status='converted')
+    wo = WorkOrder.objects.create(client=client_obj, ticket=ticket)
+    wo.line_items.create(kind='labor', description='x', unit_price=Decimal('10'))
+    wo_pk = wo.pk
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:work_order_delete', args=[wo_pk]))
+    assert resp.status_code == 302
+    assert not WorkOrder.objects.filter(pk=wo_pk).exists()
+    assert LineItem.objects.filter(object_id=wo_pk).count() == 0  # cascaded
+    ticket.refresh_from_db()
+    assert ticket.status == 'open'  # converted ticket reopened, not orphaned
+
+
+@pytest.mark.django_db
+def test_workorder_delete_denied_for_non_admin(client, client_obj):
+    tech = User.objects.create_user(username='wodel-tech', password='x', is_staff=False)
+    wo = WorkOrder.objects.create(client=client_obj)
+    client.force_login(tech)
+    resp = client.post(reverse('core:work_order_delete', args=[wo.pk]))
+    assert resp.status_code == 403
+    assert WorkOrder.objects.filter(pk=wo.pk).exists()
