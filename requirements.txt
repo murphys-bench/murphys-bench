@@ -37,7 +37,8 @@ django-storages==1.14.6
 boto3==1.42.97
 
 # Utilities
-Pillow==10.1.0
-requests==2.31.0
+Pillow==12.2.0          # security: clears CVE-2023-50447/2024-28219/2026-42310 + PYSEC-2026-165
+requests==2.33.0        # security: clears CVE-2024-35195/2024-47081/2026-25645 (carries the IN API token)
+cryptography==48.0.1    # security: clears GHSA-537c-gmf6-5ccf; underpins field encryption
 markdown
 django-axes==8.0.0
