@@ -14,6 +14,34 @@ go/no-go only before destructive or production-affecting steps.
 
 ## Top of the queue for next session:
 
+### ⚠ DO FIRST — MB2 demo attachment security (internet-facing, carried from session 32)
+Session 32 fixed a real attachment-exposure hole on PROD but **the MB2 demo box (`10.58.35.223`,
+internet-exposed via Cloudflare at mbdemo.scs-tech.net) still has it.** Same fix, when on the demo LAN:
+```
+ssh scs-tech@10.58.35.223   # (demo box — needs the other LAN / VM-LAN SSID)
+cd /opt/murphys-bench && git pull
+mkdir -p protected && mv media/attachments protected/attachments   # relocate existing files
+venv/bin/python manage.py migrate core
+sudo systemctl restart murphys-bench
+# verify: curl old /media/attachments/<path> → 404; auth view → 302 login
+```
+Until done, demo attachments are reachable on the public internet by guessable URL. (Demo data is fake,
+but the pattern is the live exposure.) Optional hardening once at a console: nginx `deny /media/attachments/`.
+
+---
+
+**SESSION 32 (Jun 20) — Attachment security review acted on, LIVE on prod + verified. Suite 80→84.**
+Audited attachment handling; found attachments were served publicly via nginx `/media/` (no login, guessable
+URLs), plus an IDOR and inbound paths skipping the upload guards. Fixes (memory `project_mb_session32`,
+commit `971b573`):
+- **Structural:** attachments now stored under `PRIVATE_MEDIA_ROOT=BASE_DIR/protected` (outside MEDIA_ROOT)
+  via `PrivateMediaStorage`; nginx can't serve them; auth view is the only path. Files relocated per target.
+- **IDOR:** `AttachmentDownloadView` authorizes per-object (`_can_access_attachment` → ticket/WO scoping).
+- **Inbound parity:** `fetch_inbound_email._save_attachments` enforces blocked-extension list + size cap.
+- Deferred ceiling: ClamAV scan; content-sniffed inline image rendering (lands with the widget screenshots).
+
+---
+
 **SESSION 31 (Jun 20) — Device/WO hardware specs + nav fixes, all LIVE on prod. Suite 71→80.**
 Usability pass (full detail in memory `project_mb_session31`). Commits `cd9caae` + `25166ac`.
 - **Ticket device dropdown scoped to client** — onboarding an Unsorted ticket no longer lists every
