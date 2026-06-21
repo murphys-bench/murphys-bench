@@ -30,7 +30,15 @@ project. Full rationale for self-hosters in **`docs/deployment-tls.md`**; decisi
 - **Easy patch/update mechanism** — repeatable pip-audit→bump→test-on-3.12→deploy loop; prereq is
   **aligning the dev venv (Py3.9) to prod (Py3.12)** so upgrades can be tested locally.
 
+### MB2 demo — now at FULL parity with prod (Jun 20)
+Caught MB2 (`10.58.35.223`) up to current main `ca45f8e`: migrations 0058–0061 applied, deps upgraded
+(Pillow 12.2/requests 2.33/cryptography 48.0.1), perms hardened (.env 600, protected/backups 750),
+Invoice Ninja correctly **disabled** (fake data, no token). Both boxes functionally identical.
+Leftover: prod's checkout is 2 **docs-only** commits behind (couldn't sync from the VM LAN) — trivial
+`git pull` on the main LAN, no restart.
+
 ### Tracked infra work (not yet done):
+- **`ufw` lockdown on MB2** (untrusted-LAN box) so the Cloudflare tunnel is the only way in — sudo-gated.
 - **SSH/VM hardening (sudo-gated, pair with Mike):** key-only SSH, fail2ban, OS patch cadence.
 - **Real DB backup** (pg_dump is broken/empty; PBS whole-VM is the only net) — see below + `project_mb_backup_broken`.
 - Inbound-attachment ClamAV scan (deferred ceiling).
