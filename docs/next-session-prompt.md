@@ -20,9 +20,13 @@ and acted: **admin user-delete** (guards self/last-superuser — Mike removed th
 **Pillow 12.2 / requests 2.33 / cryptography 48.0.1** (validated by full suite on prod's Py3.12). Verdict:
 app layer solid, gaps are infra. Detail in memory `project_mb_session35_security`.
 
-### Mike wants to DISCUSS these (understand before building):
-- **TLS** — prod is plain HTTP on LAN (cleartext cookies/creds). Mike gun-shy after a past LE exposure;
-  safe path is DNS-01 → private 10.x IP (no open ports). Off the table until he decides on exposure.
+### TLS / HTTPS — DECIDED (Jun 20), don't re-open
+MB stays reverse-proxy-terminated (never does TLS itself — standard Django model). SCS prod stays plain
+HTTP on the **trusted main LAN**; external access (if ever) = behind Cloudflare like MB2; no internal-cert
+project. Full rationale for self-hosters in **`docs/deployment-tls.md`**; decision record in CLAUDE.md
+"TLS / HTTPS — design decision" + memory `project_mb_tls_decision`. Key idea: encryption ≠ exposure.
+
+### Still wants to DISCUSS:
 - **Easy patch/update mechanism** — repeatable pip-audit→bump→test-on-3.12→deploy loop; prereq is
   **aligning the dev venv (Py3.9) to prod (Py3.12)** so upgrades can be tested locally.
 

@@ -46,11 +46,16 @@ Detail in memory `project_mb_session35_security`.
       `fail2ban`, disable root SSH login, OS patch cadence (`unattended-upgrades`). Biggest infra
       lever — contains "secrets live on the box → VM compromise = full exposure." Doesn't affect
       local app access. Claude can't do it (needs the sudo password); produce copy-paste commands.
-- [ ] **TLS — DISCUSS FIRST (Mike gun-shy).** Prod is plain HTTP on the LAN, so session cookies +
-      credential-vault reveals cross the LAN in cleartext. Mike saw foreign IPs hammering a past
-      Let's Encrypt setup — that was *box exposure*. The safe path: LE **DNS-01** challenge on a
-      subdomain whose A record points at the **private 10.x IP** (no open ports, no public front
-      door, auto-renew, trusted cert, LAN-only). Off the table until Mike decides on exposure.
+- [x] **TLS / HTTPS — DECIDED (Jun 20, session 35).** MB stays proxy-terminated (it never does TLS
+      itself); rationale + every hosting option written up for self-hosters in
+      [`docs/deployment-tls.md`](docs/deployment-tls.md). For SCS: prod stays **plain HTTP on the
+      trusted main LAN** (deliberate — no external surface); external access (if ever) = move to the
+      VM LAN behind Cloudflare like MB2. No internal-cert project (more hassle than CF, which SCS
+      reserves `scs-tech.net` for). Full decision + reasoning in CLAUDE.md "TLS / HTTPS — design
+      decision" and memory `project_mb_tls_decision`. Don't re-litigate.
+- [ ] **Write the public-readiness deploy recipes** — `docs/deployment-tls.md` is done (the "why" +
+      options). Still nice-to-have: short copy-paste Caddy + nginx vhost examples in INSTALL.md for
+      the non-CF paths, when the public-readiness pass happens.
 - [ ] **Easy patch/update mechanism (Mike wants this).** A repeatable loop: `pip-audit` → bump →
       test on **Py3.12** → deploy. Prereq/companion: **align the dev venv to prod Python** — dev is
       3.9, prod is 3.12, so prod-pinned deps (gunicorn 26, Pillow 12…) can't install or be tested
