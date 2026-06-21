@@ -4,6 +4,15 @@ This guide installs Murphy's Bench on a fresh Ubuntu 24.04 server, served over
 HTTPS behind a Cloudflare Tunnel. It targets a self-hosted instance on an
 internal network or a small VM.
 
+> **On HTTPS/TLS:** MB deliberately does **not** terminate TLS itself — it runs
+> behind a reverse proxy (Cloudflare Tunnel, Caddy, nginx, or your own web
+> server) that does. This is the standard Django deployment model, not a missing
+> feature. A Cloudflare Tunnel is used below, but it's only one option. For the
+> full rationale and every alternative (Caddy auto-HTTPS, nginx + your own /
+> Let's Encrypt / DNS-01 cert, a subdomain on a web server you already run,
+> self-signed for LAN-only, or plain HTTP on a trusted LAN), see
+> [`docs/deployment-tls.md`](docs/deployment-tls.md).
+
 > **Status of this document:** validated by a clean install on a demo VM
 > (Ubuntu 24.04, REDACTED-IP) on Jun 16 2026. Known-good Gunicorn + Nginx
 > configs live in [`deploy/demo/`](deploy/demo/). A few items below are noted
