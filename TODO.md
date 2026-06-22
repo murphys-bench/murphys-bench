@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 20, 2026 (session 35 — security posture pass: admin user-delete, file-perm tightening, runtime CVE dep upgrades; infra gaps + discussion items tracked below; suite →99)
+**Last Updated**: June 22, 2026 (session 37 — inbound duplicate-ticket bug fixed, migration 0062, suite →100; + full system assessment → BookStack page 09; see "System assessment & remediation" below)
 **Current Phase**: Phase 1 — SCS Internal — **STABILIZATION** (see "How We Work" in CLAUDE.md)
 
 > ⚠ We are in a stabilization phase, not a feature phase. New features are paused until
@@ -8,6 +8,20 @@
 > is to check it against the stabilization rule in CLAUDE.md first.
 
 ---
+
+## System assessment & remediation (Jun 22 2026 — see BookStack page 09)
+
+Full report-only audit across 8 domains. Verdict: app/code/data/security are sound (verified green);
+every failure lived in the operational/process shell. Root cause = no verification/observability.
+- [x] DB backup rebuilt — SQLite snapshot → immutable Backblaze B2, restore-drilled (Jun 22)
+- [x] Inbound duplicate-ticket bug fixed — atomic claim + DB constraint + run-lock, migration 0062 (Jun 22)
+- [ ] **T1 · Observability keystone** — backup dead-man's-switch + failure alerting (the gap that hid the broken backup). Highest leverage.
+- [ ] **T1 · Fix PBS whole-VM backup** — VMID-103 collision prunes the real prod backup (Mike's scheduled hands-on learning task).
+- [ ] **T1 · Correct any remaining stale doc claims** (PBS-as-safety-net / IMAP references).
+- [ ] **T2 · Dedicated TEST VM** as staging/pre-prod (Mike to provision; unique VMID; Python 3.12; restore B2 data) → ends edit-on-prod; add snapshot-before-migrate.
+- [ ] **T2 · Decommission the unused PostgreSQL** server + remove dead `DB_*` lines from `.env`.
+- [ ] **T2 · Rotate the broad GitHub PAT** still on the scs-repair-tracker box.
+- [ ] **T3 (hygiene / by decision):** CI test gate · `pip-audit` loop · logrotate (gunicorn logs) · `fail2ban` · TLS decision · ClamAV.
 
 ## Billing work (decided Jun 19 2026 — see memory `project_mb_pricing_architecture` + `project_in_integration`)
 

@@ -8,7 +8,7 @@
 |---|---|---|
 | Nightly app backup | SQLite DB snapshot + attachments (`protected/`, `media/`) + `.env`, as one gzipped tarball | 02:15 nightly, last 14 kept locally |
 | Off-site copy (Backblaze B2) | The same nightly tarball, pushed to bucket `scs-mb-backups` | every nightly run |
-| Proxmox / PBS VM backups | Whole VM (OS, app, DB, `.env`) | per Proxmox schedule |
+| Proxmox / PBS VM backups ⚠️ | Whole VM — **currently BROKEN for production** (VMID-103 collision prunes the real backup; see the System Assessment, page 09) | per Proxmox schedule |
 | GitHub | All application code | every push |
 | Bitwarden | `FIELD_ENCRYPTION_KEY` (and other secrets) | manual |
 
@@ -70,7 +70,12 @@ was used when the data was encrypted. A new/different key will not decrypt old d
 
 ## Restore procedures
 
-### A) Restore the whole VM (fastest, preferred)
+### A) Restore the whole VM (Proxmox / PBS)
+
+> ⚠️ **As of June 2026 this path is NOT reliable for production** — a VMID collision is pruning the real
+> murphys-bench VM backup (see the System Assessment, page 09). Until it's fixed, prefer procedure **B**
+> (restore from the Backblaze B2 tarball), which is verified working. Once PBS is fixed, this is the
+> fastest whole-machine recovery.
 
 Roll back to a Proxmox / PBS backup. This brings back the OS, app, database, and `.env` (including the
 encryption key) together. Then verify the app boots and the timers are active.

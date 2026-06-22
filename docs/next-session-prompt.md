@@ -40,7 +40,7 @@ Leftover: prod's checkout is 2 **docs-only** commits behind (couldn't sync from 
 ### Tracked infra work (not yet done):
 - **`ufw` lockdown on MB2** (untrusted-LAN box) so the Cloudflare tunnel is the only way in — sudo-gated.
 - **SSH/VM hardening (sudo-gated, pair with Mike):** key-only SSH, fail2ban, OS patch cadence.
-- **Real DB backup** (pg_dump is broken/empty; PBS whole-VM is the only net) — see below + `project_mb_backup_broken`.
+- ✅ **Real DB backup — DONE Jun 22** (SQLite snapshot → immutable B2, restore-drilled). ⚠️ but **PBS whole-VM backup is BROKEN for prod** (VMID collision) — fix scheduled. See BookStack page 09 (system assessment) + the remediation tiers.
 - Inbound-attachment ClamAV scan (deferred ceiling).
 
 ---
@@ -247,8 +247,8 @@ match prod (both boxes now `PasswordAuthentication no`; verified). Claude connec
 - **Four data-integrity bugs fixed** (each test-covered): ticket-delete guard (was always-false `hasattr`); `Device.serial_number` now nullable so many serial-less devices coexist (migration 0045); collision-resistant ticket/WO number assignment (`_save_with_unique_number`); email/inbound failures now log to `core` logger instead of failing silently.
 - **`reset_operational_data` management command**: clean OSTicket-cutover wipe. Dry-run by default; destructive path needs `--confirm "DELETE ALL OPERATIONAL DATA"`. Deletes operational data, keeps all config + superusers.
 - **Production safety guards**: `DEBUG` now defaults False; startup refuses default `SECRET_KEY`/`FIELD_ENCRYPTION_KEY` when `DEBUG=False`; added nosniff; SSL-redirect/HSTS opt-in via `.env`. Local Mac `.env` created (DEBUG=True).
-- **Nightly DB backup**: `scripts/backup_db.sh` + systemd timer (02:15 nightly). Installed + active.
-- **systemd timers** for `fetch_inbound_email` (2 min) + `check_sla_overdue` (15 min) — installed + active; inbound verified connecting to IMAP.
+- **Nightly DB backup**: `scripts/mb_backup.sh` (SQLite snapshot + files → immutable B2) + systemd timer (02:15). Working + restore-drilled (Jun 22).
+- **systemd timers** for `fetch_inbound_email` (2 min) + `check_sla_overdue` (15 min) — installed + active; inbound now over **POP3** (switched from IMAP to kill a dedup bug).
 - **Conversation-view polish**: client replies render green with the contact name; quoted email history folds into a collapsible greyed blockquote; reply header shows "<Tech> · to customer" / "<Contact> · client reply" instead of "Customer Visible". (`reply_body`/`split_reply_quote` in `mb_icons.py`.)
 - **Email rendering fixes + Email Branding**: client emails now show white/contrast header text (was unreadable black-on-teal) and embed the logo inline (`multipart/related`) downscaled above the bar, instead of dumping a 695KB attachment. New "Email Branding" card (Settings → Email Templates) with `email_header_color` + `email_logo` (migration 0046), decoupled from app colors, with a live preview. Also fixed a latent missing-`reverse`-import bug that 500'd 6 settings save handlers.
 - **Ticket reply UX**: reply box enlarged (rows=8, resizable); reply type defaults to Customer Visible; "also send to" has a BCC/CC selector (default BCC, `send_ticket_email(bcc=…)`); reply draft autosaves to localStorage per ticket so a status-change reload doesn't lose it.
