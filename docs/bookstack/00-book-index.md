@@ -17,6 +17,7 @@ Each numbered `.md` file = one BookStack page. Create the book "Murphy's Bench" 
 6. **Email System** — inbound (POP3) + outbound (branded HTML), threading, the gotchas.
 7. **Data Model & Settings Reference** — the 34 models and what native Settings covers.
 8. **Conventions, Gotchas & Locked Decisions** — the "don't relearn this the hard way" page.
+9. **System Assessment (June 2026)** — full report-only audit (code/data/security/ops/process), graded findings + prioritized remediation.
 
 ## Maintaining this book
 
