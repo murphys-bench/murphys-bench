@@ -1,6 +1,5 @@
 # Core
 Django==4.2.30
-psycopg2-binary==2.9.9
 python-decouple==3.8
 gunicorn==26.0.0
 

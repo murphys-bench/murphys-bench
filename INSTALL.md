@@ -13,10 +13,11 @@ internal network or a small VM.
 > self-signed for LAN-only, or plain HTTP on a trusted LAN), see
 > [`docs/deployment-tls.md`](docs/deployment-tls.md).
 
-> **Status of this document:** validated by a clean install on a demo VM
-> (Ubuntu 24.04, REDACTED-IP) on Jun 16 2026. Known-good Gunicorn + Nginx
-> configs live in [`deploy/demo/`](deploy/demo/). A few items below are noted
-> where a third-party install differs from how the demo box was seeded.
+> **Status of this document:** validated by a clean install from git onto a
+> fresh Ubuntu 24.04.4 VM (`REDACTED-IP`) on Jun 22 2026, running on **SQLite**
+> (the production database) — the gunicorn/nginx snippets below match that
+> known-good prod deployment. Known-good configs also live in
+> [`deploy/demo/`](deploy/demo/).
 
 ---
 
@@ -48,10 +49,12 @@ There is **no build step** for the frontend — Tailwind/HTMX/Alpine load from C
 
 ```bash
 sudo apt update
-sudo apt install -y python3 python3-venv python3-pip \
-    postgresql postgresql-contrib \
-    nginx git
+sudo apt install -y python3 python3-venv python3-pip nginx git
 ```
+
+> PostgreSQL is **not** required — MB defaults to SQLite (a single file, no DB
+> server). Only install `postgresql postgresql-contrib` if you opt into Postgres
+> in step 5.
 
 Confirm Python is 3.12:
 
@@ -76,9 +79,17 @@ sudo chown scs-tech:scs-tech /opt/murphys-bench
 Then get the code into `/opt/murphys-bench`:
 
 - **Public/clone access:** `git clone <REPO_URL> /opt/murphys-bench`.
-- **Private repo with no creds on the box (how the demo box was done):** seed it
-  by `rsync` from a working checkout, or add a GitHub **deploy key** / PAT first.
-  Example rsync from a local checkout (excludes venv, secrets, local DB):
+- **Private repo (recommended — how the test/staging box was done):** add a
+  read-only **SSH deploy key** so the box can `git pull` deploys without storing
+  a password or a broad PAT:
+  ```bash
+  ssh-keygen -t ed25519 -f ~/.ssh/mb_deploy -N '' -C 'mb-deploy'
+  cat ~/.ssh/mb_deploy.pub        # add this to the GitHub repo → Settings → Deploy keys (read-only)
+  printf 'Host github.com\n    IdentityFile ~/.ssh/mb_deploy\n    IdentitiesOnly yes\n' >> ~/.ssh/config
+  git clone git@github.com:<org>/murphys-bench.git /opt/murphys-bench
+  ```
+- **No-creds alternative:** seed it by `rsync` from a working checkout (excludes
+  venv, secrets, local DB):
   ```bash
   rsync -az --delete --exclude venv/ --exclude .git/ --exclude .env \
     --exclude db.sqlite3 --exclude '__pycache__/' --exclude media/ \
@@ -103,6 +114,13 @@ venv/bin/pip install -r requirements.txt
 > **Note:** Murphy's Bench defaults to **SQLite** (a single file, no database server) and the SCS
 > production deployment deliberately uses SQLite. This section is only needed if you set
 > `DB_ENGINE=postgresql` in `.env`. To use the default SQLite, skip this section entirely.
+
+Install the Postgres driver into the venv (it is **not** in `requirements.txt`, since
+the default SQLite build doesn't need it):
+
+```bash
+venv/bin/pip install psycopg2-binary
+```
 
 ```bash
 sudo -u postgres psql <<'SQL'
@@ -148,16 +166,19 @@ Then edit `.env`:
 DEBUG=False                       # production-safe; app REFUSES to start with default keys
 SECRET_KEY=<generated above>
 FIELD_ENCRYPTION_KEY=<generated above>
-ALLOWED_HOSTS=demo.example.com    # the public hostname Cloudflare will serve
+ALLOWED_HOSTS=demo.example.com    # the public hostname (or the LAN IP for an internal-only box)
 
-DB_ENGINE=django.db.backends.postgresql
-DB_NAME=murphys_bench
-DB_USER=mb_user
-DB_PASSWORD=<the password from step 5>
-DB_HOST=localhost
-DB_PORT=5432
+# Database: MB defaults to SQLite (a file at db.sqlite3) — no DB_* settings needed.
+# To use PostgreSQL instead (optional — see step 5), uncomment these:
+# DB_ENGINE=postgresql
+# DB_NAME=murphys_bench
+# DB_USER=mb_user
+# DB_PASSWORD=<the password from step 5>
+# DB_HOST=localhost
+# DB_PORT=5432
 
-# HTTPS hardening — turn ON only once Cloudflare HTTPS is confirmed end-to-end (step 9)
+# HTTPS hardening — turn ON only once Cloudflare HTTPS is confirmed end-to-end (step 9).
+# For a plain-HTTP LAN-only box, leave all four OFF (the defaults) or internal access breaks.
 CSRF_TRUSTED_ORIGINS=https://demo.example.com
 SECURE_SSL_REDIRECT=True
 SESSION_COOKIE_SECURE=True
@@ -173,8 +194,18 @@ CSRF_COOKIE_SECURE=True
 
 ## 7. Initialize Django
 
+First create the runtime directories the app writes to. **`logs/` is required** —
+Django's logging opens `logs/murphys_bench.log` at startup and will **not** create
+the parent dir, so every `manage.py` command fails until it exists:
+
 ```bash
 cd /opt/murphys-bench
+mkdir -p logs media protected
+```
+
+Then initialize:
+
+```bash
 venv/bin/python manage.py migrate
 venv/bin/python manage.py collectstatic --noinput
 venv/bin/python manage.py createsuperuser
@@ -183,7 +214,7 @@ venv/bin/python manage.py createsuperuser
 Quick smoke test before wiring up the web server:
 
 ```bash
-venv/bin/python manage.py check --deploy   # should be clean once HTTPS settings are on
+venv/bin/python manage.py check --deploy   # HTTPS warnings are expected on a plain-HTTP LAN box
 venv/bin/python -m pytest                   # spine test suite should pass
 ```
 
@@ -193,29 +224,31 @@ venv/bin/python -m pytest                   # spine test suite should pass
 
 > **Known-good configs are in [`deploy/demo/`](deploy/demo/)** — copy them in
 > rather than retyping (`deploy/demo/README.md` has the exact commands). The
-> versions below are shown inline for reference.
+> versions below match the production deployment (Gunicorn on a unix socket).
 
 **Gunicorn unit** — `/etc/systemd/system/murphys-bench.service`:
 
 ```ini
 [Unit]
 Description=Murphy's Bench (Gunicorn)
-After=network.target postgresql.service
+After=network.target
 
 [Service]
 User=scs-tech
 Group=scs-tech
 WorkingDirectory=/opt/murphys-bench
-ExecStart=/opt/murphys-bench/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:8001 murphys_bench.wsgi:application
+EnvironmentFile=/opt/murphys-bench/.env
+ExecStart=/opt/murphys-bench/venv/bin/gunicorn --workers 3 \
+    --bind unix:/opt/murphys-bench/murphys.sock \
+    --access-logfile /opt/murphys-bench/logs/gunicorn-access.log \
+    --error-logfile /opt/murphys-bench/logs/gunicorn-error.log \
+    murphys_bench.wsgi:application
 Restart=always
 RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 ```
-
-> Note: `gunicorn` is in `requirements.txt` as of this validation. If installing
-> an older checkout, `venv/bin/pip install gunicorn` into the venv.
 
 ```bash
 sudo systemctl daemon-reload
@@ -230,7 +263,8 @@ server {
     listen 80;
     server_name demo.example.com;
 
-    client_max_body_size 25M;
+    client_max_body_size 50M;
+
     location /static/ {
         alias /opt/murphys-bench/staticfiles/;
     }
@@ -238,7 +272,7 @@ server {
         alias /opt/murphys-bench/media/;
     }
     location / {
-        proxy_pass http://127.0.0.1:8001;
+        proxy_pass http://unix:/opt/murphys-bench/murphys.sock;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -249,6 +283,7 @@ server {
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/murphys-bench /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default     # so MB isn't shadowed by the default site
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
