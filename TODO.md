@@ -16,9 +16,9 @@ every failure lived in the operational/process shell. Root cause = no verificati
 - [x] DB backup rebuilt — SQLite snapshot → immutable Backblaze B2, restore-drilled (Jun 22)
 - [x] Inbound duplicate-ticket bug fixed — atomic claim + DB constraint + run-lock, migration 0062 (Jun 22)
 - [ ] **T1 · Observability keystone** — backup dead-man's-switch + failure alerting (the gap that hid the broken backup). Highest leverage.
-- [ ] **T1 · Fix PBS whole-VM backup** — VMID-103 collision prunes the real prod backup (Mike's scheduled hands-on learning task).
+- [x] **T1 · Fix PBS whole-VM backup** — ✅ DONE Jun 22 (Mike-driven): resolved VMID 102/103 collisions (BookStack→202, Cloudflared→203, prod stays 103), purged dead WinXP/ITFlow groups (GC reclaimed 82GB), daily verify job + centralized prune (7/4/3), both PVE jobs → Selection "All", notify-on-fail→ticket. Convention: scsprox2=1xx, scsprox=2xx. (memory `reference_proxmox_pbs_infra`)
 - [ ] **T1 · Correct any remaining stale doc claims** (PBS-as-safety-net / IMAP references).
-- [ ] **T2 · Dedicated TEST VM** as staging/pre-prod (Mike to provision; unique VMID; Python 3.12; restore B2 data) → ends edit-on-prod; add snapshot-before-migrate.
+- [x] **T2 · Dedicated TEST VM** — ✅ DONE Jun 22: `mb-test` (VMID 201, 10.58.58.108), fresh install-from-git, Ubuntu 24.04.4/Py3.12, SQLite, prod-data copy + prod key, integrations neutralized, read-only deploy key for git-pull deploys; 100/100 tests + login verified. Surfaced+fixed INSTALL.md shake-out (commit b1c1856). Still to do: actually *use* it as the gate (deploy→verify→prod) + snapshot-before-migrate; align the dev Mac venv to Py3.12.
 - [ ] **T2 · Decommission the unused PostgreSQL** server + remove dead `DB_*` lines from `.env`.
 - [ ] **T2 · Rotate the broad GitHub PAT** still on the scs-repair-tracker box.
 - [ ] **T3 (hygiene / by decision):** CI test gate · `pip-audit` loop · logrotate (gunicorn logs) · `fail2ban` · TLS decision · ClamAV.
