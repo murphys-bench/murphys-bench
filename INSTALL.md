@@ -25,7 +25,7 @@ internal network or a small VM.
 | Piece | What it is |
 |-------|-----------|
 | Ubuntu 24.04 LTS | Host OS (Python 3.12 is the system default) |
-| PostgreSQL 16 | Database |
+| PostgreSQL 16 *(optional)* | Database — default is SQLite (a file, no DB server needed) |
 | Gunicorn | Python app server (runs Django) |
 | Nginx | Reverse proxy in front of Gunicorn; serves static files |
 | Cloudflare Tunnel | Public HTTPS access without opening inbound ports |
@@ -98,7 +98,11 @@ venv/bin/pip install -r requirements.txt
 
 ---
 
-## 5. PostgreSQL database
+## 5. (Optional) PostgreSQL database
+
+> **Note:** Murphy's Bench defaults to **SQLite** (a single file, no database server) and the SCS
+> production deployment deliberately uses SQLite. This section is only needed if you set
+> `DB_ENGINE=postgresql` in `.env`. To use the default SQLite, skip this section entirely.
 
 ```bash
 sudo -u postgres psql <<'SQL'
