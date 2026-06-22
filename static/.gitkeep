@@ -1,0 +1,3 @@
+# Keeps the static/ source dir tracked in git so STATICFILES_DIRS resolves on a
+# fresh clone (otherwise collectstatic warns: staticfiles.W004). Custom static
+# source files (if any) live here; collected output goes to staticfiles/.
