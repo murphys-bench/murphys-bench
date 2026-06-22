@@ -1730,6 +1730,7 @@ class InboundEmailLog(models.Model):
         ('reply', 'Added Reply to Ticket'),
         ('duplicate', 'Duplicate — Already Processed'),
         ('error', 'Processing Error'),
+        ('processing', 'Processing (claimed)'),
     ]
 
     message_id = models.CharField(max_length=500, blank=True, db_index=True, help_text='Email Message-ID header.')
@@ -1743,6 +1744,15 @@ class InboundEmailLog(models.Model):
     class Meta:
         db_table = 'inbound_email_log'
         ordering = ['-created_at']
+        constraints = [
+            # Atomic dedup: two log rows can never share a non-empty Message-ID.
+            # This is what makes inbound dedup race-proof (claim-by-insert).
+            models.UniqueConstraint(
+                fields=['message_id'],
+                condition=~models.Q(message_id=''),
+                name='uniq_inbound_message_id',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.from_email} → {self.status} ({self.created_at:%Y-%m-%d %H:%M})'

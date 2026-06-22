@@ -10,8 +10,10 @@ Run via cron every 1-5 minutes:
 """
 
 import email
+import fcntl
 import imaplib
 import logging
+import os
 import poplib
 import re
 import traceback
@@ -26,6 +28,8 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand
 from django.utils import timezone
+from django.db import IntegrityError, transaction
+from django.conf import settings as django_settings
 
 from fnmatch import fnmatch
 
@@ -357,9 +361,11 @@ def _process_message(raw_msg_bytes, settings, verbosity):
     if any(fnmatch(from_email, p.lower()) for p in blocked_patterns):
         return 'error', f'Blocked sender: {from_email}', None
 
-    # Duplicate guard on Message-ID
-    if message_id and InboundEmailLog.objects.filter(message_id=message_id).exclude(status='error').exists():
-        return 'duplicate', f'Already processed message-id {message_id}', None
+    # NOTE: duplicate detection is handled atomically by the caller
+    # (Command.handle) via a unique "claim" row on the Message-ID, backed by a DB
+    # constraint. We deliberately do NOT check-then-act here — that non-atomic
+    # race is exactly what let one email become two tickets when two fetch runs
+    # overlapped.
 
     # --- Threading: check subject for existing ticket number ---
     ticket_match = TICKET_RE.search(subject)
@@ -440,6 +446,17 @@ class Command(BaseCommand):
                 + (' [DRY RUN]' if dry_run else '')
             )
 
+        # Single-runner lock: never let two fetches run concurrently. Overlapping
+        # runs racing on the same message is what created duplicate tickets.
+        lock_path = os.path.join(str(django_settings.BASE_DIR), 'inbound_fetch.lock')
+        lock_file = open(lock_path, 'w')
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            if verbosity >= 1:
+                self.stdout.write('Another fetch is already running; skipping this run.')
+            return
+
         try:
             if site.inbound_protocol == 'pop3':
                 messages = self._fetch_pop3(site, dry_run, verbosity)
@@ -463,22 +480,54 @@ class Command(BaseCommand):
                 self.stdout.write(f'  [DRY RUN] From: {frm} | Subject: {subj}')
                 continue
 
-            status, detail, ticket = _process_message(raw_bytes, site, verbosity)
+            msg_obj = email.message_from_bytes(raw_bytes)
+            mid = (msg_obj.get('Message-ID') or '').strip()[:500]
+            frm = parseaddr(_decode_header_str(msg_obj.get('From', '')))[1][:255]
+            subj = _decode_header_str(msg_obj.get('Subject', ''))[:500]
+
+            # Atomically CLAIM this Message-ID before doing any work. The unique
+            # constraint means a second runner (or a re-fetch) racing on the same
+            # email loses the insert here and skips — instead of both creating a
+            # ticket. The savepoint keeps the IntegrityError from poisoning the
+            # surrounding transaction. Empty Message-IDs can't be deduped, so they
+            # fall through and are always processed.
+            claim = None
+            if mid:
+                try:
+                    with transaction.atomic():
+                        claim = InboundEmailLog.objects.create(
+                            message_id=mid, from_email=frm, subject=subj,
+                            status='processing',
+                        )
+                except IntegrityError:
+                    counts['duplicate'] += 1
+                    if verbosity >= 1:
+                        self.stdout.write(self.style.WARNING(
+                            f'  [duplicate] already processed {mid}'))
+                    continue
+
+            try:
+                status, detail, ticket = _process_message(raw_bytes, site, verbosity)
+            except Exception as exc:
+                logger.exception('Unhandled error processing inbound message %s',
+                                 mid or '(no message-id)')
+                status, detail, ticket = 'error', f'Unhandled error: {exc}', None
             counts[status] = counts.get(status, 0) + 1
 
             try:
-                msg_obj = email.message_from_bytes(raw_bytes)
-                InboundEmailLog.objects.create(
-                    message_id=(msg_obj.get('Message-ID') or '')[:500],
-                    from_email=parseaddr(_decode_header_str(msg_obj.get('From', '')))[1][:255],
-                    subject=_decode_header_str(msg_obj.get('Subject', ''))[:500],
-                    ticket=ticket,
-                    status=status,
-                    detail=detail,
-                )
+                if claim is not None:
+                    claim.status = status
+                    claim.detail = detail
+                    claim.ticket = ticket
+                    claim.save(update_fields=['status', 'detail', 'ticket'])
+                else:
+                    InboundEmailLog.objects.create(
+                        message_id='', from_email=frm, subject=subj,
+                        ticket=ticket, status=status, detail=detail,
+                    )
             except Exception:
-                # An InboundEmailLog write failure must not interrupt processing,
-                # but it should be visible rather than swallowed.
+                # A log write failure must not interrupt processing, but it should
+                # be visible rather than swallowed.
                 logger.exception('Failed to write InboundEmailLog row for a fetched message.')
 
             style = self.style.SUCCESS if status in ('new_ticket', 'reply') else self.style.WARNING
