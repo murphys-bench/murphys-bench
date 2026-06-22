@@ -11,7 +11,7 @@
 | Protocol | HTTP (plain, on the LAN) |
 | App path | `/opt/murphys-bench/` |
 | Python | 3.12 (Ubuntu 24.04 default), venv at `/opt/murphys-bench/venv/` |
-| Database | PostgreSQL 16 (local on the VM) |
+| Database | SQLite (`db.sqlite3` on the VM) |
 | App server | Gunicorn |
 | Web server | Nginx (reverse proxy in front of Gunicorn) |
 
@@ -44,7 +44,7 @@ This VM has **no cron** — all scheduled work runs as systemd timers. Unit file
 
 | Timer | Cadence | Purpose |
 |---|---|---|
-| `murphys-bench-backup.timer` | nightly 02:15 | `pg_dump` → gzipped backup |
+| `murphys-bench-backup.timer` | nightly 02:15 | SQLite snapshot + files → Backblaze B2 (immutable) |
 | inbound email fetch | every 2 min | poll mailbox → tickets/replies |
 | SLA check | every 15 min | flag overdue tickets |
 

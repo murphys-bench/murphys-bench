@@ -59,3 +59,8 @@ Thumbs.db
 
 # Database backup dumps (local + server, never committed)
 backups/
+
+# rclone binary + B2 credentials + retired scripts (added Jun 22)
+bin/
+.rclone.conf
+scripts/*.retired-*

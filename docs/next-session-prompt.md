@@ -60,9 +60,10 @@ cascades the rest). Migration 0061. Commits `03badde` (Phase B) + `a35bf97` (WO 
 - Optional MB later: on-demand "check payment status" button; email-on-push toggle.
 - **Quote/Project approval layer** still deferred (additive, no live-data clock — wait for real project workflow).
 
-### ⚠ STILL TRACKED: Real DB backup (current pg_dump backup is BROKEN — empty dumps)
-DB recovery relies on PBS whole-VM backups. Mike wants a real, versatile backup (off-box location options,
-retention, verify-on-write/fail-loud). Decision list in TODO.md "Real DB backup". See memory `project_mb_backup_broken`.
+### ✅ DONE: Real DB backup (Jun 22)
+Fixed — prod runs SQLite (not Postgres); the old pg_dump dumped an empty DB. New fail-loud SQLite-snapshot
++ attachments backup → Backblaze B2 (immutable, Object Lock 30d, lifecycle auto-prune). See
+docs/bookstack/05-backup-and-disaster-recovery.md and memory `project_mb_db_sqlite_decision`.
 
 ---
 
@@ -81,11 +82,11 @@ create invoice as a **draft** (IN mints the number, owns assembly + payment; sta
 duplicate guard on returned IN id, editable stored ref, create-only/no auto-email. IN v5 API audit
 already done. Full detail + push-gaps in memory `project_in_integration`. Plan before building.
 
-### ⚠ ALSO TRACKED: Real DB backup (current pg_dump backup is BROKEN — empty dumps)
-`scripts/backup_db.sh` + timer produce empty dumps (~394 bytes) while reporting "OK" — it was tabled
-pending location/retention and never worked. **DB recovery currently relies on PBS whole-VM backups.**
-Mike wants a real, versatile backup (off-box location options, retention, verify-on-write, fail loud).
-Details + decision list in TODO.md "Real DB backup". CLAUDE.md item 7 corrected to stop claiming it works.
+### ✅ DONE: Real DB backup (Jun 22)
+Root cause: prod runs **SQLite**; the old pg_dump dumped an empty Postgres DB. New `scripts/mb_backup.sh` =
+fail-loud SQLite snapshot + `.env`/`protected/`/`media/` → Backblaze B2 (Object Lock governance 30d,
+lifecycle auto-prune), restore-tested, nightly timer repointed. See docs/bookstack/05 + memory
+`project_mb_db_sqlite_decision`.
 
 ---
 
@@ -234,7 +235,7 @@ match prod (both boxes now `PasswordAuthentication no`; verified). Claude connec
 - 7 new tests; suite at 40 passing.
 
 - Django 4.2 app, migrations through 0051
-- **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + PostgreSQL 16 (HTTP on LAN; no domain yet)
+- **Deployed internally**: Ubuntu 24.04 VM, 10.58.58.82, Gunicorn + Nginx + SQLite (HTTP on LAN; no domain yet)
 - **Gunicorn service**: `murphys-bench.service` — `sudo systemctl restart murphys-bench` (scs-tech has NOPASSWD for restart/status of this service only)
 - **App path**: `/opt/murphys-bench/`  •  **SSH**: `ssh -i ~/.ssh/id_ed25519 scs-tech@10.58.58.82`  •  **venv Python 3.12**
 - Deploy: `git push` on Mac → SSH → `git pull && venv/bin/python manage.py migrate` → `sudo systemctl restart murphys-bench`

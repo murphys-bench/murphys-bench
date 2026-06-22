@@ -35,7 +35,7 @@ Ticket (intake + email replies) → Triage → Work Order (the repair)
 |---|---|
 | Backend | Python 3.12 · Django 4.2 |
 | Frontend | Tailwind CSS (CDN) · HTMX · Alpine.js |
-| Database | PostgreSQL 16 (production) · SQLite (local dev) |
+| Database | SQLite (production and local dev) · PostgreSQL supported via DB_ENGINE (unused) |
 | Auth | Django session auth + django-two-factor-auth (TOTP) |
 | App server | Gunicorn |
 | Web server / TLS termination | Nginx |
@@ -49,7 +49,7 @@ There is **no build step** (Tailwind via CDN), **no async queue** (synchronous e
 Browser (LAN client)
    │  HTTP on 10.58.58.82  (no public domain yet)
    ▼
-Nginx  ──►  Gunicorn (murphys-bench.service)  ──►  Django app  ──►  PostgreSQL 16
+Nginx  ──►  Gunicorn (murphys-bench.service)  ──►  Django app  ──►  SQLite (db.sqlite3)
                                                         │
                                                         ├─► outbound SMTP (cPanel mail)
                                                         └─► inbound POP3 poll (systemd timer)
@@ -59,7 +59,7 @@ Background work is driven by **systemd timers**, not cron (this VM has no cron):
 
 - `fetch_inbound_email` — every 2 min, turns inbound mail into tickets/replies
 - `check_sla_overdue` — every 15 min, flags overdue tickets
-- nightly `pg_dump` backup — 02:15
+- nightly backup (SQLite snapshot + files → Backblaze B2, immutable) — 02:15
 
 ## Operating principles (why the system is shaped this way)
 

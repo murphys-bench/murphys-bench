@@ -65,23 +65,16 @@ Detail in memory `project_mb_session35_security`.
 - Done this session: admin user-delete; `.env` 600 + `protected/`/`backups/` 750; runtime CVE dep
   upgrades (Pillow 12.2 / requests 2.33 / cryptography 48.0.1).
 
-## Real DB backup (tracked — pg_dump backup is currently BROKEN)
+## Real DB backup — ✅ DONE (Jun 22 2026)
 
-> ⚠ Discovered Jun 20 2026 (session 33): `scripts/backup_db.sh` + the systemd timer produce
-> **empty dumps** (~394 bytes, no data) while reporting "backup OK". It was tabled pending
-> location/retention decisions and never actually worked. **DB recovery currently relies on PBS
-> whole-VM nightly backups.** CLAUDE.md item 7 corrected to stop claiming it works.
-
-- [ ] **Build a real, versatile DB backup** (Mike: "must be real, with options… versatile enough
-      to be useful"). Decisions to make when we get there:
-      - **Diagnose** why the current dump is empty (likely the `.env` DB_NAME/DB_USER the script
-        reads doesn't match the app's actual connection, or it's dumping an empty DB).
-      - **Location** (off-box — local-only is near-useless since PBS already covers VM-death):
-        NAS, the PBS host, or cloud (B2/S3 — adds a credential to manage). Make it configurable.
-      - **Retention**: simple N-day vs grandfather-father-son (daily/weekly/monthly).
-      - **Verify-on-write**: fail loud if a dump is empty/short (the current silent "OK" is the trap).
-      - Restore doc: dump holds *encrypted* ciphertext — a working restore needs dump +
-        `FIELD_ENCRYPTION_KEY` (Bitwarden).
+> Root cause of the "broken backup": the old `pg_dump` job dumped an **empty PostgreSQL** DB —
+> production actually runs on **SQLite**. Fixed end-to-end:
+> - `scripts/mb_backup.sh` — consistent SQLite snapshot (Python online-backup, WAL on) + `.env` +
+>   `protected/` + `media/` → dated gzipped tarball, **fail-loud** (integrity + size checks).
+> - Off-site to **Backblaze B2** (`scs-mb-backups`) via bundled rclone, **Object Lock governance 30d**
+>   (immutable) + lifecycle auto-prune (~36d); 14 local copies kept.
+> - Restore-tested; nightly `murphys-bench-backup.timer` repointed (old `backup_db.sh` delegates to it).
+> - Restore needs the tarball **and** `FIELD_ENCRYPTION_KEY` (Bitwarden). See docs/bookstack/05.
 
 ---
 
@@ -91,7 +84,7 @@ Detail in memory `project_mb_session35_security`.
 - Database schema fully designed and documented
 - Django project initialized with all dependencies
 - 14 data models created with proper relationships
-- Migrations created and applied (SQLite dev, PostgreSQL configured)
+- Migrations created and applied (SQLite, dev and production)
 - Django admin customized for all 14 models
 - Base template with navigation (Tailwind CSS, dark nav bar)
 - Authentication — login/logout, all views protected with LoginRequiredMixin

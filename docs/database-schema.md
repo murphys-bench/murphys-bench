@@ -2,7 +2,7 @@
 
 **Version**: 1.1  
 **Last Updated**: June 4, 2026  
-**Database**: PostgreSQL (SQLite in dev)
+**Database**: SQLite (production and dev; PostgreSQL supported via DB_ENGINE but not used)
 
 ---
 
