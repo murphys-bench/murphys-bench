@@ -64,3 +64,4 @@ backups/
 bin/
 .rclone.conf
 scripts/*.retired-*
+inbound_fetch.lock

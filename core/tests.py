@@ -802,25 +802,46 @@ def test_reply_to_open_ticket_threads_and_keeps_open(client_obj):
 
 
 @pytest.mark.django_db
-def test_duplicate_message_id_is_skipped():
-    """The orphan-multiplication guard: a Message-ID already recorded in
-    InboundEmailLog (non-error) is never processed again. This is what stops a
-    'leave on server' poll from re-creating the same ticket on every cycle."""
-    from core.management.commands.fetch_inbound_email import _process_message
+def test_inbound_log_message_id_unique_constraint():
+    """Structural guard: the DB refuses a second log row with the same non-empty
+    Message-ID — this is what makes dedup atomic / race-proof. Empty Message-IDs
+    are exempt, since unknowns can't be deduped."""
     from core.models import InboundEmailLog
+    from django.db import IntegrityError, transaction
+    InboundEmailLog.objects.create(message_id='<dup@x>', status='new_ticket')
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            InboundEmailLog.objects.create(message_id='<dup@x>', status='new_ticket')
+    InboundEmailLog.objects.create(message_id='', status='error')
+    InboundEmailLog.objects.create(message_id='', status='error')
+    assert InboundEmailLog.objects.filter(message_id='').count() == 2
+
+
+@pytest.mark.django_db
+def test_same_email_fetched_twice_creates_one_ticket(monkeypatch):
+    """Regression for the duplicate-ticket bug: two fetch passes over the SAME
+    message (overlapping runners or a re-fetch) must yield exactly ONE ticket.
+    The atomic Message-ID claim, backed by the unique constraint, guarantees it."""
+    from core.management.commands.fetch_inbound_email import Command
+    from core.models import InboundEmailLog
+    from django.core.management import call_command
     site = SiteSettings.get()
-    InboundEmailLog.objects.create(
-        message_id='<fresh-001@davis.example>', status='new_ticket',
-        from_email='wayne@davis.example', subject='x',
-    )
+    site.inbound_email_enabled = True
+    site.inbound_protocol = 'pop3'
+    site.inbound_host = 'mail.example'
+    site.inbound_username = 'support@example'
+    site.save()
+
+    raw = _raw_new_email(message_id='<race-1@davis.example>')
+    # Same message returned twice in one batch == the worst case of a race.
+    monkeypatch.setattr(Command, '_fetch_pop3', lambda self, s, d, v: [raw, raw])
+
     before = Ticket.objects.count()
+    call_command('fetch_inbound_email', verbosity=0)
 
-    status, detail, ticket = _process_message(_raw_new_email(), site, verbosity=0)
-
-    assert status == 'duplicate', f'Expected duplicate, got {status}: {detail}'
-    assert ticket is None
-    assert Ticket.objects.count() == before, 'A duplicate must not create a ticket.'
-
+    assert Ticket.objects.count() == before + 1, 'The same email must create only one ticket.'
+    assert InboundEmailLog.objects.filter(
+        message_id='<race-1@davis.example>').count() == 1
 
 @pytest.mark.django_db
 def test_returning_sender_reuses_existing_contact(client_obj):
