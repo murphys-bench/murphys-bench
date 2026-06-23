@@ -257,7 +257,7 @@ multiplying one wrong ticket into several (TKT-00008/00009).
 Mike asked for an honest posture read + weaknesses. Audited via `manage.py check --deploy` + settings/user introspection on prod. Verdict: **app layer is solid** (session auth + LoginRequired everywhere, django-axes, role perms + per-object visibility scoping, MFA enforced, AES-256 field encryption incl. the IN token, structurally-private attachments); **the real gaps are infrastructure/operational.** Detail in memory `project_mb_session35_security`.
 - **Acted on (live):** added **admin user-delete** (`UserDeleteView`, admin-only, guards against deleting self or the last superuser; SET_NULL FKs keep history) — there was none, which is why Mike couldn't remove the 3 test accounts (now deleted; only `admin` remains). Tightened secret/file perms: `.env` 640→600, `protected/` + `backups/` 775→750. Upgraded runtime CVE deps **Pillow 12.2.0 / requests 2.33.0 / cryptography 48.0.1** (9 CVEs cleared; requests carries the IN token, Pillow processes uploaded logos). Validated by the full suite on prod's Py3.12.
 - **Known gaps (ranked) — UPDATED Jun 22 (see BookStack page 09 assessment):** (1) ✅ **DB backup FIXED** (SQLite snapshot → immutable B2, restore-drilled). The standing infra reds are now: **(1a) NO observability** — nothing alerts on failure (the keystone gap that hid the broken backup for two weeks); **(1b) PBS whole-VM backup BROKEN for prod** (VMID-103 collision prunes the real backup — scheduled fix). (2) **Plain HTTP on the LAN** — session cookies/credential-vault reveals cross the LAN in cleartext; the 4 `check --deploy` HTTPS warnings are correctly env-gated off because there's no TLS. Mitigated by LAN-only. **TLS deferred — Mike is gun-shy** after a past Let's Encrypt exposure; the safe path is DNS-01 on a subdomain resolving to the *private* `10.x` IP (no open ports, no public front door), but it stays off the table until he decides. (3) **SSH/OS hardening (sudo-gated, Mike to pair):** key-only SSH, fail2ban, OS patch cadence — biggest infra lever; contains the "secrets live on the box → VM compromise = full exposure" risk. (4) No inbound-attachment malware scan (ClamAV) — named, deferred. (5) **dev Py3.9 vs prod Py3.12** divergence — folds into the "easy patch/update" discussion.
-- **Deliberately NOT added:** a strict Content-Security-Policy (would break the CDN Tailwind / Alpine / HTMX / inline-script UI) — revisit only if the app stops relying on CDNs/inline.
+- **CSP — partially unblocked (Jun 23 2026):** HTMX + Alpine are now self-hosted, so 2 of the 3 CDN blockers to a strict Content-Security-Policy are gone. Remaining blockers: CDN Tailwind + inline scripts/styles. Plan: move Tailwind to a compiled self-hosted stylesheet (standalone CLI), then add a real CSP — protects the credential-vault pages.
 - **Discussion queued (Mike wants to understand first):** TLS options, an easy patch/update mechanism (align dev Python to prod + a repeatable pip-audit→upgrade→test-on-3.12 loop).
 
 ### Phase B — Invoice Ninja draft push + WO delete (session 34, Jun 20)
@@ -457,7 +457,7 @@ Ticket (intake + replies) → Triage → Work Order (repair) → Notes/Checklist
 
 ### Tech Stack
 - **Backend**: Python 3.12 / Django 4.2.30
-- **Frontend**: Tailwind CSS (CDN), HTMX, Alpine.js
+- **Frontend**: Tailwind CSS (CDN — pending compiled build), HTMX + Alpine.js (self-hosted/pinned in `static/js/`)
 - **Database**: SQLite (dev and production; PostgreSQL supported via DB_ENGINE but not used)
 - **Auth**: Django session auth + django-two-factor-auth (TOTP), LoginRequiredMixin on all views
 
@@ -820,7 +820,7 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 
 ## Key Decisions Made
 
-- **Tailwind via CDN** — no build step needed for now
+- **Front-end asset delivery** — HTMX (1.9.12) and Alpine (3.15.12) are **self-hosted/pinned in `static/js/`** as of Jun 23 2026 (commit `e445fdd`), NOT from a CDN — a privacy blocker (Privacy Badger) blocking `unpkg` had broken the app on a real laptop. **Tailwind is still loaded via `cdn.tailwindcss.com`** (`base.html`, `accounts/login.html`, `templates/two_factor/_base_focus.html`) — this is the remaining CDN debt; the planned fix is a compiled stylesheet via the **standalone Tailwind CLI** (single binary, no Node), after which a real CSP can be enabled. See memory `project_mb_tailwind_cdn_security`.
 - **LoginRequiredMixin on all views** — app is internal-only
 - **Work order numbers** auto-generated as `WO-YYYYMMDD-NNNN`
 - **Ticket numbers** auto-generated as `TKT-YYYYMMDD-NNNN`
@@ -835,7 +835,7 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - **MFA backup codes for admin only** — other users recover via admin reset
 - **SLA overdue alerts are in-app only** — acknowledgment with required note creates audit trail
 - **Attachment storage Phase 1**: local filesystem (configurable path) + S3-compatible
-- **Alpine.js** loaded via CDN in base.html with `defer` — required for sidebar accordion
+- **Alpine.js** self-hosted in `static/js/` (pinned 3.15.12) loaded with `defer` — required for sidebar accordion (was CDN until Jun 23 2026)
 - **Sidebar**: HTMX-loaded on every page except dashboard; admins see all, techs see own
 - **`?assigned_to=me` filter**: works on both `/tickets/` and `/work-orders/`; admins see all
 - **Credential encryption**: AES-256 via `django-encrypted-model-fields`. `FIELD_ENCRYPTION_KEY` read from env. Never plaintext. Migrations 0031 + 0032 applied to production (June 9, session 15). Key stored in Bitwarden.
