@@ -51,13 +51,21 @@ log "code: $PREV -> $NEW"
 # 7) Restart the app.
 sudo systemctl restart murphys-bench || fail "service restart failed"
 
-# 8) Health check (curl handles the brief socket-warmup with --retry; a 2xx/3xx/4xx
-#    means the stack is alive — only 5xx or no-connection is a real failure).
-code="$(curl -s -o /dev/null -w '%{http_code}' --retry 5 --retry-delay 1 \
-    --retry-connrefused --max-time 15 http://127.0.0.1/ || echo 000)"
+# 8) Health check — poll until the app finishes warming up after the restart, then
+#    confirm it answers. A 2xx/3xx/4xx means the stack is alive (a 4xx is just
+#    ALLOWED_HOSTS rejecting the bare-IP request — still healthy); a 5xx or no
+#    connection after the grace window is a real failure.
+code=000
+for _ in $(seq 1 10); do
+    if systemctl is-active --quiet murphys-bench && [ -S "$APP/murphys.sock" ]; then
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/ || echo 000)"
+        case "$code" in 2*|3*|4*) break ;; esac
+    fi
+    sleep 1
+done
 case "$code" in
-    000|5*) fail "app not healthy after restart (HTTP $code). Roll back with: git checkout $PREV && venv/bin/python manage.py migrate && sudo systemctl restart murphys-bench" ;;
-    *)      log "app healthy (HTTP $code)" ;;
+    2*|3*|4*) log "app healthy (HTTP $code)" ;;
+    *)        fail "app not healthy after restart (HTTP $code). Roll back: git checkout $PREV && venv/bin/python manage.py migrate && sudo systemctl restart murphys-bench" ;;
 esac
 
 log "DONE: $PREV -> $NEW. To roll back: git checkout $PREV && venv/bin/python manage.py migrate && sudo systemctl restart murphys-bench"
