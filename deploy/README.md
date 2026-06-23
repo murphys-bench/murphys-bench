@@ -55,3 +55,43 @@ journalctl -u murphys-bench-fetch-email.service -f   # live; Ctrl-C to stop
 
 Note: inbound polling only does something when inbound email is enabled and
 configured in Settings, and pointed at the real support mailbox (not a test one).
+
+## Observability — failures become tickets
+
+MB self-monitors: its own operational failures open a **System Alert ticket**
+(a dedicated "System Alerts" client + the admin notification bell) via
+`manage.py send_alert` / `core.system_alerts.create_system_alert`. This is used
+instead of email because the box can't send system mail. App 500s also auto-open
+a ticket (`core.log_handlers.SystemAlertHandler` on the `django.request` logger,
+production only — wired in `settings.LOGGING`).
+
+Install the log rotation, the OnFailure→ticket handler, and the disk check:
+
+```bash
+sudo apt install -y logrotate     # not present on minimal Ubuntu installs
+sudo cp /opt/murphys-bench/deploy/logrotate-murphys-bench /etc/logrotate.d/murphys-bench
+sudo cp /opt/murphys-bench/deploy/murphys-bench-alert@.service /etc/systemd/system/
+sudo cp /opt/murphys-bench/deploy/murphys-bench-disk-check.service /etc/systemd/system/
+sudo cp /opt/murphys-bench/deploy/murphys-bench-disk-check.timer   /etc/systemd/system/
+for u in murphys-bench-backup murphys-bench-fetch-email murphys-bench-sla-check; do
+  sudo mkdir -p /etc/systemd/system/$u.service.d
+  sudo tee /etc/systemd/system/$u.service.d/onfailure.conf >/dev/null <<'DROPIN'
+[Unit]
+OnFailure=murphys-bench-alert@%N.service
+DROPIN
+done
+sudo systemctl daemon-reload
+sudo systemctl enable --now murphys-bench-disk-check.timer
+```
+
+### Backup dead-man's-switch (healthchecks.io)
+
+The backup's *liveness* (catching a job that never runs) is covered by an external
+heartbeat. Create a free check at healthchecks.io and add its ping URL to `.env`:
+
+```ini
+HEALTHCHECKS_URL=https://hc-ping.com/<your-check-uuid>
+```
+
+`scripts/mb_backup.sh` pings it on success and `<url>/fail` on failure; a missed
+ping makes healthchecks.io email you. Leave `HEALTHCHECKS_URL` unset to disable.
