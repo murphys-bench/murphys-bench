@@ -305,6 +305,12 @@ LOGGING = {
             'backupCount': 5,
             'formatter': 'verbose',
         },
+        'system_alert': {
+            'level': 'ERROR',
+            'class': 'core.log_handlers.SystemAlertHandler',
+            'filters': ['require_debug_false'],  # production only
+            'formatter': 'verbose',
+        },
     },
     'loggers': {
         'django': {
@@ -314,6 +320,11 @@ LOGGING = {
         'core': {
             'handlers': ['console', 'file'],
             'level': 'DEBUG',
+        },
+        'django.request': {
+            'handlers': ['console', 'file', 'system_alert'],
+            'level': 'ERROR',
+            'propagate': False,
         },
     },
 }
