@@ -1770,3 +1770,33 @@ def test_user_delete_denied_for_non_admin(client):
     resp = client.post(reverse('core:user_delete', args=[victim.pk]))
     assert resp.status_code in (403, 302)
     assert User.objects.filter(pk=victim.pk).exists()
+
+
+# ── WO reported-issue field: ticket description must survive conversion ──────
+
+@pytest.mark.django_db
+def test_convert_carries_ticket_description_into_wo_reported_problem(client, client_obj, admin_user):
+    problem = "Won't boot past the logo. Also wants the fans cleaned and a 2nd drive checked."
+    ticket = Ticket.objects.create(client=client_obj, subject='Boot loop', description=problem)
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:ticket_convert', args=[ticket.pk]))
+    assert resp.status_code == 302
+
+    wo = WorkOrder.objects.get(ticket=ticket)
+    assert wo.reported_problem == problem, \
+        'Ticket description must be carried into the WO reported_problem on conversion (was silently dropped before).'
+    ticket.refresh_from_db()
+    assert ticket.status == 'converted'
+
+
+@pytest.mark.django_db
+def test_wo_detail_shows_reported_problem(client, client_obj, admin_user):
+    wo = WorkOrder.objects.create(
+        client=client_obj,
+        reported_problem='Replace cracked screen; also check why battery drains overnight.',
+    )
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:work_order_detail', args=[wo.pk]))
+    assert resp.status_code == 200
+    assert 'check why battery drains overnight' in resp.content.decode()

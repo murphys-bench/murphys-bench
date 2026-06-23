@@ -284,6 +284,9 @@
             {% endfor %}
         </div>
         {% endif %}
+        {% if work_order.reported_problem %}
+        <div style="line-height:1.5; white-space:pre-line; font-size:13px;">{{ work_order.reported_problem }}</div>
+        {% endif %}
         {% if work_order.notes_customer_visible %}
         <div style="line-height:1.5; white-space:pre-line; margin-top:6px; font-size:13px;">{{ work_order.notes_customer_visible }}</div>
         {% endif %}

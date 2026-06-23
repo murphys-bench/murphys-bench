@@ -1731,6 +1731,7 @@ class TicketConvertView(LoginRequiredMixin, View):
             client=ticket.client,
             device=ticket.device,
             repair_type=form.cleaned_data.get('repair_type'),
+            reported_problem=ticket.description or '',
             assigned_to=form.cleaned_data.get('assigned_to'),
             status='new',
         )
