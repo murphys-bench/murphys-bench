@@ -1,4 +1,4 @@
-{% load mb_icons %}
+{% load mb_icons %}{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,8 +7,8 @@
     <title>{% block title %}Murphy's Bench{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
     <script>tailwind.config = { darkMode: 'class' }</script>
-    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="{% static 'js/htmx-1.9.12.min.js' %}"></script>
+    <script defer src="{% static 'js/alpine-3.15.12.min.js' %}"></script>
     {% with s=site_settings %}{% if s %}
     <style>
         :root {
@@ -266,8 +266,8 @@
         </a>
     </div>
 
-    <!-- Primary nav links -->
-    <div class="flex-shrink-0 px-2 py-3 space-y-0.5">
+    <!-- Primary nav links (scrollable region so the footer stays reachable on short screens) -->
+    <div class="flex-1 min-h-0 overflow-y-auto px-2 py-3 space-y-0.5">
         {% with u=request.resolver_match.url_name %}
 
         <a href="{% url 'core:dashboard' %}" title="Dashboard"
@@ -332,9 +332,6 @@
 
         {% endwith %}
     </div>
-
-    <!-- Spacer -->
-    <div class="flex-1"></div>
 
     <!-- Footer: user info + utility links + collapse toggle -->
     <div class="flex-shrink-0 border-t p-2 space-y-0.5"
