@@ -49,8 +49,11 @@ There is **no build step** for the frontend — Tailwind/HTMX/Alpine load from C
 
 ```bash
 sudo apt update
-sudo apt install -y python3 python3-venv python3-pip nginx git
+sudo apt install -y python3 python3-venv python3-pip nginx git logrotate
 ```
+
+> `logrotate` is used for the Gunicorn logs (see `deploy/README.md` →
+> Observability) and is missing on minimal Ubuntu installs.
 
 > PostgreSQL is **not** required — MB defaults to SQLite (a single file, no DB
 > server). Only install `postgresql postgresql-contrib` if you opt into Postgres
