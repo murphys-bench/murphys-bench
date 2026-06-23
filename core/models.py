@@ -691,6 +691,10 @@ class WorkOrder(models.Model):
     device = models.ForeignKey(Device, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
     contact = models.ForeignKey('Contact', on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
     repair_type = models.ForeignKey(RepairType, on_delete=models.SET_NULL, null=True, related_name='work_orders')
+    # Free-text presenting problem + any ad-hoc work the client requested. Not every
+    # job fits a predefined repair_type; the bench can edit/add to this freeform. Carried
+    # from the ticket's description on conversion. Shown on the printed/emailed repair report.
+    reported_problem = models.TextField(blank=True, help_text="Client's reported issue and any work requested; shown on the repair report")
     assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders_assigned')
     service_type = models.CharField(max_length=20, choices=SERVICE_TYPE_CHOICES, default='in_shop')
     status = models.CharField(max_length=50, default='new', db_index=True)

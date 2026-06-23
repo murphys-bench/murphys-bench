@@ -191,6 +191,19 @@
             </div>
         </div>
 
+        <!-- Reported Issue / Work Requested -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between mb-2">
+                <h2 class="text-base font-semibold text-gray-900">Reported Issue / Work Requested</h2>
+                <a href="{% url 'core:work_order_edit' work_order.pk %}" class="text-xs text-blue-600 hover:underline">Edit</a>
+            </div>
+            {% if work_order.reported_problem %}
+            <div class="text-sm text-gray-900 whitespace-pre-line">{{ work_order.reported_problem }}</div>
+            {% else %}
+            <p class="text-sm text-gray-400">Nothing recorded yet — use Edit to add what the client reported or asked us to check.</p>
+            {% endif %}
+        </div>
+
         <!-- WO Details (inline editable) -->
         <div class="bg-white rounded-lg shadow p-6" x-data="{ editing: false }">
             <div class="flex items-center justify-between mb-4">
