@@ -449,6 +449,7 @@ class Ticket(models.Model):
         ('phone', 'Phone'),
         ('web', 'Web Form'),
         ('rmm', 'RMM System'),
+        ('system', 'System Alert'),
     ]
 
     STATUS_CHOICES = [
@@ -1692,6 +1693,7 @@ class Notification(models.Model):
 
     KIND_CHOICES = [
         ('tech_message', 'Tech Message'),
+        ('system_alert', 'System Alert'),
     ]
 
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')

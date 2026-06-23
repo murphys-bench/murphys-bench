@@ -682,6 +682,30 @@ def test_no_notification_when_sender_holds_both_roles(client, client_obj):
     assert Notification.objects.count() == 0
 
 
+# ── System alerts: MB's own failures become a filterable ticket + admin bell ──
+
+@pytest.mark.django_db
+def test_create_system_alert_makes_ticket_and_notifies_admin(admin_user):
+    from core.system_alerts import create_system_alert
+    from core.models import Notification, Ticket
+
+    t = create_system_alert('Backup failed', 'snapshot integrity error')
+    assert t.client.name == 'System Alerts'
+    assert t.source == 'system'
+    assert t.status == 'new'
+    assert Notification.objects.filter(
+        ticket=t, kind='system_alert', recipient=admin_user).exists()
+
+    # Dedupe: same subject within the window reuses the open ticket (no spam).
+    t2 = create_system_alert('Backup failed', 'again')
+    assert t2.pk == t.pk
+    assert Ticket.objects.filter(subject='Backup failed').count() == 1
+
+    # Forcing past dedupe opens a fresh ticket.
+    t3 = create_system_alert('Backup failed', 'third', dedupe_minutes=0)
+    assert t3.pk != t.pk
+
+
 # ── Inbound: a client reply threads into its ticket, never spawns an orphan ──
 # Regression guard for the Jun 14 bug: replies to a 'converted' ticket were
 # falling through and creating brand-new tickets (TKT-00008/00009).
