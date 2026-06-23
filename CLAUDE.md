@@ -822,6 +822,7 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 
 - **Front-end asset delivery** — HTMX (1.9.12) and Alpine (3.15.12) are **self-hosted/pinned in `static/js/`** as of Jun 23 2026 (commit `e445fdd`), NOT from a CDN — a privacy blocker (Privacy Badger) blocking `unpkg` had broken the app on a real laptop. **Tailwind is still loaded via `cdn.tailwindcss.com`** (`base.html`, `accounts/login.html`, `templates/two_factor/_base_focus.html`) — this is the remaining CDN debt; the planned fix is a compiled stylesheet via the **standalone Tailwind CLI** (single binary, no Node), after which a real CSP can be enabled. See memory `project_mb_tailwind_cdn_security`.
 - **LoginRequiredMixin on all views** — app is internal-only
+- **WorkOrder free-text problem**: `WorkOrder.reported_problem` (TextField, mig 0064) is the freeform "Reported Issue / Work Requested" — for work that doesn't fit a predefined `repair_type` plus ad-hoc client asks. Bench-editable; works on standalone WOs (no ticket). `TicketConvertView` carries `ticket.description` into it (it was silently dropped before). Shown on WO form/detail + the repair report ("Problem / Task"). `repair_type` is optional, not the only way to state the issue. See memory `project_mb_wo_reported_issue`.
 - **Work order numbers** auto-generated as `WO-YYYYMMDD-NNNN`
 - **Ticket numbers** auto-generated as `TKT-YYYYMMDD-NNNN`
 - **SQLite for dev and production** — PostgreSQL supported via DB_ENGINE but not used (decision Jun 21)
