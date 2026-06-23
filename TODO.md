@@ -21,7 +21,9 @@ every failure lived in the operational/process shell. Root cause = no verificati
 - [x] **T2 · Dedicated TEST VM** — ✅ DONE Jun 22: `mb-test` (VMID 201, 10.58.58.108), fresh install-from-git, Ubuntu 24.04.4/Py3.12, SQLite, prod-data copy + prod key, integrations neutralized, read-only deploy key for git-pull deploys; 100/100 tests + login verified. Surfaced+fixed INSTALL.md shake-out (commit b1c1856). Still to do: actually *use* it as the gate (deploy→verify→prod) + snapshot-before-migrate; align the dev Mac venv to Py3.12.
 - [ ] **T2 · Decommission the unused PostgreSQL** server + remove dead `DB_*` lines from `.env`.
 - [ ] **T2 · Rotate the broad GitHub PAT** still on the scs-repair-tracker box.
-- [ ] **T3 (hygiene / by decision):** CI test gate · `pip-audit` loop · logrotate (gunicorn logs) · `fail2ban` · TLS decision · ClamAV.
+- [x] **CI test gate — ✅ DONE Jun 23** (`.github/workflows/ci.yml`): runs pytest + `manage.py check` on every push/PR (Py3.12, ephemeral keys, SQLite). First run green. Makes the 102-test discipline self-enforcing. Mac→GitHub now over SSH (token/keychain friction retired).
+- [x] **logrotate — ✅ DONE Jun 22** (gunicorn logs; part of the observability pass).
+- [ ] **T3 (hygiene / by decision):** `pip-audit` loop · `fail2ban` · TLS decision · ClamAV · (later: lint config/ruff, mypy — low priority per review: gate > tooling).
 
 ## Billing work (decided Jun 19 2026 — see memory `project_mb_pricing_architecture` + `project_in_integration`)
 
