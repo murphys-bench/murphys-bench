@@ -612,6 +612,24 @@ Full code review → shifted from feature-building to hardening. All shipped + d
 
 ---
 
+## Candidate features — considered, UNDECIDED (from the publish/viability discussion, Jun 2026)
+
+Surfaced while assessing whether to open-source MB (see README "Today, and where it could go"
++ memory `project_web_app_vision`). **None of these are committed or rejected** — they're
+parked here so they're not lost, and so the README's "tell me what you'd need" invitation has
+a place to collect real demand. Decide by what SCS actually needs and what (if any) other
+shops ask for — not by guessing.
+
+- **SMS / text notifications** ("device ready") — repair-shop staple (PCRT/RepairDesk have it); email-only today.
+- **Parts inventory & ordering** — stock levels, low-stock alerts, reorder; parts are billable line items today.
+- **Point of sale (POS)** — counter checkout / accessory sales.
+- **Additional invoicing/accounting targets** — QuickBooks Online & others (IN is wired first because SCS uses it; explicitly NOT IN-only forever).
+- **Deeper documentation** — beyond the current KB + credential vaults (pairs with BookStack today).
+- **Customer self-service portal**, **RMM integration**, **SSL/domain expiry alerts**, **recurring-contract (MRR) billing**.
+- **Multi-shop capability** — PCRT supported it; open question, not foreclosed.
+
+---
+
 ## Phase 3+: Multi-Tenant SaaS (Speculative)
 
 *Only if multiple companies request hosted version. Years away if ever.*
