@@ -706,6 +706,31 @@ def test_create_system_alert_makes_ticket_and_notifies_admin(admin_user):
     assert t3.pk != t.pk
 
 
+@pytest.mark.django_db
+def test_500_logging_handler_opens_system_alert_ticket(admin_user):
+    """An unhandled 500 (django.request ERROR with a traceback) becomes a ticket
+    with the traceback in the body."""
+    import logging
+    import sys
+    from core.log_handlers import SystemAlertHandler
+    from core.models import Ticket
+
+    handler = SystemAlertHandler()
+    try:
+        raise ValueError('boom in a view')
+    except ValueError:
+        rec = logging.LogRecord(
+            'django.request', logging.ERROR, __file__, 0,
+            'Internal Server Error: /tickets/', None, sys.exc_info(),
+        )
+    handler.emit(rec)
+
+    t = Ticket.objects.filter(source='system', subject__startswith='500:').first()
+    assert t is not None
+    assert 'Internal Server Error: /tickets/' in t.subject
+    assert 'boom in a view' in t.description
+
+
 # ── Inbound: a client reply threads into its ticket, never spawns an orphan ──
 # Regression guard for the Jun 14 bug: replies to a 'converted' ticket were
 # falling through and creating brand-new tickets (TKT-00008/00009).
