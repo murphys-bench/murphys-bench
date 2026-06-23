@@ -1,0 +1,20 @@
+# Murphy's Bench log rotation.
+# Install:  sudo cp deploy/logrotate-murphys-bench /etc/logrotate.d/murphys-bench
+#
+# Rotates the Gunicorn access/error logs and the backup log. The Django app log
+# (logs/murphys_bench.log) self-rotates via a RotatingFileHandler in settings.py,
+# so it is deliberately NOT listed here (don't double-rotate it).
+# copytruncate is used so Gunicorn keeps writing to the same fd without a restart.
+/opt/murphys-bench/logs/gunicorn-access.log
+/opt/murphys-bench/logs/gunicorn-error.log
+/opt/murphys-bench/logs/backup.log {
+    weekly
+    rotate 8
+    maxsize 50M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    su scs-tech scs-tech
+}

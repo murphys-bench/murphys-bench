@@ -17,8 +17,12 @@ RCLONE_BIN="$APP/bin/rclone"
 RCLONE_CONF="$APP/.rclone.conf"
 RCLONE_REMOTE="b2:scs-mb-backups"   # e.g. b2:scs-mb-backups  -- filled in once B2 key exists
 
+# healthchecks.io dead-man's-switch (set HEALTHCHECKS_URL in .env to enable; unset = no-op)
+HC_URL="$(grep -E '^HEALTHCHECKS_URL=' "$APP/.env" 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
+hc_ping(){ [ -n "${HC_URL:-}" ] && curl -fsS -m 10 --retry 3 "${HC_URL}${1:-}" >/dev/null 2>&1 || true; }
+
 log(){ echo "$(date "+%F %T") $*" | tee -a "$LOG"; }
-fail(){ log "BACKUP FAILED: $*"; exit 1; }
+fail(){ log "BACKUP FAILED: $*"; hc_ping /fail; exit 1; }
 
 mkdir -p "$STAGE"
 log "=== backup start $TS ==="
@@ -63,3 +67,5 @@ fi
 # 4) Local retention
 ls -1t "$STAGE"/mb-backup-*.tar.gz 2>/dev/null | tail -n +$((KEEP_LOCAL+1)) | xargs -r rm -f
 log "=== backup done; local archives kept: $(ls -1 "$STAGE"/mb-backup-*.tar.gz 2>/dev/null | wc -l) ==="
+
+hc_ping   # signal success to the healthchecks.io dead-man's-switch

@@ -1,0 +1,10 @@
+# Install:  sudo cp deploy/murphys-bench-disk-check.service /etc/systemd/system/
+[Unit]
+Description=Murphy's Bench disk-usage check (alerts if root fs is high)
+After=network.target
+
+[Service]
+Type=oneshot
+User=scs-tech
+WorkingDirectory=/opt/murphys-bench
+ExecStart=/opt/murphys-bench/scripts/mb_disk_check.sh 85
