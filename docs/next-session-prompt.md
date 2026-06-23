@@ -14,6 +14,27 @@ go/no-go only before destructive or production-affecting steps.
 
 ## Top of the queue for next session:
 
+**SESSION 40 (Jun 23) — current state.** Large multi-part session:
+- **Staging VM** `mb-test` (201, `10.58.58.108`) stood up — fresh install-from-git, real prod-data copy (⚠ LAN-only, NEVER a demo — `mb_test_vm_holds_real_data`).
+- **PBS backups squared away** (VMID 102/103 collisions fixed → scsprox2=1xx/scsprox=2xx; verify+prune+notify) — `reference_proxmox_pbs_infra`.
+- **Observability keystone** shipped — MB self-monitors → System Alert tickets (app 500s, systemd OnFailure, disk check, backup heartbeat, logrotate). **Both assessment reds now CLOSED.**
+- **`scripts/update.sh`** — self-serve, backup-first, auto-health-checked update (prod+staging).
+- **CI gate LIVE** — GitHub Actions runs pytest+check on every push (first run green).
+- **README.md** drafted + viability desk-check; **Mac→GitHub switched to SSH**.
+- External-AI review reframed MB as a **credible, evidence-backed internal-tool foundation** (gate > tooling). Full detail in CLAUDE.md header.
+
+**Resume here — Mike's self-sufficiency bar (install/update/backup/export WITHOUT Claude):**
+1. **`restore.sh`** — one-command restore from a backup tarball (stop → restore db+media+protected → restart; FIELD_ENCRYPTION_KEY reminder). Completes the backup pillar.
+2. **Data export** — `manage.py` command → portable CSV + media bundle.
+3. **`setup.sh`** — one-line installer scripting INSTALL.md (Debian/Ubuntu apt family; Ubuntu 24.04 tested, not locked — any systemd Linux, Py≥3.10).
+4. **Tagged releases + AUTO-rollback (FIRM):** semver tags (know current/target version); failed update auto-reverts **code AND DB** to last stable (reuse restore.sh). CI-green → tag = rollback target.
+5. **In-app admin 'Update'** — wraps update.sh out-of-band; current-vs-available version; admin-only.
+6. **Publish-readiness (only if going public):** screenshots, LICENSE (AGPLv3), secrets/client-data audit → fresh public repo, de-Shamrock tweaks (COMPANY_NAME default, T2T relay). Validate demand first (show MB2 to peers).
+
+Memory: `project_mb_publish_ops_selfsufficiency`, `project_mb_test_vm_plan`, `reference_proxmox_pbs_infra`, `project_mb_assessment_2026_06`. ⚠ **When giving Mike terminal commands, ALWAYS state WHERE to run them** (Mac Terminal vs SSH into which VM) — `feedback_state_where_to_run_commands`.
+
+---
+
 **SESSION 35 (Jun 20) — Security posture pass. Suite 96→99.** Audited prod (`check --deploy` + settings)
 and acted: **admin user-delete** (guards self/last-superuser — Mike removed the 3 test accounts, only
 `admin` remains); file perms tightened (`.env` 600; `protected/`+`backups/` 750); runtime CVE dep upgrades

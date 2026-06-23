@@ -632,6 +632,21 @@ shops ask for — not by guessing.
 
 ---
 
+## Self-sufficiency & release ops (Mike's bar — FIRM, Jun 23 2026)
+
+Mike must be able to **install, update, backup, and export data WITHOUT Claude** (bus-factor). Each = one fail-loud command + a short doc line, no code-reading. Memory: `project_mb_publish_ops_selfsufficiency`.
+
+- [x] **`scripts/update.sh`** — backup-first → pull → pip → migrate → collectstatic → restart → health-poll + rollback hint. Verified staging+prod (Jun 23). Run: `cd /opt/murphys-bench && scripts/update.sh`.
+- [x] **CI gate** — `.github/workflows/ci.yml` (pytest + `manage.py check` on every push). See the remediation section.
+- [ ] **`restore.sh`** — one-command restore from a backup tarball (stop → restore db+media+protected → restart; FIELD_ENCRYPTION_KEY reminder). Completes the backup pillar.
+- [ ] **Data export** — `manage.py` command → portable CSV + media bundle.
+- [ ] **`setup.sh`** — one-line installer scripting INSTALL.md (Debian/Ubuntu apt family).
+- [ ] **Tagged releases + AUTO-rollback (FIRM):** semver tags (current/target version); failed update auto-reverts **code AND DB** to last stable (reuse restore.sh). CI-green → tag = rollback target.
+- [ ] **In-app admin 'Update'** — wraps update.sh out-of-band (can't restart gunicorn from its own request); current-vs-available version; admin-only/CSRF. Mainly for single-instance adopters; SCS stays staging-first.
+- **Docker:** deferred until demand validated (would fork the systemd model); setup.sh is the easy-install answer for now.
+
+---
+
 ## Phase 3+: Multi-Tenant SaaS (Speculative)
 
 *Only if multiple companies request hosted version. Years away if ever.*
