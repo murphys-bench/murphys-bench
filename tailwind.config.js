@@ -16,6 +16,12 @@ module.exports = {
     './core/**/*.py',
     './accounts/**/*.py',
   ],
+  // The {% icon %} templatetag builds its size class dynamically in Python
+  // (core/templatetags/mb_icons.py: f'w-{size} h-{size}'), so Tailwind can't see
+  // the concrete w-N/h-N. Safelist the icon dimensions so they're never purged.
+  safelist: [
+    { pattern: /^(w|h)-(3|4|5|6|7|8|10|12|14|16)$/ },
+  ],
   theme: {
     extend: {},
   },

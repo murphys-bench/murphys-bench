@@ -5,8 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Murphy's Bench{% endblock %}</title>
-    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
-    <script>tailwind.config = { darkMode: 'class' }</script>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
     <script src="{% static 'js/htmx-1.9.12.min.js' %}"></script>
     <script defer src="{% static 'js/alpine-3.15.12.min.js' %}"></script>
     {% with s=site_settings %}{% if s %}
