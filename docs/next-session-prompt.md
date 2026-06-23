@@ -14,6 +14,24 @@ go/no-go only before destructive or production-affecting steps.
 
 ## Top of the queue for next session:
 
+**SESSION 41 (Jun 23) — front-end fully self-hosted (no CDN) + WO reported-issue field. Suite 102→104.**
+- **CDN removed everywhere.** Privacy Badger blocking `unpkg` broke the app on Mike's laptop (Alpine+HTMX failed). Fixed: HTMX 1.9.12 + Alpine 3.15.12 vendored/pinned to `static/js/` (`e445fdd`); Tailwind moved off `cdn.tailwindcss.com` to a **compiled self-hosted** `static/css/app.css` via the standalone Tailwind v3.4.19 CLI — `scripts/build_css.sh` + `tailwind.config.js` + `tailwind/input.css`, **no Node**, `app.css` gitignored & built-on-deploy (`63d9421`). Coverage check caught a dynamic icon-size purge → safelisted `(w|h)-(3..16)`. Live prod+MB2+mb-test, 0 CDN refs. Also fixed sidebar scroll-clip on short laptop screens.
+- **WorkOrder.reported_problem** (migration 0064): free-text "Reported Issue / Work Requested" for uncategorizable/ad-hoc work; convert now carries `ticket.description` (was dropped); on form/detail/repair-report; works standalone. Memory `project_mb_wo_reported_issue`.
+
+**▶ RESUME HERE — CSP (Content-Security-Policy), the last front-end hardening step.** Now feasible (no CDN) but NOT a quick toggle:
+- Alpine v3 evaluates directives via `new Function()` → a strict policy needs `script-src 'unsafe-eval'` UNLESS we migrate to Alpine's CSP build (rewrites every `x-data`/inline expression — large).
+- Inline `<script>` blocks (e.g. base.html pre-paint localStorage script) need per-request **nonces** via middleware.
+- Inline `style="..."` attributes are pervasive → `style-src` will likely need `'unsafe-inline'`.
+- **Plan: report-only CSP first** (`Content-Security-Policy-Report-Only`) on mb-test to see the real violation set and decide the Alpine question with data, THEN enforce. Its own session. Memory `project_mb_tailwind_cdn_security`.
+- ⚠ When deploying any branch that changes CSS: run `scripts/build_css.sh` before `collectstatic` (update.sh does this; manual `git pull` deploys must too).
+- Build CSS on every box at deploy: prod (82, key `id_ed25519`), MB2 (35.223, key `claude-code`), mb-test (108, key `claude-code`).
+
+**Also still open:** align dev Mac Python 3.9→3.12 (no 3.12 installed; do on the new MacBook Air) — memory `project_mb_dev_python_alignment`.
+
+(Reports page Chart.js + html2pdf were also vendored Jun 23 — app is now fully CDN-free.)
+
+---
+
 **SESSION 40 (Jun 23) — current state.** Large multi-part session:
 - **Staging VM** `mb-test` (201, `10.58.58.108`) stood up — fresh install-from-git, real prod-data copy (⚠ LAN-only, NEVER a demo — `mb_test_vm_holds_real_data`).
 - **PBS backups squared away** (VMID 102/103 collisions fixed → scsprox2=1xx/scsprox=2xx; verify+prune+notify) — `reference_proxmox_pbs_infra`.
@@ -338,7 +356,7 @@ match prod (both boxes now `PasswordAuthentication no`; verified). Claude connec
 - **Gunicorn service**: `murphys-bench.service` — NOT `gunicorn.service`. Restart: `sudo systemctl restart murphys-bench`
 - **App path on server**: `/opt/murphys-bench/` — NOT `~/murphys-bench/`
 - **Audit log in templates**: Never use `entry.changes_dict.items` — use `_audit_entries(obj)` from views.py
-- **Alpine.js**: CDN with `defer`. HTMX-swapped content reinitializes automatically via mutation observer.
+- **Alpine.js**: self-hosted `static/js/alpine-3.15.12.min.js` with `defer` (NOT CDN as of Jun 23). HTMX-swapped content reinitializes automatically via mutation observer.
 - **two_factor template overrides**: Live in root `templates/two_factor/` (DIRS), NOT `core/templates/`
 - **WorkOrderNote customer filter**: Use `note_type='customer_visible'` NOT `is_internal=False`
 - **Mileage Calculate CSRF**: Uses `document.querySelector('[name=csrfmiddlewaretoken]')` — do not revert
@@ -347,7 +365,7 @@ match prod (both boxes now `PasswordAuthentication no`; verified). Claude connec
 - **mb_icons templatetag**: `{% load mb_icons %}` at top of any template that uses `{% icon %}`, `{% attr %}`, `{% getfield %}`, or `{% markdownify %}`. Partials need their own load tag.
 - **Email template variable reference**: Must use `{% verbatim %}...{% endverbatim %}` to display `{{ }}` tokens in templates.
 - **Dark mode**: `dark` class is on `<html>` (documentElement), NOT `<body>`. Use `html:not(.dark)` for light-mode-only CSS rules, NOT `body:not(.dark)`.
-- **Tailwind CDN**: Loaded with `?plugins=typography` for KB prose rendering.
+- **Tailwind**: compiled & self-hosted at `static/css/app.css` (NOT CDN as of Jun 23). Built by `scripts/build_css.sh` (standalone v3.4.19 CLI, no Node); config `tailwind.config.js` (typography plugin for KB prose; `darkMode:'class'`; safelist `(w|h)-(3..16)` for the dynamic `{% icon %}` sizes). `app.css` is gitignored & built on deploy — run the build before collectstatic.
 - **reverse_lazy at module level**: Don't use `reverse_lazy('core:...')` in module-level variable assignments in views.py — causes circular import during URL loading. Use a helper function with `reverse()` called at request time instead.
 - **Email logo**: CID inline attachment (`Content-ID: logo`, `cid:logo` in template). Logo read from `site.company_logo.path`. Will switch to public URL once Cloudflare is live.
 - **Inbound email regex**: `TICKET_RE = re.compile(r'\[?(TKT-[\d-]+)\]?', re.IGNORECASE)` — matches both sequential (TKT-00005) and legacy date-based (TKT-20260610-0001) formats.
@@ -358,9 +376,9 @@ match prod (both boxes now `PasswordAuthentication no`; verified). Claude connec
 
 - All views use `LoginRequiredMixin`
 - HTMX loaded in `base.html` with global CSRF header on `<body>`
-- Alpine.js loaded in `base.html` with `defer`
+- Alpine.js loaded in `base.html` with `defer` (self-hosted `static/js/`)
 - Follow existing patterns in `core/views.py`, `core/urls.py`, and existing templates
-- Tailwind CSS via CDN — match existing class patterns
+- Tailwind CSS compiled & self-hosted (`static/css/app.css`, no CDN) — match existing class patterns; new dynamic/Python-built classes need a `safelist` entry in `tailwind.config.js`
 - After building, run `python manage.py check` to confirm no issues
 - Create and apply migrations for all new models (both dev and prod)
 - Commit and push when complete; deploy with git pull + service restart on server
