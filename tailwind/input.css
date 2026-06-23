@@ -1,0 +1,9 @@
+/* Tailwind source for the compiled, self-hosted stylesheet.
+ *
+ * Half A produces static/css/app.css from this; the templates are NOT yet pointed
+ * at it (that's Half B, with full per-page visual verification). For now this is
+ * just the three Tailwind layers — the large hand-rolled overrides currently inline
+ * in base.html will be migrated in during Half B. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
