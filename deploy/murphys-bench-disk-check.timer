@@ -1,0 +1,12 @@
+# Install:  sudo cp deploy/murphys-bench-disk-check.timer /etc/systemd/system/
+#           sudo systemctl enable --now murphys-bench-disk-check.timer
+[Unit]
+Description=Run Murphy's Bench disk-usage check daily
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1d
+AccuracySec=1h
+
+[Install]
+WantedBy=timers.target

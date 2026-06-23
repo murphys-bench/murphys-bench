@@ -1,0 +1,12 @@
+# Template unit: turns a failed MB job into a System Alert ticket.
+# Wired via `OnFailure=murphys-bench-alert@%n.service` on the job units (see the
+# .service.d/onfailure.conf drop-ins, or deploy/README.md). %i = the failed unit.
+# Install:  sudo cp deploy/murphys-bench-alert@.service /etc/systemd/system/
+[Unit]
+Description=Murphy's Bench failure alert for %i
+
+[Service]
+Type=oneshot
+User=scs-tech
+WorkingDirectory=/opt/murphys-bench
+ExecStart=/opt/murphys-bench/venv/bin/python /opt/murphys-bench/manage.py send_alert "Job failed: %i" "systemd unit %i failed. Check: journalctl -u %i"
