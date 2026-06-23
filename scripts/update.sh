@@ -45,7 +45,8 @@ log "code: $PREV -> $NEW"
 "$APP/venv/bin/python" manage.py migrate --noinput \
     || fail "migrate failed — DB may be partially migrated. Restore the pre-update backup (scripts/restore.sh), then investigate."
 
-# 6) Static files.
+# 6) Build the self-hosted Tailwind stylesheet (standalone CLI, no Node), then collect static.
+"$APP/scripts/build_css.sh" || fail "CSS build failed"
 "$APP/venv/bin/python" manage.py collectstatic --noinput >/dev/null || fail "collectstatic failed"
 
 # 7) Restart the app.

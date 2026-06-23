@@ -65,3 +65,7 @@ bin/
 .rclone.conf
 scripts/*.retired-*
 inbound_fetch.lock
+
+# Tailwind standalone CLI cache + compiled output (built on deploy by scripts/build_css.sh)
+.tailwind/
+static/css/app.css
