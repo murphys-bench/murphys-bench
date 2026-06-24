@@ -1,6 +1,6 @@
 # Murphy's Bench Development Roadmap
 
-**Last Updated**: June 22, 2026 (session 37 — inbound duplicate-ticket bug fixed, migration 0062, suite →100; + full system assessment → BookStack page 09; see "System assessment & remediation" below)
+**Last Updated**: June 24, 2026 (session 42 — ticket SLA bugfix: first staff customer-visible reply now permanently satisfies the response deadline via `Ticket.first_responded_at`; migration 0065 backfills already-replied tickets; suite 104→107; commit 2235c53, deployed + 0065 applied on prod/MB2/mb-test. Prior: session 41 — front-end fully self-hosted/no CDN + WO reported-issue field; session 37 — inbound duplicate-ticket fix + full system assessment → BookStack page 09; see "System assessment & remediation" below)
 **Current Phase**: Phase 1 — SCS Internal — **STABILIZATION** (see "How We Work" in CLAUDE.md)
 
 > ⚠ We are in a stabilization phase, not a feature phase. New features are paused until
