@@ -95,3 +95,41 @@ HEALTHCHECKS_URL=https://hc-ping.com/<your-check-uuid>
 
 `scripts/mb_backup.sh` pings it on success and `<url>/fail` on failure; a missed
 ping makes healthchecks.io email you. Leave `HEALTHCHECKS_URL` unset to disable.
+
+## Releases & updates (tagged, with auto-rollback)
+
+Deploys go through **release tags** so you always know what version is running and
+what you're moving to.
+
+**Cut a release** (on the dev machine, after CI is green on `main`):
+
+```bash
+scripts/release.sh v0.1.0     # semver vMAJOR.MINOR.PATCH; pushes an annotated tag
+```
+
+`release.sh` refuses unless you're on a clean `main` that's in sync with
+`origin/main` (so the tag points at a commit GitHub Actions actually validated).
+
+**Deploy on a server** (`/opt/murphys-bench`, as `scs-tech`):
+
+```bash
+scripts/update.sh             # deploy the LATEST release tag (the normal path)
+scripts/update.sh v0.1.0      # pin a specific tag
+scripts/update.sh main        # deploy latest on a branch (staging/testing only)
+```
+
+`update.sh` backs up first, then pip-installs, migrates, rebuilds CSS,
+collectstatic, restarts, and health-checks. **If any step after the backup fails,
+it AUTOMATICALLY rolls back** — code (`git checkout` the previous commit) *and*
+database (`restore.sh` of the pre-update snapshot) — and re-verifies health. So a
+bad release self-heals to the last good state instead of leaving the box broken.
+
+- `scripts/update.sh --no-rollback <ref>` leaves a failed update in place (for
+  debugging a bad release) and prints the exact manual recovery command.
+- If the rollback itself can't complete (worst case), it stops and prints a
+  "MANUAL RECOVERY NEEDED" block naming the pre-update backup tarball.
+
+> Rolling back restores `protected/` + `media/` from the pre-update snapshot too,
+> so any file written during the brief mid-deploy failure window is discarded —
+> that's the intended "revert to last stable." Each rollback also leaves a
+> `backups/pre-restore-<ts>/` safety copy (harmless; prune when convenient).
