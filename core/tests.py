@@ -1800,3 +1800,58 @@ def test_wo_detail_shows_reported_problem(client, client_obj, admin_user):
     resp = client.get(reverse('core:work_order_detail', args=[wo.pk]))
     assert resp.status_code == 200
     assert 'check why battery drains overnight' in resp.content.decode()
+
+
+# ── SLA response deadline: first staff reply meets it permanently ───────────
+
+@pytest.mark.django_db
+def test_overdue_ticket_with_past_due_at_is_overdue_without_response():
+    """A ticket past its SLA due time with no staff reply is overdue."""
+    from django.utils import timezone
+    from core.models import SLAPlan
+    client_obj = Client.objects.create(name='Acme Co')
+    plan = SLAPlan.objects.create(name='Business', grace_period_hours=8)
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    ticket.due_at = timezone.now() - timezone.timedelta(hours=1)
+    ticket.sla_plan = plan
+    ticket.save(update_fields=['due_at', 'sla_plan'])
+
+    assert ticket.is_overdue, 'Past-due ticket with no response must be overdue.'
+
+
+@pytest.mark.django_db
+def test_first_staff_reply_meets_sla_and_clears_overdue(client, client_obj, admin_user):
+    """Posting the first customer-visible staff reply stamps first_responded_at
+    and the ticket is no longer overdue even though due_at is in the past."""
+    from django.utils import timezone
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    ticket.due_at = timezone.now() - timezone.timedelta(hours=1)
+    ticket.save(update_fields=['due_at'])
+    assert ticket.is_overdue
+
+    client.force_login(admin_user)
+    client.post(reverse('core:ticket_reply_add', args=[ticket.pk]),
+                {'reply_type': 'customer_visible', 'content': 'On it.'})
+
+    ticket.refresh_from_db()
+    assert ticket.first_responded_at is not None, \
+        'First staff customer-visible reply must stamp first_responded_at.'
+    assert not ticket.is_overdue, \
+        'Once responded, a ticket can no longer be overdue (response SLA met).'
+
+
+@pytest.mark.django_db
+def test_internal_note_does_not_meet_sla(client, client_obj, admin_user):
+    """An internal note is not a customer response and must not clear overdue."""
+    from django.utils import timezone
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    ticket.due_at = timezone.now() - timezone.timedelta(hours=1)
+    ticket.save(update_fields=['due_at'])
+
+    client.force_login(admin_user)
+    client.post(reverse('core:ticket_reply_add', args=[ticket.pk]),
+                {'reply_type': 'internal', 'content': 'Note to self.'})
+
+    ticket.refresh_from_db()
+    assert ticket.first_responded_at is None
+    assert ticket.is_overdue, 'Internal note must not satisfy the response SLA.'
