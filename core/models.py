@@ -489,6 +489,11 @@ class Ticket(models.Model):
         related_name='overdue_acknowledgments',
     )
     overdue_acknowledged_at = models.DateTimeField(null=True, blank=True)
+    first_responded_at = models.DateTimeField(
+        null=True, blank=True, db_index=True,
+        help_text='Set on the first staff customer-visible reply. Once set, the response '
+                  'SLA is met and the ticket can no longer go overdue.',
+    )
     subject = models.CharField(max_length=255)
     description = models.TextField()
     source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='email')
@@ -561,6 +566,10 @@ class Ticket(models.Model):
     @property
     def is_overdue(self):
         if not self.due_at:
+            return False
+        if self.first_responded_at:
+            # The only SLA is a response deadline; the first staff reply meets it
+            # permanently. The clock never re-arms after that.
             return False
         if self.status in self.CLOSED_STATUSES:
             return False

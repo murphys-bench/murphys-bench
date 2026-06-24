@@ -1637,9 +1637,16 @@ class TicketReplyCreateView(LoginRequiredMixin, View):
         )
         _save_attachments(request, reply)
         if reply.reply_type == 'customer_visible':
+            update_fields = []
             if ticket.needs_response:
                 ticket.needs_response = False
-                ticket.save(update_fields=['needs_response', 'updated_at'])
+                update_fields.append('needs_response')
+            if ticket.first_responded_at is None:
+                # First staff response meets the response SLA permanently.
+                ticket.first_responded_at = timezone.now()
+                update_fields.append('first_responded_at')
+            if update_fields:
+                ticket.save(update_fields=update_fields + ['updated_at'])
             from .email_utils import send_ticket_email
             prior_replies = list(
                 ticket.replies.filter(reply_type='customer_visible')
