@@ -1855,3 +1855,48 @@ def test_internal_note_does_not_meet_sla(client, client_obj, admin_user):
     ticket.refresh_from_db()
     assert ticket.first_responded_at is None
     assert ticket.is_overdue, 'Internal note must not satisfy the response SLA.'
+
+
+# ── export_data: portable CSV + media bundle, secrets redacted by default ───
+
+@pytest.mark.django_db
+def test_export_data_redacts_secrets_by_default(tmp_path):
+    """The portable export writes a tarball and never leaks encrypted secrets
+    unless explicitly asked. A device password is the canary."""
+    import tarfile
+    from django.core.management import call_command
+
+    c = Client.objects.create(name='Acme Co')
+    Device.objects.create(client=c, name='PC1', device_password='hunter2secret')
+
+    call_command('export_data', output=str(tmp_path))
+
+    archives = list(tmp_path.glob('mb-export-*.tar.gz'))
+    assert len(archives) == 1, 'export must produce exactly one tarball'
+
+    with tarfile.open(archives[0]) as tar:
+        names = tar.getnames()
+        device_csv = next(n for n in names if n.endswith('/csv/Device.csv'))
+        body = tar.extractfile(device_csv).read().decode()
+
+    assert 'hunter2secret' not in body, 'decrypted secret must NOT appear by default'
+    assert '***REDACTED***' in body, 'a present secret should show as redacted'
+    assert any(n.endswith('/README.txt') for n in names)
+
+
+@pytest.mark.django_db
+def test_export_data_include_secrets_writes_plaintext(tmp_path):
+    import tarfile
+    from django.core.management import call_command
+
+    c = Client.objects.create(name='Acme Co')
+    Device.objects.create(client=c, name='PC1', device_password='hunter2secret')
+
+    call_command('export_data', output=str(tmp_path), include_secrets=True)
+
+    archive = next(tmp_path.glob('mb-export-*.tar.gz'))
+    with tarfile.open(archive) as tar:
+        device_csv = next(n for n in tar.getnames() if n.endswith('/csv/Device.csv'))
+        body = tar.extractfile(device_csv).read().decode()
+
+    assert 'hunter2secret' in body, '--include-secrets must write the real value'
