@@ -32,7 +32,17 @@ internal network or a small VM.
 | Cloudflare Tunnel | Public HTTPS access without opening inbound ports |
 | systemd | Runs Gunicorn + the scheduled jobs (backup, inbound email, SLA check) |
 
-There is **no build step** for the frontend — Tailwind/HTMX/Alpine load from CDNs.
+The frontend is **fully self-hosted — nothing loads from a CDN.** HTMX/Alpine are
+vendored in `static/js/`, and Tailwind is compiled to `static/css/app.css` by
+`scripts/build_css.sh` (a pinned standalone CLI — no Node/npm). That build runs
+automatically in `scripts/setup.sh` and `scripts/update.sh`; a manual install must
+run it before `collectstatic` (see step 7).
+
+> **Fast path:** once the code is on the box (step 3) with Python available, you can
+> run **`scripts/setup.sh`** to automate steps 4, 6, 7 (venv, `.env` with generated
+> keys, CSS build, migrate, collectstatic, superuser, smoke test) in one fail-loud
+> command, then do the gunicorn/nginx/Cloudflare wiring (steps 8–10) by hand. The
+> manual steps below are the longhand it scripts.
 
 ---
 
@@ -206,9 +216,12 @@ cd /opt/murphys-bench
 mkdir -p logs media protected
 ```
 
-Then initialize:
+Then build the self-hosted stylesheet (required before `collectstatic` — it
+compiles `static/css/app.css`; downloads a pinned Tailwind CLI on first run, no
+Node) and initialize:
 
 ```bash
+scripts/build_css.sh
 venv/bin/python manage.py migrate
 venv/bin/python manage.py collectstatic --noinput
 venv/bin/python manage.py createsuperuser
