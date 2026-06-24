@@ -1404,6 +1404,31 @@ class DeviceUpdateView(LoginRequiredMixin, UpdateView):
         return context
 
 
+class DeviceDeleteView(LoginRequiredMixin, View):
+    """Hard-delete a device. Admin only.
+
+    Used to clean up duplicate/erroneous device records. Linked work orders and
+    tickets survive — both FKs are SET_NULL, and work orders keep their snapshotted
+    hardware specs (as-serviced history). The credential access log cascades.
+    Redirects back to the owning client (the device-centric hub).
+    """
+
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        device = get_object_or_404(Device, pk=pk)
+        client_pk = device.client_id
+        name = device.name
+        wo_count = device.work_orders.count()
+        device.delete()
+        msg = f'Device "{name}" deleted.'
+        if wo_count:
+            msg += (f' {wo_count} work order(s) kept their as-serviced record '
+                    f'but no longer link to a device.')
+        messages.success(request, msg)
+        return redirect('core:client_detail', pk=client_pk)
+
+
 # --- Ticket Views ---
 
 TICKET_CLOSED_STATUSES = ['resolved', 'closed']

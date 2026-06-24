@@ -21,6 +21,18 @@
                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
                 Edit
             </a>
+            {% if is_admin %}
+            {% with wo_count=device.work_orders.count %}
+            <form method="post" action="{% url 'core:device_delete' device.pk %}" class="inline"
+                  onsubmit="return confirm('Delete device &quot;{{ device.name|escapejs }}&quot;?{% if wo_count %} It is linked to {{ wo_count }} work order(s); those records are kept but will no longer reference a device.{% endif %} This cannot be undone.');">
+                {% csrf_token %}
+                <button type="submit"
+                        class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm font-medium">
+                    Delete
+                </button>
+            </form>
+            {% endwith %}
+            {% endif %}
         </div>
     </div>
 </div>
