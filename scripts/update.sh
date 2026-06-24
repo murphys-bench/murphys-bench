@@ -1,56 +1,119 @@
 #!/usr/bin/env bash
-# One-command, fail-loud update for Murphy's Bench.
+# One-command, fail-loud update for Murphy's Bench — with AUTO-ROLLBACK.
 #
-#   scripts/update.sh            # update to the latest on the current branch
-#   scripts/update.sh v0.3       # update to a specific tag/branch/commit
+#   scripts/update.sh              # deploy the latest RELEASE TAG (vX.Y.Z)
+#   scripts/update.sh v0.3.0       # deploy a specific tag
+#   scripts/update.sh main         # deploy latest on a branch (staging/testing)
+#   scripts/update.sh --no-rollback <ref>   # leave a failed update in place (debugging)
 #
-# It ALWAYS backs up before touching anything, so a failed migrate leaves you a
-# restore point. Run it as the app user (scs-tech). Nothing here needs a password
-# except the service restart (already passwordless for this unit).
+# It ALWAYS backs up first (snapshot-before-migrate). If anything after that goes
+# wrong — bad deps, failed migration, broken restart — it AUTOMATICALLY rolls the
+# code AND the database back to where it started and verifies the app is healthy
+# again. Run as the app user (scs-tech); the only privileged step is the service
+# restart (already passwordless for this unit).
 set -euo pipefail
 
 APP=/opt/murphys-bench
+VENV="$APP/venv/bin"
 cd "$APP"
 
 log()  { echo "$(date '+%F %T') update: $*"; }
 fail() { echo "UPDATE FAILED: $*" >&2; exit 1; }
 
+# manual_abort: rollback itself failed — the worst case. Tell the human exactly
+# how to recover by hand, with the backup that can restore the DB.
+manual_abort() {
+    echo "ROLLBACK FAILED: $1" >&2
+    echo "  ⚠ MANUAL RECOVERY NEEDED — the app may be down." >&2
+    echo "  Pre-update backup: ${BACKUP_TARBALL:-<none>}" >&2
+    echo "  Recover by hand:" >&2
+    echo "    cd $APP && git checkout --force $PREV && $VENV/pip install -r requirements.txt \\" >&2
+    echo "      && scripts/build_css.sh && $VENV/python manage.py collectstatic --noinput \\" >&2
+    echo "      && RESTORE_YES=1 scripts/restore.sh $BACKUP_TARBALL" >&2
+    exit 2
+}
+
+# rollback: revert code + DB to the pre-update state and confirm health.
+rollback() {
+    local why="$1"
+    if [ "$NO_ROLLBACK" = 1 ]; then
+        echo "UPDATE FAILED: $why" >&2
+        echo "  Auto-rollback DISABLED (--no-rollback) — the box may be in a broken state." >&2
+        echo "  Pre-update backup: $BACKUP_TARBALL ; previous code: $PREV ($PREV_VER)" >&2
+        echo "  Recover: cd $APP && git checkout --force $PREV && $VENV/pip install -r requirements.txt \\" >&2
+        echo "    && scripts/build_css.sh && $VENV/python manage.py collectstatic --noinput \\" >&2
+        echo "    && RESTORE_YES=1 scripts/restore.sh $BACKUP_TARBALL" >&2
+        exit 1
+    fi
+    log "UPDATE FAILED ($why) — AUTO-ROLLING BACK to $PREV ($PREV_VER)..."
+    git checkout --force --quiet "$PREV"                          || manual_abort "git checkout $PREV"
+    "$VENV/pip" install -q -r requirements.txt                    || manual_abort "pip install"
+    "$APP/scripts/build_css.sh"                                   || manual_abort "build_css"
+    "$VENV/python" manage.py collectstatic --noinput >/dev/null   || manual_abort "collectstatic"
+    # restore.sh restores the DB (+ protected/ + media/), restarts, and health-checks.
+    RESTORE_YES=1 "$APP/scripts/restore.sh" "$BACKUP_TARBALL"     || manual_abort "DB restore"
+    log "ROLLED BACK to $PREV ($PREV_VER) and verified healthy. Original failure: $why"
+    exit 1
+}
+
 [ -f manage.py ] || fail "no manage.py in $APP — wrong directory?"
 command -v git >/dev/null || fail "git not installed"
 
-REF="${1:-}"
+# Parse args: one optional ref + an optional --no-rollback flag, any order.
+REF=""
+NO_ROLLBACK=0
+for a in "$@"; do
+    case "$a" in
+        --no-rollback) NO_ROLLBACK=1 ;;
+        -*) fail "unknown flag '$a'" ;;
+        *) if [ -z "$REF" ]; then REF="$a"; else fail "unexpected extra argument '$a'"; fi ;;
+    esac
+done
 
-# 1) Back up FIRST (snapshot-before-migrate). If this fails, we stop — nothing changed.
+# 1) Back up FIRST (snapshot-before-migrate) and capture the exact tarball as the
+#    rollback point — BEFORE anything is touched. If this fails, nothing changed.
 log "backing up before update (snapshot-before-migrate)..."
 "$APP/scripts/mb_backup.sh" || fail "pre-update backup failed — aborting, nothing was changed"
+BACKUP_TARBALL="$(ls -1t "$APP/backups"/mb-backup-*.tar.gz 2>/dev/null | head -1)"
+[ -f "$BACKUP_TARBALL" ] || fail "could not locate the pre-update backup tarball — aborting before any change"
+log "rollback point: $BACKUP_TARBALL"
 
-# 2) Remember where we were, for rollback.
+# 2) Remember where we are (commit + human version), for rollback + reporting.
 PREV="$(git rev-parse --short HEAD)"
-log "current version: $PREV"
+PREV_VER="$(git describe --tags --always 2>/dev/null || echo "$PREV")"
 
-# 3) Get the new code.
+# 3) Fetch and resolve the target: no arg = latest release tag; arg = that ref.
 git fetch --all --tags --quiet || fail "git fetch failed"
 if [ -n "$REF" ]; then
-    git checkout "$REF" || fail "could not check out '$REF'"
+    TARGET="$REF"
 else
-    git pull --ff-only || fail "git pull failed (local changes on the box? resolve them, then re-run)"
+    TARGET="$(git tag -l 'v*' | sort -V | tail -1)"
+    [ -n "$TARGET" ] || fail "no release tags exist yet. Create one with scripts/release.sh \
+(on your dev machine, after CI is green), or pass an explicit ref to deploy untagged \
+code, e.g.: scripts/update.sh main"
 fi
+
+# Checkout is the boundary: it's atomic (a failure leaves the tree at PREV), so a
+# plain fail here is safe — nothing has been mutated yet.
+git checkout --quiet "$TARGET" || fail "could not check out '$TARGET' (local changes on the box? resolve them, then re-run)"
 NEW="$(git rev-parse --short HEAD)"
-log "code: $PREV -> $NEW"
+NEW_VER="$(git describe --tags --always 2>/dev/null || echo "$NEW")"
+log "code: $PREV_VER ($PREV) -> $NEW_VER ($NEW)"
+
+# ── From here on, any failure AUTO-ROLLS-BACK code + DB. ─────────────────────
 
 # 4) Dependencies (fast no-op when unchanged).
-"$APP/venv/bin/pip" install -q -r requirements.txt || fail "pip install failed"
+"$VENV/pip" install -q -r requirements.txt || rollback "pip install failed"
 
 # 5) Database migrations.
-"$APP/venv/bin/python" manage.py migrate --noinput \
-    || fail "migrate failed — DB may be partially migrated. Restore the pre-update backup (scripts/restore.sh), then investigate."
+"$VENV/python" manage.py migrate --noinput || rollback "migrate failed"
 
 # 6) Build the self-hosted Tailwind stylesheet (standalone CLI, no Node), then collect static.
-"$APP/scripts/build_css.sh" || fail "CSS build failed"
-"$APP/venv/bin/python" manage.py collectstatic --noinput >/dev/null || fail "collectstatic failed"
+"$APP/scripts/build_css.sh" || rollback "CSS build failed"
+"$VENV/python" manage.py collectstatic --noinput >/dev/null || rollback "collectstatic failed"
 
 # 7) Restart the app.
-sudo systemctl restart murphys-bench || fail "service restart failed"
+sudo systemctl restart murphys-bench || rollback "service restart failed"
 
 # 8) Health check — poll until the app finishes warming up after the restart, then
 #    confirm it answers. A 2xx/3xx/4xx means the stack is alive (a 4xx is just
@@ -66,7 +129,7 @@ for _ in $(seq 1 10); do
 done
 case "$code" in
     2*|3*|4*) log "app healthy (HTTP $code)" ;;
-    *)        fail "app not healthy after restart (HTTP $code). Roll back: git checkout $PREV && venv/bin/python manage.py migrate && sudo systemctl restart murphys-bench" ;;
+    *)        rollback "app not healthy after restart (HTTP $code)" ;;
 esac
 
-log "DONE: $PREV -> $NEW. To roll back: git checkout $PREV && venv/bin/python manage.py migrate && sudo systemctl restart murphys-bench"
+log "DONE: $PREV_VER ($PREV) -> $NEW_VER ($NEW)."
