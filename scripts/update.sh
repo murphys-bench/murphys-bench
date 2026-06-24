@@ -116,12 +116,14 @@ log "code: $PREV_VER ($PREV) -> $NEW_VER ($NEW)"
 sudo systemctl restart murphys-bench || rollback "service restart failed"
 
 # 8) Health check — poll until the app finishes warming up after the restart, then
-#    confirm it answers. A 2xx/3xx/4xx means the stack is alive (a 4xx is just
-#    ALLOWED_HOSTS rejecting the bare-IP request — still healthy); a 5xx or no
-#    connection after the grace window is a real failure.
+#    confirm it answers. We probe nginx on :80 (works whether gunicorn is on a unix
+#    socket or a TCP port — nginx fronts both); we do NOT assume a specific socket
+#    path. A 2xx/3xx/4xx means the stack is alive (a 4xx is just ALLOWED_HOSTS
+#    rejecting the bare-IP request — still healthy); a 5xx or no connection after
+#    the grace window is a real failure.
 code=000
-for _ in $(seq 1 10); do
-    if systemctl is-active --quiet murphys-bench && [ -S "$APP/murphys.sock" ]; then
+for _ in $(seq 1 15); do
+    if systemctl is-active --quiet murphys-bench; then
         code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/ || echo 000)"
         case "$code" in 2*|3*|4*) break ;; esac
     fi

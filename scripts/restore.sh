@@ -106,8 +106,8 @@ log "starting murphys-bench..."
 sudo systemctl start murphys-bench || fail "service start failed (current state preserved in $SAFE)"
 
 code=000
-for _ in $(seq 1 10); do
-    if systemctl is-active --quiet murphys-bench && [ -S "$APP/murphys.sock" ]; then
+for _ in $(seq 1 15); do
+    if systemctl is-active --quiet murphys-bench; then
         code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/ || echo 000)"
         case "$code" in 2*|3*|4*) break ;; esac
     fi
