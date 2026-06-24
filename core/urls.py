@@ -19,6 +19,7 @@ urlpatterns = [
     path('devices/new/', views.DeviceCreateView.as_view(), name='device_create'),
     path('devices/<int:pk>/', views.DeviceDetailView.as_view(), name='device_detail'),
     path('devices/<int:pk>/edit/', views.DeviceUpdateView.as_view(), name='device_edit'),
+    path('devices/<int:pk>/delete/', views.DeviceDeleteView.as_view(), name='device_delete'),
     path('mileage/', views.MileageListView.as_view(), name='mileage_list'),
     path('mileage/new/', views.MileageCreateView.as_view(), name='mileage_create'),
     path('mileage/<int:pk>/edit/', views.MileageUpdateView.as_view(), name='mileage_edit'),

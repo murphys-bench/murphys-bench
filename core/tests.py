@@ -1736,6 +1736,38 @@ def test_workorder_delete_denied_for_non_admin(client, client_obj):
     assert WorkOrder.objects.filter(pk=wo.pk).exists()
 
 
+# ── Device delete (admin only; linked work orders survive via SET_NULL) ─────
+
+@pytest.mark.django_db
+def test_device_delete_removes_duplicate(client, client_obj, admin_user):
+    dupe = Device.objects.create(client=client_obj, name="Dan's Laptop")
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:device_delete', args=[dupe.pk]))
+    assert resp.status_code == 302
+    assert not Device.objects.filter(pk=dupe.pk).exists()
+
+
+@pytest.mark.django_db
+def test_device_delete_keeps_linked_work_order(client, client_obj, admin_user):
+    device = Device.objects.create(client=client_obj, name="Dan's Laptop")
+    wo = WorkOrder.objects.create(client=client_obj, device=device)
+    client.force_login(admin_user)
+    client.post(reverse('core:device_delete', args=[device.pk]))
+    assert not Device.objects.filter(pk=device.pk).exists()
+    wo.refresh_from_db()
+    assert wo.device_id is None  # WO survives, device reference nulled
+
+
+@pytest.mark.django_db
+def test_device_delete_denied_for_non_admin(client, client_obj):
+    tech = User.objects.create_user(username='ddel-tech', password='x', is_staff=False)
+    device = Device.objects.create(client=client_obj, name="Dan's Laptop")
+    client.force_login(tech)
+    resp = client.post(reverse('core:device_delete', args=[device.pk]))
+    assert resp.status_code == 403
+    assert Device.objects.filter(pk=device.pk).exists()
+
+
 # ── Admin user delete (guards: not self, not last superuser) ────────────────
 
 @pytest.mark.django_db
