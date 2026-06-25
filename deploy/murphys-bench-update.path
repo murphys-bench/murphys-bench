@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch for an in-app Murphy's Bench update request
+
+[Path]
+# The admin UI drops this file (core/update_ops.request_update); its appearance
+# starts murphys-bench-update.service. PathExists (not PathChanged) means
+# deleting the file at the end of a run doesn't re-fire — a fresh file = one run.
+PathExists=/opt/murphys-bench/logs/update-trigger
+
+[Install]
+WantedBy=multi-user.target

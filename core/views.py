@@ -3239,6 +3239,7 @@ SETTINGS_TABS = [
     ('users',            'Users',            None),
     ('roles',            'Roles',            None),
     ('logs',             'Logs',             None),
+    ('updates',          'Updates',          None),
 ]
 
 SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS]
@@ -3386,6 +3387,54 @@ class WorkOrderSendToINView(LoginRequiredMixin, View):
         return redirect('core:work_order_detail', pk=pk)
 
 
+def _update_status_context():
+    """Shared context for the Settings → Updates section + status fragment."""
+    from . import update_ops
+    return {
+        'update_current': update_ops.current_version(),
+        'update_available': update_ops.available_version(),
+        'update_is_available': update_ops.is_update_available(),
+        'update_status': update_ops.read_status(),
+    }
+
+
+class UpdateStatusView(LoginRequiredMixin, View):
+    """HTMX-polled fragment showing current/available version + last run status.
+    Admin only. Polled every few seconds while a run is in progress."""
+
+    def get(self, request):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        return render(request, 'core/partials/update_status.html', _update_status_context())
+
+
+class UpdateCheckView(LoginRequiredMixin, View):
+    """Fetch tags from origin so 'available version' is fresh, then re-render the
+    status fragment. Admin only. Read-only git — no sudo, no code change."""
+
+    def post(self, request):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        from . import update_ops
+        if not update_ops.fetch_tags():
+            messages.warning(request, 'Could not reach the update source to check for new versions.')
+        return render(request, 'core/partials/update_status.html', _update_status_context())
+
+
+class UpdateTriggerView(LoginRequiredMixin, View):
+    """Queue an update to the latest release. Drops the trigger file the systemd
+    .path unit watches (the actual update runs out-of-band — a web request can't
+    restart its own gunicorn). Admin only; refuses if a run is already going."""
+
+    def post(self, request):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        from . import update_ops
+        if not update_ops.request_update():
+            messages.warning(request, 'An update is already in progress.')
+        return render(request, 'core/partials/update_status.html', _update_status_context())
+
+
 class SettingsView(LoginRequiredMixin, View):
     """Native settings UI — admin/can_manage_settings only."""
 
@@ -3448,6 +3497,8 @@ class SettingsView(LoginRequiredMixin, View):
             ctx['custom_fields'] = CustomField.objects.prefetch_related('choices').all()
             ctx['help_topics_all'] = HelpTopic.objects.filter(is_active=True)
             ctx['repair_types_all'] = RepairType.objects.filter(is_active=True)
+        if active_tab == 'updates':
+            ctx.update(_update_status_context())
         if active_tab == 'logs':
             from .models import EmailSendLog, InboundEmailLog
             from auditlog.models import LogEntry

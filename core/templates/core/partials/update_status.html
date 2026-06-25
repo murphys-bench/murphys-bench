@@ -1,0 +1,80 @@
+{% comment %}
+In-app update status fragment (Settings → Updates). Rendered on the settings page
+and re-rendered by UpdateStatusView/UpdateCheckView/UpdateTriggerView. While a run
+is queued/running it polls itself every 3s; terminal states stop polling.
+{% endcomment %}
+<div id="update-status"
+     {% if update_status.state == 'queued' or update_status.state == 'running' %}
+     hx-get="{% url 'core:update_status' %}"
+     hx-trigger="every 3s"
+     hx-swap="outerHTML"
+     {% endif %}>
+
+  <div class="flex items-center justify-between flex-wrap gap-3 border border-gray-200 rounded-md p-4 bg-gray-50">
+    <div class="text-sm">
+      <div class="text-gray-500">Installed version</div>
+      <div class="text-lg font-semibold text-gray-900">{{ update_current }}</div>
+    </div>
+    <div class="text-sm text-right">
+      <div class="text-gray-500">Latest available</div>
+      <div class="text-lg font-semibold text-gray-900">{{ update_available|default:"—" }}</div>
+    </div>
+  </div>
+
+  {% if update_status.state == 'queued' or update_status.state == 'running' %}
+    <div class="mt-4 flex items-center gap-3 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-md p-4">
+      <svg class="animate-spin h-5 w-5 text-blue-600" viewBox="0 0 24 24" fill="none">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+      </svg>
+      <span>Update in progress — backing up, applying, and restarting. This page updates automatically.</span>
+    </div>
+  {% elif update_status.state == 'succeeded' %}
+    <div class="mt-4 text-sm text-green-800 bg-green-50 border border-green-200 rounded-md p-4">
+      ✓ Last update succeeded{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %}.
+      Now on <strong>{{ update_current }}</strong>.
+    </div>
+  {% elif update_status.state == 'failed' %}
+    <div class="mt-4 text-sm text-red-800 bg-red-50 border border-red-200 rounded-md p-4">
+      ✗ Last update <strong>failed</strong>{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %}
+      and was automatically rolled back. The app is back on <strong>{{ update_current }}</strong>. See the log below.
+    </div>
+  {% endif %}
+
+  {% if update_status.log_tail %}
+    <details class="mt-3" {% if update_status.state == 'failed' %}open{% endif %}>
+      <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Update log (last lines)</summary>
+      <pre class="mt-2 text-xs bg-gray-900 text-gray-100 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">{{ update_status.log_tail }}</pre>
+    </details>
+  {% endif %}
+
+  <div class="mt-5 flex items-center gap-3 flex-wrap">
+    <form method="post" action="{% url 'core:update_check' %}"
+          hx-post="{% url 'core:update_check' %}" hx-target="#update-status" hx-swap="outerHTML">
+      {% csrf_token %}
+      <button type="submit"
+              class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-200">
+        Check for updates
+      </button>
+    </form>
+
+    {% if update_status.state == 'queued' or update_status.state == 'running' %}
+      <button type="button" disabled
+              class="px-5 py-2 bg-blue-300 text-white text-sm font-medium rounded-md cursor-not-allowed">
+        Updating…
+      </button>
+    {% elif update_is_available %}
+      <form method="post" action="{% url 'core:update_start' %}"
+            hx-post="{% url 'core:update_start' %}" hx-target="#update-status" hx-swap="outerHTML"
+            hx-confirm="Update Murphy's Bench from {{ update_current }} to {{ update_available }}? It backs up first and automatically rolls back if anything fails.">
+        {% csrf_token %}
+        <button type="submit"
+                class="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+          Update to latest ({{ update_available }})
+        </button>
+      </form>
+    {% else %}
+      <span class="text-sm text-gray-500">You're on the latest release.</span>
+    {% endif %}
+  </div>
+</div>

@@ -1,0 +1,13 @@
+[Unit]
+Description=Murphy's Bench in-app self-update (runs scripts/update.sh out-of-band)
+
+[Service]
+Type=oneshot
+User=scs-tech
+WorkingDirectory=/opt/murphys-bench
+# Runs update.sh via the wrapper that records status for the UI. This is a
+# separate unit from gunicorn, so update.sh's `sudo systemctl restart
+# murphys-bench` does not kill it. The only privileged step is that restart,
+# already NOPASSWD for this app user — no extra sudo is needed here.
+ExecStart=/opt/murphys-bench/scripts/run_update.sh
+TimeoutStartSec=600

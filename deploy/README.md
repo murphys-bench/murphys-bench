@@ -133,3 +133,31 @@ bad release self-heals to the last good state instead of leaving the box broken.
 > so any file written during the brief mid-deploy failure window is discarded —
 > that's the intended "revert to last stable." Each rollback also leaves a
 > `backups/pre-restore-<ts>/` safety copy (harmless; prune when convenient).
+
+## In-app updates (Settings → Updates)
+
+Lets an admin trigger `update.sh` from the web UI instead of SSHing in. A web
+request can't restart its own gunicorn, so the page drops a trigger file that a
+systemd **path unit** watches; the path unit launches a **one-shot service**
+(running as `scs-tech`, outside gunicorn's cgroup) that runs `update.sh` and
+records status for the page to poll. No extra sudo — the app only writes a file,
+and the one-shot reuses the already-NOPASSWD `systemctl restart` inside
+`update.sh`.
+
+Files: `murphys-bench-update.path` (watches `logs/update-trigger`),
+`murphys-bench-update.service` (runs `scripts/run_update.sh`).
+
+Install on the VM:
+
+```bash
+sudo cp /opt/murphys-bench/deploy/murphys-bench-update.path    /etc/systemd/system/
+sudo cp /opt/murphys-bench/deploy/murphys-bench-update.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now murphys-bench-update.path
+sudo systemctl status murphys-bench-update.path   # should be active (waiting)
+```
+
+Without these units installed the "Update to latest" button writes the trigger
+file but nothing acts on it (the run never starts). The button is admin-only;
+SCS still updates **staging-first** — this is mainly a convenience for
+single-instance adopters.
