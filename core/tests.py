@@ -2101,3 +2101,41 @@ def test_csp_report_endpoint_tolerates_garbage(client):
     resp = client.post(reverse('core:csp_report'), data=b'not json',
                        content_type='application/csp-report')
     assert resp.status_code == 204
+
+
+# ── Messages render in base.html (bug: feedback was invisible app-wide) ──────
+#
+# Found session 49: base.html had no messages block, so success/error feedback
+# from every full-page POST→redirect flow was invisible — the queued messages
+# only surfaced (stale) on the next page that rendered them, the logout page.
+# These lock in that a followed redirect actually shows its message.
+
+@pytest.mark.django_db
+def test_redirect_flow_renders_message_in_base(client, client_obj, admin_user):
+    """The reported bug: 'Send to Invoice Ninja' gave no visible feedback.
+
+    With IN disabled (the default) the view adds an error message and redirects
+    to the WO detail page. That page must render the message (proving base.html
+    renders the messages framework), not swallow it until logout.
+    """
+    wo = WorkOrder.objects.create(client=client_obj)
+    client.force_login(admin_user)
+
+    resp = client.post(reverse('core:work_order_send_in', args=[wo.pk]), follow=True)
+
+    assert resp.status_code == 200
+    assert b'Invoice Ninja is not enabled' in resp.content, \
+        'Error feedback must be visible on the page the user lands on.'
+
+
+@pytest.mark.django_db
+def test_success_message_renders_after_redirect(client, client_obj, admin_user):
+    """A success flow (ticket resolve) surfaces its confirmation on the next page."""
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    client.force_login(admin_user)
+
+    resp = client.post(reverse('core:ticket_close', args=[ticket.pk]), follow=True)
+
+    assert resp.status_code == 200
+    assert b'resolved' in resp.content, \
+        'Success feedback must be visible after the redirect.'

@@ -9,12 +9,6 @@
 {% block content %}
 <div class="p-6 max-w-2xl">
 
-    {% if messages %}
-        {% for message in messages %}
-            <div class="mb-4 px-4 py-3 rounded text-sm bg-red-50 text-red-700 border border-red-200">{{ message }}</div>
-        {% endfor %}
-    {% endif %}
-
     <form method="post">
         {% csrf_token %}
 
