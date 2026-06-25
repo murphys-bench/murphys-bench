@@ -78,6 +78,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'core.middleware.ContentSecurityPolicyMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -262,6 +263,30 @@ SESSION_COOKIE_AGE = config('SESSION_COOKIE_AGE', default=28800, cast=int)  # 8 
 # CSRF security
 CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=not DEBUG, cast=bool)
 CSRF_COOKIE_HTTPONLY = True
+
+# ── Content-Security-Policy ─────────────────────────────────────────────────
+# Emitted by core.middleware.ContentSecurityPolicyMiddleware. The front-end is
+# fully self-hosted (no CDN), so every fetchable origin is 'self'. script-src
+# keeps 'unsafe-eval'/'unsafe-inline' BY NECESSITY: Alpine.js evaluates its 400+
+# template expressions via new Function() and the app has inline <script> blocks
+# and inline event handlers. The real hardening is in the other directives —
+# default-src/connect-src 'self' (an injected script can't exfiltrate cross-origin),
+# frame-ancestors 'none' (clickjacking), object-src 'none', base-uri/form-action 'self'.
+# Ships REPORT-ONLY by default (reports to /csp-report/, enforces nothing); flip
+# CSP_REPORT_ONLY=False in .env per box once validated. Set CSP_POLICY='' to disable.
+CSP_POLICY = config('CSP_POLICY', default=(
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-eval' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self'; "
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "frame-ancestors 'none'"
+))
+CSP_REPORT_ONLY = config('CSP_REPORT_ONLY', default=True, cast=bool)
 
 # ── Login brute-force protection (django-axes) ──────────────────────────────
 AXES_FAILURE_LIMIT = config('AXES_FAILURE_LIMIT', default=5, cast=int)
