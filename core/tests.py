@@ -1889,6 +1889,42 @@ def test_internal_note_does_not_meet_sla(client, client_obj, admin_user):
     assert ticket.is_overdue, 'Internal note must not satisfy the response SLA.'
 
 
+@pytest.mark.django_db
+def test_overdue_queryset_matches_is_overdue_property():
+    """The DB-level overdue_queryset (dashboard tile, ?overdue filter, queue
+    criteria, SLA command) must agree with the is_overdue property for every
+    ticket — responded, converted, and SLA-muted tickets are NOT overdue even
+    when due_at is in the past."""
+    from django.utils import timezone
+    from core.models import SLAPlan
+    client_obj = Client.objects.create(name='Acme Co')
+    past = timezone.now() - timezone.timedelta(hours=1)
+    muted_plan = SLAPlan.objects.create(
+        name='Silent', grace_period_hours=8, disable_overdue_alerts=True)
+
+    # Genuinely overdue: past due, no reply, open.
+    overdue = Ticket.objects.create(client=client_obj, subject='overdue', description='d')
+    Ticket.objects.filter(pk=overdue.pk).update(due_at=past)
+
+    # Responded (first_responded_at set) → not overdue.
+    responded = Ticket.objects.create(client=client_obj, subject='responded', description='d')
+    Ticket.objects.filter(pk=responded.pk).update(due_at=past, first_responded_at=past)
+
+    # Converted → not overdue.
+    converted = Ticket.objects.create(client=client_obj, subject='converted', description='d')
+    Ticket.objects.filter(pk=converted.pk).update(due_at=past, status='converted')
+
+    # SLA alerts muted → not overdue.
+    muted = Ticket.objects.create(client=client_obj, subject='muted', description='d', sla_plan=muted_plan)
+    Ticket.objects.filter(pk=muted.pk).update(due_at=past)
+
+    qs_ids = set(Ticket.overdue_queryset().values_list('pk', flat=True))
+    property_ids = {t.pk for t in Ticket.objects.all() if t.is_overdue}
+
+    assert qs_ids == property_ids, 'overdue_queryset must match the is_overdue property.'
+    assert qs_ids == {overdue.pk}, 'Only the genuinely-overdue ticket should count.'
+
+
 # ── export_data: portable CSV + media bundle, secrets redacted by default ───
 
 @pytest.mark.django_db

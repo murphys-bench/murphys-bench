@@ -248,8 +248,7 @@ def _tile_count(tile, user, is_admin):
         else:
             qs = qs.exclude(status__in=TICKET_CLOSED_STATUSES)
         if '/overdue' in tile.link_url or 'overdue=1' in tile.link_url:
-            from django.utils import timezone as tz
-            qs = qs.filter(due_at__lt=tz.now()).exclude(status__in=['closed', 'resolved'])
+            qs = Ticket.overdue_queryset(qs)
     else:
         qs = WorkOrder.objects.all()
         if not is_admin:
@@ -1472,7 +1471,7 @@ class TicketListView(LoginRequiredMixin, ListView):
 
         overdue = self.request.GET.get('overdue')
         if overdue:
-            queryset = queryset.filter(due_at__lt=timezone.now()).exclude(status__in=TICKET_CLOSED_STATUSES)
+            queryset = Ticket.overdue_queryset(queryset)
 
         search = self.request.GET.get('search')
         if search:
@@ -2156,7 +2155,7 @@ def _apply_queue_filters(qs, criteria, user):
     if client:
         qs = qs.filter(client_id=client)
     if criteria.get('overdue'):
-        qs = qs.filter(due_at__lt=timezone.now()).exclude(status__in=['closed', 'resolved', 'converted'])
+        qs = Ticket.overdue_queryset(qs)
     return qs
 
 
