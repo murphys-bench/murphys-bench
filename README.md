@@ -70,8 +70,9 @@ _Coming soon._
 
 ## Tech stack
 
-Python 3.12 · Django 4.2 · HTMX + Alpine.js + Tailwind (all via CDN — no frontend build
-step) · SQLite by default (PostgreSQL optional) · Gunicorn + Nginx. It runs **behind a
+Python 3.12 · Django 4.2 · HTMX + Alpine.js + Tailwind — **all self-hosted, no CDN** (Tailwind
+is compiled to a static stylesheet via the standalone CLI on deploy; no Node) · SQLite by
+default (PostgreSQL optional) · Gunicorn + Nginx. It runs **behind a
 TLS-terminating reverse proxy** (Cloudflare Tunnel, Caddy, or Nginx) rather than terminating
 TLS itself — the standard Django model; see [`docs/deployment-tls.md`](docs/deployment-tls.md).
 
@@ -93,8 +94,9 @@ credentials, so keep it in a password manager. Details in [`deploy/README.md`](d
 
 ## License
 
-[GNU AGPLv3](LICENSE) — free to use, self-host, and modify; if you run a modified version as
-a network service, share your changes. (No warranty of any kind.)
+**Not yet finalized.** Murphy's Bench is intended to be released under an open-source license,
+but the specific one is still being chosen. Until a `LICENSE` file is added to this repo, no
+redistribution license is granted — please ask before redistributing. (No warranty of any kind.)
 
 ---
 

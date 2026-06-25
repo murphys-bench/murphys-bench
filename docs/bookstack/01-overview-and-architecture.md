@@ -34,14 +34,14 @@ Ticket (intake + email replies) → Triage → Work Order (the repair)
 | Layer | Technology |
 |---|---|
 | Backend | Python 3.12 · Django 4.2 |
-| Frontend | Tailwind CSS (CDN) · HTMX · Alpine.js |
+| Frontend | Tailwind CSS (compiled, self-hosted) · HTMX · Alpine.js (vendored/pinned, no CDN) |
 | Database | SQLite (production and local dev) · PostgreSQL supported via DB_ENGINE (unused) |
 | Auth | Django session auth + django-two-factor-auth (TOTP) |
 | App server | Gunicorn |
 | Web server / TLS termination | Nginx |
 | Host | Ubuntu 24.04 VM on Proxmox |
 
-There is **no build step** (Tailwind via CDN), **no async queue** (synchronous email is sufficient at MSP scale), and **no OAuth2** for mail (standard cPanel IMAP/POP3 credentials).
+The frontend is **fully self-hosted — no CDN**: Tailwind is compiled to a static stylesheet via the standalone CLI (a build step run on deploy by `scripts/build_css.sh`, no Node), and HTMX + Alpine.js are vendored/pinned in `static/js/`. There is **no async queue** (synchronous email is sufficient at MSP scale) and **no OAuth2** for mail (standard cPanel IMAP/POP3 credentials).
 
 ## Request path
 

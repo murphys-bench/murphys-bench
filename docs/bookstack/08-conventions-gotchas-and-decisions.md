@@ -40,8 +40,8 @@
 - **Audit log:** never iterate `entry.changes_dict.items` in a template (an `'items'` key shadows `dict.items()`). Use `_audit_entries(obj)` from `views.py`.
 - **`mb_icons` templatetag:** put `{% load mb_icons %}` at the top of any template (and any partial) that uses `{% icon %}`, `{% attr %}`, `{% getfield %}`, or `{% markdownify %}`.
 - **Dark mode:** the `dark` class is on `<html>` (documentElement), **NOT** `<body>`. Use `html:not(.dark)` for light-only CSS, not `body:not(.dark)`.
-- **Tailwind CDN** is loaded with `?plugins=typography` for KB prose rendering.
-- **Alpine.js** is CDN + `defer`; HTMX-swapped content reinitialises via a mutation observer.
+- **Tailwind** is compiled self-hosted via the standalone CLI (no Node); the typography plugin is enabled in `tailwind.config.js` for KB prose rendering. Built by `scripts/build_css.sh` → `static/css/app.css` (gitignored, built on deploy before `collectstatic`).
+- **Alpine.js** is self-hosted/pinned in `static/js/` and loaded with `defer`; HTMX-swapped content reinitialises via a mutation observer.
 - **Template variable reference:** to display literal `{{ }}` tokens, wrap in `{% verbatim %}…{% endverbatim %}`.
 - **WorkOrderNote customer filter:** use `note_type='customer_visible'`, **NOT** `is_internal=False`.
 - **Mileage Calculate CSRF:** uses `document.querySelector('[name=csrfmiddlewaretoken]')` — do not revert (it silently failed in prod before).
