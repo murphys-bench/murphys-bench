@@ -1932,3 +1932,81 @@ def test_export_data_include_secrets_writes_plaintext(tmp_path):
         body = tar.extractfile(device_csv).read().decode()
 
     assert 'hunter2secret' in body, '--include-secrets must write the real value'
+
+
+# ── In-app admin Update button (core/update_ops + Settings → Updates) ───────
+
+@pytest.fixture
+def tech_user(db):
+    return User.objects.create_user(username='tech', password='x')
+
+
+@pytest.mark.django_db
+def test_request_update_writes_trigger_and_refuses_duplicate(settings, tmp_path):
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    assert update_ops.read_status() == {'state': 'idle'}
+    assert update_ops.request_update() is True
+    assert update_ops.trigger_path().exists()
+    assert update_ops.read_status()['state'] == 'queued'
+    # A second request while one is queued/running is refused — no double trigger.
+    assert update_ops.is_running() is True
+    assert update_ops.request_update() is False
+
+
+@pytest.mark.django_db
+def test_read_status_idle_on_corrupt_file(settings, tmp_path):
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text('not json {{{')
+    assert update_ops.read_status() == {'state': 'idle'}
+
+
+@pytest.mark.django_db
+def test_is_update_available_compares_versions(monkeypatch):
+    from core import update_ops
+    monkeypatch.setattr(update_ops, 'available_version', lambda: 'v0.2.0')
+    monkeypatch.setattr(update_ops, 'current_tag', lambda: 'v0.1.1')
+    assert update_ops.is_update_available() is True
+    monkeypatch.setattr(update_ops, 'current_tag', lambda: 'v0.2.0')
+    assert update_ops.is_update_available() is False
+    monkeypatch.setattr(update_ops, 'available_version', lambda: '')
+    assert update_ops.is_update_available() is False
+
+
+@pytest.mark.django_db
+def test_update_views_require_admin(client, tech_user):
+    client.force_login(tech_user)
+    assert client.get(reverse('core:update_status')).status_code == 403
+    assert client.post(reverse('core:update_start')).status_code == 403
+    assert client.post(reverse('core:update_check')).status_code == 403
+
+
+@pytest.mark.django_db
+def test_update_trigger_view_writes_file_for_admin(client, admin_user, settings, tmp_path):
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:update_start'))
+    assert resp.status_code == 200
+    assert update_ops.trigger_path().exists()
+    assert update_ops.read_status()['state'] == 'queued'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('state,needle', [
+    ('running', 'in progress'),
+    ('succeeded', 'succeeded'),
+    ('failed', 'failed'),
+])
+def test_update_status_fragment_renders_states(client, admin_user, settings, tmp_path, state, needle):
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({'state': state}))
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:update_status'))
+    assert resp.status_code == 200
+    assert needle in resp.content.decode().lower()

@@ -124,6 +124,11 @@ urlpatterns = [
     path('settings/blocked-senders/<int:pk>/delete/', views.BlockedSenderDeleteView.as_view(), name='blocked_sender_delete'),
     path('settings/test-inbound-email/', views.EmailTestInboundView.as_view(), name='settings_test_inbound'),
 
+    # Settings — In-app updates (admin only)
+    path('settings/updates/status/', views.UpdateStatusView.as_view(), name='update_status'),
+    path('settings/updates/check/', views.UpdateCheckView.as_view(), name='update_check'),
+    path('settings/updates/start/', views.UpdateTriggerView.as_view(), name='update_start'),
+
     # Settings — Repair Types CRUD
     path('settings/repair-type-categories/new/', views.RepairTypeCategoryCreateView.as_view(), name='rt_category_create'),
     path('settings/repair-type-categories/<int:pk>/delete/', views.RepairTypeCategoryDeleteView.as_view(), name='rt_category_delete'),

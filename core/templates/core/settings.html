@@ -2856,6 +2856,19 @@
         </div>
         {% endif %}
 
+        {% if active_tab == 'updates' %}
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-1">Software Updates</h2>
+            <p class="text-sm text-gray-500 mb-6">
+                Update Murphy's Bench to the latest release without using the command line. The update
+                <strong>backs up first</strong>, applies the new version, restarts, and
+                <strong>automatically rolls back</strong> (code and database) if anything fails.
+                It runs in the background — this page will keep you posted.
+            </p>
+            {% include 'core/partials/update_status.html' %}
+        </div>
+        {% endif %}
+
     </div>
 </div>
 {% endblock %}
