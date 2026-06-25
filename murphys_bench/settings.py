@@ -202,7 +202,13 @@ if EMAIL_BACKEND != 'django.core.mail.backends.console.EmailBackend':
 ATTACHMENT_STORAGE_BACKEND = config('ATTACHMENT_STORAGE_BACKEND', default='local')
 
 if ATTACHMENT_STORAGE_BACKEND == 's3':
-    DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+    # Django 5.1 removed DEFAULT_FILE_STORAGE in favour of the STORAGES dict.
+    # Setting STORAGES replaces the whole default, so the staticfiles backend
+    # must be restated alongside the default file backend.
+    STORAGES = {
+        'default': {'BACKEND': 'storages.backends.s3boto3.S3Boto3Storage'},
+        'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+    }
     AWS_STORAGE_BUCKET_NAME = config('S3_BUCKET_NAME', default='')
     AWS_ACCESS_KEY_ID = config('S3_ACCESS_KEY', default='')
     AWS_SECRET_ACCESS_KEY = config('S3_SECRET_KEY', default='')
