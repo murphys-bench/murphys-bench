@@ -384,6 +384,22 @@
     <main class="mb-content flex-1
         {% if request.resolver_match.url_name == 'dashboard' %}max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8
         {% else %}px-6 py-6{% endif %}">
+        {% if messages %}
+        <div class="mb-4 space-y-2">
+            {% for message in messages %}
+            <div x-data="{ show: true }" x-show="show" x-transition
+                 class="flex items-start gap-3 px-4 py-3 rounded-md border text-sm font-medium
+                 {% if message.tags == 'success' %}bg-green-50 border-green-200 text-green-800
+                 {% elif message.tags == 'error' %}bg-red-50 border-red-200 text-red-800
+                 {% elif message.tags == 'warning' %}bg-yellow-50 border-yellow-300 text-yellow-800
+                 {% else %}bg-blue-50 border-blue-200 text-blue-800{% endif %}">
+                <span class="flex-1">{{ message }}</span>
+                <button type="button" @click="show = false" title="Dismiss"
+                        class="flex-shrink-0 opacity-60 hover:opacity-100">{% icon 'x-mark' 4 %}</button>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
         {% block content %}{% endblock %}
     </main>
 </div>

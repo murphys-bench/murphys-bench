@@ -17,16 +17,6 @@
 {% block content %}
 <div class="p-6">
 
-    {% if messages %}
-        {% for message in messages %}
-            <div class="mb-4 px-4 py-3 rounded text-sm
-                {% if message.tags == 'success' %}bg-green-50 text-green-700 border border-green-200
-                {% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">
-                {{ message }}
-            </div>
-        {% endfor %}
-    {% endif %}
-
     <div class="space-y-4 mb-8">
         {% for role in roles %}
         <div class="bg-white rounded-lg shadow">

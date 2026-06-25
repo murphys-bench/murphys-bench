@@ -14,20 +14,6 @@
 
 {% block content %}
 
-{% if messages %}
-<div class="mb-4">
-    {% for message in messages %}
-    <div class="px-4 py-3 rounded-md
-        {% if message.tags == 'success' %}bg-green-50 border border-green-200 text-green-800
-        {% elif message.tags == 'error' %}bg-red-50 border border-red-200 text-red-800
-        {% else %}bg-blue-50 border border-blue-200 text-blue-800{% endif %}
-        text-sm font-medium">
-        {{ message }}
-    </div>
-    {% endfor %}
-</div>
-{% endif %}
-
 <div class="flex gap-6">
 
     <!-- Sidebar nav -->
