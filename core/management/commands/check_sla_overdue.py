@@ -17,15 +17,8 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         now = timezone.now()
-        open_statuses = ['new', 'open', 'in_progress', 'waiting_on_customer']
-
-        overdue_qs = Ticket.objects.filter(
-            status__in=open_statuses,
-            due_at__lt=now,
-            due_at__isnull=False,
-        ).exclude(
-            sla_plan__disable_overdue_alerts=True,
-        )
+        # Single source of truth — mirrors Ticket.is_overdue (incl. first_responded_at).
+        overdue_qs = Ticket.overdue_queryset()
 
         total = overdue_qs.count()
         unacked = overdue_qs.filter(overdue_acknowledged_at__isnull=True).count()

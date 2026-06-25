@@ -577,6 +577,27 @@ class Ticket(models.Model):
             return False
         return timezone.now() > self.due_at
 
+    @classmethod
+    def overdue_queryset(cls, qs=None):
+        """Tickets that are currently overdue — the DB-level mirror of ``is_overdue``.
+
+        Single source of truth for every count/filter (dashboard tile, ticket list
+        ?overdue, queue criteria, SLA command) so they can't drift from the property.
+        A ticket is overdue when it has a deadline that has passed, no staff reply has
+        gone out yet, it isn't closed/resolved/converted, and its SLA isn't muted.
+        """
+        if qs is None:
+            qs = cls.objects.all()
+        return qs.filter(
+            due_at__isnull=False,
+            due_at__lt=timezone.now(),
+            first_responded_at__isnull=True,
+        ).exclude(
+            status__in=cls.CLOSED_STATUSES,
+        ).exclude(
+            sla_plan__disable_overdue_alerts=True,
+        )
+
     @property
     def overdue_is_acknowledged(self):
         """True if the current overdue period has been acknowledged."""
