@@ -1,5 +1,8 @@
+import json
 import logging
 from django.shortcuts import render, get_object_or_404, redirect
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 from django.views import View
 from django.views.generic import ListView, DetailView, CreateView, UpdateView
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -35,6 +38,35 @@ from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, De
                     ColorSettingsForm, InvoiceNinjaSettingsForm)
 
 logger = logging.getLogger('core')
+
+
+@csrf_exempt
+@require_POST
+def csp_report(request):
+    """Receive browser CSP violation reports and log them.
+
+    Browsers POST these unauthenticated and without a CSRF token, so the view is
+    csrf-exempt and login-free (the MFA middleware also exempts /csp-report/).
+    Used during the report-only rollout to see what a policy would block, and kept
+    afterward for ongoing monitoring. Bodies are size-capped and never trusted.
+    """
+    body = request.body[:4096]
+    try:
+        report = json.loads(body.decode('utf-8', 'replace'))
+    except (ValueError, UnicodeDecodeError):
+        return HttpResponse(status=204)
+    # Both the legacy report-uri shape ({"csp-report": {...}}) and bare dicts.
+    detail = report.get('csp-report', report) if isinstance(report, dict) else report
+    if isinstance(detail, dict):
+        logger.warning(
+            'CSP violation: blocked=%s directive=%s document=%s',
+            detail.get('blocked-uri'),
+            detail.get('violated-directive') or detail.get('effective-directive'),
+            detail.get('document-uri'),
+        )
+    else:
+        logger.warning('CSP violation (unparsed shape)')
+    return HttpResponse(status=204)
 
 
 def _audit_entries(obj):

@@ -4,6 +4,7 @@ from . import views
 app_name = 'core'
 
 urlpatterns = [
+    path('csp-report/', views.csp_report, name='csp_report'),
     path('', views.DashboardView.as_view(), name='dashboard'),
     path('notifications/', views.NotificationListView.as_view(), name='notifications'),
     path('notifications/count/', views.NotificationCountView.as_view(), name='notification_count'),

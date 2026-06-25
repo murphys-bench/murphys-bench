@@ -6,6 +6,7 @@ a future change can't silently regress it. Targets the spine, not coverage %.
 
 Run with:  venv/bin/python -m pytest
 """
+import json
 import logging
 
 import pytest
@@ -2046,3 +2047,57 @@ def test_update_status_fragment_renders_states(client, admin_user, settings, tmp
     resp = client.get(reverse('core:update_status'))
     assert resp.status_code == 200
     assert needle in resp.content.decode().lower()
+
+
+# ── Content-Security-Policy header + report endpoint ────────────────────────
+
+@pytest.mark.django_db
+def test_csp_header_report_only_by_default(client, settings):
+    """Ships report-only: the browser reports violations but enforces nothing,
+    and the policy carries the directives that actually contain an XSS."""
+    settings.CSP_REPORT_ONLY = True
+    resp = client.get('/')
+    hdr = resp.headers.get('Content-Security-Policy-Report-Only')
+    assert hdr is not None, 'Report-only CSP header must be present'
+    assert 'Content-Security-Policy' not in resp.headers, 'Enforcing header must be absent in report-only mode'
+    for token in ("default-src 'self'", "frame-ancestors 'none'",
+                  "object-src 'none'", "base-uri 'self'", "report-uri /csp-report/"):
+        assert token in hdr, f'CSP missing directive: {token}'
+
+
+@pytest.mark.django_db
+def test_csp_enforced_when_flag_off(client, settings):
+    """CSP_REPORT_ONLY=False switches to the enforcing header."""
+    settings.CSP_REPORT_ONLY = False
+    resp = client.get('/')
+    assert resp.headers.get('Content-Security-Policy') is not None
+    assert 'Content-Security-Policy-Report-Only' not in resp.headers
+
+
+@pytest.mark.django_db
+def test_csp_absent_when_policy_empty(client, settings):
+    """Empty CSP_POLICY emits no header — the instant .env-only rollback."""
+    settings.CSP_POLICY = ''
+    resp = client.get('/')
+    assert 'Content-Security-Policy' not in resp.headers
+    assert 'Content-Security-Policy-Report-Only' not in resp.headers
+
+
+@pytest.mark.django_db
+def test_csp_report_endpoint_accepts_post(client):
+    """Browser-posted violation reports are accepted (204) without auth/CSRF."""
+    resp = client.post(
+        reverse('core:csp_report'),
+        data=json.dumps({'csp-report': {'blocked-uri': 'https://evil.test',
+                                        'violated-directive': 'script-src'}}),
+        content_type='application/json',
+    )
+    assert resp.status_code == 204
+
+
+@pytest.mark.django_db
+def test_csp_report_endpoint_tolerates_garbage(client):
+    """Non-JSON body must not error — just 204 and move on."""
+    resp = client.post(reverse('core:csp_report'), data=b'not json',
+                       content_type='application/csp-report')
+    assert resp.status_code == 204
