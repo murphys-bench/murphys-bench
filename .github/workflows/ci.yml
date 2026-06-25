@@ -1,8 +1,9 @@
 name: CI
 
-# The gate: run the test spine + Django checks automatically on every change,
-# so broken code is caught here instead of in production. Mirrors prod (Python
-# 3.12, SQLite). Green = the 102-test suite and Django checks pass.
+# The gate: build the self-hosted CSS, run Django checks, collectstatic, and the
+# test spine automatically on every change, so broken code is caught here instead
+# of in production. Mirrors prod (Python 3.12, SQLite). Green = the suite, Django
+# checks, and the Tailwind build all pass.
 
 on:
   push:
@@ -40,10 +41,20 @@ jobs:
           echo "SECRET_KEY=$(python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())')" >> "$GITHUB_ENV"
           echo "FIELD_ENCRYPTION_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> "$GITHUB_ENV"
 
+      - name: Build self-hosted CSS
+        # Compiles tailwind/input.css -> static/css/app.css via the pinned
+        # standalone Tailwind CLI (no Node). Catches build/purge regressions —
+        # e.g. a dynamic class that isn't safelisted — that page-load tests miss.
+        run: scripts/build_css.sh
+
       - name: Django system checks
         # Plain check (not --deploy) so green means green — --deploy would flag
         # the deliberate HTTPS-on-LAN warnings and make CI perpetually yellow.
         run: python manage.py check
+
+      - name: Collect static files
+        # Surfaces missing/broken static refs and confirms app.css collects.
+        run: python manage.py collectstatic --noinput
 
       - name: Run tests
         run: python -m pytest
