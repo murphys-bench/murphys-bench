@@ -59,11 +59,19 @@ run it before `collectstatic` (see step 7).
 
 ```bash
 sudo apt update
-sudo apt install -y python3 python3-venv python3-pip nginx git logrotate
+sudo apt install -y python3 python3-venv python3-pip nginx git logrotate \
+    libpango-1.0-0 libpangocairo-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
 ```
 
 > `logrotate` is used for the Gunicorn logs (see `deploy/README.md` →
 > Observability) and is missing on minimal Ubuntu installs.
+
+> The `libpango*` / `fonts-dejavu-core` packages are **WeasyPrint's** runtime
+> dependencies (they pull cairo/glib/harfbuzz). MB uses WeasyPrint to generate
+> PDF documents — emailed repair reports and quotes. Without them the app still
+> runs, but emailing a report/quote fails with a clear error. `update.sh` does
+> **not** install system packages, so add these once per box (on macOS dev:
+> `brew install pango`).
 
 > PostgreSQL is **not** required — MB defaults to SQLite (a single file, no DB
 > server). Only install `postgresql postgresql-contrib` if you opt into Postgres
