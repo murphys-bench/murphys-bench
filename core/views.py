@@ -3064,6 +3064,61 @@ class WorkPerformedCustomLogView(LoginRequiredMixin, View):
 # Repair Report (print view)
 # ---------------------------------------------------------------------------
 
+def _repair_report_context(work_order, site, report_type='repair'):
+    """Build the repair-report render context once, shared by the print page and
+    the emailed PDF so the two can never drift apart on content."""
+    from django.utils import timezone
+
+    # Customer-visible notes only
+    notes = work_order.notes.filter(note_type='customer_visible').order_by('created_at')
+
+    # Line items grouped by category for the report. Labor lines group under
+    # their source button's category; parts under "Parts"; custom labor under "Other".
+    line_items = (
+        work_order.line_items
+        .select_related('source_labor_item')
+        .order_by('kind', 'logged_at')
+    )
+    categories = {}
+    for entry in line_items:
+        if entry.kind == 'part':
+            cat = 'Parts'
+        elif entry.source_labor_item:
+            cat = entry.source_labor_item.category
+        else:
+            cat = 'Other'
+        categories.setdefault(cat, []).append(entry)
+
+    repair_types = [work_order.repair_type] if work_order.repair_type else []
+
+    # Named contact: use WO contact FK, fall back to client's primary contact
+    contact = work_order.contact
+    if not contact:
+        contact = work_order.client.contacts.filter(is_primary=True).first()
+
+    return {
+        'work_order': work_order,
+        'site': site,
+        'notes': notes,
+        'wp_categories': categories,
+        'repair_types': repair_types,
+        'report_type': report_type,
+        'contact': contact,
+        'print_date': timezone.now(),
+    }
+
+
+def _report_recipient_contact(work_order):
+    """The contact a report email is addressed to: the WO's contact (with an
+    email), else the client's primary/any active emailable contact."""
+    contact = work_order.contact
+    if contact and contact.email:
+        return contact
+    return (work_order.client.contacts.filter(is_primary=True, is_active=True, email__gt='').first()
+            or work_order.client.contacts.filter(is_active=True, email__gt='').first()
+            or contact)
+
+
 class WorkOrderPrintView(LoginRequiredMixin, View):
     """Print-optimised repair report for handing to the customer."""
 
@@ -3076,48 +3131,94 @@ class WorkOrderPrintView(LoginRequiredMixin, View):
         )
         site = SiteSettings.get()
         report_type = request.GET.get('type', 'repair')  # 'repair' or 'claim'
+        ctx = _repair_report_context(work_order, site, report_type)
+        return render(request, 'core/work_order_print.html', ctx)
 
-        # Customer-visible notes only
-        notes = work_order.notes.filter(note_type='customer_visible').order_by('created_at')
 
-        # Line items grouped by category for the report. Labor lines group under
-        # their source button's category; parts under "Parts"; custom labor under "Other".
-        line_items = (
-            work_order.line_items
-            .select_related('source_labor_item')
-            .order_by('kind', 'logged_at')
+class WorkOrderReportEmailView(LoginRequiredMixin, View):
+    """Email the repair report to the customer as a PDF attachment.
+
+    GET shows a small recipient form (pick a contact on the client, or type a
+    custom address); POST renders the report to PDF and sends it via
+    send_document_email. Scoped like the rest of the WO views.
+    """
+
+    def _get_wo(self, request, pk):
+        wo = get_object_or_404(
+            WorkOrder.objects.select_related('client', 'device', 'repair_type', 'assigned_to', 'contact'),
+            pk=pk,
         )
-        categories = {}
-        for entry in line_items:
-            if entry.kind == 'part':
-                cat = 'Parts'
-            elif entry.source_labor_item:
-                cat = entry.source_labor_item.category
-            else:
-                cat = 'Other'
-            categories.setdefault(cat, []).append(entry)
+        # Same visibility scoping as other WO actions.
+        if not _scope_assignable_for(WorkOrder.objects.all(), request.user).filter(pk=wo.pk).exists():
+            return None
+        return wo
 
-        # Repair type tags
-        repair_types = []
-        if work_order.repair_type:
-            repair_types = [work_order.repair_type]
-
-        # Named contact: use WO contact FK, fall back to client's primary contact
-        contact = work_order.contact
-        if not contact:
-            contact = work_order.client.contacts.filter(is_primary=True).first()
-
-        from django.utils import timezone
-        return render(request, 'core/work_order_print.html', {
-            'work_order': work_order,
-            'site': site,
-            'notes': notes,
-            'wp_categories': categories,
-            'repair_types': repair_types,
-            'report_type': report_type,
-            'contact': contact,
-            'print_date': timezone.now(),
+    def get(self, request, pk):
+        wo = self._get_wo(request, pk)
+        if wo is None:
+            raise Http404
+        default = _report_recipient_contact(wo)
+        return render(request, 'core/work_order_email_report.html', {
+            'work_order': wo,
+            'contacts': wo.client.contacts.filter(is_active=True),
+            'default_contact': default,
+            'default_email': (default.email if default else '') or wo.client.email,
         })
+
+    def post(self, request, pk):
+        wo = self._get_wo(request, pk)
+        if wo is None:
+            raise Http404
+
+        from .pdf_utils import render_pdf
+        from .email_utils import send_document_email
+        from django.template.loader import render_to_string
+
+        # Resolve recipient: a chosen contact, or a custom address.
+        contact = None
+        to_email = (request.POST.get('custom_email') or '').strip()
+        contact_id = request.POST.get('contact')
+        if not to_email and contact_id:
+            contact = wo.client.contacts.filter(pk=contact_id).first()
+            to_email = contact.email if contact else ''
+        if not to_email:
+            messages.error(request, 'Choose a contact or enter an email address.')
+            return redirect('core:work_order_email_report', pk=pk)
+
+        site = SiteSettings.get()
+        ctx = _repair_report_context(wo, site, report_type='repair')
+        # The print template already carries an @media print stylesheet that
+        # WeasyPrint honors (hides the on-screen Print/Close controls, shows the
+        # footer) — render it straight to PDF rather than maintaining a second copy.
+        html = render_to_string('core/work_order_print.html', ctx)
+        try:
+            pdf_bytes = render_pdf(html)
+        except Exception:
+            logger.exception('PDF render failed for repair report %s.', wo.work_order_number)
+            messages.error(request, 'Could not generate the report PDF. The PDF engine may not be installed on this server.')
+            return redirect('core:work_order_detail', pk=pk)
+
+        company = site.company_name or "Murphy's Bench"
+        cover = (
+            f"Hello,\n\nPlease find attached the repair report for "
+            f"{wo.work_order_number}{(' — ' + wo.device.name) if wo.device else ''}.\n\n"
+            f"Thank you for your business.\n{company}"
+        )
+        log = send_document_email(
+            to_email,
+            subject=f"{company}: Repair Report {wo.work_order_number}",
+            cover_body=cover,
+            attachments=[(f'Repair-Report-{wo.work_order_number}.pdf', pdf_bytes, 'application/pdf')],
+            client=wo.client,
+            contact=contact,
+            trigger='wo_report',
+            related_ticket=wo.ticket,
+        )
+        if log.status == 'sent':
+            messages.success(request, f'Repair report emailed to {to_email}.')
+        else:
+            messages.error(request, f'Report not sent ({log.get_reason_display() or log.status}).')
+        return redirect('core:work_order_detail', pk=pk)
 
 
 # ---------------------------------------------------------------------------

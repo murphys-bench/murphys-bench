@@ -55,8 +55,34 @@ def _email_logo_field(site):
     return getattr(site, 'email_logo', None) or site.company_logo
 
 
-def _build_html_email(body, signature_body, subject, ticket, site):
-    """Render the HTML email wrapper. Returns (html_str, logo_data, logo_mime_type)."""
+def _suppression_reason(to_email, client, site):
+    """Return (reason, detail) if this address must NOT be emailed, else ('', '').
+
+    Shared by every outbound path so suppression rules live in one place. Layers:
+    per-client suppress flag, the pattern blocklist, and the exact-address list.
+    Does NOT consider Contact.receives_email — that's a recipient-level check the
+    caller applies when it has resolved a specific contact.
+    """
+    from .models import SuppressedAddress
+    if client and client.suppress_emails:
+        return 'client_flag', ''
+    patterns = [p.strip() for p in site.email_suppression_patterns.splitlines() if p.strip()]
+    for pattern in patterns:
+        if fnmatch(to_email.lower(), pattern.lower()):
+            return 'pattern', pattern
+    if SuppressedAddress.objects.filter(email__iexact=to_email).exists():
+        return 'exact_address', ''
+    return '', ''
+
+
+def _build_html_email(body, signature_body, subject, ticket, site, embed_logo=True):
+    """Render the HTML email wrapper. Returns (html_str, logo_data, logo_mime_type).
+
+    embed_logo=False skips the inline CID logo (the header falls back to the
+    company name) — used by document cover emails, where the branding lives in
+    the attached PDF and a 'related' inline image would complicate the MIME tree
+    that also carries the attachment.
+    """
     from django.template.loader import render_to_string
     import os
 
@@ -64,7 +90,7 @@ def _build_html_email(body, signature_body, subject, ticket, site):
     logo_mime_type = 'image/png'
     has_logo = False
 
-    logo_field = _email_logo_field(site)
+    logo_field = _email_logo_field(site) if embed_logo else None
     if logo_field:
         try:
             logo_path = logo_field.path
@@ -148,29 +174,12 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
         )
         return
 
-    # Layer 1: per-client suppress flag
-    if ticket.client.suppress_emails:
+    # Suppression layers (client flag → pattern blocklist → exact-address list)
+    reason, detail = _suppression_reason(to_email, ticket.client, site)
+    if reason:
         EmailSendLog.objects.create(
             ticket=ticket, to_email=to_email, trigger=trigger,
-            status='suppressed', reason='client_flag',
-        )
-        return
-
-    # Layer 2: pattern blocklist
-    patterns = [p.strip() for p in site.email_suppression_patterns.splitlines() if p.strip()]
-    for pattern in patterns:
-        if fnmatch(to_email.lower(), pattern.lower()):
-            EmailSendLog.objects.create(
-                ticket=ticket, to_email=to_email, trigger=trigger,
-                status='suppressed', reason='pattern', detail=pattern,
-            )
-            return
-
-    # Layer 3: exact address suppression list
-    if SuppressedAddress.objects.filter(email__iexact=to_email).exists():
-        EmailSendLog.objects.create(
-            ticket=ticket, to_email=to_email, trigger=trigger,
-            status='suppressed', reason='exact_address',
+            status='suppressed', reason=reason, detail=detail,
         )
         return
 
@@ -275,3 +284,89 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
         ticket=ticket, to_email=to_email, trigger=trigger,
         status=status, reason=reason,
     )
+
+
+def send_document_email(to_email, subject, cover_body, *, from_email=None,
+                        reply_to=None, attachments=None, client=None,
+                        contact=None, cc=None, trigger='document',
+                        related_ticket=None):
+    """Send an MB-generated document (repair report, quote) as a short HTML cover
+    email with PDF attachment(s).
+
+    Honors every suppression layer and always writes an EmailSendLog row (ticket
+    optional — these aren't ticket-triggered). Fail-loud: SMTP errors are logged
+    and recorded as 'failed', never swallowed. Returns the EmailSendLog row.
+
+    attachments: list of (filename, content_bytes, mimetype).
+    """
+    from .models import SiteSettings, EmailSendLog, EmailSignature
+    from django.core.mail import EmailMultiAlternatives, get_connection
+    from django.conf import settings as django_settings
+
+    site = SiteSettings.get()
+
+    def _log(status, reason='', detail=''):
+        return EmailSendLog.objects.create(
+            ticket=related_ticket, to_email=to_email or '', trigger=trigger,
+            status=status, reason=reason, detail=detail,
+        )
+
+    if not site.email_enabled:
+        return _log('suppressed', 'email_disabled')
+    if not to_email:
+        return _log('suppressed', 'no_address')
+    # Recipient-level opt-out (a specific contact who declines automated mail).
+    if contact is not None and not contact.receives_email:
+        return _log('suppressed', 'contact_flag')
+
+    reason, detail = _suppression_reason(to_email, client, site)
+    if reason:
+        return _log('suppressed', reason, detail)
+
+    # Short branded cover (no inline logo — the PDF carries the branding, and a
+    # 'related' image would complicate the multipart/mixed tree that holds the
+    # attachment). Default signature if one is configured.
+    sig_obj = EmailSignature.objects.filter(is_default=True).first()
+    signature_body = sig_obj.body if sig_obj else ''
+    html_body, _logo, _mime = _build_html_email(
+        cover_body, signature_body, subject, None, site, embed_logo=False,
+    )
+    plain_body = cover_body
+    if signature_body:
+        plain_body = f"{cover_body}\n\n--\n{signature_body}"
+
+    use_ssl = site.email_port == 465
+    connection = get_connection(
+        backend='django.core.mail.backends.smtp.EmailBackend',
+        host=site.email_host or django_settings.EMAIL_HOST,
+        port=site.email_port or django_settings.EMAIL_PORT,
+        username=site.email_username or django_settings.EMAIL_HOST_USER,
+        password=site.email_password or django_settings.EMAIL_HOST_PASSWORD,
+        use_tls=site.email_use_tls and not use_ssl,
+        use_ssl=use_ssl,
+        fail_silently=True,
+    )
+
+    sender = from_email or site.email_from or django_settings.DEFAULT_FROM_EMAIL
+
+    try:
+        msg = EmailMultiAlternatives(
+            subject=subject,
+            body=plain_body,
+            from_email=sender,
+            to=[to_email],
+            cc=[e for e in (cc or []) if e and e != to_email],
+            reply_to=[reply_to] if reply_to else None,
+            connection=connection,
+        )
+        msg.attach_alternative(html_body, 'text/html')
+        for filename, content, mimetype in (attachments or []):
+            msg.attach(filename, content, mimetype)
+        sent = msg.send(fail_silently=False)
+        status = 'sent' if sent else 'failed'
+        reason = '' if sent else 'send_error'
+    except Exception:
+        logger.exception('SMTP send failed for %s → %s.', trigger, to_email)
+        status, reason = 'failed', 'send_error'
+
+    return _log(status, reason)

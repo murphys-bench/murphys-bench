@@ -2139,3 +2139,160 @@ def test_success_message_renders_after_redirect(client, client_obj, admin_user):
     assert resp.status_code == 200
     assert b'resolved' in resp.content, \
         'Success feedback must be visible after the redirect.'
+
+
+# ── Phase 1: document email (PDF repair reports / quotes) ───────────────────
+# base.html messages now render; this layer adds emailing MB-generated PDFs.
+# The send helper is tested directly (no SMTP/WeasyPrint); the real PDF render
+# and the full view are gated behind a skip so CI stays green if the WeasyPrint
+# system libs aren't installed on the runner.
+
+def _weasyprint_ok():
+    try:
+        import weasyprint
+        weasyprint.HTML(string='<p>x</p>').write_pdf()
+        return True
+    except Exception:
+        return False
+
+
+pdf_skip = pytest.mark.skipif(not _weasyprint_ok(),
+                              reason='WeasyPrint system libs not installed')
+
+
+def _enable_email():
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    site.email_enabled = True
+    site.email_from = 'support@example.com'
+    site.save()
+    return site
+
+
+@pytest.mark.django_db
+def test_send_document_email_sends_and_logs(monkeypatch, client_obj):
+    from django.core.mail import EmailMultiAlternatives
+    from core.email_utils import send_document_email
+    from core.models import EmailSendLog
+    _enable_email()
+
+    captured = {}
+
+    def fake_send(self, fail_silently=False):
+        captured['attachments'] = list(self.attachments)
+        captured['to'] = list(self.to)
+        captured['from'] = self.from_email
+        return 1
+
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', fake_send)
+
+    log = send_document_email(
+        'wayne@davis.example', subject='Your Report',
+        cover_body='Here is your report.',
+        attachments=[('Repair-Report-WO-1.pdf', b'%PDF-fake', 'application/pdf')],
+        client=client_obj, trigger='wo_report',
+    )
+
+    assert log.status == 'sent'
+    assert log.trigger == 'wo_report'
+    assert captured['to'] == ['wayne@davis.example']
+    assert captured['from'] == 'support@example.com'
+    assert any(a[0].endswith('.pdf') for a in captured['attachments']), \
+        'The PDF must be attached to the email.'
+    assert EmailSendLog.objects.filter(status='sent', trigger='wo_report').exists()
+
+
+@pytest.mark.django_db
+def test_send_document_email_honors_client_suppression(client_obj):
+    from core.email_utils import send_document_email
+    _enable_email()
+    client_obj.suppress_emails = True
+    client_obj.save()
+
+    log = send_document_email(
+        'x@example.com', subject='S', cover_body='B',
+        attachments=[('a.pdf', b'%PDF', 'application/pdf')],
+        client=client_obj, trigger='wo_report',
+    )
+    assert log.status == 'suppressed'
+    assert log.reason == 'client_flag'
+
+
+@pytest.mark.django_db
+def test_send_document_email_no_address_is_logged(client_obj):
+    from core.email_utils import send_document_email
+    _enable_email()
+    log = send_document_email(
+        '', subject='S', cover_body='B', client=client_obj, trigger='wo_report',
+    )
+    assert log.status == 'suppressed'
+    assert log.reason == 'no_address'
+
+
+@pytest.mark.django_db
+def test_send_document_email_respects_contact_optout(client_obj):
+    from core.email_utils import send_document_email
+    from core.models import Contact
+    _enable_email()
+    c = Contact.objects.create(client=client_obj, first_name='No', last_name='Mail',
+                               email='no@example.com', receives_email=False)
+    log = send_document_email(
+        'no@example.com', subject='S', cover_body='B',
+        attachments=[('a.pdf', b'%PDF', 'application/pdf')],
+        client=client_obj, contact=c, trigger='wo_report',
+    )
+    assert log.status == 'suppressed'
+    assert log.reason == 'contact_flag'
+
+
+@pdf_skip
+@pytest.mark.django_db
+def test_render_pdf_produces_pdf_bytes():
+    from core.pdf_utils import render_pdf
+    out = render_pdf('<h1>Murphy\'s Bench</h1><p>Report.</p>')
+    assert out[:5] == b'%PDF-'
+    assert len(out) > 500
+
+
+@pdf_skip
+@pytest.mark.django_db
+def test_email_report_view_renders_pdf_and_sends(monkeypatch, client, client_obj, admin_user):
+    from django.core.mail import EmailMultiAlternatives
+    from core.models import EmailSendLog, Contact
+    _enable_email()
+    contact = Contact.objects.create(client=client_obj, first_name='Wayne', last_name='Davis',
+                                     email='wayne@davis.example', is_primary=True)
+    wo = WorkOrder.objects.create(client=client_obj, contact=contact)
+
+    captured = {}
+
+    def fake_send(self, fail_silently=False):
+        captured['attachments'] = list(self.attachments)
+        return 1
+
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', fake_send)
+    client.force_login(admin_user)
+
+    resp = client.post(reverse('core:work_order_email_report', args=[wo.pk]),
+                       {'contact': contact.pk}, follow=True)
+
+    assert resp.status_code == 200
+    assert EmailSendLog.objects.filter(status='sent', trigger='wo_report').exists()
+    assert captured['attachments'], 'A PDF attachment must be present.'
+    assert captured['attachments'][0][0] == f'Repair-Report-{wo.work_order_number}.pdf'
+    assert captured['attachments'][0][1][:5] == b'%PDF-', 'Attachment must be real PDF bytes.'
+
+
+@pytest.mark.django_db
+def test_email_report_form_page_renders(client, client_obj, admin_user):
+    """The GET recipient form renders (template smoke) with the WO's contacts."""
+    from core.models import Contact
+    contact = Contact.objects.create(client=client_obj, first_name='Wayne',
+                                     last_name='Davis', email='wayne@davis.example',
+                                     is_primary=True)
+    wo = WorkOrder.objects.create(client=client_obj, contact=contact)
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:work_order_email_report', args=[wo.pk]))
+    assert resp.status_code == 200
+    assert b'Email Repair Report' in resp.content
+    assert b'wayne@davis.example' in resp.content

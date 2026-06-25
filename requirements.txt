@@ -35,6 +35,11 @@ django-auditlog==3.3.0
 django-storages==1.14.6
 boto3==1.42.97
 
+# PDF generation (customer documents: repair reports, quotes)
+# Needs system libs (pango/cairo/glib) — apt on Ubuntu, brew on macOS dev.
+# See INSTALL.md + scripts/setup.sh. Imported lazily so a missing lib can't crash boot.
+weasyprint==69.0
+
 # Utilities
 Pillow==12.2.0          # security: clears CVE-2023-50447/2024-28219/2026-42310 + PYSEC-2026-165
 requests==2.33.0        # security: clears CVE-2024-35195/2024-47081/2026-25645 (carries the IN API token)

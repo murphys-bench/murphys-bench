@@ -22,6 +22,8 @@
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">WO History</a>
             <a href="{% url 'core:work_order_print' work_order.pk %}" target="_blank"
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap flex items-center gap-1">{% icon "printer" 4 %} Repair Report</a>
+            <a href="{% url 'core:work_order_email_report' work_order.pk %}"
+               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap flex items-center gap-1">{% icon "envelope" 4 %} Email Report</a>
             <a href="{% url 'core:work_order_print' work_order.pk %}?type=claim" target="_blank"
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Claim Ticket</a>
             {% if is_admin %}

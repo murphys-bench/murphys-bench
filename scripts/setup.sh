@@ -57,7 +57,10 @@ log "python $PYVER OK"
 if [ "$SKIP_APT" = 0 ]; then
     log "installing system packages (sudo)..."
     sudo apt-get update -qq || fail "apt update failed"
+    # The libpango/cairo/ft2 stack + fonts are WeasyPrint's runtime deps (PDF
+    # generation for repair reports and quotes); they pull cairo/glib/harfbuzz.
     sudo apt-get install -y -qq python3 python3-venv python3-pip nginx git logrotate curl \
+        libpango-1.0-0 libpangocairo-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core \
         || fail "apt install failed"
 else
     log "skipping apt (--skip-apt)"

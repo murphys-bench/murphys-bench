@@ -18,6 +18,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install WeasyPrint system libraries
+        # PDF generation (repair reports, quotes) needs the pango/cairo stack at
+        # runtime. Installing it here lets the PDF tests actually run in CI
+        # instead of skipping — so a real render regression is caught at the gate.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libpango-1.0-0 libpangocairo-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:

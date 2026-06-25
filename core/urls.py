@@ -102,8 +102,9 @@ urlpatterns = [
     path('work-performed/<int:pk>/delete/', views.WorkPerformedDeleteView.as_view(), name='work_performed_delete'),
     path('work-performed/<int:pk>/update/', views.WorkPerformedUpdateView.as_view(), name='work_performed_update'),
 
-    # Repair Report (print view)
+    # Repair Report (print view + email-as-PDF)
     path('work-orders/<int:pk>/print/', views.WorkOrderPrintView.as_view(), name='work_order_print'),
+    path('work-orders/<int:pk>/email-report/', views.WorkOrderReportEmailView.as_view(), name='work_order_email_report'),
 
     # Credentials + Billing (HTMX on WO detail)
     path('work-orders/<int:pk>/credentials/', views.WorkOrderCredentialsSaveView.as_view(), name='wo_credentials_save'),
