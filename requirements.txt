@@ -1,5 +1,5 @@
 # Core
-Django==4.2.30
+Django==5.2.15          # 5.2 LTS (security support to Apr 2028); 4.2 LTS went EOL Apr 2026
 python-decouple==3.8
 gunicorn==26.0.0
 
