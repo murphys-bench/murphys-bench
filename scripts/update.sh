@@ -85,7 +85,18 @@ PREV_VER="$(git describe --tags --always 2>/dev/null || echo "$PREV")"
 # 3) Fetch and resolve the target: no arg = latest release tag; arg = that ref.
 git fetch --all --tags --quiet || fail "git fetch failed"
 if [ -n "$REF" ]; then
-    TARGET="$REF"
+    # A BRANCH name must deploy the freshly-fetched REMOTE tip, not the box's stale
+    # local branch ref. `git checkout main` lands on the LOCAL `main`, which fetch does
+    # NOT fast-forward — so a plain checkout could silently deploy an OLD commit (it once
+    # downgraded mb-test). When the ref resolves to a remote branch, check out the
+    # remote-tracking ref (detached) so we always land on origin/<branch>. Tags and SHAs
+    # are absolute refs — they resolve to the same commit locally or remote — so they're
+    # checked out exactly as given.
+    if git show-ref --verify --quiet "refs/remotes/origin/$REF"; then
+        TARGET="origin/$REF"
+    else
+        TARGET="$REF"
+    fi
 else
     TARGET="$(git tag -l 'v*' | sort -V | tail -1)"
     [ -n "$TARGET" ] || fail "no release tags exist yet. Create one with scripts/release.sh \
@@ -94,8 +105,9 @@ code, e.g.: scripts/update.sh main"
 fi
 
 # Checkout is the boundary: it's atomic (a failure leaves the tree at PREV), so a
-# plain fail here is safe — nothing has been mutated yet.
-git checkout --quiet "$TARGET" || fail "could not check out '$TARGET' (local changes on the box? resolve them, then re-run)"
+# plain fail here is safe — nothing has been mutated yet. `--detach` keeps branch
+# deploys on the exact origin/<branch> commit (we never track a local branch on the box).
+git checkout --quiet --detach "$TARGET" || fail "could not check out '$TARGET' (local changes on the box? resolve them, then re-run)"
 NEW="$(git rev-parse --short HEAD)"
 NEW_VER="$(git describe --tags --always 2>/dev/null || echo "$NEW")"
 log "code: $PREV_VER ($PREV) -> $NEW_VER ($NEW)"
