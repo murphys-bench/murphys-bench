@@ -94,9 +94,12 @@ credentials, so keep it in a password manager. Details in [`deploy/README.md`](d
 
 ## License
 
-**Not yet finalized.** Murphy's Bench is intended to be released under an open-source license,
-but the specific one is still being chosen. Until a `LICENSE` file is added to this repo, no
-redistribution license is granted — please ask before redistributing. (No warranty of any kind.)
+Murphy's Bench is licensed under the **GNU Affero General Public License v3.0** — see
+[LICENSE](LICENSE). You're free to use, self-host, and modify it; if you distribute a modified
+version, or run one as a network service, you must make your changes available under the same
+license. (No warranty of any kind.)
+
+Copyright © 2026 Mike McCall
 
 ---
 
