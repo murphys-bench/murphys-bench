@@ -38,6 +38,19 @@ the bench.**
   object storage), and self-monitoring that turns its own failures (a failed job, a 500, a
   full disk, a backup that didn't run) into a ticket so you find out before your customers do.
 
+## What it's not
+
+It's deliberately **not** a giant MSP suite, a retail POS, or an accounting platform. In particular, it isn't:
+
+- a POS or cash-register system
+- full inventory management
+- an accounting package — [Invoice Ninja](https://invoiceninja.com/) stays the system of record for invoicing and payments
+- a customer self-service portal
+- a hosted SaaS product
+- a replacement for QuickBooks, Square, or Invoice Ninja
+
+Some of these (parts/inventory especially) may grow later — but the focus today is the ticket → bench → invoice workflow.
+
 ## Today, and where it could go
 
 Right now Murphy's Bench does the **ticket → repair → invoice** core, and does it well —
@@ -61,20 +74,53 @@ are welcome and read, but replies are best-effort, and there's **no warranty —
 own risk** (see the license). Keeping support light on purpose is what keeps a one-person
 project alive.
 
+## Who it's for
+
+Murphy's Bench may be a fit if you're:
+
+- a solo repair technician or a small computer-repair shop
+- a small field-service operation
+- someone who wants repair-workflow software without SaaS pricing
+- comfortable self-hosting a Django app
+
+It's probably **not** for you if you need enterprise MSP automation, a polished hosted
+product, a retail POS, deep inventory, or guaranteed support.
+
 ---
 
 ## Screenshots
 
-<!-- TODO: add 3–5 screenshots — dashboard, ticket detail, work-order detail, repair report -->
-_Coming soon._
+**Dashboard** — your ticket and work-order queues at a glance.
+
+![Dashboard](screenshots/dashboard.png)
+
+**Ticket detail** — threaded conversation, the linked work order, and quick actions.
+
+![Ticket detail](screenshots/ticket-detail.png)
+
+**Reports & analytics** — billing summary, ticket volume, and ticket→work-order conversion, with CSV/PDF export.
+
+![Reports & analytics](screenshots/reports.png)
+
+**Settings** — everything is configured in-app through a native settings UI; no Django admin needed.
+
+![Settings](screenshots/settings.png)
+
+**Dark mode** — every page has a light and dark theme.
+
+![Dashboard in dark mode](screenshots/dashboard-dark.png)
+![Ticket detail in dark mode](screenshots/ticket-detail-dark.png)
+
+_(Screenshots use demo data.)_
 
 ## Tech stack
 
-Python 3.12 · Django 4.2 · HTMX + Alpine.js + Tailwind — **all self-hosted, no CDN** (Tailwind
+Python 3.12 · Django 5.2 LTS · HTMX + Alpine.js + Tailwind — **all self-hosted, no CDN** (Tailwind
 is compiled to a static stylesheet via the standalone CLI on deploy; no Node) · SQLite by
 default (PostgreSQL optional) · Gunicorn + Nginx. It runs **behind a
 TLS-terminating reverse proxy** (Cloudflare Tunnel, Caddy, or Nginx) rather than terminating
-TLS itself — the standard Django model; see [`docs/deployment-tls.md`](docs/deployment-tls.md).
+TLS itself — the standard Django model; see [`docs/deployment-tls.md`](docs/deployment-tls.md). A
+Content-Security-Policy is enforced in front of the app.
 
 ## Install
 
