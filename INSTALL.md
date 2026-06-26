@@ -395,7 +395,7 @@ For a **demo box** you typically want:
    there's something to interact with. **Do not load real client data onto a
    demo box.**
 
-See **[SETUP.md](SETUP.md)** for the admin/configuration walkthrough.   <!-- ⚠ TODO: write SETUP.md -->
+See **[SETUP.md](SETUP.md)** for the admin/configuration walkthrough.
 
 ---
 
