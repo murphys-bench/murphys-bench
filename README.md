@@ -98,6 +98,10 @@ product, a retail POS, deep inventory, or guaranteed support.
 
 ![Ticket detail](screenshots/ticket-detail.png)
 
+**Work order** — the repair bench: reported issue, device, priced labor/parts, a stopwatch, pre/post checklist, and encrypted credentials.
+
+![Work order detail](screenshots/work-order-detail.png)
+
 **Reports & analytics** — billing summary, ticket volume, and ticket→work-order conversion, with CSV/PDF export.
 
 ![Reports & analytics](screenshots/reports.png)
@@ -110,6 +114,7 @@ product, a retail POS, deep inventory, or guaranteed support.
 
 ![Dashboard in dark mode](screenshots/dashboard-dark.png)
 ![Ticket detail in dark mode](screenshots/ticket-detail-dark.png)
+![Work order in dark mode](screenshots/work-order-detail-dark.png)
 
 _(Screenshots use demo data.)_
 
