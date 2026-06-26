@@ -20,7 +20,7 @@ python manage.py runserver
 # http://localhost:8000   ·   local-dev login: admin / password123
 ```
 
-Local dev uses **SQLite** and a local `.env` with `DEBUG=True`. Production uses **PostgreSQL** with `DEBUG=False`.
+Local dev uses **SQLite** and a local `.env` with `DEBUG=True`. Production also runs **SQLite**, with `DEBUG=False`. (The app *can* use PostgreSQL via `DB_ENGINE=postgresql`, but the SCS deployment deliberately uses SQLite.)
 
 ### Before committing
 
@@ -39,6 +39,10 @@ python manage.py migrate               # apply locally first
 ```
 
 ## Deploy to production
+
+> **The blessed path is now `scripts/update.sh`** (added since this manual sequence was written). Run from `/opt/murphys-bench/` on the box, it does the whole thing fail-loud: backup-first → pull → pip → build CSS → migrate → collectstatic → restart → health-poll, and **auto-rolls-back code *and* DB** if any step fails. With no argument it deploys the latest release tag; pass an explicit ref (e.g. `main`) for staging-latest. An admin can also trigger it from **Settings → Updates** in the app. The manual steps below are the longhand it automates — useful to understand, but prefer `update.sh`.
+>
+> **Deploy order is always `mb-test` → verify → prod → MB2.** Staging (`mb-test`, `10.58.58.108`) exists to catch surprises before they touch live client data — even for "low-risk" changes.
 
 1. **On the Mac** — commit and push:
    ```bash

@@ -72,15 +72,23 @@ was used when the data was encrypted. A new/different key will not decrypt old d
 
 ### A) Restore the whole VM (Proxmox / PBS)
 
-> ⚠️ **As of June 2026 this path is NOT reliable for production** — a VMID collision is pruning the real
-> murphys-bench VM backup (see the System Assessment, page 09). Until it's fixed, prefer procedure **B**
-> (restore from the Backblaze B2 tarball), which is verified working. Once PBS is fixed, this is the
-> fastest whole-machine recovery.
+> ✅ **Working & verified** (the VMID collision that previously pruned the real production backup was
+> fixed Jun 22 2026; PBS verify confirmed All OK Jun 24 — see page 09). This is the fastest
+> whole-machine recovery: it brings back the OS, app, database, and `.env` together. Procedure **B**
+> (restore from the Backblaze B2 tarball) remains the option when you only need the data, or are
+> rebuilding on a different host.
 
 Roll back to a Proxmox / PBS backup. This brings back the OS, app, database, and `.env` (including the
 encryption key) together. Then verify the app boots and the timers are active.
 
 ### B) Restore the database + files from a nightly tarball
+
+> **Preferred: `scripts/restore.sh`** automates this whole procedure fail-loud — it integrity-checks the
+> bundled snapshot *before* touching anything live, saves the current db/protected/media/.env to
+> `backups/pre-restore-<ts>/` (so the restore is itself reversible), stops the service, swaps everything
+> in, restarts, and health-polls. Run: `cd /opt/murphys-bench && scripts/restore.sh backups/mb-backup-<ts>.tar.gz`.
+> It keeps the live `.env` by default (same-box rollback keeps current secrets); use `--with-env` for a
+> fresh-box rebuild. The manual steps below are what it does under the hood.
 
 On a host that already has the app + a matching `.env` (with the correct `FIELD_ENCRYPTION_KEY`):
 
