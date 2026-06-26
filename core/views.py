@@ -1394,7 +1394,7 @@ class DeviceCreateView(LoginRequiredMixin, CreateView):
         self.object = form.save()
         if self.request.POST.get('save_and_create_wo'):
             return redirect(
-                reverse_lazy('core:workorder_create') + f'?device={self.object.pk}'
+                reverse_lazy('core:work_order_create') + f'?device={self.object.pk}'
             )
         next_url = self.request.POST.get('next') or self.request.GET.get('next')
         if next_url:
@@ -1424,7 +1424,7 @@ class DeviceUpdateView(LoginRequiredMixin, UpdateView):
         self.object = form.save()
         if self.request.POST.get('save_and_create_wo'):
             return redirect(
-                reverse_lazy('core:workorder_create') + f'?device={self.object.pk}'
+                reverse_lazy('core:work_order_create') + f'?device={self.object.pk}'
             )
         return redirect(reverse_lazy('core:device_detail', kwargs={'pk': self.object.pk}))
 
