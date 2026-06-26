@@ -99,9 +99,9 @@ Detail in memory `project_mb_session35_security`.
 ✅ **COMPLETED**:
 - Database schema fully designed and documented
 - Django project initialized with all dependencies
-- 14 data models created with proper relationships
+- Data models created with proper relationships (47 as of migration 0065)
 - Migrations created and applied (SQLite, dev and production)
-- Django admin customized for all 14 models
+- Django admin customized (now a break-glass tool — native Settings UI covers routine config)
 - Base template with navigation (Tailwind CSS, dark nav bar)
 - Authentication — login/logout, all views protected with LoginRequiredMixin
 - Dashboard — stats, open work orders, recently closed, quick action buttons

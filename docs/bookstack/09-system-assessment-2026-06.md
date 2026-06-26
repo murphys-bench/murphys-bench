@@ -2,6 +2,15 @@
 
 > A full, honest, report-only audit of the whole system — code, data, security, operations, and process — done 2026-06-22 after a single day surfaced several critical operational failures and shook confidence in the project. Findings are graded 🟢 green / 🟡 yellow / 🔴 red, and every claim was **verified against the running system, not assumed.**
 
+> 📌 **Status since this assessment (as of June 2026).** This page is a *point-in-time record* — the 🔴/🟡 grades below are how things stood on 2026-06-22 and are kept verbatim. Since then the remediation has largely been done:
+> - **G — Observability 🔴 → ✅** *(closed)* — MB now self-monitors; operational failures (app 500s, systemd `OnFailure` on all timers, daily disk check, backup dead-man's-switch, logrotate) open a **System Alert ticket**.
+> - **H — Process 🔴 → ✅** *(closed)* — a dedicated **`mb-test` staging VM** ends direct-on-prod editing; a **CI gate** (pytest + `check` on every push) is live; deploys run mb-test → prod → MB2.
+> - **B — PBS backup 🔴 → ✅** *(closed Jun 22, verified Jun 24)* — VMID collisions resolved, daily verify + centralized prune.
+> - **E — dev Python 3.9 vs prod 3.12 → ✅** *(closed)* — both dev Macs aligned to Py3.12.
+> - **D residuals — still open:** the unused PostgreSQL server (decommission) and plain-HTTP-on-LAN (TLS is a deliberate, documented decision, not a gap). `fail2ban`/`pip-audit` loop remain Tier-3 hygiene.
+>
+> See the repo's `TODO.md` and `docs/next-session-prompt.md` for the live remediation state.
+
 ## TL;DR
 
 **The software is well-built. The operations around it were not — and that gap is what failed us.**

@@ -18,6 +18,20 @@
 > ⚠️ **App path is `/opt/murphys-bench/`, NOT `~/murphys-bench/`.**
 > ⚠️ **Production Python is `python3`, never `python`.** Use the venv: `/opt/murphys-bench/venv/bin/python`.
 
+## The other two instances
+
+Production isn't the only box. There are three Murphy's Bench instances, each with a distinct job:
+
+| Instance | IP / host | Role | Data | Exposure |
+|---|---|---|---|---|
+| **prod** | `10.58.58.82` | Live SCS system | Real client data | LAN-only, plain HTTP |
+| **mb-test** (staging) | `10.58.58.108` (Proxmox VMID 201) | Pre-prod gate — deploy + migrate here first | **A copy of prod data under prod's `FIELD_ENCRYPTION_KEY`**; outbound integrations neutralized | LAN-only |
+| **MB2** (demo) | `10.58.35.223` | External demo for testers | **Fake data only** | Public via Cloudflare Tunnel at `https://mbdemo.scs-tech.net`, behind Cloudflare Access |
+
+> ⚠️ **`mb-test` holds REAL client data** (a faithful copy, for honest migration testing) — keep it LAN-only and **never** repurpose it as a demo. **MB2 is the only fake-data, internet-facing box.**
+>
+> **Deploy order is always `mb-test` → verify → prod → MB2** (see *Development & Deploy Workflow*).
+
 ## SSH access
 
 ```bash
