@@ -19,7 +19,7 @@ The defects were not random. They share one cause: **the system was operated on 
 | Domain | Verdict | One-line |
 |---|---|---|
 | A — Operations / scheduling / deploy | 🟢 | Single correct set of timers (post-fix); migrations clean; git in sync |
-| B — Backup & disaster recovery | 🟢 mechanism / 🔴 PBS | New B2 backup drill-proven restorable; **PBS whole-VM backup BROKEN for prod** |
+| B — Backup & disaster recovery | 🟢 | New B2 backup drill-proven restorable; PBS whole-VM backup ✅ **fixed Jun 22, verified All OK Jun 24** (was 🔴 broken as-found) |
 | C — Data integrity | 🟢 | No corruption, no orphans, ticket numbers unique; data intact |
 | D — Security | 🟢 fundamentals / 🟡 residuals | Auth/MFA/encryption/attachment-isolation solid; plain-HTTP-on-LAN + unused Postgres remain |
 | E — Code health | 🟢 | Honors "fail loud" (verified — 0 real silent failures of 13 candidates); 100 tests; clean |
@@ -35,7 +35,9 @@ Only the three intended systemd timers run (backup nightly, inbound fetch every 
 ### B — Backup & Disaster Recovery 🟢 mechanism / 🔴 PBS
 The new application backup (consistent SQLite snapshot + attachments + `.env` → Backblaze B2, immutable via Object Lock, restore-**drilled** from the offsite copy) is sound, and its keys live in Bitwarden so it is reachable in a real VM-loss disaster.
 
-**🔴 The whole-VM "safety net" is broken for production.** Production is Proxmox VM 103; due to a VMID collision with a second VM in the same PBS datastore, PBS retention prunes the single real production backup. PBS verification is also off on every backup. Until 2026-06-22, between the (empty) database backup and the (mis-targeted) VM backup, **production had no working backup at all.** Fixing PBS is a deliberate, scheduled learning task. *(PBS storage durability — which NAS the datastore persists to — is also unconfirmed.)*
+**✅ RESOLVED Jun 22 2026; verified All OK Jun 24 2026.** *(Finding kept below as the point-in-time assessment record.)* The VMID collisions were fixed (BookStack 102→202, Cloudflared 103→203; prod stays 103), a daily verify job was added, and prune was centralized (7/4/3). PBS content confirmed Jun 24: prod `vm/103` has 4 retained backups with **Verify State All OK**, and every group in the datastore has a distinct VMID. One open follow-up (low priority): the VM backups are **not client-side encrypted at rest** on the NAS, so a whole-VM backup includes prod's `.env` (which holds `FIELD_ENCRYPTION_KEY`) in the clear — acceptable on the trusted LAN, but PBS client-side encryption is the defense-in-depth option if ever wanted.
+
+**🔴 (AS FOUND, 2026-06-22) The whole-VM "safety net" is broken for production.** Production is Proxmox VM 103; due to a VMID collision with a second VM in the same PBS datastore, PBS retention prunes the single real production backup. PBS verification is also off on every backup. Until 2026-06-22, between the (empty) database backup and the (mis-targeted) VM backup, **production had no working backup at all.** *(PBS storage durability — which NAS the datastore persists to — is also unconfirmed.)*
 
 ### C — Data Integrity 🟢
 SQLite foreign-key enforcement is on; `integrity_check` passes; zero FK violations; ticket numbers unique; no orphaned records; the dedup fix left no stuck claim rows. Two apparent anomalies were verified benign (a legitimate standalone work order; an intentionally-unpriced line item). The data is intact, including through the same-day dedup/delete work.

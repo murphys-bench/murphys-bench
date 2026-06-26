@@ -8,7 +8,7 @@
 |---|---|---|
 | Nightly app backup | SQLite DB snapshot + attachments (`protected/`, `media/`) + `.env`, as one gzipped tarball | 02:15 nightly, last 14 kept locally |
 | Off-site copy (Backblaze B2) | The same nightly tarball, pushed to bucket `scs-mb-backups` | every nightly run |
-| Proxmox / PBS VM backups ⚠️ | Whole VM — **currently BROKEN for production** (VMID-103 collision prunes the real backup; see the System Assessment, page 09) | per Proxmox schedule |
+| Proxmox / PBS VM backups ✅ | Whole VM — **working & verified** (VMID collisions resolved Jun 22 2026: BookStack→202, Cloudflared→203, prod stays 103; daily verify job added). Confirmed healthy Jun 24 2026: prod `vm/103` has 4 retained backups, Verify State **All OK**, no collisions across the datastore. *(Backups are not client-side encrypted at rest — see the encryption note in the System Assessment, page 09.)* | per Proxmox schedule |
 | GitHub | All application code | every push |
 | Bitwarden | `FIELD_ENCRYPTION_KEY` (and other secrets) | manual |
 
