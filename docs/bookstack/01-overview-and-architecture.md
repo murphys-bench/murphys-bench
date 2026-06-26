@@ -33,7 +33,7 @@ Ticket (intake + email replies) → Triage → Work Order (the repair)
 
 | Layer | Technology |
 |---|---|
-| Backend | Python 3.12 · Django 4.2 |
+| Backend | Python 3.12 · Django 5.2 LTS |
 | Frontend | Tailwind CSS (compiled, self-hosted) · HTMX · Alpine.js (vendored/pinned, no CDN) |
 | Database | SQLite (production and local dev) · PostgreSQL supported via DB_ENGINE (unused) |
 | Auth | Django session auth + django-two-factor-auth (TOTP) |

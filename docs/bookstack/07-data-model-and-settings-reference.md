@@ -1,6 +1,6 @@
 # Murphy's Bench — Data Model & Settings Reference
 
-> A map of the 34 data models and what the native Settings UI covers. For field-level detail see `docs/database-schema.md` in the repo.
+> A map of the data models and what the native Settings UI covers. For field-level detail see `docs/database-schema.md` in the repo.
 
 ## Core workflow objects
 

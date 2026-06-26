@@ -67,4 +67,4 @@
 
 ## The prime directive
 
-The project is in a **stabilization phase**, not a feature phase. The default response to a new feature request is to check it against that rule first. Depth and trustworthiness over breadth. The one approved post-stabilization feature is the **Invoice Ninja bridge** — and only after the test suite is broader, because it moves money.
+The project is in a **stabilization phase**, not a feature phase. The default response to a new feature request is to check it against that rule first. Depth and trustworthiness over breadth. The **Invoice Ninja bridge** (the first approved post-stabilization feature, since it moves money) shipped in session 34; the current post-stabilization work is the **sales/quoting product layer** (prospect → estimate → quote), with feature work gated on the test suite staying broad.

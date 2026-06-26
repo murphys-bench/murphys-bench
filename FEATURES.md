@@ -116,7 +116,10 @@ and it doesn't try to be.
   (cash/walk-in), or disputed.
 - **Outstanding balances** roll up per client.
 - **CSV export** of invoices and billing so it drops into whatever accounting
-  system you already use. (A direct Invoice Ninja bridge is planned.)
+  system you already use.
+- **Invoice Ninja bridge** — push a work order's priced labor/parts to
+  [Invoice Ninja](https://invoiceninja.com/) as a draft invoice (one-directional;
+  IN stays the system of record and assigns the invoice number).
 
 ---
 

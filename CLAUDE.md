@@ -1,6 +1,6 @@
 # Murphy's Bench
 
-**Status**: Phase 1 Active Development — Deployed Internally (10.58.58.82)
+**Status**: Phase 1 — Daily Production at SCS (10.58.58.82); stabilization phase + sales/quoting product layer
 **Tech Stack**: Python 3.12 / Django 5.2 LTS / HTMX + Alpine.js (self-hosted) / Tailwind CSS (compiled, self-hosted via standalone CLI — no CDN, no Node)
 **Deployment Model**: Self-hosted on internal network (Proxmox VM, Gunicorn + Nginx, SQLite)
 **Repository**: `~/Documents/Claude/murphys-bench` + GitHub (private)
@@ -472,7 +472,7 @@ murphys-bench/
 │   ├── settings.py
 │   └── urls.py
 ├── core/                        # Main app
-│   ├── models.py               # All 32 data models
+│   ├── models.py               # All data models (47 as of mig 0065)
 │   ├── views.py                # All views
 │   ├── urls.py                 # Core URL patterns
 │   ├── forms.py                # All forms
@@ -539,7 +539,14 @@ murphys-bench/
     └── next-session-prompt.md
 ```
 
-### Data Models (34 current, migrations through 0051)
+### Data Models (47 current, migrations through 0065)
+
+> Full field-level detail is generated in [`docs/database-schema.md`](docs/database-schema.md).
+> The list below is a conceptual summary — see that file for fields/types. Models added
+> since the original list: `RepairTypeCategory`, `ContactPhone`, `StatusDefinition`,
+> `LineItem` (the universal priced-line primitive — `WorkPerformed` was unified into it
+> and deleted), `OrgCredential` + `CredentialAccessLog`, `DeviceCredentialAccessLog`,
+> `MFAResetLog`, `EmailSignature`, `BlockedSender`, `CannedResponseCategory`.
 - **Role** — permission role with 16 boolean flags; seeded: Administrator, Technician
 - **TechSkill** — skill tags M2M on User; captured for future skill-based routing
 - **User** — extended Django user; role CharField (legacy) + role_obj FK to Role + skills M2M
