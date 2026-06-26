@@ -2296,3 +2296,35 @@ def test_email_report_form_page_renders(client, client_obj, admin_user):
     assert resp.status_code == 200
     assert b'Email Repair Report' in resp.content
     assert b'wayne@davis.example' in resp.content
+
+
+# ── Regression: device "Save & Create WO" redirects without NoReverseMatch ──
+# The DeviceCreate/Update form_valid built the redirect with the wrong URL name
+# ('core:workorder_create' — never existed), 500ing /devices/new/ on that path.
+
+@pytest.mark.django_db
+def test_device_save_and_create_wo_redirects_to_work_order_create(client, client_obj, admin_user):
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:device_create'), {
+        'client': client_obj.pk,
+        'name': 'Bench Laptop',
+        'device_type': 'laptop',
+        'save_and_create_wo': '1',
+    })
+    assert resp.status_code == 302, 'Save & Create WO must redirect, not 500.'
+    device = Device.objects.get(name='Bench Laptop')
+    assert resp.url == reverse('core:work_order_create') + f'?device={device.pk}'
+
+
+@pytest.mark.django_db
+def test_device_edit_save_and_create_wo_redirects(client, client_obj, admin_user):
+    device = Device.objects.create(client=client_obj, name='Edit Me', device_type='laptop')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:device_edit', args=[device.pk]), {
+        'client': client_obj.pk,
+        'name': 'Edit Me',
+        'device_type': 'laptop',
+        'save_and_create_wo': '1',
+    })
+    assert resp.status_code == 302
+    assert resp.url == reverse('core:work_order_create') + f'?device={device.pk}'
