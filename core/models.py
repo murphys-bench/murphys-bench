@@ -90,6 +90,7 @@ class Role(models.Model):
     can_create_workorder = models.BooleanField(default=True)
     can_edit_workorder = models.BooleanField(default=True)
     can_close_workorder = models.BooleanField(default=True)
+    can_view_prospects = models.BooleanField(default=True, help_text='View and manage sales prospects (leads).')
 
     class Meta:
         db_table = 'roles'
@@ -276,6 +277,117 @@ class ContactPhone(models.Model):
 
     def __str__(self):
         return f"{self.number} ({self.get_phone_type_display()})"
+
+
+class Prospect(models.Model):
+    """A prospective customer (sales lead), captured contact-first before they
+    become a paying Client. Promoted to a Client (+ a primary Contact) when the
+    work is accepted. Thin by design — the financial layer's customer spine."""
+
+    STATUS_CHOICES = [
+        ('new', 'New'),
+        ('contacted', 'Contacted'),
+        ('quoted', 'Quoted'),
+        ('won', 'Won'),
+        ('lost', 'Lost'),
+    ]
+
+    # The contact comes first — a lead is always a person we're talking to,
+    # who may or may not sit within a company.
+    contact_first_name = models.CharField(max_length=100)
+    contact_last_name = models.CharField(max_length=100, blank=True)
+    company = models.CharField(
+        max_length=255, blank=True,
+        help_text='The company this contact belongs to, if any (required for business).',
+    )
+    # Known up front, before any quote — drives the company-vs-individual shape.
+    client_type = models.CharField(
+        max_length=20, choices=Client.CLIENT_TYPE_CHOICES, default='residential',
+    )
+    email = models.EmailField(blank=True)
+    phone = models.CharField(max_length=20, blank=True)
+    notes = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='new')
+
+    # Set when promoted; links the lead to the Client it became.
+    promoted_to = models.ForeignKey(
+        Client, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='promoted_from_prospects',
+    )
+    promoted_at = models.DateTimeField(null=True, blank=True)
+
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='prospects_created',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'prospects'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status']),
+            models.Index(fields=['email']),
+        ]
+
+    def __str__(self):
+        return self.display_name
+
+    @property
+    def contact_name(self):
+        return f"{self.contact_first_name} {self.contact_last_name}".strip()
+
+    @property
+    def display_name(self):
+        """Company — Contact for business; the contact's name for residential."""
+        if self.company:
+            name = self.contact_name
+            return f"{self.company} — {name}" if name else self.company
+        return self.contact_name
+
+    @property
+    def is_promoted(self):
+        return self.promoted_to_id is not None
+
+    def promote_to_client(self):
+        """Create a Client (+ a primary Contact) from this lead and link it back.
+
+        Business → Client named for the company; residential → Client named for
+        the person. A Contact is always created (contact-first). Idempotent: a
+        prospect that's already been promoted returns its existing Client."""
+        from django.db import transaction
+        from django.utils import timezone
+
+        if self.promoted_to_id:
+            return self.promoted_to
+
+        with transaction.atomic():
+            if self.client_type == 'business' and self.company:
+                client_name = self.company
+            else:
+                client_name = self.contact_name or self.company or 'Unnamed'
+
+            client = Client.objects.create(
+                name=client_name,
+                client_type=self.client_type,
+                email=self.email,
+                phone=self.phone,
+                notes=self.notes,
+            )
+            Contact.objects.create(
+                client=client,
+                first_name=self.contact_first_name,
+                last_name=self.contact_last_name or '',
+                email=self.email,
+                phone=self.phone,
+                is_primary=True,
+            )
+            self.promoted_to = client
+            self.promoted_at = timezone.now()
+            self.status = 'won'
+            self.save(update_fields=['promoted_to', 'promoted_at', 'status', 'updated_at'])
+        return client
 
 
 class RepairTypeCategory(models.Model):
