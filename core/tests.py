@@ -1824,6 +1824,33 @@ def test_convert_carries_ticket_description_into_wo_reported_problem(client, cli
 
 
 @pytest.mark.django_db
+def test_ticket_with_open_wo_can_be_closed(client, client_obj, admin_user):
+    """MB does NOT block closing a ticket whose linked WO is still open — sequencing
+    ticket-close vs WO-completion is the shop's policy, not the software's opinion.
+    Covers both close paths: the full edit form and the quick status dropdown."""
+    # Quick status path
+    t1 = Ticket.objects.create(client=client_obj, subject='A', description='D')
+    WorkOrder.objects.create(client=client_obj, ticket=t1, status='open')
+    client.force_login(admin_user)
+    client.post(reverse('core:ticket_status_update', args=[t1.pk]), {'status': 'closed'})
+    t1.refresh_from_db()
+    assert t1.status == 'closed', 'Quick status change must close despite an open linked WO.'
+
+    # Full edit form path
+    t2 = Ticket.objects.create(client=client_obj, subject='B', description='D')
+    WorkOrder.objects.create(client=client_obj, ticket=t2, status='open')
+    client.post(reverse('core:ticket_edit', args=[t2.pk]), {
+        'client': client_obj.pk,
+        'subject': 'B',
+        'description': 'D',
+        'status': 'resolved',
+        'source': 'email',
+    })
+    t2.refresh_from_db()
+    assert t2.status == 'resolved', 'Edit form must close despite an open linked WO.'
+
+
+@pytest.mark.django_db
 def test_wo_detail_shows_reported_problem(client, client_obj, admin_user):
     wo = WorkOrder.objects.create(
         client=client_obj,

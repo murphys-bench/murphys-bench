@@ -342,8 +342,15 @@ that `E.xxxxx` is T2's own ticket ID (kept on purpose; clients are told it) and 
 ### Design intent to preserve (don't "fix" these — they're deliberate)
 - A completed Work Order must **never** auto-close its Ticket. The ticket drives the
   human-facing interaction and a person resolves it manually after real contact.
-  `AUTO_RESOLVE_TICKET_ON_WO_CLOSE` stays off by default. (The close-dependency block in
-  `TicketUpdateView` is correct and working — only the *delete* guard, item 1 above, is broken.)
+  `AUTO_RESOLVE_TICKET_ON_WO_CLOSE` stays off by default. This is the *non-action* we keep —
+  it does not force a human to do anything, it just declines to close automatically.
+- **REMOVED Jun 28 2026 (Jim's challenge, Mike agreed):** the old *hard block* that prevented
+  closing a ticket while its linked WO was still open. That was MB imposing a workflow opinion —
+  how a shop sequences ticket-close vs WO-completion is the shop's policy, not the software's. Any
+  authorized tech can now close a ticket regardless of linked-WO state, in both close paths
+  (`TicketUpdateView.form_valid` + `TicketStatusUpdateView`). No warning/flag was added (it would
+  just be noise). Locked by `test_ticket_with_open_wo_can_be_closed`. Keeping the auto-close
+  *non-action* above is still correct — that's distinct from the removed block.
 - A Work Order does **not** require a Ticket — work doesn't always arrive that way. But if
   a ticket came first, it also owns the last interaction.
 
@@ -594,7 +601,8 @@ See `docs/ticketing-design.md` for full detail.
 Also: `converted` (converted to Work Order — read-only after this point)
 
 ### Ticket → Work Order Rules
-- A ticket linked to an open WO **cannot** be closed/resolved — hard block
+- A ticket linked to an open WO **can** be closed/resolved — MB does not block it (the old hard
+  block was removed Jun 28 2026; sequencing is the shop's policy, not the software's opinion)
 - When the WO closes, ticket shows a prompt: "WO complete — ready to resolve" — tech closes manually
 - `AUTO_RESOLVE_TICKET_ON_WO_CLOSE` admin setting (default **off**)
 - Ticket remains in system after conversion — full history retained
@@ -839,7 +847,7 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - **No Celery/async queue** — synchronous email sending is sufficient at MSP scale
 - **No OAuth2** for email — SCS uses cPanel-hosted mail with standard IMAP/POP3 credentials
 - **Single unified KB** — not split between tickets and work orders
-- **Ticket close is always manual** even when linked WO closes — forces human contact
+- **Ticket close is always manual** even when linked WO closes — a completed WO never auto-closes its ticket (`AUTO_RESOLVE_TICKET_ON_WO_CLOSE` off). But MB does **not** block a human from closing a ticket whose WO is still open — that sequencing is the shop's policy (old hard block removed Jun 28 2026)
 - **MFA backup codes for admin only** — other users recover via admin reset
 - **SLA overdue alerts are in-app only** — acknowledgment with required note creates audit trail
 - **Attachment storage Phase 1**: local filesystem (configurable path) + S3-compatible
