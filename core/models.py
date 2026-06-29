@@ -1056,6 +1056,10 @@ class Invoice(models.Model):
     paid_date = models.DateField(null=True, blank=True)
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, blank=True)
     notes = models.TextField(blank=True)
+    # Invoice Ninja read-back — recorded, not authoritative
+    invoice_ninja_id = models.CharField(max_length=100, blank=True)
+    in_status = models.CharField(max_length=50, blank=True)
+    in_status_checked_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

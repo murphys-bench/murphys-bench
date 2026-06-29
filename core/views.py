@@ -3477,6 +3477,24 @@ class WorkOrderBillingUpdateView(LoginRequiredMixin, View):
         })
 
 
+class WorkOrderBillingCheckINView(LoginRequiredMixin, View):
+    """HTMX: pull current invoice status from Invoice Ninja and record it."""
+
+    def post(self, request, pk):
+        from . import invoice_ninja
+        wo = get_object_or_404(WorkOrder, pk=pk)
+        invoice, _ = Invoice.objects.get_or_create(work_order=wo)
+        try:
+            invoice_ninja.check_invoice_status(wo)
+            invoice.refresh_from_db()
+        except invoice_ninja.InvoiceNinjaError as e:
+            messages.error(request, str(e))
+        return render(request, 'core/partials/billing_card.html', {
+            'work_order': wo,
+            'invoice': invoice,
+        })
+
+
 # ---------------------------------------------------------------------------
 # Native Settings UI (/settings/)
 # ---------------------------------------------------------------------------
