@@ -10,6 +10,8 @@ from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
 from django.urls import reverse, reverse_lazy
 from django.db.models import Q, F as models_F, Max as models_Max, Count
+from django.db import IntegrityError
+from django.core.exceptions import PermissionDenied
 from django.contrib.contenttypes.models import ContentType
 from django.http import FileResponse, Http404
 from django.utils import timezone
@@ -29,13 +31,13 @@ from .models import (
     SuppressedAddress,
     BlockedSender,
     SLAPlan, HelpTopic, TechSkill,
-    Notification,
+    Notification, Prospect,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
                     CompanySettingsForm, OutboundEmailSettingsForm, InboundEmailSettingsForm,
                     AttachmentSettingsForm, SecuritySettingsForm, MileageSettingsForm,
-                    ColorSettingsForm, InvoiceNinjaSettingsForm)
+                    ColorSettingsForm, InvoiceNinjaSettingsForm, ProspectForm)
 
 logger = logging.getLogger('core')
 
@@ -119,6 +121,12 @@ def _save_attachments(request, obj):
 
 def _is_admin(user):
     return user.is_staff or user.has_perm_flag('can_manage_settings')
+
+
+def _can_view_prospects(user):
+    """Prospects are visible to everyone unless a role explicitly turns the flag
+    off. Admins always qualify."""
+    return _is_admin(user) or user.has_perm_flag('can_view_prospects')
 
 
 def _can_reset_mfa(user):
@@ -1319,6 +1327,134 @@ class ClientDeleteView(LoginRequiredMixin, View):
         client.delete()
         messages.success(request, f'{client.name} has been permanently deleted.')
         return redirect('core:client_list')
+
+
+class ProspectAccessMixin(LoginRequiredMixin):
+    """Gate prospect views on the can_view_prospects role flag."""
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _can_view_prospects(request.user):
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+
+class ProspectListView(ProspectAccessMixin, ListView):
+    model = Prospect
+    template_name = 'core/prospect_list.html'
+    context_object_name = 'prospects'
+    paginate_by = 25
+
+    def get_queryset(self):
+        qs = Prospect.objects.select_related('promoted_to')
+        search = self.request.GET.get('search')
+        if search:
+            qs = qs.filter(
+                Q(contact_first_name__icontains=search) |
+                Q(contact_last_name__icontains=search) |
+                Q(company__icontains=search) |
+                Q(email__icontains=search)
+            )
+        status = self.request.GET.get('status')
+        if status in dict(Prospect.STATUS_CHOICES):
+            qs = qs.filter(status=status)
+        elif not self.request.GET.get('show_closed'):
+            # Default view hides the finished leads (won/lost).
+            qs = qs.exclude(status__in=['won', 'lost'])
+        return qs
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['active_status'] = self.request.GET.get('status', '')
+        ctx['show_closed'] = bool(self.request.GET.get('show_closed'))
+        ctx['status_choices'] = Prospect.STATUS_CHOICES
+        return ctx
+
+
+class ProspectDetailView(ProspectAccessMixin, DetailView):
+    model = Prospect
+    template_name = 'core/prospect_detail.html'
+    context_object_name = 'prospect'
+
+
+class ProspectCreateView(ProspectAccessMixin, CreateView):
+    model = Prospect
+    form_class = ProspectForm
+    template_name = 'core/prospect_form.html'
+
+    def form_valid(self, form):
+        form.instance.created_by = self.request.user
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse_lazy('core:prospect_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['title'] = 'New Prospect'
+        ctx['cancel_url'] = reverse_lazy('core:prospect_list')
+        return ctx
+
+
+class ProspectUpdateView(ProspectAccessMixin, UpdateView):
+    model = Prospect
+    form_class = ProspectForm
+    template_name = 'core/prospect_form.html'
+
+    def get_success_url(self):
+        return reverse_lazy('core:prospect_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['title'] = f'Edit {self.object.display_name}'
+        ctx['cancel_url'] = reverse_lazy('core:prospect_detail', kwargs={'pk': self.object.pk})
+        return ctx
+
+
+class ProspectPromoteView(ProspectAccessMixin, View):
+    def post(self, request, pk):
+        prospect = get_object_or_404(Prospect, pk=pk)
+        if prospect.is_promoted:
+            messages.info(request, f'{prospect.display_name} is already a client.')
+            return redirect('core:client_detail', pk=prospect.promoted_to_id)
+        try:
+            client = prospect.promote_to_client()
+        except IntegrityError:
+            messages.error(
+                request,
+                f'A client named "{prospect.company or prospect.contact_name}" already '
+                'exists. Rename the prospect or merge manually before promoting.'
+            )
+            return redirect('core:prospect_detail', pk=pk)
+        messages.success(request, f'{prospect.display_name} promoted to client.')
+        return redirect('core:client_detail', pk=client.pk)
+
+
+class ProspectMarkLostView(ProspectAccessMixin, View):
+    def post(self, request, pk):
+        prospect = get_object_or_404(Prospect, pk=pk)
+        if prospect.is_promoted:
+            messages.error(request, 'A promoted prospect cannot be marked lost.')
+            return redirect('core:prospect_detail', pk=pk)
+        prospect.status = 'lost'
+        prospect.save(update_fields=['status', 'updated_at'])
+        messages.success(request, f'{prospect.display_name} marked lost.')
+        return redirect('core:prospect_detail', pk=pk)
+
+
+class ProspectDeleteView(ProspectAccessMixin, View):
+    def post(self, request, pk):
+        prospect = get_object_or_404(Prospect, pk=pk)
+        if prospect.is_promoted:
+            messages.error(
+                request,
+                'This prospect was promoted to a client and cannot be deleted '
+                '(it would orphan the link). Delete the client instead if needed.'
+            )
+            return redirect('core:prospect_detail', pk=pk)
+        name = prospect.display_name
+        prospect.delete()
+        messages.success(request, f'Prospect {name} deleted.')
+        return redirect('core:prospect_list')
 
 
 class InvoiceExportView(LoginRequiredMixin, View):
@@ -2862,6 +2998,7 @@ _ROLE_FLAGS = [
     ('can_manage_kb',              'Manage KB'),
     ('can_view_device_credentials','View Device Credentials'),
     ('can_reset_user_mfa',         'Reset User MFA'),
+    ('can_view_prospects',         'View Prospects'),
 ]
 
 

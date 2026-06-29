@@ -1,0 +1,100 @@
+{% extends "core/base.html" %}
+
+{% block title %}{{ title }} - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow page-title-bar">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        <h1 class="text-2xl font-bold text-gray-900">{{ title }}</h1>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl space-y-6">
+
+    <form method="post" class="space-y-6">
+        {% csrf_token %}
+
+        {% if form.errors %}
+        <div class="bg-red-50 border border-red-200 rounded-md p-4">
+            <p class="text-sm font-medium text-red-800">Please fix the errors below:</p>
+            <ul class="mt-2 text-sm text-red-700 list-disc list-inside">
+                {% for field in form %}
+                    {% for error in field.errors %}
+                        <li>{{ field.label }}: {{ error }}</li>
+                    {% endfor %}
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <!-- Contact (always first) -->
+        <div class="bg-white rounded-lg shadow p-6"
+             x-data="{ clientType: '{{ form.client_type.value|default:'residential' }}' }"
+             @change="if ($event.target.name === 'client_type') clientType = $event.target.value">
+            <h2 class="text-base font-semibold text-gray-900 mb-4">Contact</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">First Name <span class="text-red-500">*</span></label>
+                    {{ form.contact_first_name }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Last Name <span class="text-gray-400 font-normal">(optional)</span></label>
+                    {{ form.contact_last_name }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                    {{ form.email }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                    {{ form.phone }}
+                </div>
+            </div>
+        </div>
+
+        <!-- Company / type -->
+        <div class="bg-white rounded-lg shadow p-6"
+             x-data="{ clientType: '{{ form.client_type.value|default:'residential' }}' }"
+             @change="if ($event.target.name === 'client_type') clientType = $event.target.value">
+            <h2 class="text-base font-semibold text-gray-900 mb-4">Type</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Client Type</label>
+                    {{ form.client_type }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">
+                        Company
+                        <span class="text-gray-400 font-normal" x-text="clientType === 'business' ? '(required)' : '(optional)'"></span>
+                    </label>
+                    {{ form.company }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Stage</label>
+                    {{ form.status }}
+                </div>
+            </div>
+        </div>
+
+        <!-- Notes -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-base font-semibold text-gray-900 mb-4">Notes</h2>
+            {{ form.notes }}
+        </div>
+
+        <div class="flex gap-3">
+            <button type="submit"
+                    class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium">
+                Save Prospect
+            </button>
+            <a href="{{ cancel_url }}"
+               class="px-6 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">
+                Cancel
+            </a>
+        </div>
+
+    </form>
+</div>
+{% endblock %}
