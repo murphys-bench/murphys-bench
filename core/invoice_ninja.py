@@ -195,7 +195,7 @@ def check_invoice_status(work_order):
     data = _request('GET', f'/invoices/{in_id}')
     invoice_data = data.get('data', {})
     status_id = invoice_data.get('status_id')
-    label = _IN_STATUS_LABELS.get(status_id, f'Unknown ({status_id})')
+    label = _IN_STATUS_LABELS.get(int(status_id), f'Unknown ({status_id})') if status_id is not None else 'Unknown'
 
     invoice, _ = Invoice.objects.get_or_create(work_order=work_order)
     invoice.invoice_ninja_id = in_id
