@@ -2383,3 +2383,133 @@ def test_device_edit_save_and_create_wo_redirects(client, client_obj, admin_user
     })
     assert resp.status_code == 302
     assert resp.url == reverse('core:work_order_create') + f'?device={device.pk}'
+
+
+# ── Slice 0: Prospect (customer spine) ──────────────────────────────────────
+
+from core.models import Prospect, Role
+
+
+@pytest.mark.django_db
+def test_prospect_create_via_view(client, admin_user):
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:prospect_create'), {
+        'contact_first_name': 'Dana',
+        'contact_last_name': 'Reyes',
+        'company': '',
+        'client_type': 'residential',
+        'email': 'dana@example.com',
+        'phone': '',
+        'status': 'new',
+        'notes': '',
+    })
+    assert resp.status_code == 302
+    p = Prospect.objects.get(email='dana@example.com')
+    assert p.created_by == admin_user
+    assert p.status == 'new'
+
+
+@pytest.mark.django_db
+def test_business_prospect_requires_company():
+    from core.forms import ProspectForm
+    form = ProspectForm(data={
+        'contact_first_name': 'Sam', 'contact_last_name': 'Lee', 'company': '',
+        'client_type': 'business', 'email': '', 'phone': '', 'status': 'new', 'notes': '',
+    })
+    assert not form.is_valid()
+    assert 'company' in form.errors
+
+
+@pytest.mark.django_db
+def test_promote_business_creates_client_and_contact(client, admin_user):
+    p = Prospect.objects.create(
+        contact_first_name='Pat', contact_last_name='Kim', company='Globex',
+        client_type='business', email='pat@globex.com', phone='555-1212',
+    )
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:prospect_promote', args=[p.pk]))
+    assert resp.status_code == 302
+
+    p.refresh_from_db()
+    assert p.is_promoted
+    assert p.status == 'won'
+    new_client = p.promoted_to
+    assert new_client.name == 'Globex'
+    assert new_client.client_type == 'business'
+    contact = new_client.contacts.get()
+    assert (contact.first_name, contact.last_name) == ('Pat', 'Kim')
+    assert contact.is_primary
+
+
+@pytest.mark.django_db
+def test_promote_residential_names_client_for_person(client, admin_user):
+    p = Prospect.objects.create(
+        contact_first_name='Jo', contact_last_name='Park',
+        client_type='residential', email='jo@example.com',
+    )
+    client.force_login(admin_user)
+    client.post(reverse('core:prospect_promote', args=[p.pk]))
+    p.refresh_from_db()
+    assert p.promoted_to.name == 'Jo Park'
+    assert p.promoted_to.client_type == 'residential'
+
+
+@pytest.mark.django_db
+def test_prospect_cannot_be_promoted_twice(admin_user):
+    p = Prospect.objects.create(
+        contact_first_name='One', contact_last_name='Time', company='OnceCo',
+        client_type='business',
+    )
+    first = p.promote_to_client()
+    second = p.promote_to_client()
+    assert first.pk == second.pk
+    assert Client.objects.filter(name='OnceCo').count() == 1
+
+
+@pytest.mark.django_db
+def test_promoted_prospect_cannot_be_deleted(client, admin_user):
+    p = Prospect.objects.create(
+        contact_first_name='No', contact_last_name='Del', company='KeepCo',
+        client_type='business',
+    )
+    p.promote_to_client()
+    client.force_login(admin_user)
+    client.post(reverse('core:prospect_delete', args=[p.pk]))
+    assert Prospect.objects.filter(pk=p.pk).exists()
+
+
+@pytest.mark.django_db
+def test_prospect_list_hidden_when_role_blocks(client):
+    role = Role.objects.create(name='No Prospects', can_view_prospects=False)
+    user = User.objects.create_user(username='blocked', password='x', is_staff=False)
+    user.role_obj = role
+    user.save()
+    client.force_login(user)
+    resp = client.get(reverse('core:prospect_list'))
+    assert resp.status_code == 403
+
+
+@pytest.mark.django_db
+def test_mark_lost_excludes_from_default_list(client, admin_user):
+    p = Prospect.objects.create(
+        contact_first_name='Lost', contact_last_name='Lead',
+        client_type='residential',
+    )
+    client.force_login(admin_user)
+    client.post(reverse('core:prospect_mark_lost', args=[p.pk]))
+    p.refresh_from_db()
+    assert p.status == 'lost'
+    resp = client.get(reverse('core:prospect_list'))
+    assert p not in resp.context['prospects']
+
+
+@pytest.mark.django_db
+def test_prospect_form_and_detail_render(client, admin_user):
+    p = Prospect.objects.create(
+        contact_first_name='Ren', contact_last_name='Vox', company='Vox LLC',
+        client_type='business', email='r@vox.com',
+    )
+    client.force_login(admin_user)
+    assert client.get(reverse('core:prospect_create')).status_code == 200
+    assert client.get(reverse('core:prospect_detail', args=[p.pk])).status_code == 200
+    assert client.get(reverse('core:prospect_edit', args=[p.pk])).status_code == 200
