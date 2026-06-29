@@ -121,8 +121,8 @@ _(Screenshots use demo data.)_
 ## Tech stack
 
 Python 3.12 · Django 5.2 LTS · HTMX + Alpine.js + Tailwind — **all self-hosted, no CDN** (Tailwind
-is compiled to a static stylesheet via the standalone CLI on deploy; no Node) · SQLite by
-default (PostgreSQL optional) · Gunicorn + Nginx. It runs **behind a
+is compiled to a static stylesheet via the standalone CLI on deploy; no Node) · SQLite
+(single file, no DB server) · Gunicorn + Nginx. It runs **behind a
 TLS-terminating reverse proxy** (Cloudflare Tunnel, Caddy, or Nginx) rather than terminating
 TLS itself — the standard Django model; see [`docs/deployment-tls.md`](docs/deployment-tls.md). A
 Content-Security-Policy is enforced in front of the app.

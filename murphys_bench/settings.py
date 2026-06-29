@@ -113,31 +113,15 @@ TEMPLATES = [
 WSGI_APPLICATION = 'murphys_bench.wsgi.application'
 
 # Database Configuration
-# For development: SQLite (quick testing)
-# For production: PostgreSQL (recommended)
-# Set DB_ENGINE env var to switch
-
-DB_ENGINE = config('DB_ENGINE', default='sqlite3')
-
-if DB_ENGINE == 'postgresql':
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': config('DB_NAME', default='murphys_bench'),
-            'USER': config('DB_USER', default='postgres'),
-            'PASSWORD': config('DB_PASSWORD', default=''),
-            'HOST': config('DB_HOST', default='localhost'),
-            'PORT': config('DB_PORT', default='5432'),
-        }
+# Murphy's Bench runs on SQLite (WAL mode) in dev and production — a deliberate
+# decision for a single-node, small-shop deployment (see CLAUDE.md "Key Decisions").
+# The off-site backup is a consistent SQLite snapshot (scripts/mb_backup.sh).
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
-else:
-    # SQLite for development
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+}
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [

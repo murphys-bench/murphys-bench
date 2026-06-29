@@ -26,7 +26,7 @@ internal network or a small VM.
 | Piece | What it is |
 |-------|-----------|
 | Ubuntu 24.04 LTS | Host OS (Python 3.12 is the system default) |
-| PostgreSQL 16 *(optional)* | Database — default is SQLite (a file, no DB server needed) |
+| SQLite | Database — a single file, built into Python; no DB server to install |
 | Gunicorn | Python app server (runs Django) |
 | Nginx | Reverse proxy in front of Gunicorn; serves static files |
 | Cloudflare Tunnel | Public HTTPS access without opening inbound ports |
@@ -130,35 +130,11 @@ venv/bin/pip install -r requirements.txt
 
 ---
 
-## 5. (Optional) PostgreSQL database
+## 5. Database
 
-> **Note:** Murphy's Bench defaults to **SQLite** (a single file, no database server) and the SCS
-> production deployment deliberately uses SQLite. This section is only needed if you set
-> `DB_ENGINE=postgresql` in `.env`. To use the default SQLite, skip this section entirely.
-
-Install the Postgres driver into the venv (it is **not** in `requirements.txt`, since
-the default SQLite build doesn't need it):
-
-```bash
-venv/bin/pip install psycopg2-binary
-```
-
-```bash
-sudo -u postgres psql <<'SQL'
-CREATE DATABASE murphys_bench;
-CREATE USER mb_user WITH PASSWORD 'CHANGE_ME_STRONG_PASSWORD';
-ALTER ROLE mb_user SET client_encoding TO 'utf8';
-ALTER ROLE mb_user SET default_transaction_isolation TO 'read committed';
-ALTER ROLE mb_user SET timezone TO 'UTC';
-GRANT ALL PRIVILEGES ON DATABASE murphys_bench TO mb_user;
-SQL
-```
-
-On PostgreSQL 16 you may also need to grant schema rights:
-
-```bash
-sudo -u postgres psql -d murphys_bench -c "GRANT ALL ON SCHEMA public TO mb_user;"   # ⚠ VERIFY
-```
+Nothing to install or configure — Murphy's Bench uses **SQLite**, a single file
+(`db.sqlite3`) created automatically when you run migrations (step 7). The off-site
+backup is a consistent SQLite snapshot (`scripts/mb_backup.sh`).
 
 ---
 
@@ -189,14 +165,7 @@ SECRET_KEY=<generated above>
 FIELD_ENCRYPTION_KEY=<generated above>
 ALLOWED_HOSTS=demo.example.com    # the public hostname (or the LAN IP for an internal-only box)
 
-# Database: MB defaults to SQLite (a file at db.sqlite3) — no DB_* settings needed.
-# To use PostgreSQL instead (optional — see step 5), uncomment these:
-# DB_ENGINE=postgresql
-# DB_NAME=murphys_bench
-# DB_USER=mb_user
-# DB_PASSWORD=<the password from step 5>
-# DB_HOST=localhost
-# DB_PORT=5432
+# Database: SQLite (a file at db.sqlite3) — no DB settings needed.
 
 # HTTPS hardening — turn ON only once Cloudflare HTTPS is confirmed end-to-end (step 9).
 # For a plain-HTTP LAN-only box, leave all four OFF (the defaults) or internal access breaks.

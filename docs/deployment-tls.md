@@ -10,7 +10,7 @@ is the standard, correct architecture for a Django application, not an omission.
 
 ## The design principle
 
-MB is an application (Django + Gunicorn + PostgreSQL), not a static website. Like
+MB is an application (Django + Gunicorn + SQLite), not a static website. Like
 virtually every self-hosted web app of its kind, it expects to sit **behind a
 reverse proxy** (nginx, Caddy, Traefik, a Cloudflare Tunnel, or your existing web
 server). The proxy is the public-facing piece that:
