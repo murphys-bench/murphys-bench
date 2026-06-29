@@ -20,7 +20,7 @@ python manage.py runserver
 # http://localhost:8000   ·   local-dev login: admin / password123
 ```
 
-Local dev uses **SQLite** and a local `.env` with `DEBUG=True`. Production also runs **SQLite**, with `DEBUG=False`. (The app *can* use PostgreSQL via `DB_ENGINE=postgresql`, but the SCS deployment deliberately uses SQLite.)
+Local dev uses **SQLite** and a local `.env` with `DEBUG=True`. Production also runs **SQLite**, with `DEBUG=False`. SQLite is the only supported database — a deliberate decision for a single-node, small-shop deployment.
 
 ### Before committing
 

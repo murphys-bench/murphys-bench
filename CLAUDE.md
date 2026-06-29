@@ -465,7 +465,7 @@ Ticket (intake + replies) → Triage → Work Order (repair) → Notes/Checklist
 ### Tech Stack
 - **Backend**: Python 3.12 / Django 5.2.15 LTS
 - **Frontend**: Tailwind CSS (compiled & self-hosted at `static/css/app.css` via the standalone CLI — `scripts/build_css.sh`, `tailwind.config.js`; built on deploy, no Node), HTMX + Alpine.js (self-hosted/pinned in `static/js/`). **Fully CDN-free as of Jun 23 2026** — including the admin reports page (Chart.js 4.4.0 + html2pdf 0.10.1 also vendored to `static/js/`).
-- **Database**: SQLite (dev and production; PostgreSQL supported via DB_ENGINE but not used)
+- **Database**: SQLite (dev and production — a single file, no DB server; the only supported DB)
 - **Auth**: Django session auth + django-two-factor-auth (TOTP), LoginRequiredMixin on all views
 
 ### Project Structure
@@ -840,7 +840,7 @@ Contacts, Devices, and Work Orders as peer objects. The legacy app — and corre
 - **WorkOrder free-text problem**: `WorkOrder.reported_problem` (TextField, mig 0064) is the freeform "Reported Issue / Work Requested" — for work that doesn't fit a predefined `repair_type` plus ad-hoc client asks. Bench-editable; works on standalone WOs (no ticket). `TicketConvertView` carries `ticket.description` into it (it was silently dropped before). Shown on WO form/detail + the repair report ("Problem / Task"). `repair_type` is optional, not the only way to state the issue. See memory `project_mb_wo_reported_issue`.
 - **Work order numbers** auto-generated as `WO-YYYYMMDD-NNNN`
 - **Ticket numbers** auto-generated as `TKT-YYYYMMDD-NNNN`
-- **SQLite for dev and production** — PostgreSQL supported via DB_ENGINE but not used (decision Jun 21)
+- **SQLite for dev and production** — the only supported DB (decision Jun 21; the unused Postgres option/branch was removed Jun 28, the dead servers decommissioned)
 - **Visual polish** — shipped session 15: color-coded dashboard tiles, SVG icons replacing emoji, device type icon grid
 - **GitHub**: Private repo, push after each working feature
 - **HTMX** for inline interactions (notes, replies, checklist toggling)

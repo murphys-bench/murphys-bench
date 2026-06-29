@@ -7,7 +7,7 @@
 > - **H — Process 🔴 → ✅** *(closed)* — a dedicated **`mb-test` staging VM** ends direct-on-prod editing; a **CI gate** (pytest + `check` on every push) is live; deploys run mb-test → prod → MB2.
 > - **B — PBS backup 🔴 → ✅** *(closed Jun 22, verified Jun 24)* — VMID collisions resolved, daily verify + centralized prune.
 > - **E — dev Python 3.9 vs prod 3.12 → ✅** *(closed)* — both dev Macs aligned to Py3.12.
-> - **D residuals — still open:** the unused PostgreSQL server (decommission) and plain-HTTP-on-LAN (TLS is a deliberate, documented decision, not a gap). `fail2ban`/`pip-audit` loop remain Tier-3 hygiene.
+> - **D residuals:** ✅ unused PostgreSQL server decommissioned (Jun 28 — purged on prod & MB2, code branch removed, both verified SQLite). Still open: plain-HTTP-on-LAN (TLS is a deliberate, documented decision, not a gap). `fail2ban`/`pip-audit` loop remain Tier-3 hygiene.
 >
 > See the repo's `TODO.md` and `docs/next-session-prompt.md` for the live remediation state.
 

@@ -24,8 +24,8 @@ runtime path is mostly there — this is about auditing the *code* for baked-in 
 - [ ] Move whatever that finds out of code into `.env` / Django settings.
       (`COMPANY_NAME`, `ALLOWED_HOSTS`, SMTP creds, encryption key are already env-driven.)
 - [ ] Confirm nothing reads from a hardcoded path that assumes your homelab layout.
-- [~] Ship a `sample.env` with fake placeholders + inline comments. **`.env.example`
-      exists** — but fix its stale default (`DB_ENGINE=postgresql`; MB defaults to SQLite)
+- [x] Ship a `sample.env` with fake placeholders + inline comments. **`.env.example`
+      exists**; the stale Postgres `DB_*` block was removed Jun 28 (MB is SQLite-only),
       so a copy-paste install isn't misled.
 - [ ] Add a minimal demo fixture: one fake client, one fake device, one fake ticket —
       enough that a fresh install shows something instead of an empty shell.

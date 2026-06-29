@@ -2,7 +2,7 @@
 
 **Version**: 2.0  
 **Last Updated**: June 26, 2026  
-**Database**: SQLite (production and dev; PostgreSQL supported via DB_ENGINE but not used)  
+**Database**: SQLite (production and dev — a single file, no DB server)  
 **Migrations**: through 0065  
 
 > This reference is **generated from `core/models.py`** (the live models, as of
