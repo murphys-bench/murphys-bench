@@ -1878,6 +1878,18 @@ def test_wo_notes_have_order_toggle_defaulting_newest_first(client, client_obj, 
     assert 'Newest first' in body and 'Oldest first' in body
 
 
+@pytest.mark.django_db
+def test_role_edit_page_renders(client, admin_user):
+    """Regression: role_form.html used the `getfield` filter without {% load mb_icons %},
+    so /roles/<id>/edit/ 500'd with TemplateSyntaxError. Lock it at 200."""
+    from core.models import Role
+    role = Role.objects.create(name='Bench Lead')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:role_edit', args=[role.pk]))
+    assert resp.status_code == 200
+    assert 'Edit Role' in resp.content.decode()
+
+
 # ── SLA response deadline: first staff reply meets it permanently ───────────
 
 @pytest.mark.django_db
