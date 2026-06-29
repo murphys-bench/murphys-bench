@@ -434,8 +434,16 @@
         </div>
 
         <!-- Activity -->
-        <div id="tab-activity" class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4">Activity</h2>
+        <div id="tab-activity" class="bg-white rounded-lg shadow p-6"
+             x-data="{ order: localStorage.getItem('mb_wo_notes_order') || 'newest' }"
+             x-init="$watch('order', v => localStorage.setItem('mb_wo_notes_order', v))">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-900">Activity</h2>
+                <button type="button"
+                        @click="order = (order === 'newest' ? 'oldest' : 'newest')"
+                        class="text-xs font-medium text-blue-600 hover:text-blue-800"
+                        x-text="order === 'newest' ? 'Newest first ↓' : 'Oldest first ↑'"></button>
+            </div>
             {% if work_order.ticket %}
             <div class="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4" x-data="{ open: false }">
                 <div class="flex items-center justify-between gap-2">
@@ -466,7 +474,8 @@
                 <div id="wo-msg-result"></div>
             </div>
             {% endif %}
-            <div id="notes-list" class="space-y-4 mb-6">
+            <div id="notes-list" class="flex gap-4 mb-6"
+                 :class="order === 'newest' ? 'flex-col-reverse' : 'flex-col'">
                 {% for note in work_order.notes.all %}
                     {% include "core/partials/note_item.html" %}
                 {% empty %}

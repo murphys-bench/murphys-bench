@@ -1862,6 +1862,22 @@ def test_wo_detail_shows_reported_problem(client, client_obj, admin_user):
     assert 'check why battery drains overnight' in resp.content.decode()
 
 
+@pytest.mark.django_db
+def test_wo_notes_have_order_toggle_defaulting_newest_first(client, client_obj, admin_user):
+    """WO activity notes are reorderable (Jim's request); default newest-first, sticky
+    per-browser via localStorage. Ordering is client-side, so assert the markup + default."""
+    wo = WorkOrder.objects.create(client=client_obj)
+    client.force_login(admin_user)
+    body = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
+    # localStorage-backed preference with a newest-first default
+    assert "mb_wo_notes_order" in body
+    assert "'newest'" in body
+    # the reverse-on-newest binding drives the visual order without touching DOM/HTMX swap
+    assert "flex-col-reverse" in body
+    # a user-facing toggle exists
+    assert 'Newest first' in body and 'Oldest first' in body
+
+
 # ── SLA response deadline: first staff reply meets it permanently ───────────
 
 @pytest.mark.django_db
