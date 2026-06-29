@@ -1638,11 +1638,10 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
 
     def form_valid(self, form):
         new_status = form.cleaned_data.get('status')
-        if new_status in ('resolved', 'closed'):
-            wo = getattr(self.object, 'work_order_created', None)
-            if wo and wo.status not in WO_CLOSED_STATUSES:
-                form.add_error('status', f'Cannot close this ticket — linked work order {wo.work_order_number} is still open.')
-                return self.form_invalid(form)
+        # NOTE: MB deliberately does NOT block closing a ticket whose linked WO is
+        # still open. How a shop sequences ticket-close vs WO-completion is a policy
+        # decision that belongs to the shop, not the software. (A WO completing still
+        # never auto-closes its ticket — see AUTO_RESOLVE_TICKET_ON_WO_CLOSE.)
         # If client changed, clear device (it belongs to the old client)
         new_client = form.cleaned_data.get('client')
         if new_client and self.object.client_id != new_client.pk:
@@ -4660,11 +4659,7 @@ class TicketStatusUpdateView(LoginRequiredMixin, View):
         new_status = request.POST.get('status', '').strip()
         if not new_status:
             return redirect('core:ticket_detail', pk=pk)
-        if new_status in TICKET_CLOSED_STATUSES:
-            wo = getattr(ticket, 'work_order_created', None)
-            if wo and wo.status not in WO_CLOSED_STATUSES:
-                messages.error(request, f'Cannot close — linked work order {wo.work_order_number} is still open.')
-                return redirect('core:ticket_detail', pk=pk)
+        # No block on closing a ticket with an open linked WO — see TicketUpdateView.form_valid.
         old_status = ticket.status
         ticket.status = new_status
         if new_status in TICKET_CLOSED_STATUSES and ticket.wo_complete:
