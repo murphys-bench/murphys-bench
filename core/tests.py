@@ -2513,3 +2513,48 @@ def test_prospect_form_and_detail_render(client, admin_user):
     assert client.get(reverse('core:prospect_create')).status_code == 200
     assert client.get(reverse('core:prospect_detail', args=[p.pk])).status_code == 200
     assert client.get(reverse('core:prospect_edit', args=[p.pk])).status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Slice 1 — IN status check
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_check_invoice_status_records_label(admin_user):
+    """check_invoice_status() writes in_status + in_status_checked_at onto the Invoice."""
+    from unittest.mock import patch
+    from core import invoice_ninja
+    from core.models import Invoice, WorkOrder, Client
+
+    c = Client.objects.create(name='StatusCo')
+    wo = WorkOrder.objects.create(client=c, invoice_ninja_id='abc123')
+    Invoice.objects.get_or_create(work_order=wo)
+
+    fake_response = {'data': {'id': 'abc123', 'status_id': 4}}
+    with patch('core.invoice_ninja._request', return_value=fake_response):
+        label = invoice_ninja.check_invoice_status(wo)
+
+    assert label == 'Paid'
+    inv = Invoice.objects.get(work_order=wo)
+    assert inv.in_status == 'Paid'
+    assert inv.invoice_ninja_id == 'abc123'
+    assert inv.in_status_checked_at is not None
+
+
+@pytest.mark.django_db
+def test_billing_check_in_view_updates_card(client, admin_user):
+    """POST to wo_billing_check_in re-renders billing_card with IN status."""
+    from unittest.mock import patch
+    from core.models import Invoice, WorkOrder, Client
+
+    c = Client.objects.create(name='CheckCo')
+    wo = WorkOrder.objects.create(client=c, invoice_ninja_id='xyz999')
+    Invoice.objects.get_or_create(work_order=wo)
+
+    client.force_login(admin_user)
+    fake_response = {'data': {'id': 'xyz999', 'status_id': 2}}
+    with patch('core.invoice_ninja._request', return_value=fake_response):
+        resp = client.post(reverse('core:wo_billing_check_in', args=[wo.pk]))
+
+    assert resp.status_code == 200
+    assert b'Sent' in resp.content

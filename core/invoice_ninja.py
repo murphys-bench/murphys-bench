@@ -166,6 +166,46 @@ def _line_items_payload(work_order):
     return items
 
 
+_IN_STATUS_LABELS = {
+    1: 'Draft',
+    2: 'Sent',
+    3: 'Partial',
+    4: 'Paid',
+    5: 'Cancelled',
+    6: 'Reversed',
+    -1: 'Overdue',
+}
+
+
+def check_invoice_status(work_order):
+    """Read the current status of a pushed invoice from IN and record it on the Invoice row.
+
+    Requires work_order.invoice_ninja_id to be set (i.e. the WO was already pushed).
+    Updates Invoice.in_status + Invoice.in_status_checked_at; does NOT touch billing_status.
+    Returns the human-readable IN status string.
+    Raises InvoiceNinjaError on any communication or configuration problem.
+    """
+    from django.utils import timezone
+    from .models import Invoice
+
+    in_id = (work_order.invoice_ninja_id or '').strip()
+    if not in_id:
+        raise InvoiceNinjaError('This work order has not been pushed to Invoice Ninja yet.')
+
+    data = _request('GET', f'/invoices/{in_id}')
+    invoice_data = data.get('data', {})
+    status_id = invoice_data.get('status_id')
+    label = _IN_STATUS_LABELS.get(status_id, f'Unknown ({status_id})')
+
+    invoice, _ = Invoice.objects.get_or_create(work_order=work_order)
+    invoice.invoice_ninja_id = in_id
+    invoice.in_status = label
+    invoice.in_status_checked_at = timezone.now()
+    invoice.save(update_fields=['invoice_ninja_id', 'in_status', 'in_status_checked_at'])
+
+    return label
+
+
 def push_work_order(work_order):
     """Create a DRAFT invoice in IN from the WO's priced lines.
 

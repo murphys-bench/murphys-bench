@@ -46,6 +46,33 @@
         <div class="mb-3 p-2 bg-gray-50 rounded text-xs text-gray-600 whitespace-pre-wrap">{{ invoice.notes }}</div>
         {% endif %}
 
+        <!-- Invoice Ninja status -->
+        {% if work_order.invoice_ninja_id %}
+        <div class="mb-3 border-t border-gray-100 pt-3">
+            <div class="flex items-center justify-between gap-2">
+                <div class="text-xs text-gray-500">
+                    IN status:
+                    {% if invoice.in_status %}
+                    <span class="font-medium text-gray-700">{{ invoice.in_status }}</span>
+                    {% if invoice.in_status_checked_at %}
+                    <span class="text-gray-400 ml-1">— checked {{ invoice.in_status_checked_at|date:"M d g:ia" }}</span>
+                    {% endif %}
+                    {% else %}
+                    <span class="text-gray-400">not checked</span>
+                    {% endif %}
+                </div>
+                <form hx-post="{% url 'core:wo_billing_check_in' work_order.pk %}"
+                      hx-target="#billing-card" hx-swap="outerHTML">
+                    {% csrf_token %}
+                    <button type="submit"
+                            class="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600 hover:bg-gray-200 font-medium whitespace-nowrap">
+                        Check IN
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- Quick action buttons -->
         <div class="flex flex-wrap gap-2">
             {% if invoice.billing_status == 'uninvoiced' %}
