@@ -1145,8 +1145,9 @@ class Estimate(models.Model):
 
     @property
     def is_locked(self):
-        """Read-only once accepted — the WO it spawned is the live record now."""
-        return self.status == 'accepted'
+        """Read-only once accepted (the WO it spawned is the live record now) or
+        once superseded by a revision (the new linked estimate is the live one)."""
+        return self.status == 'accepted' or self.revisions.exists()
 
     @property
     def line_items_total(self):

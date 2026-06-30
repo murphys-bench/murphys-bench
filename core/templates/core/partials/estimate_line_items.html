@@ -26,6 +26,7 @@ target differs (#estimate-line-items-section vs #work-performed-section).
             <div class="text-sm text-gray-700 shrink-0 mt-0.5 text-right min-w-[64px]">
                 {% if entry.line_total != None %}${{ entry.line_total|floatformat:2 }}{% else %}<span class="text-xs text-gray-300 italic">no price</span>{% endif %}
             </div>
+            {% if not estimate.is_locked %}
             <div class="flex gap-2 shrink-0 mt-0.5">
                 <button type="button" @click="editing = true" title="Edit"
                         class="text-gray-400 hover:text-blue-500 transition-colors">
@@ -51,6 +52,7 @@ target differs (#estimate-line-items-section vs #work-performed-section).
                     </button>
                 </form>
             </div>
+            {% endif %}
         </div>
         <!-- Edit form -->
         <div x-show="editing" x-cloak class="px-3 py-2">

@@ -2825,3 +2825,120 @@ def test_quote_print_view_renders_with_total(client, admin_user, client_obj):
     assert resp.status_code == 200
     assert est.estimate_number.encode() in resp.content
     assert b'75.00' in resp.content
+
+
+# ---------------------------------------------------------------------------
+# Slice 2c — Estimate lifecycle: accept / decline / revise
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_accept_client_estimate_creates_wo_with_copied_lines(client, admin_user, client_obj):
+    from decimal import Decimal
+    est = Estimate.objects.create(client=client_obj, scope='Tune-up + SSD')
+    est.line_items.create(kind='labor', description='Tune-up', quantity=1, unit_price=Decimal('80'))
+    est.line_items.create(kind='part', description='SSD', quantity=2, unit_price=Decimal('50'))
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_accept', args=[est.pk]))
+
+    assert resp.status_code == 302
+    est.refresh_from_db()
+    assert est.status == 'accepted'
+    assert est.accepted_at is not None
+    assert est.work_order is not None
+    assert est.is_locked
+    wo = est.work_order
+    assert wo.client_id == client_obj.pk
+    assert wo.reported_problem == 'Tune-up + SSD'
+    assert wo.line_items.count() == 2
+    assert wo.line_items_total == Decimal('180')
+
+
+@pytest.mark.django_db
+def test_accept_prospect_estimate_promotes_and_reanchors(client, admin_user):
+    from core.models import Client as ClientModel
+    prospect = _Prospect.objects.create(
+        contact_first_name='Pat', contact_last_name='Quinn',
+        client_type='business', company='Quinn LLC', email='pat@quinn.example',
+    )
+    est = Estimate.objects.create(prospect=prospect, scope='Network setup')
+    est.line_items.create(kind='labor', description='Install', quantity=1, unit_price='200')
+    client.force_login(admin_user)
+    client.post(reverse('core:estimate_accept', args=[est.pk]))
+
+    est.refresh_from_db()
+    prospect.refresh_from_db()
+    assert prospect.is_promoted
+    new_client = ClientModel.objects.get(name='Quinn LLC')
+    assert new_client.contacts.filter(is_primary=True).exists()
+    assert est.client_id == new_client.pk
+    assert est.prospect_id is None
+    assert est.status == 'accepted'
+    assert est.work_order is not None
+
+
+@pytest.mark.django_db
+def test_accept_when_ticket_already_has_wo_creates_standalone(client, admin_user, client_obj):
+    from core.models import Ticket
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    WorkOrder.objects.create(client=client_obj, ticket=ticket)  # ticket already converted
+    est = Estimate.objects.create(client=client_obj, ticket=ticket, scope='More work')
+    est.line_items.create(kind='labor', description='Extra', quantity=1, unit_price='40')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_accept', args=[est.pk]))
+
+    assert resp.status_code == 302  # no IntegrityError
+    est.refresh_from_db()
+    assert est.status == 'accepted'
+    assert est.work_order.ticket_id is None  # standalone — didn't steal the OneToOne
+
+
+@pytest.mark.django_db
+def test_accept_rejected_from_invalid_status(client, admin_user, client_obj):
+    est = Estimate.objects.create(client=client_obj, status='declined')
+    client.force_login(admin_user)
+    client.post(reverse('core:estimate_accept', args=[est.pk]))
+    est.refresh_from_db()
+    assert est.status == 'declined'
+    assert est.work_order is None
+
+
+@pytest.mark.django_db
+def test_decline_requires_reason_and_records_it(client, admin_user, client_obj):
+    est = Estimate.objects.create(client=client_obj, status='sent')
+    client.force_login(admin_user)
+    # No reason → no transition
+    client.post(reverse('core:estimate_decline', args=[est.pk]), {'decline_reason': '  '})
+    est.refresh_from_db()
+    assert est.status == 'sent'
+    # With reason → declined
+    client.post(reverse('core:estimate_decline', args=[est.pk]), {'decline_reason': 'Too expensive'})
+    est.refresh_from_db()
+    assert est.status == 'declined'
+    assert est.decline_reason == 'Too expensive'
+
+
+@pytest.mark.django_db
+def test_revise_creates_linked_draft_and_freezes_original(client, admin_user, client_obj):
+    from decimal import Decimal
+    old = Estimate.objects.create(client=client_obj, status='sent', scope='v1')
+    old.line_items.create(kind='labor', description='Work', quantity=1, unit_price=Decimal('100'))
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_revise', args=[old.pk]))
+
+    assert resp.status_code == 302
+    new = Estimate.objects.exclude(pk=old.pk).get()
+    assert new.revision_of_id == old.pk
+    assert new.status == 'draft'
+    assert new.client_id == client_obj.pk
+    assert new.line_items.count() == 1
+    assert new.line_items_total == Decimal('100')
+    old.refresh_from_db()
+    assert old.is_locked  # superseded → read-only
+
+
+@pytest.mark.django_db
+def test_revise_rejected_from_draft(client, admin_user, client_obj):
+    old = Estimate.objects.create(client=client_obj, status='draft')
+    client.force_login(admin_user)
+    client.post(reverse('core:estimate_revise', args=[old.pk]))
+    assert Estimate.objects.count() == 1  # no revision spawned
