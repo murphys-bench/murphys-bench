@@ -1,6 +1,6 @@
 from django import forms
 from django.core.files.uploadedfile import UploadedFile
-from .models import WorkOrder, Client, Contact, ContactPhone, Device, Ticket, RepairType, HelpTopic, SLAPlan, KBCategory, KBArticle, Mileage, SiteSettings, Prospect
+from .models import WorkOrder, Client, Contact, ContactPhone, Device, Ticket, RepairType, HelpTopic, SLAPlan, KBCategory, KBArticle, Mileage, SiteSettings, Prospect, Estimate
 
 
 MAX_LOGO_DIMENSION = 2000  # px on either side — generous; we display-fit anything under this
@@ -153,6 +153,38 @@ class ProspectForm(forms.ModelForm):
         cleaned = super().clean()
         if cleaned.get('client_type') == 'business' and not cleaned.get('company'):
             self.add_error('company', 'Company name is required for a business prospect.')
+        return cleaned
+
+
+class EstimateForm(forms.ModelForm):
+    class Meta:
+        model = Estimate
+        fields = [
+            'client', 'prospect', 'ticket', 'contact', 'device',
+            'scope', 'expires_on',
+        ]
+        widgets = {
+            'client': forms.Select(attrs={'class': _PROSPECT_INPUT}),
+            'prospect': forms.Select(attrs={'class': _PROSPECT_INPUT}),
+            'ticket': forms.Select(attrs={'class': _PROSPECT_INPUT}),
+            'contact': forms.Select(attrs={'class': _PROSPECT_INPUT}),
+            'device': forms.Select(attrs={'class': _PROSPECT_INPUT}),
+            'scope': forms.Textarea(attrs={'class': _PROSPECT_INPUT, 'rows': 4, 'placeholder': "What we're quoting…"}),
+            'expires_on': forms.DateInput(attrs={'class': _PROSPECT_INPUT, 'type': 'date'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for f in ('client', 'prospect', 'ticket', 'contact', 'device', 'expires_on'):
+            self.fields[f].required = False
+
+    def clean(self):
+        cleaned = super().clean()
+        client = cleaned.get('client')
+        prospect = cleaned.get('prospect')
+        if bool(client) == bool(prospect):
+            self.add_error('client', 'Choose exactly one of Client or Prospect.')
+            self.add_error('prospect', 'Choose exactly one of Client or Prospect.')
         return cleaned
 
 
@@ -685,7 +717,7 @@ class RoleForm(forms.ModelForm):
             'can_delete_ticket', 'can_assign_ticket', 'can_reply_internal',
             'can_reply_customer', 'can_view_device_credentials', 'can_reset_user_mfa',
             'can_create_workorder', 'can_edit_workorder', 'can_close_workorder',
-            'can_view_prospects',
+            'can_view_prospects', 'can_view_estimates',
         ]
         widgets = {
             'name': forms.TextInput(attrs={'class': _INPUT}),

@@ -31,13 +31,13 @@ from .models import (
     SuppressedAddress,
     BlockedSender,
     SLAPlan, HelpTopic, TechSkill,
-    Notification, Prospect,
+    Notification, Prospect, Estimate,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
                     CompanySettingsForm, OutboundEmailSettingsForm, InboundEmailSettingsForm,
                     AttachmentSettingsForm, SecuritySettingsForm, MileageSettingsForm,
-                    ColorSettingsForm, InvoiceNinjaSettingsForm, ProspectForm)
+                    ColorSettingsForm, InvoiceNinjaSettingsForm, ProspectForm, EstimateForm)
 
 logger = logging.getLogger('core')
 
@@ -127,6 +127,12 @@ def _can_view_prospects(user):
     """Prospects are visible to everyone unless a role explicitly turns the flag
     off. Admins always qualify."""
     return _is_admin(user) or user.has_perm_flag('can_view_prospects')
+
+
+def _can_view_estimates(user):
+    """Estimates are visible to everyone unless a role explicitly turns the flag
+    off. Admins always qualify."""
+    return _is_admin(user) or user.has_perm_flag('can_view_estimates')
 
 
 def _can_reset_mfa(user):
@@ -1455,6 +1461,167 @@ class ProspectDeleteView(ProspectAccessMixin, View):
         prospect.delete()
         messages.success(request, f'Prospect {name} deleted.')
         return redirect('core:prospect_list')
+
+
+class EstimateAccessMixin(LoginRequiredMixin):
+    """Gate estimate views on the can_view_estimates role flag."""
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _can_view_estimates(request.user):
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+
+class EstimateListView(EstimateAccessMixin, ListView):
+    model = Estimate
+    template_name = 'core/estimate_list.html'
+    context_object_name = 'estimates'
+    paginate_by = 25
+
+    def get_queryset(self):
+        qs = Estimate.objects.select_related('client', 'prospect')
+        search = self.request.GET.get('search')
+        if search:
+            qs = qs.filter(
+                Q(estimate_number__icontains=search) |
+                Q(client__name__icontains=search) |
+                Q(prospect__contact_first_name__icontains=search) |
+                Q(prospect__contact_last_name__icontains=search) |
+                Q(prospect__company__icontains=search) |
+                Q(scope__icontains=search)
+            )
+        status = self.request.GET.get('status')
+        if status in dict(Estimate.STATUS_CHOICES):
+            qs = qs.filter(status=status)
+        elif not self.request.GET.get('show_closed'):
+            # Default view hides the finished estimates.
+            qs = qs.exclude(status__in=['accepted', 'declined', 'expired'])
+        return qs
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['active_status'] = self.request.GET.get('status', '')
+        ctx['show_closed'] = bool(self.request.GET.get('show_closed'))
+        ctx['status_choices'] = Estimate.STATUS_CHOICES
+        return ctx
+
+
+class EstimateDetailView(EstimateAccessMixin, DetailView):
+    model = Estimate
+    template_name = 'core/estimate_detail.html'
+    context_object_name = 'estimate'
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        labor_items = QuickLaborItem.objects.filter(is_active=True).order_by('category', 'sort_order', 'label')
+        labor_by_category = {}
+        for item in labor_items:
+            labor_by_category.setdefault(item.category, []).append(item)
+        ctx['labor_by_category'] = labor_by_category
+        ctx['entries'] = _line_items_for(self.object)
+        return ctx
+
+
+class EstimateCreateView(EstimateAccessMixin, CreateView):
+    model = Estimate
+    form_class = EstimateForm
+    template_name = 'core/estimate_form.html'
+
+    def form_valid(self, form):
+        form.instance.created_by = self.request.user
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse_lazy('core:estimate_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['title'] = 'New Estimate'
+        ctx['cancel_url'] = reverse_lazy('core:estimate_list')
+        return ctx
+
+
+class EstimateUpdateView(EstimateAccessMixin, UpdateView):
+    model = Estimate
+    form_class = EstimateForm
+    template_name = 'core/estimate_form.html'
+
+    def get_success_url(self):
+        return reverse_lazy('core:estimate_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['title'] = f'Edit {self.object.estimate_number}'
+        ctx['cancel_url'] = reverse_lazy('core:estimate_detail', kwargs={'pk': self.object.pk})
+        return ctx
+
+
+class EstimateMarkSentView(EstimateAccessMixin, View):
+    def post(self, request, pk):
+        estimate = get_object_or_404(Estimate, pk=pk)
+        if estimate.status != 'draft':
+            messages.error(request, f'{estimate.estimate_number} is not a draft.')
+            return redirect('core:estimate_detail', pk=pk)
+        estimate.status = 'sent'
+        estimate.save(update_fields=['status', 'updated_at'])
+        messages.success(request, f'{estimate.estimate_number} marked sent.')
+        return redirect('core:estimate_detail', pk=pk)
+
+
+class EstimateDeleteView(EstimateAccessMixin, View):
+    def post(self, request, pk):
+        estimate = get_object_or_404(Estimate, pk=pk)
+        if estimate.status == 'accepted':
+            messages.error(
+                request,
+                f'{estimate.estimate_number} was accepted and cannot be deleted '
+                '(it would orphan the linked work order).'
+            )
+            return redirect('core:estimate_detail', pk=pk)
+        number = estimate.estimate_number
+        estimate.delete()
+        messages.success(request, f'Estimate {number} deleted.')
+        return redirect('core:estimate_list')
+
+
+class EstimateLaborLogView(EstimateAccessMixin, View):
+    """HTMX: log a QuickLaborItem against an Estimate as a labor line item."""
+
+    def post(self, request, est_pk, item_pk):
+        estimate = get_object_or_404(Estimate, pk=est_pk)
+        item = get_object_or_404(QuickLaborItem, pk=item_pk, is_active=True)
+        estimate.line_items.create(
+            kind='labor',
+            description=item.label[:255],
+            quantity=1,
+            unit_price=item.default_price,
+            source_labor_item=item,
+            logged_by=request.user,
+        )
+        return _render_line_items(request, estimate)
+
+
+class EstimateCustomLogView(EstimateAccessMixin, View):
+    """HTMX: log a fully custom line item — labor or part — on an Estimate."""
+
+    def post(self, request, est_pk):
+        estimate = get_object_or_404(Estimate, pk=est_pk)
+        label = request.POST.get('custom_label', '').strip()
+        notes = request.POST.get('notes', '').strip()
+        kind = request.POST.get('kind', 'labor')
+        if kind not in ('labor', 'part'):
+            kind = 'labor'
+        qty = _parse_qty(request.POST.get('quantity'))
+        if label:
+            estimate.line_items.create(
+                kind=kind,
+                description=label[:255],
+                quantity=qty if qty is not None else 1,
+                unit_price=_parse_price(request.POST.get('unit_price')),
+                notes=notes,
+                logged_by=request.user,
+            )
+        return _render_line_items(request, estimate)
 
 
 class InvoiceExportView(LoginRequiredMixin, View):
@@ -3122,10 +3289,19 @@ def _parse_qty(val):
     return d if d is not None else None
 
 
-def _render_work_performed(request, work_order):
+def _render_line_items(request, host):
+    """Render the logged-line-items partial for a WorkOrder or an Estimate.
+
+    Both hosts attach LineItem via the same GenericRelation; only the
+    template (and its context var name) differs."""
+    if isinstance(host, Estimate):
+        return render(request, 'core/partials/estimate_line_items.html', {
+            'estimate': host,
+            'entries': _line_items_for(host),
+        })
     return render(request, 'core/partials/work_performed.html', {
-        'work_order': work_order,
-        'entries': _line_items_for(work_order),
+        'work_order': host,
+        'entries': _line_items_for(host),
     })
 
 
@@ -3144,7 +3320,7 @@ class WorkPerformedLogView(LoginRequiredMixin, View):
             source_labor_item=item,
             logged_by=request.user,
         )
-        return _render_work_performed(request, work_order)
+        return _render_line_items(request, work_order)
 
 
 class WorkPerformedDeleteView(LoginRequiredMixin, View):
@@ -3152,9 +3328,9 @@ class WorkPerformedDeleteView(LoginRequiredMixin, View):
 
     def post(self, request, pk):
         entry = get_object_or_404(LineItem, pk=pk)
-        work_order = entry.content_object
+        host = entry.content_object
         entry.delete()
-        return _render_work_performed(request, work_order)
+        return _render_line_items(request, host)
 
 
 class WorkPerformedUpdateView(LoginRequiredMixin, View):
@@ -3170,7 +3346,7 @@ class WorkPerformedUpdateView(LoginRequiredMixin, View):
         entry.quantity = qty if qty is not None else 1
         entry.unit_price = _parse_price(request.POST.get('unit_price'))
         entry.save(update_fields=['description', 'notes', 'quantity', 'unit_price'])
-        return _render_work_performed(request, entry.content_object)
+        return _render_line_items(request, entry.content_object)
 
 
 class WorkPerformedCustomLogView(LoginRequiredMixin, View):
@@ -3193,7 +3369,7 @@ class WorkPerformedCustomLogView(LoginRequiredMixin, View):
                 notes=notes,
                 logged_by=request.user,
             )
-        return _render_work_performed(request, work_order)
+        return _render_line_items(request, work_order)
 
 
 # ---------------------------------------------------------------------------

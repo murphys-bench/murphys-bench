@@ -2558,3 +2558,123 @@ def test_billing_check_in_view_updates_card(client, admin_user):
 
     assert resp.status_code == 200
     assert b'Sent' in resp.content
+
+
+# ---------------------------------------------------------------------------
+# Slice 2a — Estimate model + CRUD + line items
+# ---------------------------------------------------------------------------
+
+from core.models import Estimate, Prospect as _Prospect, QuickLaborItem
+
+
+@pytest.mark.django_db
+def test_estimate_number_sequential_and_unique(client_obj):
+    e1 = Estimate.objects.create(client=client_obj)
+    e2 = Estimate.objects.create(client=client_obj)
+    assert e1.estimate_number == 'EST-00001'
+    assert e2.estimate_number == 'EST-00002'
+
+
+@pytest.mark.django_db
+def test_estimate_requires_exactly_one_anchor(client_obj):
+    from django.core.exceptions import ValidationError
+    prospect = _Prospect.objects.create(
+        contact_first_name='Lee', client_type='residential',
+    )
+    # Neither set -> invalid
+    e = Estimate(scope='nothing')
+    with pytest.raises(ValidationError):
+        e.clean()
+    # Both set -> invalid
+    e2 = Estimate(client=client_obj, prospect=prospect)
+    with pytest.raises(ValidationError):
+        e2.clean()
+    # Exactly one -> valid
+    e3 = Estimate(client=client_obj)
+    e3.clean()  # should not raise
+
+
+@pytest.mark.django_db
+def test_estimate_create_sets_created_by(client, admin_user, client_obj):
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_create'), {
+        'client': client_obj.pk, 'scope': 'New laptop setup',
+    })
+    assert resp.status_code == 302
+    est = Estimate.objects.get()
+    assert est.created_by == admin_user
+    assert est.client_id == client_obj.pk
+    assert est.status == 'draft'
+
+
+@pytest.mark.django_db
+def test_estimate_list_hides_closed_by_default(client, admin_user, client_obj):
+    open_est = Estimate.objects.create(client=client_obj)
+    closed_est = Estimate.objects.create(client=client_obj, status='accepted')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:estimate_list'))
+    ests = list(resp.context['estimates'])
+    assert open_est in ests
+    assert closed_est not in ests
+
+
+@pytest.mark.django_db
+def test_estimate_line_items_total_ignores_unpriced(client_obj):
+    from decimal import Decimal
+    est = Estimate.objects.create(client=client_obj)
+    est.line_items.create(kind='labor', description='Diag', quantity=1, unit_price=Decimal('50'))
+    est.line_items.create(kind='part', description='SSD', quantity=2, unit_price=Decimal('40'))
+    est.line_items.create(kind='labor', description='Unpriced note')  # no unit_price
+    assert est.line_items_total == Decimal('130')
+
+
+@pytest.mark.django_db
+def test_estimate_mark_sent_transitions_draft_to_sent(client, admin_user, client_obj):
+    est = Estimate.objects.create(client=client_obj)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_mark_sent', args=[est.pk]))
+    est.refresh_from_db()
+    assert resp.status_code == 302
+    assert est.status == 'sent'
+
+
+@pytest.mark.django_db
+def test_estimate_delete_blocked_when_accepted(client, admin_user, client_obj):
+    est = Estimate.objects.create(client=client_obj, status='accepted')
+    client.force_login(admin_user)
+    client.post(reverse('core:estimate_delete', args=[est.pk]))
+    assert Estimate.objects.filter(pk=est.pk).exists()
+
+
+@pytest.mark.django_db
+def test_estimate_access_mixin_blocks_on_role_flag(client, client_obj):
+    role = Role.objects.create(name='NoEstimates', can_view_estimates=False)
+    user = User.objects.create_user(username='tech1', password='x', role_obj=role)
+    client.force_login(user)
+    resp = client.get(reverse('core:estimate_list'))
+    assert resp.status_code == 403
+
+
+@pytest.mark.django_db
+def test_estimate_labor_log_creates_line_item_on_estimate(client, admin_user, client_obj):
+    item = QuickLaborItem.objects.create(label='Virus Removal', category='Software', default_price='75.00')
+    est = Estimate.objects.create(client=client_obj)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_labor_log', args=[est.pk, item.pk]))
+    assert resp.status_code == 200
+    li = est.line_items.get()
+    assert li.description == 'Virus Removal'
+    assert li.source_labor_item_id == item.pk
+
+
+@pytest.mark.django_db
+def test_estimate_custom_log_creates_line_item_on_estimate(client, admin_user, client_obj):
+    est = Estimate.objects.create(client=client_obj)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_custom_log', args=[est.pk]), {
+        'kind': 'part', 'custom_label': '1TB SSD', 'quantity': '1', 'unit_price': '60',
+    })
+    assert resp.status_code == 200
+    li = est.line_items.get()
+    assert li.kind == 'part'
+    assert li.description == '1TB SSD'
