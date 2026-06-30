@@ -1723,6 +1723,130 @@ class EstimateQuoteEmailView(EstimateAccessMixin, View):
         return redirect('core:estimate_detail', pk=pk)
 
 
+def _copy_line_items(source, target, user):
+    """Snapshot-copy every LineItem from one host (Estimate/WorkOrder) onto
+    another. Prices/quantities are copied as-is; the new lines are re-stamped
+    with the acting user (logged_at is auto_now_add)."""
+    for li in source.line_items.all():
+        target.line_items.create(
+            kind=li.kind,
+            description=li.description,
+            quantity=li.quantity,
+            unit_price=li.unit_price,
+            source_labor_item=li.source_labor_item,
+            notes=li.notes,
+            logged_by=user,
+        )
+
+
+class EstimateAcceptView(EstimateAccessMixin, View):
+    """Accept a quote: promote a prospect if needed, spawn a Work Order with the
+    estimate's lines copied over, and lock the estimate read-only."""
+
+    def post(self, request, pk):
+        from django.db import transaction
+        estimate = get_object_or_404(Estimate.objects.select_related('client', 'prospect', 'device', 'contact', 'ticket'), pk=pk)
+        if estimate.status not in ('draft', 'sent'):
+            messages.error(request, f'{estimate.estimate_number} cannot be accepted from its current status.')
+            return redirect('core:estimate_detail', pk=pk)
+
+        try:
+            with transaction.atomic():
+                # Promote a prospect-anchored estimate to a real Client, then re-anchor.
+                if estimate.prospect_id:
+                    client = estimate.prospect.promote_to_client()
+                    estimate.client = client
+                    estimate.prospect = None
+                else:
+                    client = estimate.client
+
+                # Named contact: the estimate's, else (for a promoted prospect) the
+                # client's new primary contact.
+                contact = estimate.contact or client.contacts.filter(is_primary=True).first()
+
+                # WorkOrder.ticket is OneToOne — only link if the ticket has no WO yet.
+                link_ticket = None
+                if estimate.ticket_id and not WorkOrder.objects.filter(ticket=estimate.ticket).exists():
+                    link_ticket = estimate.ticket
+
+                wo = WorkOrder.objects.create(
+                    work_order_number=WorkOrder.generate_work_order_number(
+                        from_ticket_number=link_ticket.ticket_number if link_ticket else None,
+                    ),
+                    ticket=link_ticket,
+                    client=client,
+                    device=estimate.device,
+                    contact=contact,
+                    reported_problem=estimate.scope or '',
+                    status='new',
+                )
+                _copy_line_items(estimate, wo, request.user)
+
+                estimate.status = 'accepted'
+                estimate.accepted_at = timezone.now()
+                estimate.work_order = wo
+                estimate.save(update_fields=['status', 'accepted_at', 'work_order', 'client', 'prospect', 'updated_at'])
+        except IntegrityError:
+            messages.error(
+                request,
+                'Could not accept: a client with that name already exists. '
+                'Reconcile the prospect/client before accepting.'
+            )
+            return redirect('core:estimate_detail', pk=pk)
+
+        msg = f'{estimate.estimate_number} accepted — created {wo.work_order_number}.'
+        if estimate.ticket_id and link_ticket is None:
+            msg += ' (The linked ticket already had a work order, so this one is standalone.)'
+        messages.success(request, msg)
+        return redirect('core:work_order_detail', pk=wo.pk)
+
+
+class EstimateDeclineView(EstimateAccessMixin, View):
+    """Record that a quote was declined, with a reason. No WO, no stock effect."""
+
+    def post(self, request, pk):
+        estimate = get_object_or_404(Estimate, pk=pk)
+        if estimate.status not in ('draft', 'sent'):
+            messages.error(request, f'{estimate.estimate_number} cannot be declined from its current status.')
+            return redirect('core:estimate_detail', pk=pk)
+        reason = (request.POST.get('decline_reason') or '').strip()
+        if not reason:
+            messages.error(request, 'A reason is required to decline a quote.')
+            return redirect('core:estimate_detail', pk=pk)
+        estimate.status = 'declined'
+        estimate.decline_reason = reason
+        estimate.save(update_fields=['status', 'decline_reason', 'updated_at'])
+        messages.success(request, f'{estimate.estimate_number} marked declined.')
+        return redirect('core:estimate_detail', pk=pk)
+
+
+class EstimateReviseView(EstimateAccessMixin, View):
+    """Supersede a sent/declined/expired quote with a new linked draft revision."""
+
+    def post(self, request, pk):
+        from django.db import transaction
+        old = get_object_or_404(Estimate, pk=pk)
+        if old.status not in ('sent', 'declined', 'expired'):
+            messages.error(request, f'{old.estimate_number} cannot be revised from its current status.')
+            return redirect('core:estimate_detail', pk=pk)
+        with transaction.atomic():
+            new = Estimate.objects.create(
+                client=old.client,
+                prospect=old.prospect,
+                ticket=old.ticket,
+                contact=old.contact,
+                device=old.device,
+                scope=old.scope,
+                expires_on=old.expires_on,
+                revision_of=old,
+                status='draft',
+                created_by=request.user,
+            )
+            _copy_line_items(old, new, request.user)
+        messages.success(request, f'Created {new.estimate_number} as a revision of {old.estimate_number}.')
+        return redirect('core:estimate_detail', pk=new.pk)
+
+
 class InvoiceExportView(LoginRequiredMixin, View):
     """Export invoice records for a client as CSV."""
 

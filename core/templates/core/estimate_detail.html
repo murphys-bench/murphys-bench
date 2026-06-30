@@ -25,6 +25,28 @@
 {% block content %}
 <div class="max-w-3xl space-y-6">
 
+    {% if estimate.status == 'accepted' and estimate.work_order %}
+    <div class="bg-green-50 border border-green-200 rounded-md p-4 text-sm text-green-800">
+        Accepted{% if estimate.accepted_at %} {{ estimate.accepted_at|date:"M j, Y" }}{% endif %} —
+        <a href="{% url 'core:work_order_detail' estimate.work_order_id %}" class="font-medium underline">{{ estimate.work_order.work_order_number }}</a>.
+    </div>
+    {% elif estimate.status == 'declined' %}
+    <div class="bg-red-50 border border-red-200 rounded-md p-4 text-sm text-red-800">
+        Declined.{% if estimate.decline_reason %} <span class="whitespace-pre-line">{{ estimate.decline_reason }}</span>{% endif %}
+    </div>
+    {% endif %}
+
+    {% if estimate.revision_of %}
+    <div class="bg-gray-50 border border-gray-200 rounded-md p-3 text-sm text-gray-600">
+        Revision of <a href="{% url 'core:estimate_detail' estimate.revision_of_id %}" class="font-medium underline">{{ estimate.revision_of.estimate_number }}</a>.
+    </div>
+    {% endif %}
+    {% for rev in estimate.revisions.all %}
+    <div class="bg-amber-50 border border-amber-200 rounded-md p-3 text-sm text-amber-800">
+        Superseded by <a href="{% url 'core:estimate_detail' rev.pk %}" class="font-medium underline">{{ rev.estimate_number }}</a>.
+    </div>
+    {% endfor %}
+
     <div class="bg-white rounded-lg shadow p-6">
         <h2 class="text-base font-semibold text-gray-900 mb-4">Details</h2>
         <dl class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
@@ -57,6 +79,7 @@
          x-data="{ logOpen: false, customOpen: false }">
         <div class="flex items-center justify-between mb-3">
             <h2 class="text-lg font-semibold text-gray-900">Line Items</h2>
+            {% if not estimate.is_locked %}
             <div class="flex gap-2">
                 <button type="button" @click="customOpen = !customOpen; if(customOpen) logOpen = false"
                         class="text-xs px-2 py-1 rounded border"
@@ -71,6 +94,7 @@
                 </button>
                 {% endif %}
             </div>
+            {% endif %}
         </div>
 
         <!-- Custom entry form -->
@@ -143,29 +167,57 @@
     </div>
 
     <!-- Actions -->
-    <div class="flex flex-wrap gap-3">
-        {% if estimate.status == 'draft' %}
-            <form method="post" action="{% url 'core:estimate_mark_sent' estimate.pk %}">
-                {% csrf_token %}
-                <button type="submit" class="px-5 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium">Mark Sent</button>
-            </form>
-        {% endif %}
-        <a href="{% url 'core:estimate_quote_print' estimate.pk %}" target="_blank"
-           class="px-5 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">Preview Quote</a>
-        {% if not estimate.is_locked %}
-            <a href="{% url 'core:estimate_quote_email' estimate.pk %}"
-               class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">Email Quote</a>
-        {% endif %}
-        {% if not estimate.is_locked %}
-            <a href="{% url 'core:estimate_edit' estimate.pk %}"
-               class="px-5 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">Edit</a>
-        {% endif %}
-        {% if estimate.status != 'accepted' %}
-            <form method="post" action="{% url 'core:estimate_delete' estimate.pk %}"
-                  onsubmit="return confirm('Delete this estimate permanently?');">
-                {% csrf_token %}
-                <button type="submit" class="px-5 py-2 text-red-600 hover:text-red-800 font-medium">Delete</button>
-            </form>
+    <div x-data="{ declining: false }" class="space-y-3">
+        <div class="flex flex-wrap gap-3">
+            {% if estimate.status == 'draft' %}
+                <form method="post" action="{% url 'core:estimate_mark_sent' estimate.pk %}">
+                    {% csrf_token %}
+                    <button type="submit" class="px-5 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium">Mark Sent</button>
+                </form>
+            {% endif %}
+            {% if estimate.status == 'draft' or estimate.status == 'sent' %}
+                <form method="post" action="{% url 'core:estimate_accept' estimate.pk %}"
+                      onsubmit="return confirm('Accept this quote? This creates a work order{% if estimate.prospect %} and promotes the prospect to a client{% endif %}.');">
+                    {% csrf_token %}
+                    <button type="submit" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">Accept → Work Order</button>
+                </form>
+                <button type="button" @click="declining = !declining"
+                        class="px-5 py-2 bg-amber-100 text-amber-800 rounded-md hover:bg-amber-200 font-medium">Decline</button>
+            {% endif %}
+            {% if estimate.status == 'sent' or estimate.status == 'declined' or estimate.status == 'expired' %}
+                <form method="post" action="{% url 'core:estimate_revise' estimate.pk %}"
+                      onsubmit="return confirm('Create a new draft revision of this quote?');">
+                    {% csrf_token %}
+                    <button type="submit" class="px-5 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">Revise</button>
+                </form>
+            {% endif %}
+            <a href="{% url 'core:estimate_quote_print' estimate.pk %}" target="_blank"
+               class="px-5 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">Preview Quote</a>
+            {% if not estimate.is_locked %}
+                <a href="{% url 'core:estimate_quote_email' estimate.pk %}"
+                   class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">Email Quote</a>
+                <a href="{% url 'core:estimate_edit' estimate.pk %}"
+                   class="px-5 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">Edit</a>
+            {% endif %}
+            {% if estimate.status != 'accepted' %}
+                <form method="post" action="{% url 'core:estimate_delete' estimate.pk %}"
+                      onsubmit="return confirm('Delete this estimate permanently?');">
+                    {% csrf_token %}
+                    <button type="submit" class="px-5 py-2 text-red-600 hover:text-red-800 font-medium">Delete</button>
+                </form>
+            {% endif %}
+        </div>
+
+        {% if estimate.status == 'draft' or estimate.status == 'sent' %}
+        <!-- Decline reason -->
+        <form x-show="declining" x-cloak method="post" action="{% url 'core:estimate_decline' estimate.pk %}"
+              class="bg-amber-50 border border-amber-100 rounded-lg p-4 space-y-2">
+            {% csrf_token %}
+            <label class="block text-sm font-medium text-amber-900">Reason for declining <span class="text-red-500">*</span></label>
+            <textarea name="decline_reason" rows="2" required
+                      class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-500"></textarea>
+            <button type="submit" class="px-4 py-1.5 bg-amber-600 text-white text-sm rounded hover:bg-amber-700 font-medium">Record Decline</button>
+        </form>
         {% endif %}
     </div>
 
