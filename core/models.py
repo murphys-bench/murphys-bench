@@ -91,6 +91,7 @@ class Role(models.Model):
     can_edit_workorder = models.BooleanField(default=True)
     can_close_workorder = models.BooleanField(default=True)
     can_view_prospects = models.BooleanField(default=True, help_text='View and manage sales prospects (leads).')
+    can_view_estimates = models.BooleanField(default=True, help_text='View and manage sales estimates (quotes).')
 
     class Meta:
         db_table = 'roles'
@@ -1068,6 +1069,115 @@ class Invoice(models.Model):
 
     def __str__(self):
         return f'Invoice for {self.work_order.work_order_number} — {self.get_billing_status_display()}'
+
+
+class Estimate(models.Model):
+    """A priced quote built for a Prospect or Client, ahead of any Work Order.
+
+    MB owns the quote end-to-end (including the customer document) — Invoice
+    Ninja is never touched at quote time, so dead/declined quotes never
+    clutter IN. Anchors to exactly one of client/prospect (opportunity-shaped,
+    not problem-shaped); a ticket is one optional origin, not the anchor."""
+
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('sent', 'Sent'),
+        ('accepted', 'Accepted'),
+        ('declined', 'Declined'),
+        ('expired', 'Expired'),
+    ]
+
+    # Anchor — exactly one of these is set (enforced in clean()).
+    client = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True, blank=True, related_name='estimates')
+    prospect = models.ForeignKey(Prospect, on_delete=models.SET_NULL, null=True, blank=True, related_name='estimates')
+
+    # Optional context — none of these are required.
+    ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='estimates')
+    contact = models.ForeignKey(Contact, on_delete=models.SET_NULL, null=True, blank=True, related_name='estimates')
+    device = models.ForeignKey(Device, on_delete=models.SET_NULL, null=True, blank=True, related_name='estimates')
+
+    estimate_number = models.CharField(max_length=20, unique=True)
+    scope = models.TextField(blank=True, help_text='What we\'re quoting — free text.')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', db_index=True)
+    expires_on = models.DateField(null=True, blank=True)
+
+    # Decline path (populated in Slice 2c).
+    decline_reason = models.TextField(blank=True)
+
+    # Revision chain — a sent/declined estimate freezes; revising creates a new
+    # linked estimate (preserves an audit trail of what was offered/declined).
+    revision_of = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True, related_name='revisions',
+    )
+
+    # Accept path (populated in Slice 2c).
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    work_order = models.ForeignKey(WorkOrder, on_delete=models.SET_NULL, null=True, blank=True, related_name='source_estimate')
+
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='estimates_created')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    line_items = GenericRelation('LineItem')
+
+    class Meta:
+        db_table = 'estimates'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        return f'{self.estimate_number} — {self.display_name}'
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if bool(self.client_id) == bool(self.prospect_id):
+            raise ValidationError('An estimate must be anchored to exactly one of Client or Prospect.')
+
+    @property
+    def display_name(self):
+        if self.client_id:
+            return self.client.name
+        if self.prospect_id:
+            return self.prospect.display_name
+        return 'Unanchored'
+
+    @property
+    def is_locked(self):
+        """Read-only once accepted — the WO it spawned is the live record now."""
+        return self.status == 'accepted'
+
+    @property
+    def line_items_total(self):
+        """Sum of priced line items. Unpriced lines are ignored — mirrors
+        WorkOrder.line_items_total so the same vocabulary applies pre-WO."""
+        from decimal import Decimal
+        total = Decimal('0')
+        for li in self.line_items.all():
+            lt = li.line_total
+            if lt is not None:
+                total += lt
+        return total
+
+    def save(self, *args, **kwargs):
+        if self._state.adding:
+            return _save_with_unique_number(
+                self, 'estimate_number', self.generate_estimate_number,
+                lambda: super(Estimate, self).save(*args, **kwargs),
+            )
+        return super().save(*args, **kwargs)
+
+    @classmethod
+    def generate_estimate_number(cls):
+        """Generate sequential estimate number like EST-00001."""
+        import re
+        existing = cls.objects.filter(
+            estimate_number__regex=r'^EST-\d{5}$'
+        ).values_list('estimate_number', flat=True)
+        nums = [int(n[4:]) for n in existing if re.match(r'^EST-\d{5}$', n)]
+        next_num = (max(nums) + 1) if nums else 1
+        return f"EST-{next_num:05d}"
 
 
 class OrgCredential(models.Model):

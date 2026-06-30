@@ -1,0 +1,87 @@
+{% extends "core/base.html" %}
+{% load mb_icons %}
+
+{% block title %}Estimates - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow page-title-bar">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-4">
+        <h1 class="text-2xl font-bold text-gray-900">Estimates</h1>
+        <div class="flex flex-wrap items-center gap-3">
+            <form method="get" class="flex items-center gap-2">
+                <input type="text" name="search" value="{{ request.GET.search }}" placeholder="Search estimates…"
+                       class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                <select name="status" onchange="this.form.submit()"
+                        class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    <option value="">Open</option>
+                    {% for value, label in status_choices %}
+                        <option value="{{ value }}" {% if active_status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+            <a href="{% url 'core:estimate_create' %}"
+               class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">+ New Estimate</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">For</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Scope</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Added</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+                {% for estimate in estimates %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-3">
+                        <a href="{% url 'core:estimate_detail' estimate.pk %}" class="text-blue-600 hover:underline font-medium">{{ estimate.estimate_number }}</a>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-600">{{ estimate.display_name }}</td>
+                    <td class="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">{{ estimate.scope|default:"—" }}</td>
+                    <td class="px-4 py-3 text-sm text-gray-700">${{ estimate.line_items_total|floatformat:2 }}</td>
+                    <td class="px-4 py-3 text-sm">
+                        <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium
+                            {% if estimate.status == 'accepted' %}bg-green-100 text-green-800
+                            {% elif estimate.status == 'declined' %}bg-red-100 text-red-700
+                            {% elif estimate.status == 'expired' %}bg-gray-200 text-gray-600
+                            {% elif estimate.status == 'sent' %}bg-blue-100 text-blue-800
+                            {% else %}bg-yellow-100 text-yellow-800{% endif %}">
+                            {{ estimate.get_status_display }}
+                        </span>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-500">{{ estimate.created_at|date:"M j, Y" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="px-4 py-10 text-center text-gray-500">No estimates found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="mt-4 text-sm">
+        {% if show_closed %}
+            <a href="{% url 'core:estimate_list' %}" class="text-blue-600 hover:underline">Hide accepted/declined/expired</a>
+        {% else %}
+            <a href="?show_closed=1" class="text-blue-600 hover:underline">Show accepted/declined/expired</a>
+        {% endif %}
+    </div>
+
+    {% if is_paginated %}
+    <div class="mt-4 flex justify-center gap-2 text-sm">
+        {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}" class="px-3 py-1 border rounded">Prev</a>{% endif %}
+        <span class="px-3 py-1">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}" class="px-3 py-1 border rounded">Next</a>{% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
