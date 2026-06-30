@@ -181,6 +181,12 @@
                     </div>
 
                     <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Sales From Address</label>
+                        {{ forms.outbound.email_sales_from }}
+                        <p class="text-xs text-gray-400 mt-1">Used when emailing quotes/estimates. Leave blank to use the From Address above.</p>
+                    </div>
+
+                    <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Suppression Patterns</label>
                         {{ forms.outbound.email_suppression_patterns }}
                         <p class="text-xs text-gray-400 mt-1">One fnmatch pattern per line. Matching senders never receive automated replies (e.g. <code>noreply@*</code>).</p>

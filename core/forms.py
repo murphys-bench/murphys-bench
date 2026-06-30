@@ -471,7 +471,7 @@ class OutboundEmailSettingsForm(forms.ModelForm):
         model = SiteSettings
         fields = [
             'email_enabled', 'email_host', 'email_port', 'email_use_tls',
-            'email_username', 'email_password', 'email_from',
+            'email_username', 'email_password', 'email_from', 'email_sales_from',
             'email_suppression_patterns',
         ]
         widgets = {
@@ -482,6 +482,7 @@ class OutboundEmailSettingsForm(forms.ModelForm):
             'email_username': forms.TextInput(attrs={'class': _SS_INPUT}),
             'email_password': forms.PasswordInput(attrs={'class': _SS_INPUT}, render_value=True),
             'email_from': forms.EmailInput(attrs={'class': _SS_INPUT, 'placeholder': 'support@yourdomain.com'}),
+            'email_sales_from': forms.EmailInput(attrs={'class': _SS_INPUT, 'placeholder': 'sales@yourdomain.com'}),
             'email_suppression_patterns': forms.Textarea(attrs={'class': _SS_INPUT, 'rows': 5}),
         }
 

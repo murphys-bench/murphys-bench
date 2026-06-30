@@ -150,6 +150,12 @@
                 <button type="submit" class="px-5 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium">Mark Sent</button>
             </form>
         {% endif %}
+        <a href="{% url 'core:estimate_quote_print' estimate.pk %}" target="_blank"
+           class="px-5 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">Preview Quote</a>
+        {% if not estimate.is_locked %}
+            <a href="{% url 'core:estimate_quote_email' estimate.pk %}"
+               class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">Email Quote</a>
+        {% endif %}
         {% if not estimate.is_locked %}
             <a href="{% url 'core:estimate_edit' estimate.pk %}"
                class="px-5 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">Edit</a>

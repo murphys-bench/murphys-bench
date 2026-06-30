@@ -2678,3 +2678,150 @@ def test_estimate_custom_log_creates_line_item_on_estimate(client, admin_user, c
     li = est.line_items.get()
     assert li.kind == 'part'
     assert li.description == '1TB SSD'
+
+
+# ---------------------------------------------------------------------------
+# Slice 2b — Quote PDF + sales email
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_quote_email_uses_sales_from_when_set(client_obj):
+    from django.core.mail import EmailMultiAlternatives
+    from core.email_utils import send_document_email
+    site = _enable_email()
+    site.email_sales_from = 'sales@example.com'
+    site.save()
+
+    captured = {}
+
+    def fake_send(self, fail_silently=False):
+        captured['from'] = self.from_email
+        return 1
+
+    import unittest.mock
+    with unittest.mock.patch.object(EmailMultiAlternatives, 'send', fake_send):
+        log = send_document_email(
+            'x@example.com', subject='Quote', cover_body='B',
+            from_email=site.email_sales_from,
+            attachments=[('a.pdf', b'%PDF', 'application/pdf')],
+            client=client_obj, trigger='estimate_quote',
+        )
+    assert log.status == 'sent'
+    assert captured['from'] == 'sales@example.com'
+
+
+@pytest.mark.django_db
+def test_quote_email_falls_back_to_support_from_when_sales_blank(client_obj):
+    from django.core.mail import EmailMultiAlternatives
+    from core.email_utils import send_document_email
+    site = _enable_email()
+    assert not site.email_sales_from
+
+    sales_from = site.email_sales_from or site.email_from or None
+    captured = {}
+
+    def fake_send(self, fail_silently=False):
+        captured['from'] = self.from_email
+        return 1
+
+    import unittest.mock
+    with unittest.mock.patch.object(EmailMultiAlternatives, 'send', fake_send):
+        log = send_document_email(
+            'x@example.com', subject='Quote', cover_body='B',
+            from_email=sales_from,
+            attachments=[('a.pdf', b'%PDF', 'application/pdf')],
+            client=client_obj, trigger='estimate_quote',
+        )
+    assert log.status == 'sent'
+    assert captured['from'] == site.email_from
+
+
+@pdf_skip
+@pytest.mark.django_db
+def test_quote_email_view_client_anchored_sends_and_marks_sent(monkeypatch, client, client_obj, admin_user):
+    from django.core.mail import EmailMultiAlternatives
+    from core.models import EmailSendLog, Contact
+    _enable_email()
+    contact = Contact.objects.create(client=client_obj, first_name='Wayne', last_name='Davis',
+                                     email='wayne@davis.example', is_primary=True)
+    est = Estimate.objects.create(client=client_obj, contact=contact, scope='New laptop')
+    est.line_items.create(kind='labor', description='Setup', quantity=1, unit_price='100')
+    assert est.status == 'draft'
+
+    captured = {}
+
+    def fake_send(self, fail_silently=False):
+        captured['attachments'] = list(self.attachments)
+        return 1
+
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', fake_send)
+    client.force_login(admin_user)
+
+    resp = client.post(reverse('core:estimate_quote_email', args=[est.pk]),
+                       {'contact': contact.pk}, follow=True)
+
+    assert resp.status_code == 200
+    assert EmailSendLog.objects.filter(status='sent', trigger='estimate_quote').exists()
+    assert captured['attachments'][0][0] == f'Quote-{est.estimate_number}.pdf'
+    assert captured['attachments'][0][1][:5] == b'%PDF-'
+    est.refresh_from_db()
+    assert est.status == 'sent'
+
+
+@pdf_skip
+@pytest.mark.django_db
+def test_quote_email_view_prospect_anchored_uses_custom_address(monkeypatch, client, admin_user):
+    from django.core.mail import EmailMultiAlternatives
+    from core.models import EmailSendLog
+    _enable_email()
+    prospect = _Prospect.objects.create(
+        contact_first_name='Lee', contact_last_name='Voss',
+        client_type='residential', email='lee@example.com',
+    )
+    est = Estimate.objects.create(prospect=prospect, scope='Desktop build')
+    est.line_items.create(kind='part', description='GPU', quantity=1, unit_price='400')
+
+    captured = {}
+
+    def fake_send(self, fail_silently=False):
+        captured['to'] = list(self.to)
+        return 1
+
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', fake_send)
+    client.force_login(admin_user)
+
+    resp = client.post(reverse('core:estimate_quote_email', args=[est.pk]),
+                       {'custom_email': 'lee@example.com'}, follow=True)
+
+    assert resp.status_code == 200
+    assert EmailSendLog.objects.filter(status='sent', trigger='estimate_quote').exists()
+    assert captured['to'] == ['lee@example.com']
+    est.refresh_from_db()
+    assert est.status == 'sent'
+
+
+@pdf_skip
+@pytest.mark.django_db
+def test_quote_email_does_not_revert_already_sent_estimate(monkeypatch, client, client_obj, admin_user):
+    from django.core.mail import EmailMultiAlternatives
+    _enable_email()
+    est = Estimate.objects.create(client=client_obj, status='sent')
+    est.line_items.create(kind='labor', description='Diag', quantity=1, unit_price='50')
+
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', lambda self, fail_silently=False: 1)
+    client.force_login(admin_user)
+    client.post(reverse('core:estimate_quote_email', args=[est.pk]), {'custom_email': 'x@example.com'})
+
+    est.refresh_from_db()
+    assert est.status == 'sent'
+
+
+@pytest.mark.django_db
+def test_quote_print_view_renders_with_total(client, admin_user, client_obj):
+    est = Estimate.objects.create(client=client_obj)
+    est.line_items.create(kind='labor', description='Diag', quantity=1, unit_price='75')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:estimate_quote_print', args=[est.pk]))
+    assert resp.status_code == 200
+    assert est.estimate_number.encode() in resp.content
+    assert b'75.00' in resp.content
