@@ -1583,6 +1583,7 @@ class SiteSettings(models.Model):
     email_username = models.CharField(max_length=255, blank=True)
     email_password = EncryptedCharField(max_length=255, blank=True)
     email_from = models.EmailField(blank=True, help_text='From address shown to clients. e.g. support@yourdomain.com')
+    email_sales_from = models.EmailField(blank=True, help_text='From address for quotes/estimates. Blank = use the support From address above.')
 
     # Auto-responder suppression patterns (newline-separated fnmatch patterns)
     email_suppression_patterns = models.TextField(

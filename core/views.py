@@ -1624,6 +1624,105 @@ class EstimateCustomLogView(EstimateAccessMixin, View):
         return _render_line_items(request, estimate)
 
 
+class EstimateQuotePrintView(EstimateAccessMixin, View):
+    """Browser preview of the quote (new tab) — same template the emailed PDF uses."""
+
+    def get(self, request, pk):
+        estimate = get_object_or_404(
+            Estimate.objects.select_related('client', 'prospect', 'contact'), pk=pk,
+        )
+        site = SiteSettings.get()
+        ctx = _quote_report_context(estimate, site)
+        return render(request, 'core/estimate_quote_print.html', ctx)
+
+
+class EstimateQuoteEmailView(EstimateAccessMixin, View):
+    """Email the quote to the customer as a PDF attachment, from the sales address.
+
+    GET shows a small recipient form (client contacts dropdown, or a prefilled
+    prospect email, or a custom address); POST renders the quote to PDF and
+    sends it. A successful send advances a draft estimate to 'sent' — emailing
+    the quote IS sending it.
+    """
+
+    def get(self, request, pk):
+        estimate = get_object_or_404(Estimate.objects.select_related('client', 'prospect'), pk=pk)
+        contacts = estimate.client.contacts.filter(is_active=True) if estimate.client_id else None
+        default_contact = None
+        if estimate.client_id:
+            default_contact = estimate.contact or estimate.client.contacts.filter(
+                is_primary=True, is_active=True, email__gt='',
+            ).first()
+            default_email = (default_contact.email if default_contact else '') or estimate.client.email
+        else:
+            default_email = estimate.prospect.email
+        return render(request, 'core/estimate_email_quote.html', {
+            'estimate': estimate,
+            'contacts': contacts,
+            'default_contact': default_contact,
+            'default_email': default_email,
+        })
+
+    def post(self, request, pk):
+        estimate = get_object_or_404(Estimate.objects.select_related('client', 'prospect'), pk=pk)
+
+        from .pdf_utils import render_pdf
+        from .email_utils import send_document_email
+        from django.template.loader import render_to_string
+
+        # Resolve recipient: a chosen client contact, or a custom address
+        # (the only path for a prospect-anchored estimate — no Contact rows).
+        contact = None
+        to_email = (request.POST.get('custom_email') or '').strip()
+        contact_id = request.POST.get('contact')
+        if not to_email and contact_id and estimate.client_id:
+            contact = estimate.client.contacts.filter(pk=contact_id).first()
+            to_email = contact.email if contact else ''
+        if not to_email:
+            messages.error(request, 'Choose a contact or enter an email address.')
+            return redirect('core:estimate_quote_email', pk=pk)
+
+        site = SiteSettings.get()
+        ctx = _quote_report_context(estimate, site)
+        # Same browser-preview/PDF template trick as the repair report: the
+        # @media print rules hide the on-screen controls and show the footer.
+        html = render_to_string('core/estimate_quote_print.html', ctx)
+        try:
+            pdf_bytes = render_pdf(html)
+        except Exception:
+            logger.exception('PDF render failed for quote %s.', estimate.estimate_number)
+            messages.error(request, 'Could not generate the quote PDF. The PDF engine may not be installed on this server.')
+            return redirect('core:estimate_detail', pk=pk)
+
+        company = site.company_name or "Murphy's Bench"
+        sales_from = site.email_sales_from or site.email_from or None
+        scope_snippet = f' — {estimate.scope[:60]}' if estimate.scope else ''
+        cover = (
+            f"Hello,\n\nPlease find attached your quote {estimate.estimate_number}{scope_snippet}.\n\n"
+            f"Thank you for considering us.\n{company}"
+        )
+        log = send_document_email(
+            to_email,
+            subject=f"{company}: Quote {estimate.estimate_number}",
+            cover_body=cover,
+            from_email=sales_from,
+            reply_to=sales_from,
+            attachments=[(f'Quote-{estimate.estimate_number}.pdf', pdf_bytes, 'application/pdf')],
+            client=estimate.client,
+            contact=contact,
+            trigger='estimate_quote',
+            related_ticket=estimate.ticket,
+        )
+        if log.status == 'sent':
+            if estimate.status == 'draft':
+                estimate.status = 'sent'
+                estimate.save(update_fields=['status', 'updated_at'])
+            messages.success(request, f'Quote emailed to {to_email}.')
+        else:
+            messages.error(request, f'Quote not sent ({log.get_reason_display() or log.status}).')
+        return redirect('core:estimate_detail', pk=pk)
+
+
 class InvoiceExportView(LoginRequiredMixin, View):
     """Export invoice records for a client as CSV."""
 
@@ -3416,6 +3515,60 @@ def _repair_report_context(work_order, site, report_type='repair'):
         'repair_types': repair_types,
         'report_type': report_type,
         'contact': contact,
+        'print_date': timezone.now(),
+    }
+
+
+def _quote_report_context(estimate, site):
+    """Build the quote-print context once, shared by the print page and the
+    emailed PDF. Resolves a unified bill-to block for either anchor — a
+    Prospect has no Contact rows, only inline email/phone fields."""
+    from django.utils import timezone
+
+    line_items = (
+        estimate.line_items
+        .select_related('source_labor_item')
+        .order_by('kind', 'logged_at')
+    )
+    categories = {}
+    for entry in line_items:
+        if entry.kind == 'part':
+            cat = 'Parts'
+        elif entry.source_labor_item:
+            cat = entry.source_labor_item.category
+        else:
+            cat = 'Other'
+        categories.setdefault(cat, []).append(entry)
+
+    if estimate.client_id:
+        client = estimate.client
+        contact = estimate.contact or client.contacts.filter(is_primary=True).first()
+        bill_to = {
+            'name': client.name,
+            'address_line1': client.address_line1,
+            'address_line2': client.address_line2,
+            'address_city': client.address_city,
+            'address_state': client.address_state,
+            'address_zip': client.address_zip,
+            'contact_name': f'{contact.first_name} {contact.last_name}'.strip() if contact else '',
+            'email': (contact.email if contact else '') or client.email,
+            'phone': (contact.phone if contact else '') or client.phone,
+        }
+    else:
+        prospect = estimate.prospect
+        bill_to = {
+            'name': prospect.display_name,
+            'address_line1': '', 'address_line2': '', 'address_city': '', 'address_state': '', 'address_zip': '',
+            'contact_name': prospect.contact_name,
+            'email': prospect.email,
+            'phone': prospect.phone,
+        }
+
+    return {
+        'estimate': estimate,
+        'site': site,
+        'wp_categories': categories,
+        'bill_to': bill_to,
         'print_date': timezone.now(),
     }
 

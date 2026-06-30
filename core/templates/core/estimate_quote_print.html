@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quote — {{ estimate.estimate_number }}</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            font-size: 14px;
+            color: #1a1a1a;
+            background: #f0f2f1;
+            padding: 24px;
+        }
+        .page {
+            max-width: 780px;
+            margin: 0 auto;
+            background: #fff;
+            border-radius: 6px;
+            overflow: hidden;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+        }
+
+        /* Header */
+        .report-header {
+            padding: 24px 32px 16px;
+            border-bottom: 3px solid #2d6a4f;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .company-logo { max-height: 60px; max-width: 180px; object-fit: contain; margin-bottom: 8px; }
+        .company-info { font-size: 13px; color: #444; line-height: 1.6; }
+        .company-name { font-weight: 700; font-size: 15px; color: #1a1a1a; }
+        .report-meta { text-align: right; }
+        .wo-number { font-size: 22px; font-weight: 700; color: #2d6a4f; }
+        .report-label { font-size: 13px; font-weight: 600; color: #374151; margin-top: 2px; }
+        .report-sub { font-size: 12px; color: #666; margin-top: 2px; }
+
+        /* Sections */
+        .section { padding: 20px 32px; border-bottom: 1px solid #e5e7eb; }
+        .section:last-child { border-bottom: none; }
+        .section-title {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #6b7280;
+            margin-bottom: 10px;
+        }
+
+        .field-label { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px; }
+        .field-value { font-size: 14px; color: #1a1a1a; font-weight: 500; }
+        .field-sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+
+        /* Line items */
+        .work-category { margin-bottom: 14px; }
+        .work-category-name {
+            font-size: 11px;
+            font-weight: 700;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 6px;
+        }
+        .work-item { font-size: 13px; font-weight: 600; color: #1a1a1a; padding: 2px 0; }
+        .work-item-desc { font-size: 12px; color: #6b7280; padding-left: 12px; margin-bottom: 4px; }
+
+        /* Signature lines */
+        .sig-section { padding: 24px 32px; border-top: 1px solid #e5e7eb; }
+        .sig-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+        .sig-line {
+            border-bottom: 1px solid #374151;
+            margin-bottom: 6px;
+            height: 40px;
+        }
+        .sig-label { font-size: 11px; color: #6b7280; }
+
+        /* Footer (print only) */
+        .report-footer {
+            display: none;
+            padding: 8px 32px;
+            border-top: 1px solid #e5e7eb;
+            font-size: 11px;
+            color: #9ca3af;
+            text-align: center;
+        }
+
+        /* Print controls (screen only) */
+        .print-controls {
+            max-width: 780px;
+            margin: 0 auto 16px;
+            display: flex;
+            gap: 10px;
+        }
+        .btn-print {
+            padding: 8px 20px;
+            background: #2d6a4f;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-back {
+            padding: 8px 20px;
+            background: #e5e7eb;
+            color: #374151;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        /* Print styles */
+        @media print {
+            body { background: #fff; padding: 0; font-size: 12px; }
+            .page { box-shadow: none; border-radius: 0; max-width: 100%; }
+            .print-controls { display: none; }
+            .section { padding: 14px 24px; }
+            .report-header { padding: 16px 24px 12px; }
+            .sig-section { padding: 16px 24px; }
+            .report-footer { display: block; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Screen-only controls -->
+<div class="print-controls">
+    <button class="btn-print" onclick="window.print()">Print</button>
+    <a class="btn-back" href="{% url 'core:estimate_detail' estimate.pk %}"
+       onclick="window.close(); setTimeout(function(){ window.location.href='{% url 'core:estimate_detail' estimate.pk %}'; }, 150); return false;">← Close</a>
+</div>
+
+<div class="page">
+
+    <!-- Header -->
+    <div class="report-header">
+        <div>
+            {% if site.company_logo %}
+                <img src="{{ site.company_logo.url }}" alt="{{ site.company_name }}" class="company-logo"><br>
+            {% endif %}
+            <div class="company-name">{{ site.company_name|default:"Your Company" }}</div>
+            <div class="company-info">
+                {% if site.company_address_line1 %}{{ site.company_address_line1 }}<br>{% endif %}
+                {% if site.company_address_line2 %}{{ site.company_address_line2 }}<br>{% endif %}
+                {% if site.company_phone %}{{ site.company_phone }}<br>{% endif %}
+                {% if site.company_email %}{{ site.company_email }}{% endif %}
+            </div>
+        </div>
+        <div class="report-meta">
+            <div class="wo-number">{{ estimate.estimate_number }}</div>
+            <div class="report-label">Quote</div>
+            <div class="report-sub">Issued: {{ print_date|date:"M d, Y" }}</div>
+            {% if estimate.expires_on %}
+            <div class="report-sub">Expires: {{ estimate.expires_on|date:"M d, Y" }}</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Bill to -->
+    <div class="section">
+        <div class="section-title">Quote For</div>
+        <div class="field-value">{{ bill_to.name }}</div>
+        {% if bill_to.contact_name %}<div class="field-sub">{{ bill_to.contact_name }}</div>{% endif %}
+        {% if bill_to.email %}<div class="field-sub">{{ bill_to.email }}</div>{% endif %}
+        {% if bill_to.phone %}<div class="field-sub">{{ bill_to.phone }}</div>{% endif %}
+        {% if bill_to.address_line1 %}
+        <div class="field-sub" style="margin-top:4px;">
+            {{ bill_to.address_line1 }}<br>
+            {% if bill_to.address_line2 %}{{ bill_to.address_line2 }}<br>{% endif %}
+            {{ bill_to.address_city }}{% if bill_to.address_state %}, {{ bill_to.address_state }}{% endif %} {{ bill_to.address_zip }}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Scope -->
+    {% if estimate.scope %}
+    <div class="section">
+        <div class="section-title">Scope</div>
+        <div style="line-height:1.5; white-space:pre-line; font-size:13px;">{{ estimate.scope }}</div>
+    </div>
+    {% endif %}
+
+    <!-- Line items -->
+    {% if wp_categories %}
+    <div class="section">
+        <div class="section-title">Line Items</div>
+        {% for category, entries in wp_categories.items %}
+        <div class="work-category">
+            <div class="work-category-name">{{ category }}</div>
+            {% for entry in entries %}
+            <div class="work-item" style="display:flex; justify-content:space-between; gap:12px;">
+                <span>{{ entry.description }}{% if entry.quantity != 1 %} <span style="color:#666;">× {{ entry.quantity|floatformat:"-2" }}</span>{% endif %}</span>
+                {% if entry.line_total != None %}<span style="white-space:nowrap;">${{ entry.line_total|floatformat:2 }}</span>{% endif %}
+            </div>
+            {% with desc=entry.print_description %}
+            {% if desc %}<div class="work-item-desc">{{ desc }}</div>{% endif %}
+            {% endwith %}
+            {% endfor %}
+        </div>
+        {% endfor %}
+        {% if estimate.line_items_total %}
+        <div class="work-item" style="display:flex; justify-content:space-between; border-top:1px solid #999; margin-top:8px; padding-top:6px; font-weight:bold;">
+            <span>Total</span>
+            <span>${{ estimate.line_items_total|floatformat:2 }}</span>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Signature -->
+    <div class="sig-section">
+        <div class="sig-grid">
+            <div class="sig-block">
+                <div class="sig-line"></div>
+                <div class="sig-label">Accepted By &amp; Date</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer (print only) -->
+    <div class="report-footer">
+        {{ site.company_name|default:"Murphy's Bench" }}
+        &nbsp;&bull;&nbsp;
+        {{ estimate.estimate_number }}
+        &nbsp;&bull;&nbsp;
+        {{ print_date|date:"M d, Y" }}
+    </div>
+
+</div>
+</body>
+</html>
