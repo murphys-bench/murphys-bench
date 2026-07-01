@@ -3266,3 +3266,109 @@ def test_sale_checkout_role_block_403(client, client_obj):
     })
     assert resp.status_code == 403
 
+
+# ── Slice 3c — Sale receipt PDF/email (mirrors the Slice 2b quote pattern) ───
+
+def _completed_sale(client_obj=None, amount='30.00'):
+    from decimal import Decimal
+    from django.utils import timezone
+    sale = _priced_draft_sale(client_obj)
+    sale.payment_method = 'cash'
+    sale.amount = Decimal(amount)
+    sale.status = 'completed'
+    sale.paid_at = timezone.now()
+    sale.save()
+    return sale
+
+
+@pytest.mark.django_db
+def test_receipt_print_view_renders_with_total(client, admin_user, client_obj):
+    sale = _completed_sale(client_obj)
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:sale_receipt_print', args=[sale.pk]))
+    assert resp.status_code == 200
+    assert sale.sale_number.encode() in resp.content
+    assert b'30.00' in resp.content
+
+
+@pytest.mark.django_db
+def test_receipt_print_blocked_when_not_completed(client, admin_user, client_obj):
+    sale = _priced_draft_sale(client_obj)  # still draft
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:sale_receipt_print', args=[sale.pk]))
+    assert resp.status_code == 302  # redirected back, not rendered
+
+
+@pdf_skip
+@pytest.mark.django_db
+def test_receipt_email_view_client_anchored_sends(monkeypatch, client, client_obj, admin_user):
+    from django.core.mail import EmailMultiAlternatives
+    from core.models import EmailSendLog, Contact
+    _enable_email()
+    contact = Contact.objects.create(client=client_obj, first_name='Wayne', last_name='Davis',
+                                     email='wayne@davis.example', is_primary=True)
+    sale = _completed_sale(client_obj)
+    sale.contact = contact
+    sale.save()
+
+    captured = {}
+    def fake_send(self, fail_silently=False):
+        captured['attachments'] = list(self.attachments)
+        captured['to'] = list(self.to)
+        return 1
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', fake_send)
+    client.force_login(admin_user)
+
+    resp = client.post(reverse('core:sale_receipt_email', args=[sale.pk]),
+                       {'contact': contact.pk}, follow=True)
+
+    assert resp.status_code == 200
+    assert EmailSendLog.objects.filter(status='sent', trigger='sale_receipt').exists()
+    assert captured['to'] == ['wayne@davis.example']
+    assert captured['attachments'][0][0] == f'Receipt-{sale.sale_number}.pdf'
+    assert captured['attachments'][0][1][:5] == b'%PDF-'
+
+
+@pdf_skip
+@pytest.mark.django_db
+def test_receipt_email_view_walkin_uses_custom_address(monkeypatch, client, admin_user):
+    from django.core.mail import EmailMultiAlternatives
+    from core.models import EmailSendLog
+    _enable_email()
+    sale = _completed_sale(client_obj=None)  # anonymous walk-in
+
+    captured = {}
+    def fake_send(self, fail_silently=False):
+        captured['to'] = list(self.to)
+        return 1
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', fake_send)
+    client.force_login(admin_user)
+
+    resp = client.post(reverse('core:sale_receipt_email', args=[sale.pk]),
+                       {'custom_email': 'walkin@example.com'}, follow=True)
+
+    assert resp.status_code == 200
+    assert EmailSendLog.objects.filter(status='sent', trigger='sale_receipt').exists()
+    assert captured['to'] == ['walkin@example.com']
+
+
+@pytest.mark.django_db
+def test_receipt_email_blocked_when_not_completed(client, admin_user, client_obj):
+    sale = _priced_draft_sale(client_obj)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_receipt_email', args=[sale.pk]),
+                       {'custom_email': 'x@example.com'})
+    assert resp.status_code == 302
+    from core.models import EmailSendLog
+    assert not EmailSendLog.objects.filter(trigger='sale_receipt').exists()
+
+
+@pytest.mark.django_db
+def test_receipt_email_requires_address(client, admin_user, client_obj):
+    sale = _completed_sale(client_obj)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_receipt_email', args=[sale.pk]), {})
+    assert resp.status_code == 302
+    from core.models import EmailSendLog
+    assert not EmailSendLog.objects.filter(trigger='sale_receipt').exists()
+

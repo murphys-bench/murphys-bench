@@ -3935,6 +3935,149 @@ def _quote_report_context(estimate, site):
     }
 
 
+def _receipt_context(sale, site):
+    """Build the receipt-print context once, shared by the print page and the
+    emailed PDF. Sold-to is the client (with its primary/sale contact) or a
+    bare 'Walk-in' label for an anonymous counter sale."""
+    line_items = (
+        sale.line_items
+        .select_related('source_labor_item')
+        .order_by('kind', 'logged_at')
+    )
+    categories = {}
+    for entry in line_items:
+        if entry.kind == 'part':
+            cat = 'Parts'
+        elif entry.source_labor_item:
+            cat = entry.source_labor_item.category
+        else:
+            cat = 'Other'
+        categories.setdefault(cat, []).append(entry)
+
+    if sale.client_id:
+        client = sale.client
+        contact = sale.contact or client.contacts.filter(is_primary=True).first()
+        bill_to = {
+            'name': client.name,
+            'address_line1': client.address_line1,
+            'address_line2': client.address_line2,
+            'address_city': client.address_city,
+            'address_state': client.address_state,
+            'address_zip': client.address_zip,
+            'contact_name': f'{contact.first_name} {contact.last_name}'.strip() if contact else '',
+            'email': (contact.email if contact else '') or client.email,
+            'phone': (contact.phone if contact else '') or client.phone,
+        }
+    else:
+        bill_to = {
+            'name': 'Walk-in', 'address_line1': '', 'address_line2': '',
+            'address_city': '', 'address_state': '', 'address_zip': '',
+            'contact_name': '', 'email': '', 'phone': '',
+        }
+
+    return {
+        'sale': sale,
+        'site': site,
+        'wp_categories': categories,
+        'bill_to': bill_to,
+    }
+
+
+class SaleReceiptPrintView(SaleAccessMixin, View):
+    """Browser preview of the receipt (new tab) — same template the emailed PDF uses.
+    Only meaningful once the sale has been paid."""
+
+    def get(self, request, pk):
+        sale = get_object_or_404(Sale.objects.select_related('client', 'contact'), pk=pk)
+        if sale.status != 'completed':
+            messages.error(request, 'This sale has not been completed yet — no receipt to print.')
+            return redirect('core:sale_detail', pk=pk)
+        site = SiteSettings.get()
+        ctx = _receipt_context(sale, site)
+        return render(request, 'core/sale_receipt_print.html', ctx)
+
+
+class SaleReceiptEmailView(SaleAccessMixin, View):
+    """Email the receipt to the customer as a PDF attachment.
+
+    GET shows a small recipient form (client contacts dropdown, or a custom
+    address — the only path for an anonymous walk-in sale); POST renders the
+    receipt to PDF and sends it. Only available once the sale is completed."""
+
+    def get(self, request, pk):
+        sale = get_object_or_404(Sale.objects.select_related('client', 'contact'), pk=pk)
+        if sale.status != 'completed':
+            messages.error(request, 'This sale has not been completed yet — no receipt to send.')
+            return redirect('core:sale_detail', pk=pk)
+        contacts = sale.client.contacts.filter(is_active=True) if sale.client_id else None
+        default_contact = None
+        default_email = ''
+        if sale.client_id:
+            default_contact = sale.contact or sale.client.contacts.filter(
+                is_primary=True, is_active=True, email__gt='',
+            ).first()
+            default_email = (default_contact.email if default_contact else '') or sale.client.email
+        return render(request, 'core/sale_email_receipt.html', {
+            'sale': sale,
+            'contacts': contacts,
+            'default_contact': default_contact,
+            'default_email': default_email,
+        })
+
+    def post(self, request, pk):
+        sale = get_object_or_404(Sale.objects.select_related('client', 'contact'), pk=pk)
+        if sale.status != 'completed':
+            messages.error(request, 'This sale has not been completed yet — no receipt to send.')
+            return redirect('core:sale_detail', pk=pk)
+
+        from .pdf_utils import render_pdf
+        from .email_utils import send_document_email
+        from django.template.loader import render_to_string
+
+        contact = None
+        to_email = (request.POST.get('custom_email') or '').strip()
+        contact_id = request.POST.get('contact')
+        if not to_email and contact_id and sale.client_id:
+            contact = sale.client.contacts.filter(pk=contact_id).first()
+            to_email = contact.email if contact else ''
+        if not to_email:
+            messages.error(request, 'Choose a contact or enter an email address.')
+            return redirect('core:sale_receipt_email', pk=pk)
+
+        site = SiteSettings.get()
+        ctx = _receipt_context(sale, site)
+        html = render_to_string('core/sale_receipt_print.html', ctx)
+        try:
+            pdf_bytes = render_pdf(html)
+        except Exception:
+            logger.exception('PDF render failed for receipt %s.', sale.sale_number)
+            messages.error(request, 'Could not generate the receipt PDF. The PDF engine may not be installed on this server.')
+            return redirect('core:sale_detail', pk=pk)
+
+        company = site.company_name or "Murphy's Bench"
+        sales_from = site.email_sales_from or site.email_from or None
+        cover = (
+            f"Hello,\n\nThank you for your business. Please find attached your receipt "
+            f"{sale.sale_number} for ${sale.amount or 0}.\n\n{company}"
+        )
+        log = send_document_email(
+            to_email,
+            subject=f"{company}: Receipt {sale.sale_number}",
+            cover_body=cover,
+            from_email=sales_from,
+            reply_to=sales_from,
+            attachments=[(f'Receipt-{sale.sale_number}.pdf', pdf_bytes, 'application/pdf')],
+            client=sale.client,
+            contact=contact,
+            trigger='sale_receipt',
+        )
+        if log.status == 'sent':
+            messages.success(request, f'Receipt emailed to {to_email}.')
+        else:
+            messages.error(request, f'Receipt not sent ({log.get_reason_display() or log.status}).')
+        return redirect('core:sale_detail', pk=pk)
+
+
 def _report_recipient_contact(work_order):
     """The contact a report email is addressed to: the WO's contact (with an
     email), else the client's primary/any active emailable contact."""
