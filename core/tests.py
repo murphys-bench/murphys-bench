@@ -2942,3 +2942,143 @@ def test_revise_rejected_from_draft(client, admin_user, client_obj):
     client.force_login(admin_user)
     client.post(reverse('core:estimate_revise', args=[old.pk]))
     assert Estimate.objects.count() == 1  # no revision spawned
+
+
+# ---------------------------------------------------------------------------
+# Slice 3a — Sale model + CRUD + line items (Counter lane)
+# ---------------------------------------------------------------------------
+
+from core.models import Sale
+
+
+@pytest.mark.django_db
+def test_sale_number_sequential_and_unique(client_obj):
+    s1 = Sale.objects.create(client=client_obj)
+    s2 = Sale.objects.create(client=client_obj)
+    assert s1.sale_number == 'SALE-00001'
+    assert s2.sale_number == 'SALE-00002'
+
+
+@pytest.mark.django_db
+def test_sale_client_is_optional_for_anonymous_walkin():
+    sale = Sale.objects.create()
+    assert sale.client_id is None
+    assert sale.display_name == 'Walk-in'
+
+
+@pytest.mark.django_db
+def test_sale_create_sets_created_by(client, admin_user, client_obj):
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_create'), {
+        'client': client_obj.pk, 'notes': 'Cable + adapter',
+    })
+    assert resp.status_code == 302
+    sale = Sale.objects.get()
+    assert sale.created_by == admin_user
+    assert sale.client_id == client_obj.pk
+    assert sale.status == 'draft'
+
+
+@pytest.mark.django_db
+def test_sale_create_with_no_client_is_valid(client, admin_user):
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_create'), {})
+    assert resp.status_code == 302
+    sale = Sale.objects.get()
+    assert sale.client_id is None
+
+
+@pytest.mark.django_db
+def test_sale_list_hides_void_by_default(client, admin_user, client_obj):
+    open_sale = Sale.objects.create(client=client_obj)
+    void_sale = Sale.objects.create(client=client_obj, status='void')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:sale_list'))
+    sales = list(resp.context['sales'])
+    assert open_sale in sales
+    assert void_sale not in sales
+
+
+@pytest.mark.django_db
+def test_sale_line_items_total_ignores_unpriced(client_obj):
+    from decimal import Decimal
+    sale = Sale.objects.create(client=client_obj)
+    sale.line_items.create(kind='part', description='Cable', quantity=2, unit_price=Decimal('10'))
+    sale.line_items.create(kind='labor', description='Setup', quantity=1, unit_price=Decimal('25'))
+    sale.line_items.create(kind='part', description='Unpriced note')  # no unit_price
+    assert sale.line_items_total == Decimal('45')
+
+
+@pytest.mark.django_db
+def test_sale_delete_blocked_when_completed(client, admin_user, client_obj):
+    sale = Sale.objects.create(client=client_obj, status='completed')
+    client.force_login(admin_user)
+    client.post(reverse('core:sale_delete', args=[sale.pk]))
+    assert Sale.objects.filter(pk=sale.pk).exists()
+
+
+@pytest.mark.django_db
+def test_sale_delete_allowed_when_draft(client, admin_user, client_obj):
+    sale = Sale.objects.create(client=client_obj, status='draft')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_delete', args=[sale.pk]))
+    assert resp.status_code == 302
+    assert not Sale.objects.filter(pk=sale.pk).exists()
+
+
+@pytest.mark.django_db
+def test_sale_access_mixin_blocks_on_role_flag(client, client_obj):
+    role = Role.objects.create(name='NoSales', can_view_sales=False)
+    user = User.objects.create_user(username='tech2', password='x', role_obj=role)
+    client.force_login(user)
+    resp = client.get(reverse('core:sale_list'))
+    assert resp.status_code == 403
+
+
+@pytest.mark.django_db
+def test_sale_labor_log_creates_line_item_on_sale(client, admin_user, client_obj):
+    item = QuickLaborItem.objects.create(label='Data Transfer', category='Software', default_price='45.00')
+    sale = Sale.objects.create(client=client_obj)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_labor_log', args=[sale.pk, item.pk]))
+    assert resp.status_code == 200
+    li = sale.line_items.get()
+    assert li.description == 'Data Transfer'
+    assert li.source_labor_item_id == item.pk
+
+
+@pytest.mark.django_db
+def test_sale_custom_log_creates_line_item_on_sale(client, admin_user, client_obj):
+    sale = Sale.objects.create(client=client_obj)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_custom_log', args=[sale.pk]), {
+        'kind': 'part', 'custom_label': 'USB Hub', 'quantity': '1', 'unit_price': '15',
+    })
+    assert resp.status_code == 200
+    li = sale.line_items.get()
+    assert li.kind == 'part'
+    assert li.description == 'USB Hub'
+
+
+@pytest.mark.django_db
+def test_sale_line_item_delete_and_update_reuse_shared_endpoints(client, admin_user, client_obj):
+    """LineItem edit/delete are host-agnostic (content_object) — confirms Sale
+    rides the same WorkPerformedUpdateView/DeleteView as WorkOrder/Estimate."""
+    from decimal import Decimal
+    sale = Sale.objects.create(client=client_obj)
+    sale.line_items.create(kind='part', description='Cable', quantity=1, unit_price=Decimal('10'))
+    li = sale.line_items.get()
+    client.force_login(admin_user)
+
+    resp = client.post(reverse('core:work_performed_update', args=[li.pk]), {
+        'custom_label': 'USB-C Cable', 'quantity': '2', 'unit_price': '12',
+    })
+    assert resp.status_code == 200
+    li.refresh_from_db()
+    assert li.description == 'USB-C Cable'
+    assert li.quantity == Decimal('2')
+
+    resp = client.post(reverse('core:work_performed_delete', args=[li.pk]))
+    assert resp.status_code == 200
+    assert sale.line_items.count() == 0
+

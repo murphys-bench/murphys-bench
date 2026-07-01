@@ -92,6 +92,7 @@ class Role(models.Model):
     can_close_workorder = models.BooleanField(default=True)
     can_view_prospects = models.BooleanField(default=True, help_text='View and manage sales prospects (leads).')
     can_view_estimates = models.BooleanField(default=True, help_text='View and manage sales estimates (quotes).')
+    can_view_sales = models.BooleanField(default=True, help_text='View and manage counter sales.')
 
     class Meta:
         db_table = 'roles'
@@ -1179,6 +1180,104 @@ class Estimate(models.Model):
         nums = [int(n[4:]) for n in existing if re.match(r'^EST-\d{5}$', n)]
         next_num = (max(nums) + 1) if nums else 1
         return f"EST-{next_num:05d}"
+
+
+class Sale(models.Model):
+    """A counter/walk-in sale — Lane B (Counter). Client is optional (nullable):
+    a cash walk-in with no client stays MB-only and is never pushed to Invoice
+    Ninja (IN needs a client). Reuses the LineItem GenericRelation exactly like
+    WorkOrder/Estimate — same edit/delete UI, same vocabulary.
+
+    Payment/checkout fields are defined now but wired up in Slice 3b (checkout +
+    Send-to-IN); this slice (3a) only builds the record + line items."""
+
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('completed', 'Completed'),
+        ('void', 'Void'),
+    ]
+    PAYMENT_METHOD_CHOICES = [
+        ('cash', 'Cash'),
+        ('check', 'Check'),
+        ('card', 'Card'),
+        ('other', 'Other'),
+    ]
+
+    client = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True, blank=True, related_name='sales')
+    contact = models.ForeignKey(Contact, on_delete=models.SET_NULL, null=True, blank=True, related_name='sales')
+
+    sale_number = models.CharField(max_length=20, unique=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', db_index=True)
+    notes = models.TextField(blank=True)
+
+    # Checkout / payment record (Slice 3b).
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, blank=True)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    reference = models.CharField(max_length=100, blank=True, help_text='Check number or card confirmation reference.')
+
+    # Invoice Ninja push (Slice 3b) — mirrors Invoice/Estimate's read-back trio.
+    invoice_ninja_id = models.CharField(max_length=100, blank=True)
+    in_status = models.CharField(max_length=50, blank=True)
+    in_status_checked_at = models.DateTimeField(null=True, blank=True)
+
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='sales_created')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    line_items = GenericRelation('LineItem')
+
+    class Meta:
+        db_table = 'sales'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        return f'{self.sale_number} — {self.display_name}'
+
+    @property
+    def display_name(self):
+        if self.client_id:
+            return self.client.name
+        return 'Walk-in'
+
+    @property
+    def is_locked(self):
+        """Read-only once completed or voided."""
+        return self.status in ('completed', 'void')
+
+    @property
+    def line_items_total(self):
+        """Sum of priced line items. Unpriced lines are ignored — same vocabulary
+        as WorkOrder.line_items_total / Estimate.line_items_total."""
+        from decimal import Decimal
+        total = Decimal('0')
+        for li in self.line_items.all():
+            lt = li.line_total
+            if lt is not None:
+                total += lt
+        return total
+
+    def save(self, *args, **kwargs):
+        if self._state.adding:
+            return _save_with_unique_number(
+                self, 'sale_number', self.generate_sale_number,
+                lambda: super(Sale, self).save(*args, **kwargs),
+            )
+        return super().save(*args, **kwargs)
+
+    @classmethod
+    def generate_sale_number(cls):
+        """Generate sequential sale number like SALE-00001."""
+        import re
+        existing = cls.objects.filter(
+            sale_number__regex=r'^SALE-\d{5}$'
+        ).values_list('sale_number', flat=True)
+        nums = [int(n[5:]) for n in existing if re.match(r'^SALE-\d{5}$', n)]
+        next_num = (max(nums) + 1) if nums else 1
+        return f"SALE-{next_num:05d}"
 
 
 class OrgCredential(models.Model):

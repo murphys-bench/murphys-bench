@@ -31,13 +31,13 @@ from .models import (
     SuppressedAddress,
     BlockedSender,
     SLAPlan, HelpTopic, TechSkill,
-    Notification, Prospect, Estimate,
+    Notification, Prospect, Estimate, Sale,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
                     CompanySettingsForm, OutboundEmailSettingsForm, InboundEmailSettingsForm,
                     AttachmentSettingsForm, SecuritySettingsForm, MileageSettingsForm,
-                    ColorSettingsForm, InvoiceNinjaSettingsForm, ProspectForm, EstimateForm)
+                    ColorSettingsForm, InvoiceNinjaSettingsForm, ProspectForm, EstimateForm, SaleForm)
 
 logger = logging.getLogger('core')
 
@@ -133,6 +133,12 @@ def _can_view_estimates(user):
     """Estimates are visible to everyone unless a role explicitly turns the flag
     off. Admins always qualify."""
     return _is_admin(user) or user.has_perm_flag('can_view_estimates')
+
+
+def _can_view_sales(user):
+    """Sales are visible to everyone unless a role explicitly turns the flag
+    off. Admins always qualify."""
+    return _is_admin(user) or user.has_perm_flag('can_view_sales')
 
 
 def _can_reset_mfa(user):
@@ -1847,6 +1853,150 @@ class EstimateReviseView(EstimateAccessMixin, View):
         return redirect('core:estimate_detail', pk=new.pk)
 
 
+class SaleAccessMixin(LoginRequiredMixin):
+    """Gate sale views on the can_view_sales role flag."""
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _can_view_sales(request.user):
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+
+class SaleListView(SaleAccessMixin, ListView):
+    model = Sale
+    template_name = 'core/sale_list.html'
+    context_object_name = 'sales'
+    paginate_by = 25
+
+    def get_queryset(self):
+        qs = Sale.objects.select_related('client')
+        search = self.request.GET.get('search')
+        if search:
+            qs = qs.filter(
+                Q(sale_number__icontains=search) |
+                Q(client__name__icontains=search)
+            )
+        status = self.request.GET.get('status')
+        if status in dict(Sale.STATUS_CHOICES):
+            qs = qs.filter(status=status)
+        elif not self.request.GET.get('show_closed'):
+            # Default view hides voided sales.
+            qs = qs.exclude(status='void')
+        return qs
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['active_status'] = self.request.GET.get('status', '')
+        ctx['show_closed'] = bool(self.request.GET.get('show_closed'))
+        ctx['status_choices'] = Sale.STATUS_CHOICES
+        return ctx
+
+
+class SaleDetailView(SaleAccessMixin, DetailView):
+    model = Sale
+    template_name = 'core/sale_detail.html'
+    context_object_name = 'sale'
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        labor_items = QuickLaborItem.objects.filter(is_active=True).order_by('category', 'sort_order', 'label')
+        labor_by_category = {}
+        for item in labor_items:
+            labor_by_category.setdefault(item.category, []).append(item)
+        ctx['labor_by_category'] = labor_by_category
+        ctx['entries'] = _line_items_for(self.object)
+        return ctx
+
+
+class SaleCreateView(SaleAccessMixin, CreateView):
+    model = Sale
+    form_class = SaleForm
+    template_name = 'core/sale_form.html'
+
+    def form_valid(self, form):
+        form.instance.created_by = self.request.user
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse_lazy('core:sale_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['title'] = 'New Sale'
+        ctx['cancel_url'] = reverse_lazy('core:sale_list')
+        return ctx
+
+
+class SaleUpdateView(SaleAccessMixin, UpdateView):
+    model = Sale
+    form_class = SaleForm
+    template_name = 'core/sale_form.html'
+
+    def get_success_url(self):
+        return reverse_lazy('core:sale_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['title'] = f'Edit {self.object.sale_number}'
+        ctx['cancel_url'] = reverse_lazy('core:sale_detail', kwargs={'pk': self.object.pk})
+        return ctx
+
+
+class SaleDeleteView(SaleAccessMixin, View):
+    def post(self, request, pk):
+        sale = get_object_or_404(Sale, pk=pk)
+        if sale.status == 'completed':
+            messages.error(
+                request,
+                f'{sale.sale_number} was completed and cannot be deleted.'
+            )
+            return redirect('core:sale_detail', pk=pk)
+        number = sale.sale_number
+        sale.delete()
+        messages.success(request, f'Sale {number} deleted.')
+        return redirect('core:sale_list')
+
+
+class SaleLaborLogView(SaleAccessMixin, View):
+    """HTMX: log a QuickLaborItem against a Sale as a labor line item."""
+
+    def post(self, request, sale_pk, item_pk):
+        sale = get_object_or_404(Sale, pk=sale_pk)
+        item = get_object_or_404(QuickLaborItem, pk=item_pk, is_active=True)
+        sale.line_items.create(
+            kind='labor',
+            description=item.label[:255],
+            quantity=1,
+            unit_price=item.default_price,
+            source_labor_item=item,
+            logged_by=request.user,
+        )
+        return _render_line_items(request, sale)
+
+
+class SaleCustomLogView(SaleAccessMixin, View):
+    """HTMX: log a fully custom line item — labor or part — on a Sale."""
+
+    def post(self, request, sale_pk):
+        sale = get_object_or_404(Sale, pk=sale_pk)
+        label = request.POST.get('custom_label', '').strip()
+        notes = request.POST.get('notes', '').strip()
+        kind = request.POST.get('kind', 'part')
+        if kind not in ('labor', 'part'):
+            kind = 'part'
+        qty = _parse_qty(request.POST.get('quantity'))
+        if label:
+            sale.line_items.create(
+                kind=kind,
+                description=label[:255],
+                quantity=qty if qty is not None else 1,
+                unit_price=_parse_price(request.POST.get('unit_price')),
+                notes=notes,
+                logged_by=request.user,
+            )
+        return _render_line_items(request, sale)
+
+
 class InvoiceExportView(LoginRequiredMixin, View):
     """Export invoice records for a client as CSV."""
 
@@ -3389,6 +3539,8 @@ _ROLE_FLAGS = [
     ('can_view_device_credentials','View Device Credentials'),
     ('can_reset_user_mfa',         'Reset User MFA'),
     ('can_view_prospects',         'View Prospects'),
+    ('can_view_estimates',         'View Estimates'),
+    ('can_view_sales',             'View Sales'),
 ]
 
 
@@ -3513,13 +3665,18 @@ def _parse_qty(val):
 
 
 def _render_line_items(request, host):
-    """Render the logged-line-items partial for a WorkOrder or an Estimate.
+    """Render the logged-line-items partial for a WorkOrder, an Estimate, or a Sale.
 
-    Both hosts attach LineItem via the same GenericRelation; only the
+    All three hosts attach LineItem via the same GenericRelation; only the
     template (and its context var name) differs."""
     if isinstance(host, Estimate):
         return render(request, 'core/partials/estimate_line_items.html', {
             'estimate': host,
+            'entries': _line_items_for(host),
+        })
+    if isinstance(host, Sale):
+        return render(request, 'core/partials/sale_line_items.html', {
+            'sale': host,
             'entries': _line_items_for(host),
         })
     return render(request, 'core/partials/work_performed.html', {
