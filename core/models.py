@@ -1218,6 +1218,7 @@ class Sale(models.Model):
 
     # Invoice Ninja push (Slice 3b) — mirrors Invoice/Estimate's read-back trio.
     invoice_ninja_id = models.CharField(max_length=100, blank=True)
+    invoice_ninja_ref = models.CharField(max_length=100, blank=True, help_text='Invoice Ninja invoice number (for display).')
     in_status = models.CharField(max_length=50, blank=True)
     in_status_checked_at = models.DateTimeField(null=True, blank=True)
 
@@ -1777,6 +1778,10 @@ class SiteSettings(models.Model):
         max_length=255, blank=True,
         help_text='IN API token (Settings → Account Management → Integrations → API Tokens). Stored encrypted.',
     )
+    # Link-once cache of the standing IN "Walk-In" client used for anonymous counter
+    # sales. NOT a user-facing setting — populated automatically on the first walk-in
+    # push (same "link once, don't sync" philosophy as Client.invoice_ninja_id).
+    invoice_ninja_walkin_client_id = models.CharField(max_length=100, blank=True, default='')
 
     # Status badge colors — hex values rendered as CSS variables
     color_status_new         = models.CharField(max_length=7, default='#dbeafe', blank=True)  # blue-100

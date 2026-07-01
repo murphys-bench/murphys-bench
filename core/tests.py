@@ -3082,3 +3082,187 @@ def test_sale_line_item_delete_and_update_reuse_shared_endpoints(client, admin_u
     assert resp.status_code == 200
     assert sale.line_items.count() == 0
 
+
+# ── Slice 3b — Sale checkout + Send-to-IN (paid invoice; API mocked) ─────────
+
+def _priced_draft_sale(client_obj=None):
+    """A draft sale with one priced line, ready for checkout."""
+    from decimal import Decimal
+    sale = Sale.objects.create(client=client_obj)
+    sale.line_items.create(kind='part', description='Widget', quantity=1, unit_price=Decimal('30'))
+    return sale
+
+
+@pytest.mark.django_db
+def test_sale_checkout_records_payment_and_completes(client, admin_user, client_obj):
+    """IN disabled → checkout records the payment locally and completes, no push."""
+    from decimal import Decimal
+    sale = _priced_draft_sale(client_obj)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_checkout', args=[sale.pk]), {
+        'payment_method': 'cash', 'amount': '30.00', 'reference': '',
+    })
+    assert resp.status_code == 302
+    sale.refresh_from_db()
+    assert sale.status == 'completed'
+    assert sale.payment_method == 'cash'
+    assert sale.amount == Decimal('30.00')
+    assert sale.paid_at is not None
+    assert sale.invoice_ninja_id == ''  # IN disabled → nothing pushed
+
+
+@pytest.mark.django_db
+def test_sale_checkout_blocked_without_priced_lines(client, admin_user, client_obj):
+    sale = Sale.objects.create(client=client_obj)  # no priced lines
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_checkout', args=[sale.pk]), {
+        'payment_method': 'cash', 'amount': '10.00',
+    })
+    assert resp.status_code == 302
+    sale.refresh_from_db()
+    assert sale.status == 'draft'  # not completed
+
+
+@pytest.mark.django_db
+def test_sale_checkout_pushes_when_in_enabled(client, admin_user, client_obj, monkeypatch):
+    """IN enabled → checkout calls push_sale after recording the payment."""
+    from core import invoice_ninja
+    _enable_in()
+    sale = _priced_draft_sale(client_obj)
+    calls = []
+    monkeypatch.setattr(invoice_ninja, 'push_sale', lambda s: calls.append(s) or 'INV-5')
+    client.force_login(admin_user)
+    client.post(reverse('core:sale_checkout', args=[sale.pk]), {
+        'payment_method': 'card', 'amount': '30.00', 'reference': 'AUTH123',
+    })
+    sale.refresh_from_db()
+    assert sale.status == 'completed'
+    assert len(calls) == 1  # pushed once
+
+
+@pytest.mark.django_db
+def test_sale_checkout_push_failure_completes_locally(client, admin_user, client_obj, monkeypatch):
+    """A push failure must NOT roll back the recorded payment (fail loud, keep the record)."""
+    from core import invoice_ninja
+    _enable_in()
+    sale = _priced_draft_sale(client_obj)
+
+    def boom(s):
+        raise invoice_ninja.InvoiceNinjaError('IN down')
+    monkeypatch.setattr(invoice_ninja, 'push_sale', boom)
+    client.force_login(admin_user)
+    client.post(reverse('core:sale_checkout', args=[sale.pk]), {
+        'payment_method': 'cash', 'amount': '30.00',
+    })
+    sale.refresh_from_db()
+    assert sale.status == 'completed'      # payment kept
+    assert sale.invoice_ninja_id == ''     # push failed → retry available
+
+
+@pytest.mark.django_db
+def test_push_sale_creates_paid_invoice_for_client(client_obj, monkeypatch):
+    """push_sale posts an invoice THEN a payment (→ IN shows Paid) and stores the ref."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    _enable_in()
+    client_obj.invoice_ninja_id = '42'; client_obj.save()  # already linked → no client lookup
+    sale = _priced_draft_sale(client_obj)
+    sale.payment_method = 'check'; sale.amount = Decimal('30'); sale.reference = 'CHK-9'
+    sale.status = 'completed'; sale.save()
+
+    calls = []
+    def fake_request(method, path, *, params=None, json=None):
+        calls.append((method, path, json))
+        if path == '/invoices':
+            return {'data': {'id': 999, 'number': 'INV-0007'}}
+        return {'data': {'id': 1}}
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+
+    ref = invoice_ninja.push_sale(sale)
+    sale.refresh_from_db()
+    assert ref == 'INV-0007'
+    assert sale.invoice_ninja_id == '999'
+    assert sale.invoice_ninja_ref == 'INV-0007'
+    assert sale.in_status == 'Paid'
+    # Order: invoice first, then payment applied to it for the recorded amount.
+    paths = [p for _, p, _ in calls]
+    assert paths == ['/invoices', '/payments']
+    inv_body = calls[0][2]
+    assert inv_body['client_id'] == '42'
+    assert inv_body['po_number'] == sale.sale_number
+    pay_body = calls[1][2]
+    assert pay_body['client_id'] == '42'
+    assert pay_body['amount'] == 30.0
+    assert pay_body['invoices'] == [{'invoice_id': '999', 'amount': 30.0}]
+
+
+@pytest.mark.django_db
+def test_push_sale_walkin_creates_and_caches_client(monkeypatch):
+    """Anonymous sale → resolves/creates the standing 'Walk-In' client, caches the
+    id on SiteSettings, and reuses it on the next push (no duplicate create)."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    _enable_in()
+
+    def make_sale():
+        s = Sale.objects.create()  # no client → anonymous
+        s.line_items.create(kind='part', description='Cable', quantity=1, unit_price=Decimal('12'))
+        s.payment_method = 'cash'; s.amount = Decimal('12'); s.status = 'completed'; s.save()
+        return s
+
+    calls = []
+    def fake_request(method, path, *, params=None, json=None):
+        calls.append((method, path))
+        if path == '/clients' and method == 'GET':
+            return {'data': []}                       # no existing Walk-In
+        if path == '/clients' and method == 'POST':
+            return {'data': {'id': 500}}              # create Walk-In
+        if path == '/invoices':
+            return {'data': {'id': 999, 'number': 'INV-9'}}
+        return {'data': {'id': 1}}
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+
+    invoice_ninja.push_sale(make_sale())
+    assert SiteSettings.get().invoice_ninja_walkin_client_id == '500'
+
+    # Second push: cached id reused → no /clients calls at all this time.
+    calls.clear()
+    invoice_ninja.push_sale(make_sale())
+    assert not any(path == '/clients' for _, path in calls)
+
+
+@pytest.mark.django_db
+def test_push_sale_blocks_when_no_priced_lines(client_obj):
+    from core import invoice_ninja
+    _enable_in()
+    sale = Sale.objects.create(client=client_obj)  # no priced lines
+    with pytest.raises(invoice_ninja.InvoiceNinjaError):
+        invoice_ninja.push_sale(sale)
+
+
+@pytest.mark.django_db
+def test_sale_send_in_duplicate_guard(client, admin_user, client_obj, monkeypatch):
+    from core import invoice_ninja
+    _enable_in()
+    sale = Sale.objects.create(client=client_obj, status='completed',
+                               invoice_ninja_id='123', invoice_ninja_ref='INV-1')
+    calls = []
+    monkeypatch.setattr(invoice_ninja, 'push_sale', lambda s: calls.append(s))
+    client.force_login(admin_user)
+    client.post(reverse('core:sale_send_in', args=[sale.pk]))               # no confirm → skip
+    assert calls == []
+    client.post(reverse('core:sale_send_in', args=[sale.pk]), {'confirm_resend': '1'})
+    assert len(calls) == 1
+
+
+@pytest.mark.django_db
+def test_sale_checkout_role_block_403(client, client_obj):
+    role = Role.objects.create(name='NoSales2', can_view_sales=False)
+    user = User.objects.create_user(username='tech3', password='x', role_obj=role)
+    sale = _priced_draft_sale(client_obj)
+    client.force_login(user)
+    resp = client.post(reverse('core:sale_checkout', args=[sale.pk]), {
+        'payment_method': 'cash', 'amount': '30.00',
+    })
+    assert resp.status_code == 403
+

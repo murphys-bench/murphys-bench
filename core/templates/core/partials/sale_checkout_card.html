@@ -1,0 +1,74 @@
+{% load mb_icons %}
+{# Checkout / payment card for a Sale. Draft → payment form; completed → recorded
+   payment + Invoice Ninja status with a retry / re-send path. #}
+<div class="bg-white rounded-lg shadow p-6" id="sale-checkout-card">
+
+    {% if sale.status == 'completed' %}
+        <h2 class="text-base font-semibold text-gray-900 mb-4">Payment</h2>
+        <dl class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div><dt class="text-gray-500">Method</dt><dd class="text-gray-900">{{ sale.get_payment_method_display|default:"—" }}</dd></div>
+            <div><dt class="text-gray-500">Amount</dt><dd class="text-gray-900 font-semibold">${{ sale.amount|default:"0.00" }}</dd></div>
+            <div><dt class="text-gray-500">Paid</dt><dd class="text-gray-900">{{ sale.paid_at|date:"M j, Y g:i A"|default:"—" }}</dd></div>
+            {% if sale.reference %}<div><dt class="text-gray-500">Reference</dt><dd class="text-gray-900">{{ sale.reference }}</dd></div>{% endif %}
+        </dl>
+
+        <div class="mt-4 pt-4 border-t border-gray-100">
+            {% if sale.invoice_ninja_id %}
+                <div class="flex flex-wrap items-center gap-3">
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                        Invoice Ninja → #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }}{% if sale.in_status %} · {{ sale.in_status }}{% endif %}
+                    </span>
+                    {% if not sale.client_id %}<span class="text-xs text-gray-400">billed to Walk-In</span>{% endif %}
+                    {% if invoice_ninja_enabled %}
+                    <form method="post" action="{% url 'core:sale_send_in' sale.pk %}"
+                          onsubmit="return confirm('Re-send this sale to Invoice Ninja? This creates another paid invoice.');">
+                        {% csrf_token %}
+                        <input type="hidden" name="confirm_resend" value="1">
+                        <button type="submit" class="text-xs text-gray-500 hover:text-gray-700 underline">Re-send</button>
+                    </form>
+                    {% endif %}
+                </div>
+            {% elif invoice_ninja_enabled %}
+                <p class="text-sm text-yellow-700 mb-2">Not yet sent to Invoice Ninja.</p>
+                <form method="post" action="{% url 'core:sale_send_in' sale.pk %}">
+                    {% csrf_token %}
+                    <button type="submit" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 font-medium">
+                        Retry Send to Invoice Ninja
+                    </button>
+                </form>
+            {% else %}
+                <p class="text-sm text-gray-400">Recorded in Murphy's Bench only (Invoice Ninja not enabled).</p>
+            {% endif %}
+        </div>
+
+    {% elif sale.status == 'draft' %}
+        <h2 class="text-base font-semibold text-gray-900 mb-4">Checkout</h2>
+        {% if has_priced_lines %}
+            <form method="post" action="{% url 'core:sale_checkout' sale.pk %}" class="space-y-4">
+                {% csrf_token %}
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-sm text-gray-600 mb-1">Payment method</label>
+                        {{ checkout_form.payment_method }}
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-600 mb-1">Amount ($)</label>
+                        {{ checkout_form.amount }}
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-600 mb-1">Reference</label>
+                        {{ checkout_form.reference }}
+                    </div>
+                </div>
+                <button type="submit" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">
+                    Complete Sale
+                </button>
+                {% if invoice_ninja_enabled %}
+                <p class="text-xs text-gray-400">Completing records the payment and sends a paid invoice to Invoice Ninja{% if not sale.client_id %} (under Walk-In){% endif %}.</p>
+                {% endif %}
+            </form>
+        {% else %}
+            <p class="text-sm text-gray-500">Add at least one priced line item above before checkout.</p>
+        {% endif %}
+    {% endif %}
+</div>
