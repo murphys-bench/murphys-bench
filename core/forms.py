@@ -206,6 +206,33 @@ class SaleForm(forms.ModelForm):
         self.fields['notes'].required = False
 
 
+class SaleCheckoutForm(forms.ModelForm):
+    """Record how a counter sale was paid. Amount pre-fills from the line-items
+    total (server-computed) but stays editable — Mike keys the record himself."""
+    class Meta:
+        from .models import Sale
+        model = Sale
+        fields = ['payment_method', 'amount', 'reference']
+        widgets = {
+            'payment_method': forms.Select(attrs={'class': _PROSPECT_INPUT}),
+            'amount': forms.NumberInput(attrs={'class': _PROSPECT_INPUT, 'step': '0.01', 'min': '0.01'}),
+            'reference': forms.TextInput(attrs={'class': _PROSPECT_INPUT, 'placeholder': 'Check # or card confirmation (optional)'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['payment_method'].required = True
+        self.fields['payment_method'].choices = self._meta.model.PAYMENT_METHOD_CHOICES  # no blank option
+        self.fields['amount'].required = True
+        self.fields['reference'].required = False
+
+    def clean_amount(self):
+        amount = self.cleaned_data.get('amount')
+        if amount is None or amount <= 0:
+            raise forms.ValidationError('Enter the amount paid (greater than zero).')
+        return amount
+
+
 class DeviceForm(forms.ModelForm):
     class Meta:
         model = Device

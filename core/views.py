@@ -37,7 +37,8 @@ from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, De
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
                     CompanySettingsForm, OutboundEmailSettingsForm, InboundEmailSettingsForm,
                     AttachmentSettingsForm, SecuritySettingsForm, MileageSettingsForm,
-                    ColorSettingsForm, InvoiceNinjaSettingsForm, ProspectForm, EstimateForm, SaleForm)
+                    ColorSettingsForm, InvoiceNinjaSettingsForm, ProspectForm, EstimateForm, SaleForm,
+                    SaleCheckoutForm)
 
 logger = logging.getLogger('core')
 
@@ -1905,6 +1906,10 @@ class SaleDetailView(SaleAccessMixin, DetailView):
             labor_by_category.setdefault(item.category, []).append(item)
         ctx['labor_by_category'] = labor_by_category
         ctx['entries'] = _line_items_for(self.object)
+        # Checkout card: pre-fill the amount with the server-computed line total.
+        ctx['checkout_form'] = SaleCheckoutForm(initial={'amount': self.object.line_items_total})
+        ctx['has_priced_lines'] = self.object.line_items_total > 0
+        ctx['invoice_ninja_enabled'] = SiteSettings.get().invoice_ninja_enabled
         return ctx
 
 
@@ -1995,6 +2000,82 @@ class SaleCustomLogView(SaleAccessMixin, View):
                 logged_by=request.user,
             )
         return _render_line_items(request, sale)
+
+
+class SaleCheckoutView(SaleAccessMixin, View):
+    """Complete a counter sale: record how it was paid and (if IN is enabled) push
+    a PAID invoice to Invoice Ninja in one action. Bundled one-click: if the IN push
+    fails, the sale still completes locally and a retry button appears — the recorded
+    payment is never lost. MB never charges anything; it mirrors a payment already taken."""
+
+    def post(self, request, pk):
+        from django.db import transaction
+        from . import invoice_ninja
+        sale = get_object_or_404(Sale, pk=pk)
+
+        if sale.is_locked:
+            messages.error(request, f'{sale.sale_number} is already {sale.get_status_display().lower()}.')
+            return redirect('core:sale_detail', pk=pk)
+        if sale.line_items_total <= 0:
+            messages.error(request, 'Add at least one priced line item before checkout.')
+            return redirect('core:sale_detail', pk=pk)
+
+        form = SaleCheckoutForm(request.POST, instance=sale)
+        if not form.is_valid():
+            for errors in form.errors.values():
+                for err in errors:
+                    messages.error(request, err)
+            return redirect('core:sale_detail', pk=pk)
+
+        with transaction.atomic():
+            sale = form.save(commit=False)
+            sale.paid_at = timezone.now()
+            sale.status = 'completed'
+            sale.save()
+
+        # Bundled push (client sale → its IN client; anonymous → the "Walk-In" client).
+        if SiteSettings.get().invoice_ninja_enabled:
+            try:
+                ref = invoice_ninja.push_sale(sale)
+                messages.success(request, f'{sale.sale_number} completed and sent to Invoice Ninja as paid — invoice #{ref}.')
+            except invoice_ninja.InvoiceNinjaError as e:
+                messages.warning(
+                    request,
+                    f'{sale.sale_number} was completed and the payment recorded, but sending to '
+                    f'Invoice Ninja failed: {e} Use "Retry Send to Invoice Ninja".'
+                )
+        else:
+            messages.success(request, f'{sale.sale_number} completed. Payment recorded.')
+        return redirect('core:sale_detail', pk=pk)
+
+
+class SaleSendINView(SaleAccessMixin, View):
+    """Retry / re-send a completed sale to Invoice Ninja as a paid invoice.
+    Used when the bundled checkout push failed, or to deliberately re-send."""
+
+    def post(self, request, pk):
+        from . import invoice_ninja
+        sale = get_object_or_404(Sale, pk=pk)
+        if not SiteSettings.get().invoice_ninja_enabled:
+            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
+            return redirect('core:sale_detail', pk=pk)
+        if sale.status != 'completed':
+            messages.error(request, 'Only a completed sale can be sent to Invoice Ninja.')
+            return redirect('core:sale_detail', pk=pk)
+        # Duplicate guard: already pushed and not an explicit confirmed re-send.
+        if sale.invoice_ninja_id and request.POST.get('confirm_resend') != '1':
+            messages.warning(
+                request,
+                f'{sale.sale_number} was already sent to Invoice Ninja '
+                f'(#{sale.invoice_ninja_ref or sale.invoice_ninja_id}). Use "Re-send" to push again.'
+            )
+            return redirect('core:sale_detail', pk=pk)
+        try:
+            ref = invoice_ninja.push_sale(sale)
+            messages.success(request, f'Sent to Invoice Ninja as paid — invoice #{ref}.')
+        except invoice_ninja.InvoiceNinjaError as e:
+            messages.error(request, f'Could not send to Invoice Ninja: {e}')
+        return redirect('core:sale_detail', pk=pk)
 
 
 class InvoiceExportView(LoginRequiredMixin, View):
