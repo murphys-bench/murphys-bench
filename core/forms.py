@@ -188,6 +188,24 @@ class EstimateForm(forms.ModelForm):
         return cleaned
 
 
+class SaleForm(forms.ModelForm):
+    class Meta:
+        from .models import Sale
+        model = Sale
+        fields = ['client', 'contact', 'notes']
+        widgets = {
+            'client': forms.Select(attrs={'class': _PROSPECT_INPUT}),
+            'contact': forms.Select(attrs={'class': _PROSPECT_INPUT}),
+            'notes': forms.Textarea(attrs={'class': _PROSPECT_INPUT, 'rows': 3, 'placeholder': 'Optional notes…'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['client'].required = False
+        self.fields['contact'].required = False
+        self.fields['notes'].required = False
+
+
 class DeviceForm(forms.ModelForm):
     class Meta:
         model = Device
@@ -718,7 +736,7 @@ class RoleForm(forms.ModelForm):
             'can_delete_ticket', 'can_assign_ticket', 'can_reply_internal',
             'can_reply_customer', 'can_view_device_credentials', 'can_reset_user_mfa',
             'can_create_workorder', 'can_edit_workorder', 'can_close_workorder',
-            'can_view_prospects', 'can_view_estimates',
+            'can_view_prospects', 'can_view_estimates', 'can_view_sales',
         ]
         widgets = {
             'name': forms.TextInput(attrs={'class': _INPUT}),
