@@ -149,11 +149,12 @@ def find_or_create_client(client):
     return in_id
 
 
-def _line_items_payload(work_order):
-    """Map the WO's PRICED line items to IN invoice line items. Unpriced lines
-    (no unit_price) are internal/diagnostic and are not billed."""
+def _line_items_payload(host):
+    """Map a host's PRICED line items to IN invoice line items. Unpriced lines
+    (no unit_price) are internal/diagnostic and are not billed. `host` is any
+    object exposing a `line_items` GenericRelation (WorkOrder or Sale)."""
     items = []
-    for li in work_order.line_items.all():
+    for li in host.line_items.all():
         if li.unit_price is None:
             continue
         # Client-facing text: the line's print description, falling back to its label.
@@ -235,3 +236,99 @@ def push_work_order(work_order):
     work_order.invoice_ninja_ref = str(invoice.get('number') or '')
     work_order.save(update_fields=['invoice_ninja_id', 'invoice_ninja_ref'])
     return work_order.invoice_ninja_ref or work_order.invoice_ninja_id
+
+
+# Counter-sale checkout push (Slice 3b). Unlike the WO push (a DRAFT), a sale is
+# pushed as a PAID invoice: create the invoice, then post a payment against it so
+# IN shows Paid. MB never charges anything — it mirrors a payment Mike already took.
+
+WALKIN_CLIENT_NAME = 'Walk-In'
+
+# MB payment method → IN payment type_id. Left EMPTY on purpose: IN's PaymentType
+# constants must be confirmed against the live instance before we send a type_id
+# (a wrong id makes /payments 400). Until populated, the payment is posted without
+# a categorized type — it still marks the invoice Paid; the method is captured in
+# the payment's private_notes. Populate after verifying in Mike's IN instance.
+_IN_PAYMENT_TYPE_IDS = {}
+
+
+def find_or_create_walkin_client():
+    """Return the IN client id for anonymous counter sales, creating a standing
+    'Walk-In' client if needed. Link-once: cache the id on SiteSettings so we
+    never create duplicates (same philosophy as Client.invoice_ninja_id)."""
+    from .models import SiteSettings
+    s = SiteSettings.get()
+    cached = (s.invoice_ninja_walkin_client_id or '').strip()
+    if cached:
+        return cached
+
+    # Match an existing 'Walk-In' by exact name before creating one.
+    data = _request('GET', '/clients', params={'filter': WALKIN_CLIENT_NAME})
+    for row in (data.get('data') or []):
+        if (row.get('name') or '').strip() == WALKIN_CLIENT_NAME:
+            in_id = str(row['id'])
+            s.invoice_ninja_walkin_client_id = in_id
+            s.save(update_fields=['invoice_ninja_walkin_client_id'])
+            return in_id
+
+    data = _request('POST', '/clients', json={'name': WALKIN_CLIENT_NAME})
+    in_id = str(data['data']['id'])
+    s.invoice_ninja_walkin_client_id = in_id
+    s.save(update_fields=['invoice_ninja_walkin_client_id'])
+    return in_id
+
+
+def push_sale(sale):
+    """Create a PAID invoice in IN from a counter sale's priced lines.
+
+    A sale with a client bills under that client; an anonymous walk-in bills under
+    the standing 'Walk-In' client. After creating the invoice we post a payment for
+    the sale's recorded amount so IN marks it Paid. Fail loud on any problem; on
+    failure nothing partial is trusted on the sale (the checkout view surfaces the
+    error and offers a retry).
+    """
+    from django.utils import timezone
+
+    line_items = _line_items_payload(sale)
+    if not line_items:
+        raise InvoiceNinjaError(
+            'This sale has no priced line items to send. Add a price to at least '
+            'one line first.'
+        )
+
+    if sale.client_id:
+        in_client_id = find_or_create_client(sale.client)
+    else:
+        in_client_id = find_or_create_walkin_client()
+
+    invoice_data = _request('POST', '/invoices', json={
+        'client_id': in_client_id,
+        'po_number': sale.sale_number,  # SALE# for bank→IN→MB traceability
+        'line_items': line_items,
+    })
+    invoice = invoice_data['data']
+    invoice_id = str(invoice['id'])
+    sale.invoice_ninja_id = invoice_id
+    sale.invoice_ninja_ref = str(invoice.get('number') or '')
+
+    # Post the payment → IN marks the invoice Paid (not Draft).
+    amount = float(sale.amount if sale.amount is not None else sale.line_items_total)
+    payment_payload = {
+        'client_id': in_client_id,
+        'amount': amount,
+        'invoices': [{'invoice_id': invoice_id, 'amount': amount}],
+        'transaction_reference': sale.reference or '',
+        'private_notes': f'Counter sale {sale.sale_number} — {sale.get_payment_method_display() or sale.payment_method or "unspecified"}',
+        'date': timezone.localdate().isoformat(),
+    }
+    type_id = _IN_PAYMENT_TYPE_IDS.get(sale.payment_method)
+    if type_id is not None:
+        payment_payload['type_id'] = type_id
+    _request('POST', '/payments', json=payment_payload)
+
+    sale.in_status = 'Paid'
+    sale.in_status_checked_at = timezone.now()
+    sale.save(update_fields=[
+        'invoice_ninja_id', 'invoice_ninja_ref', 'in_status', 'in_status_checked_at',
+    ])
+    return sale.invoice_ninja_ref or sale.invoice_ninja_id
