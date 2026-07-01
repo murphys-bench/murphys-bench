@@ -12,6 +12,13 @@
             {% if sale.reference %}<div><dt class="text-gray-500">Reference</dt><dd class="text-gray-900">{{ sale.reference }}</dd></div>{% endif %}
         </dl>
 
+        <div class="mt-4 pt-4 border-t border-gray-100 flex flex-wrap gap-3">
+            <a href="{% url 'core:sale_receipt_print' sale.pk %}" target="_blank"
+               class="text-sm text-blue-600 hover:underline">Print Receipt</a>
+            <a href="{% url 'core:sale_receipt_email' sale.pk %}"
+               class="text-sm text-blue-600 hover:underline">Email Receipt</a>
+        </div>
+
         <div class="mt-4 pt-4 border-t border-gray-100">
             {% if sale.invoice_ninja_id %}
                 <div class="flex flex-wrap items-center gap-3">
