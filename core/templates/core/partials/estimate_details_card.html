@@ -1,0 +1,74 @@
+{% comment %}
+Details card for an Estimate. Client/Prospect/Ticket/Contact/Device save on
+change, Scope saves on blur, Expires On saves on change — via
+EstimateQuickUpdateView — no Save button, no separate edit page. Client and
+Prospect are mutually exclusive; picking one clears the other server-side.
+A locked (accepted, or superseded by a revision) estimate shows a plain
+read-only summary.
+{% endcomment %}
+<div class="bg-white rounded-lg shadow p-6" id="estimate-details-card">
+    <h2 class="text-base font-semibold text-gray-900 mb-4">Details</h2>
+
+    {% if estimate.is_locked %}
+        <dl class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div>
+                <dt class="text-gray-500">For</dt>
+                <dd class="text-gray-900">
+                    {% if estimate.client %}
+                        <a href="{% url 'core:client_detail' estimate.client_id %}" class="text-blue-600 hover:underline">{{ estimate.client.name }}</a>
+                    {% elif estimate.prospect %}
+                        <a href="{% url 'core:prospect_detail' estimate.prospect_id %}" class="text-blue-600 hover:underline">{{ estimate.prospect.display_name }}</a> <span class="text-gray-400">(prospect)</span>
+                    {% else %}—{% endif %}
+                </dd>
+            </div>
+            <div><dt class="text-gray-500">Ticket</dt><dd class="text-gray-900">{% if estimate.ticket %}<a href="{% url 'core:ticket_detail' estimate.ticket_id %}" class="text-blue-600 hover:underline">{{ estimate.ticket.ticket_number }}</a>{% else %}—{% endif %}</dd></div>
+            <div><dt class="text-gray-500">Contact</dt><dd class="text-gray-900">{{ estimate.contact|default:"—" }}</dd></div>
+            <div><dt class="text-gray-500">Device</dt><dd class="text-gray-900">{{ estimate.device|default:"—" }}</dd></div>
+            <div><dt class="text-gray-500">Expires</dt><dd class="text-gray-900">{{ estimate.expires_on|date:"M j, Y"|default:"—" }}</dd></div>
+            <div><dt class="text-gray-500">Added</dt><dd class="text-gray-900">{{ estimate.created_at|date:"M j, Y" }}</dd></div>
+        </dl>
+        {% if estimate.scope %}
+        <div class="mt-4 pt-4 border-t border-gray-100">
+            <dt class="text-gray-500 text-sm mb-1">Scope</dt>
+            <dd class="text-sm text-gray-900 whitespace-pre-line">{{ estimate.scope }}</dd>
+        </div>
+        {% endif %}
+    {% else %}
+        <p class="text-xs text-gray-400 mb-4">Choose exactly one of Client or Prospect — picking one clears the other. Saves automatically.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Client</label>
+                {{ estimate_form.client }}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Prospect</label>
+                {{ estimate_form.prospect }}
+            </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Ticket <span class="text-gray-400 font-normal">(optional)</span></label>
+                {{ estimate_form.ticket }}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Contact <span class="text-gray-400 font-normal">(optional)</span></label>
+                {{ estimate_form.contact }}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Device <span class="text-gray-400 font-normal">(optional)</span></label>
+                {{ estimate_form.device }}
+            </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Scope</label>
+                {{ estimate_form.scope }}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Expires On <span class="text-gray-400 font-normal">(optional)</span></label>
+                {{ estimate_form.expires_on }}
+                <p class="text-gray-500 text-sm mt-3">Added {{ estimate.created_at|date:"M j, Y" }}</p>
+            </div>
+        </div>
+    {% endif %}
+</div>

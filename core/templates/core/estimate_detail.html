@@ -47,32 +47,7 @@
     </div>
     {% endfor %}
 
-    <div class="bg-white rounded-lg shadow p-6">
-        <h2 class="text-base font-semibold text-gray-900 mb-4">Details</h2>
-        <dl class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div>
-                <dt class="text-gray-500">For</dt>
-                <dd class="text-gray-900">
-                    {% if estimate.client %}
-                        <a href="{% url 'core:client_detail' estimate.client_id %}" class="text-blue-600 hover:underline">{{ estimate.client.name }}</a>
-                    {% elif estimate.prospect %}
-                        <a href="{% url 'core:prospect_detail' estimate.prospect_id %}" class="text-blue-600 hover:underline">{{ estimate.prospect.display_name }}</a> <span class="text-gray-400">(prospect)</span>
-                    {% else %}—{% endif %}
-                </dd>
-            </div>
-            <div><dt class="text-gray-500">Ticket</dt><dd class="text-gray-900">{% if estimate.ticket %}<a href="{% url 'core:ticket_detail' estimate.ticket_id %}" class="text-blue-600 hover:underline">{{ estimate.ticket.ticket_number }}</a>{% else %}—{% endif %}</dd></div>
-            <div><dt class="text-gray-500">Contact</dt><dd class="text-gray-900">{{ estimate.contact|default:"—" }}</dd></div>
-            <div><dt class="text-gray-500">Device</dt><dd class="text-gray-900">{{ estimate.device|default:"—" }}</dd></div>
-            <div><dt class="text-gray-500">Expires</dt><dd class="text-gray-900">{{ estimate.expires_on|date:"M j, Y"|default:"—" }}</dd></div>
-            <div><dt class="text-gray-500">Added</dt><dd class="text-gray-900">{{ estimate.created_at|date:"M j, Y" }}</dd></div>
-        </dl>
-        {% if estimate.scope %}
-        <div class="mt-4 pt-4 border-t border-gray-100">
-            <dt class="text-gray-500 text-sm mb-1">Scope</dt>
-            <dd class="text-sm text-gray-900 whitespace-pre-line">{{ estimate.scope }}</dd>
-        </div>
-        {% endif %}
-    </div>
+    {% include "core/partials/estimate_details_card.html" %}
 
     <!-- Line items -->
     <div class="bg-white rounded-lg shadow p-6"
@@ -196,8 +171,6 @@
             {% if not estimate.is_locked %}
                 <a href="{% url 'core:estimate_quote_email' estimate.pk %}"
                    class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">Email Quote</a>
-                <a href="{% url 'core:estimate_edit' estimate.pk %}"
-                   class="px-5 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">Edit</a>
             {% endif %}
             {% if estimate.status != 'accepted' %}
                 <form method="post" action="{% url 'core:estimate_delete' estimate.pk %}"

@@ -2653,16 +2653,86 @@ def test_estimate_requires_exactly_one_anchor(client_obj):
 
 
 @pytest.mark.django_db
-def test_estimate_create_sets_created_by(client, admin_user, client_obj):
+def test_estimate_create_is_instant_and_lands_on_detail(client, admin_user):
+    """New Estimate is a one-click action (no intermediate form): POSTing
+    creates a blank unanchored draft and redirects straight to its detail
+    page — Client/Prospect/Scope are set afterward via the inline Details
+    card (mirrors the Sale create flow)."""
     client.force_login(admin_user)
-    resp = client.post(reverse('core:estimate_create'), {
-        'client': client_obj.pk, 'scope': 'New laptop setup',
-    })
+    resp = client.post(reverse('core:estimate_create'), {})
     assert resp.status_code == 302
     est = Estimate.objects.get()
     assert est.created_by == admin_user
-    assert est.client_id == client_obj.pk
+    assert est.client_id is None
+    assert est.prospect_id is None
     assert est.status == 'draft'
+    assert resp.url == reverse('core:estimate_detail', args=[est.pk])
+
+
+@pytest.mark.django_db
+def test_estimate_quick_update_sets_client_and_scope(client, admin_user, client_obj):
+    est = Estimate.objects.create(created_by=admin_user)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_quick_update', args=[est.pk]), {
+        'client': client_obj.pk, 'scope': 'New laptop setup',
+    })
+    assert resp.status_code == 200
+    est.refresh_from_db()
+    assert est.client_id == client_obj.pk
+    assert est.scope == 'New laptop setup'
+
+
+@pytest.mark.django_db
+def test_estimate_quick_update_client_clears_prospect(client, admin_user, client_obj):
+    prospect = Prospect.objects.create(contact_first_name='Lee', client_type='residential')
+    est = Estimate.objects.create(created_by=admin_user, prospect=prospect)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_quick_update', args=[est.pk]), {
+        'client': client_obj.pk,
+    })
+    assert resp.status_code == 200
+    est.refresh_from_db()
+    assert est.client_id == client_obj.pk
+    assert est.prospect_id is None
+
+
+@pytest.mark.django_db
+def test_estimate_quick_update_prospect_clears_client(client, admin_user, client_obj):
+    prospect = Prospect.objects.create(contact_first_name='Lee', client_type='residential')
+    est = Estimate.objects.create(created_by=admin_user, client=client_obj)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_quick_update', args=[est.pk]), {
+        'prospect': prospect.pk,
+    })
+    assert resp.status_code == 200
+    est.refresh_from_db()
+    assert est.prospect_id == prospect.pk
+    assert est.client_id is None
+
+
+@pytest.mark.django_db
+def test_estimate_quick_update_scope_only_does_not_touch_client(client, admin_user, client_obj):
+    est = Estimate.objects.create(created_by=admin_user, client=client_obj)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_quick_update', args=[est.pk]), {
+        'scope': 'Typed on blur',
+    })
+    assert resp.status_code == 200
+    est.refresh_from_db()
+    assert est.scope == 'Typed on blur'
+    assert est.client_id == client_obj.pk
+
+
+@pytest.mark.django_db
+def test_estimate_quick_update_blocked_when_locked(client, admin_user, client_obj):
+    est = Estimate.objects.create(client=client_obj, status='accepted')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_quick_update', args=[est.pk]), {
+        'scope': 'should not save',
+    })
+    assert resp.status_code == 200
+    est.refresh_from_db()
+    assert est.scope != 'should not save'
 
 
 @pytest.mark.django_db
