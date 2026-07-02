@@ -1772,6 +1772,9 @@ class EstimateQuotePrintView(EstimateAccessMixin, View):
         estimate = get_object_or_404(
             Estimate.objects.select_related('client', 'prospect', 'contact'), pk=pk,
         )
+        if not estimate.client_id and not estimate.prospect_id:
+            messages.error(request, 'Choose a Client or Prospect before previewing the quote.')
+            return redirect('core:estimate_detail', pk=pk)
         site = SiteSettings.get()
         ctx = _quote_report_context(estimate, site)
         return render(request, 'core/estimate_quote_print.html', ctx)
@@ -1788,6 +1791,9 @@ class EstimateQuoteEmailView(EstimateAccessMixin, View):
 
     def get(self, request, pk):
         estimate = get_object_or_404(Estimate.objects.select_related('client', 'prospect'), pk=pk)
+        if not estimate.client_id and not estimate.prospect_id:
+            messages.error(request, 'Choose a Client or Prospect before emailing the quote.')
+            return redirect('core:estimate_detail', pk=pk)
         contacts = estimate.client.contacts.filter(is_active=True) if estimate.client_id else None
         default_contact = None
         if estimate.client_id:
@@ -1806,6 +1812,9 @@ class EstimateQuoteEmailView(EstimateAccessMixin, View):
 
     def post(self, request, pk):
         estimate = get_object_or_404(Estimate.objects.select_related('client', 'prospect'), pk=pk)
+        if not estimate.client_id and not estimate.prospect_id:
+            messages.error(request, 'Choose a Client or Prospect before emailing the quote.')
+            return redirect('core:estimate_detail', pk=pk)
 
         from .pdf_utils import render_pdf
         from .email_utils import send_document_email

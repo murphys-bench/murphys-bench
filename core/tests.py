@@ -3099,6 +3099,28 @@ def test_estimate_option_actions_blocked_when_locked(client, admin_user, client_
 
 
 @pytest.mark.django_db
+def test_estimate_quote_print_blocked_when_unanchored(client, admin_user):
+    """A brand-new blank draft (Round 1: creation lands unanchored) must not
+    crash the quote print/PDF view — it should redirect with a message
+    instead of hitting AttributeError on a None prospect."""
+    est = Estimate.objects.create()
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:estimate_quote_print', args=[est.pk]))
+    assert resp.status_code == 302
+    assert resp.url == reverse('core:estimate_detail', args=[est.pk])
+
+
+@pytest.mark.django_db
+def test_estimate_quote_email_blocked_when_unanchored(client, admin_user):
+    est = Estimate.objects.create()
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:estimate_quote_email', args=[est.pk]))
+    assert resp.status_code == 302
+    resp = client.post(reverse('core:estimate_quote_email', args=[est.pk]), {'custom_email': 'x@example.com'})
+    assert resp.status_code == 302
+
+
+@pytest.mark.django_db
 def test_accept_prospect_estimate_promotes_and_reanchors(client, admin_user):
     from core.models import Client as ClientModel
     prospect = _Prospect.objects.create(
