@@ -1700,6 +1700,22 @@ class EstimateOptionCreateView(EstimateAccessMixin, View):
         return _render_line_items(request, estimate)
 
 
+class EstimateGeneralLabelUpdateView(EstimateAccessMixin, View):
+    """HTMX: rename the General section (auto-saves on blur) so it can read
+    like a real option name ("Base", "Common Costs") instead of the generic
+    default — only meaningful once EstimateOptions exist, but harmless to
+    call regardless. Blank input falls back to 'General' rather than saving
+    an empty heading."""
+
+    def post(self, request, pk):
+        estimate = get_object_or_404(Estimate, pk=pk)
+        if not estimate.is_locked:
+            label = request.POST.get('general_label', '').strip()
+            estimate.general_label = label[:120] if label else 'General'
+            estimate.save(update_fields=['general_label'])
+        return _render_line_items(request, estimate)
+
+
 class EstimateOptionSelectView(EstimateAccessMixin, View):
     """HTMX: mark one option as the client's pick — clears any sibling
     selection (mutually exclusive within the estimate). Rejected options stay

@@ -191,7 +191,7 @@
     <!-- Line items -->
     {% if wp_categories %}
     <div class="section">
-        <div class="section-title">{% if option_blocks %}General{% else %}Line Items{% endif %}</div>
+        <div class="section-title">{% if option_blocks %}{{ estimate.general_label }}{% else %}Line Items{% endif %}</div>
         {% for category, entries in wp_categories.items %}
         <div class="work-category">
             <div class="work-category-name">{{ category }}</div>

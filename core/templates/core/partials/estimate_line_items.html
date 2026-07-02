@@ -9,7 +9,16 @@ has — options are opt-in via "+ Add Option" in estimate_detail.html.
 {% if options %}
 <div x-data="{ customOpen: false }">
     <div class="flex items-center justify-between mb-1.5">
-        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">General</p>
+        {% if estimate.is_locked %}
+        <p class="text-sm font-semibold text-gray-800">{{ estimate.general_label }}</p>
+        {% else %}
+        <input type="text" name="general_label" value="{{ estimate.general_label }}"
+               placeholder="General"
+               hx-post="{% url 'core:estimate_general_label_update' estimate.pk %}"
+               hx-trigger="blur"
+               hx-target="#estimate-line-items-section" hx-swap="innerHTML"
+               class="text-sm font-semibold text-gray-800 border-0 border-b border-transparent hover:border-gray-300 focus:border-blue-400 focus:outline-none bg-transparent px-0 py-0.5 w-40">
+        {% endif %}
         {% if not estimate.is_locked %}
         <button type="button" @click="customOpen = !customOpen"
                 class="text-xs px-2 py-1 rounded border text-blue-600 border-blue-300 hover:bg-blue-50">
