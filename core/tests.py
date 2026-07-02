@@ -2385,6 +2385,64 @@ def test_device_edit_save_and_create_wo_redirects(client, client_obj, admin_user
     assert resp.url == reverse('core:work_order_create') + f'?device={device.pk}'
 
 
+# ── New Client page: optional embedded device card ──────────────────────────
+# Client name and device name are both "name" model fields, so the embedded
+# device form is bound with prefix='device' (device-name, device-device_type,
+# etc.) to keep them from colliding as the same POST key in one <form>.
+
+@pytest.mark.django_db
+def test_new_client_with_device_fields_creates_both(client, admin_user):
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:client_create'), {
+        'name': 'Wayne Enterprises',
+        'client_type': 'business',
+        'is_active': 'on',
+        'device-name': 'Front Desk Laptop',
+        'device-device_type': 'laptop',
+        'device-manufacturer': 'Dell',
+        'device-model': 'XPS 13',
+    })
+    assert resp.status_code == 302
+    new_client = Client.objects.get(name='Wayne Enterprises')
+    device = Device.objects.get(client=new_client)
+    assert device.name == 'Front Desk Laptop'
+    assert device.manufacturer == 'Dell'
+    assert device.model == 'XPS 13'
+    assert resp.url == reverse('core:client_detail', kwargs={'pk': new_client.pk})
+
+
+@pytest.mark.django_db
+def test_new_client_without_device_creates_only_client(client, admin_user):
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:client_create'), {
+        'name': 'Solo Client',
+        'client_type': 'residential',
+        'is_active': 'on',
+        'device-device_type': 'laptop',
+    })
+    assert resp.status_code == 302
+    new_client = Client.objects.get(name='Solo Client')
+    assert Device.objects.filter(client=new_client).count() == 0
+
+
+@pytest.mark.django_db
+def test_new_client_invalid_device_serial_reblocks_client_save(client, admin_user, client_obj):
+    """A duplicate serial number on the embedded device form must fail the
+    whole page (no orphan client saved) rather than 500 or silently drop it."""
+    Device.objects.create(client=client_obj, name='Existing', serial_number='SN-DUPE')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:client_create'), {
+        'name': 'Should Not Save',
+        'client_type': 'business',
+        'is_active': 'on',
+        'device-name': 'New Device',
+        'device-device_type': 'laptop',
+        'device-serial_number': 'SN-DUPE',
+    })
+    assert resp.status_code == 200
+    assert not Client.objects.filter(name='Should Not Save').exists()
+
+
 # ── Slice 0: Prospect (customer spine) ──────────────────────────────────────
 
 from core.models import Prospect, Role

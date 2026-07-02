@@ -33,7 +33,7 @@ from .models import (
     SLAPlan, HelpTopic, TechSkill,
     Notification, Prospect, Estimate, Sale,
 )
-from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm,
+from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm, DeviceQuickAddForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
                     CompanySettingsForm, OutboundEmailSettingsForm, InboundEmailSettingsForm,
                     AttachmentSettingsForm, SecuritySettingsForm, MileageSettingsForm,
@@ -1288,9 +1288,26 @@ class ClientCreateView(LoginRequiredMixin, CreateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context.setdefault('device_form', DeviceQuickAddForm(prefix='device'))
         context['title'] = 'New Client'
         context['cancel_url'] = reverse_lazy('core:client_list')
         return context
+
+    def post(self, request, *args, **kwargs):
+        from django.db import transaction
+
+        self.object = None
+        form = self.get_form()
+        device_form = DeviceQuickAddForm(request.POST, prefix='device')
+        if form.is_valid() and device_form.is_valid():
+            with transaction.atomic():
+                self.object = form.save()
+                if device_form.cleaned_data.get('name'):
+                    device = device_form.save(commit=False)
+                    device.client = self.object
+                    device.save()
+            return redirect(self.get_success_url())
+        return self.render_to_response(self.get_context_data(form=form, device_form=device_form))
 
 
 class ClientUpdateView(LoginRequiredMixin, UpdateView):
