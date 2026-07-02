@@ -3006,6 +3006,30 @@ def test_estimate_option_create_and_totals_independent(client, admin_user, clien
 
 
 @pytest.mark.django_db
+def test_estimate_general_subtotal_still_shown_when_options_exist(client, admin_user, client_obj):
+    """Regression: General items had no visible subtotal at all once any
+    option existed (the template hid the whole block instead of just
+    relabeling it) — found live via a real quote with a General item plus
+    two options, where the General total simply vanished on both the detail
+    page and the printed quote."""
+    from decimal import Decimal
+    est = Estimate.objects.create(client=client_obj)
+    est.line_items.create(kind='labor', description='All Ubiquity', quantity=1, unit_price=Decimal('10000'))
+    est.options.create(label='All Cisco')
+    client.force_login(admin_user)
+
+    resp = client.get(reverse('core:estimate_detail', args=[est.pk]))
+    body = resp.content.decode()
+    assert 'Subtotal' in body
+    assert '10000.00' in body
+
+    resp = client.get(reverse('core:estimate_quote_print', args=[est.pk]))
+    body = resp.content.decode()
+    assert '10000.00' in body
+    assert 'Subtotal' in body or 'Total' in body
+
+
+@pytest.mark.django_db
 def test_estimate_option_select_clears_sibling_selection(client, admin_user, client_obj):
     est = Estimate.objects.create(client=client_obj)
     a = est.options.create(label='A')

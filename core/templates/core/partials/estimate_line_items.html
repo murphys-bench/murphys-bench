@@ -22,12 +22,10 @@ has — options are opt-in via "+ Add Option" in estimate_detail.html.
 {% else %}
 <p class="text-sm text-gray-400 italic">No line items yet.</p>
 {% endif %}
-{% if not options %}
 <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-200 text-sm">
-    <span class="text-gray-500">Total</span>
+    <span class="text-gray-500">{% if options %}Subtotal{% else %}Total{% endif %}</span>
     <span class="font-semibold text-gray-800">${{ estimate.line_items_total|floatformat:2 }}</span>
 </div>
-{% endif %}
 
 {% for option in options %}
 <div class="mt-4 pt-4 border-t border-gray-200" x-data="{ customOpen: false }">

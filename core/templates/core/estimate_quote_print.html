@@ -191,7 +191,7 @@
     <!-- Line items -->
     {% if wp_categories %}
     <div class="section">
-        <div class="section-title">Line Items</div>
+        <div class="section-title">{% if option_blocks %}General{% else %}Line Items{% endif %}</div>
         {% for category, entries in wp_categories.items %}
         <div class="work-category">
             <div class="work-category-name">{{ category }}</div>
@@ -206,9 +206,9 @@
             {% endfor %}
         </div>
         {% endfor %}
-        {% if not option_blocks and estimate.line_items_total %}
+        {% if estimate.line_items_total %}
         <div class="work-item" style="display:flex; justify-content:space-between; border-top:1px solid #999; margin-top:8px; padding-top:6px; font-weight:bold;">
-            <span>Total</span>
+            <span>{% if option_blocks %}Subtotal{% else %}Total{% endif %}</span>
             <span>${{ estimate.line_items_total|floatformat:2 }}</span>
         </div>
         {% endif %}
