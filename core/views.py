@@ -1893,6 +1893,20 @@ class SaleListView(SaleAccessMixin, ListView):
         return ctx
 
 
+def _sale_checkout_context(sale):
+    """Checkout-card context, shared by the initial page render and the
+    out-of-band refresh triggered whenever a line item is logged/deleted —
+    has_priced_lines and the amount prefill must reflect the CURRENT line
+    total, not the total at the time the page first loaded."""
+    from decimal import Decimal
+    prefill_amount = sale.line_items_total.quantize(Decimal('0.01'))
+    return {
+        'checkout_form': SaleCheckoutForm(initial={'amount': prefill_amount}),
+        'has_priced_lines': sale.line_items_total > 0,
+        'invoice_ninja_enabled': SiteSettings.get().invoice_ninja_enabled,
+    }
+
+
 class SaleDetailView(SaleAccessMixin, DetailView):
     model = Sale
     template_name = 'core/sale_detail.html'
@@ -1909,15 +1923,7 @@ class SaleDetailView(SaleAccessMixin, DetailView):
         # Customer card: inline edit form (Client/Contact/Notes), same fields
         # used at creation — editing and creating are the same UI.
         ctx['sale_form'] = SaleForm(instance=self.object)
-        # Checkout card: pre-fill the amount with the server-computed line total,
-        # rounded to cents — line_items_total can carry extra decimal places from
-        # quantity * unit_price (e.g. 0.5 * 60.00 = 30.000), which fails the
-        # amount field's own step=0.01 validation if submitted unedited.
-        from decimal import Decimal
-        prefill_amount = self.object.line_items_total.quantize(Decimal('0.01'))
-        ctx['checkout_form'] = SaleCheckoutForm(initial={'amount': prefill_amount})
-        ctx['has_priced_lines'] = self.object.line_items_total > 0
-        ctx['invoice_ninja_enabled'] = SiteSettings.get().invoice_ninja_enabled
+        ctx.update(_sale_checkout_context(self.object))
         return ctx
 
 
@@ -3752,16 +3758,27 @@ def _render_line_items(request, host):
 
     All three hosts attach LineItem via the same GenericRelation; only the
     template (and its context var name) differs."""
+    from django.template.loader import render_to_string
     if isinstance(host, Estimate):
         return render(request, 'core/partials/estimate_line_items.html', {
             'estimate': host,
             'entries': _line_items_for(host),
         })
     if isinstance(host, Sale):
-        return render(request, 'core/partials/sale_line_items.html', {
+        # The Checkout card lives outside #sale-line-items-section (the swap
+        # target), so its "has priced lines" gate and amount prefill go stale
+        # after an add/edit/delete unless explicitly refreshed. Append it as
+        # an out-of-band swap alongside the in-band line-items fragment.
+        items_html = render_to_string(request=request, template_name='core/partials/sale_line_items.html', context={
             'sale': host,
             'entries': _line_items_for(host),
         })
+        checkout_html = render_to_string(request=request, template_name='core/partials/sale_checkout_card.html', context={
+            'sale': host,
+            'oob': True,
+            **_sale_checkout_context(host),
+        })
+        return HttpResponse(items_html + checkout_html)
     return render(request, 'core/partials/work_performed.html', {
         'work_order': host,
         'entries': _line_items_for(host),
