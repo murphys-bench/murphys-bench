@@ -1906,45 +1906,47 @@ class SaleDetailView(SaleAccessMixin, DetailView):
             labor_by_category.setdefault(item.category, []).append(item)
         ctx['labor_by_category'] = labor_by_category
         ctx['entries'] = _line_items_for(self.object)
-        # Checkout card: pre-fill the amount with the server-computed line total.
-        ctx['checkout_form'] = SaleCheckoutForm(initial={'amount': self.object.line_items_total})
+        # Customer card: inline edit form (Client/Contact/Notes), same fields
+        # used at creation — editing and creating are the same UI.
+        ctx['sale_form'] = SaleForm(instance=self.object)
+        # Checkout card: pre-fill the amount with the server-computed line total,
+        # rounded to cents — line_items_total can carry extra decimal places from
+        # quantity * unit_price (e.g. 0.5 * 60.00 = 30.000), which fails the
+        # amount field's own step=0.01 validation if submitted unedited.
+        from decimal import Decimal
+        prefill_amount = self.object.line_items_total.quantize(Decimal('0.01'))
+        ctx['checkout_form'] = SaleCheckoutForm(initial={'amount': prefill_amount})
         ctx['has_priced_lines'] = self.object.line_items_total > 0
         ctx['invoice_ninja_enabled'] = SiteSettings.get().invoice_ninja_enabled
         return ctx
 
 
-class SaleCreateView(SaleAccessMixin, CreateView):
-    model = Sale
-    form_class = SaleForm
-    template_name = 'core/sale_form.html'
+class SaleCreateView(SaleAccessMixin, View):
+    """Creates a blank draft Sale and lands directly on its detail page — no
+    intermediate form. Customer/Contact/Notes are set later via the inline
+    edit card on sale_detail, the same UI used to edit them afterward (Mike's
+    call: creation and editing should be one page, not two)."""
 
-    def form_valid(self, form):
-        form.instance.created_by = self.request.user
-        return super().form_valid(form)
-
-    def get_success_url(self):
-        return reverse_lazy('core:sale_detail', kwargs={'pk': self.object.pk})
-
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        ctx['title'] = 'New Sale'
-        ctx['cancel_url'] = reverse_lazy('core:sale_list')
-        return ctx
+    def post(self, request):
+        sale = Sale.objects.create(created_by=request.user)
+        return redirect('core:sale_detail', pk=sale.pk)
 
 
-class SaleUpdateView(SaleAccessMixin, UpdateView):
-    model = Sale
-    form_class = SaleForm
-    template_name = 'core/sale_form.html'
+class SaleQuickUpdateView(SaleAccessMixin, View):
+    """Inline update of Customer/Contact/Notes from the Sale detail page's
+    Customer card. Mirrors WorkOrderQuickUpdateView's read/edit-toggle pattern."""
 
-    def get_success_url(self):
-        return reverse_lazy('core:sale_detail', kwargs={'pk': self.object.pk})
-
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        ctx['title'] = f'Edit {self.object.sale_number}'
-        ctx['cancel_url'] = reverse_lazy('core:sale_detail', kwargs={'pk': self.object.pk})
-        return ctx
+    def post(self, request, pk):
+        sale = get_object_or_404(Sale, pk=pk)
+        if sale.is_locked:
+            messages.error(request, f'{sale.sale_number} is locked and cannot be reassigned.')
+            return redirect('core:sale_detail', pk=pk)
+        form = SaleForm(request.POST, instance=sale)
+        if form.is_valid():
+            form.save()
+        else:
+            messages.error(request, 'Could not save — please check the form.')
+        return redirect('core:sale_detail', pk=pk)
 
 
 class SaleDeleteView(SaleAccessMixin, View):
