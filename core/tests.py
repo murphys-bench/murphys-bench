@@ -3090,6 +3090,24 @@ def test_sale_custom_log_creates_line_item_on_sale(client, admin_user, client_ob
 
 
 @pytest.mark.django_db
+def test_sale_custom_log_refreshes_checkout_card_out_of_band(client, admin_user, client_obj):
+    """Regression: the Checkout card lives outside #sale-line-items-section
+    (the in-band HTMX swap target), so logging the first priced line left it
+    stuck showing 'Add at least one priced line item' until a full reload.
+    The response must also carry an OOB swap of #sale-checkout-card."""
+    sale = Sale.objects.create(client=client_obj)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_custom_log', args=[sale.pk]), {
+        'kind': 'labor', 'custom_label': 'Diagnostic', 'quantity': '1', 'unit_price': '40',
+    })
+    body = resp.content.decode()
+    assert 'id="sale-checkout-card"' in body
+    assert 'hx-swap-oob="true"' in body
+    assert 'Add at least one priced line item' not in body
+    assert 'Complete Sale' in body
+
+
+@pytest.mark.django_db
 def test_sale_line_item_delete_and_update_reuse_shared_endpoints(client, admin_user, client_obj):
     """LineItem edit/delete are host-agnostic (content_object) — confirms Sale
     rides the same WorkPerformedUpdateView/DeleteView as WorkOrder/Estimate."""
