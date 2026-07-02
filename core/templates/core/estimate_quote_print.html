@@ -194,7 +194,7 @@
         <div class="section-title">{% if option_blocks %}{{ estimate.general_label }}{% else %}Line Items{% endif %}</div>
         {% for category, entries in wp_categories.items %}
         <div class="work-category">
-            <div class="work-category-name">{{ category }}</div>
+            {% if category != 'Other' %}<div class="work-category-name">{{ category }}</div>{% endif %}
             {% for entry in entries %}
             <div class="work-item" style="display:flex; justify-content:space-between; gap:12px;">
                 <span>{{ entry.description }}{% if entry.quantity != 1 %} <span style="color:#666;">× {{ entry.quantity|floatformat:"-2" }}</span>{% endif %}</span>
@@ -219,11 +219,11 @@
     {% for block in option_blocks %}
     <div class="section">
         <div class="section-title">
-            Option: {{ block.option.label }}{% if block.option.is_selected %} (Selected){% endif %}
+            {{ block.option.label }}{% if block.option.is_selected %} (Selected){% endif %}
         </div>
         {% for category, entries in block.categories.items %}
         <div class="work-category">
-            <div class="work-category-name">{{ category }}</div>
+            {% if category != 'Other' %}<div class="work-category-name">{{ category }}</div>{% endif %}
             {% for entry in entries %}
             <div class="work-item" style="display:flex; justify-content:space-between; gap:12px;">
                 <span>{{ entry.description }}{% if entry.quantity != 1 %} <span style="color:#666;">× {{ entry.quantity|floatformat:"-2" }}</span>{% endif %}</span>
