@@ -1893,6 +1893,17 @@ class SaleListView(SaleAccessMixin, ListView):
         return ctx
 
 
+def _render_sale_customer_card(request, sale):
+    """Render the Customer card partial — used for the initial page render
+    (via include) and returned directly by SaleQuickUpdateView's auto-save
+    POST so the HTMX swap shows the just-saved state."""
+    from django.template.loader import render_to_string
+    return HttpResponse(render_to_string(request=request, template_name='core/partials/sale_customer_card.html', context={
+        'sale': sale,
+        'sale_form': SaleForm(instance=sale),
+    }))
+
+
 def _sale_checkout_context(sale):
     """Checkout-card context, shared by the initial page render and the
     out-of-band refresh triggered whenever a line item is logged/deleted —
@@ -1939,20 +1950,26 @@ class SaleCreateView(SaleAccessMixin, View):
 
 
 class SaleQuickUpdateView(SaleAccessMixin, View):
-    """Inline update of Customer/Contact/Notes from the Sale detail page's
-    Customer card. Mirrors WorkOrderQuickUpdateView's read/edit-toggle pattern."""
+    """Auto-save endpoint for the Sale detail page's Customer card: Client
+    saves on change, Notes saves on blur — no button, no separate edit step
+    (Mike's call: picking a client/walk-in is all that should be required).
+    Always returns the freshly-rendered card fragment for the HTMX swap."""
 
     def post(self, request, pk):
         sale = get_object_or_404(Sale, pk=pk)
-        if sale.is_locked:
-            messages.error(request, f'{sale.sale_number} is locked and cannot be reassigned.')
-            return redirect('core:sale_detail', pk=pk)
-        form = SaleForm(request.POST, instance=sale)
-        if form.is_valid():
-            form.save()
-        else:
-            messages.error(request, 'Could not save — please check the form.')
-        return redirect('core:sale_detail', pk=pk)
+        if not sale.is_locked:
+            # Client and Notes save independently (different hx-trigger each) —
+            # only touch whichever field this particular request actually sent,
+            # never both, or a Client-only save would blank out Notes (and
+            # vice versa) since a partial POST leaves the other key absent.
+            if 'client' in request.POST:
+                client_id = request.POST.get('client')
+                sale.client_id = int(client_id) if client_id else None
+                sale.save(update_fields=['client'])
+            if 'notes' in request.POST:
+                sale.notes = request.POST.get('notes', '')
+                sale.save(update_fields=['notes'])
+        return _render_sale_customer_card(request, sale)
 
 
 class SaleDeleteView(SaleAccessMixin, View):
@@ -3975,7 +3992,7 @@ def _receipt_context(sale, site):
 
     if sale.client_id:
         client = sale.client
-        contact = sale.contact or client.contacts.filter(is_primary=True).first()
+        contact = client.contacts.filter(is_primary=True).first()
         bill_to = {
             'name': client.name,
             'address_line1': client.address_line1,
@@ -4007,7 +4024,7 @@ class SaleReceiptPrintView(SaleAccessMixin, View):
     Only meaningful once the sale has been paid."""
 
     def get(self, request, pk):
-        sale = get_object_or_404(Sale.objects.select_related('client', 'contact'), pk=pk)
+        sale = get_object_or_404(Sale.objects.select_related('client'), pk=pk)
         if sale.status != 'completed':
             messages.error(request, 'This sale has not been completed yet — no receipt to print.')
             return redirect('core:sale_detail', pk=pk)
@@ -4024,7 +4041,7 @@ class SaleReceiptEmailView(SaleAccessMixin, View):
     receipt to PDF and sends it. Only available once the sale is completed."""
 
     def get(self, request, pk):
-        sale = get_object_or_404(Sale.objects.select_related('client', 'contact'), pk=pk)
+        sale = get_object_or_404(Sale.objects.select_related('client'), pk=pk)
         if sale.status != 'completed':
             messages.error(request, 'This sale has not been completed yet — no receipt to send.')
             return redirect('core:sale_detail', pk=pk)
@@ -4032,7 +4049,7 @@ class SaleReceiptEmailView(SaleAccessMixin, View):
         default_contact = None
         default_email = ''
         if sale.client_id:
-            default_contact = sale.contact or sale.client.contacts.filter(
+            default_contact = sale.client.contacts.filter(
                 is_primary=True, is_active=True, email__gt='',
             ).first()
             default_email = (default_contact.email if default_contact else '') or sale.client.email
@@ -4044,7 +4061,7 @@ class SaleReceiptEmailView(SaleAccessMixin, View):
         })
 
     def post(self, request, pk):
-        sale = get_object_or_404(Sale.objects.select_related('client', 'contact'), pk=pk)
+        sale = get_object_or_404(Sale.objects.select_related('client'), pk=pk)
         if sale.status != 'completed':
             messages.error(request, 'This sale has not been completed yet — no receipt to send.')
             return redirect('core:sale_detail', pk=pk)
