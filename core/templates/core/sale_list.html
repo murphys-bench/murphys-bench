@@ -19,8 +19,11 @@
                     {% endfor %}
                 </select>
             </form>
-            <a href="{% url 'core:sale_create' %}"
-               class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">+ New Sale</a>
+            <form method="post" action="{% url 'core:sale_create' %}">
+                {% csrf_token %}
+                <button type="submit"
+                        class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">+ New Sale</button>
+            </form>
         </div>
     </div>
 </div>
