@@ -2987,10 +2987,40 @@ def test_sale_quick_update_sets_customer_and_notes(client, admin_user, client_ob
     resp = client.post(reverse('core:sale_quick_update', args=[sale.pk]), {
         'client': client_obj.pk, 'notes': 'Cable + adapter',
     })
-    assert resp.status_code == 302
+    assert resp.status_code == 200
     sale.refresh_from_db()
     assert sale.client_id == client_obj.pk
     assert sale.notes == 'Cable + adapter'
+
+
+@pytest.mark.django_db
+def test_sale_quick_update_client_only_saves_and_returns_card(client, admin_user, client_obj):
+    """Client and Notes auto-save independently (different hx-trigger each) —
+    a Client-only POST must not touch/blank out existing Notes."""
+    sale = Sale.objects.create(created_by=admin_user, notes='Existing note')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_quick_update', args=[sale.pk]), {
+        'client': client_obj.pk,
+    })
+    assert resp.status_code == 200
+    assert client_obj.name in resp.content.decode()
+    sale.refresh_from_db()
+    assert sale.client_id == client_obj.pk
+    assert sale.notes == 'Existing note'
+
+
+@pytest.mark.django_db
+def test_sale_quick_update_notes_only_saves(client, admin_user, client_obj):
+    """Notes-only POST (blur) must not touch the already-set Client."""
+    sale = Sale.objects.create(created_by=admin_user, client=client_obj)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_quick_update', args=[sale.pk]), {
+        'notes': 'Typed on blur',
+    })
+    assert resp.status_code == 200
+    sale.refresh_from_db()
+    assert sale.notes == 'Typed on blur'
+    assert sale.client_id == client_obj.pk
 
 
 @pytest.mark.django_db
@@ -3001,7 +3031,7 @@ def test_sale_quick_update_blocked_when_locked(client, admin_user, client_obj):
     resp = client.post(reverse('core:sale_quick_update', args=[sale.pk]), {
         'client': '', 'notes': 'should not save',
     })
-    assert resp.status_code == 302
+    assert resp.status_code == 200
     sale.refresh_from_db()
     assert sale.client_id == original_client_id
     assert sale.notes != 'should not save'
@@ -3380,8 +3410,6 @@ def test_receipt_email_view_client_anchored_sends(monkeypatch, client, client_ob
     contact = Contact.objects.create(client=client_obj, first_name='Wayne', last_name='Davis',
                                      email='wayne@davis.example', is_primary=True)
     sale = _completed_sale(client_obj)
-    sale.contact = contact
-    sale.save()
 
     captured = {}
     def fake_send(self, fail_silently=False):
