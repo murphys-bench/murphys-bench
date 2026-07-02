@@ -23,62 +23,7 @@
 {% block content %}
 <div class="max-w-3xl space-y-6">
 
-    <div class="bg-white rounded-lg shadow p-6" x-data="{ editing: {% if not sale.client and not sale.contact and not sale.notes and not sale.is_locked %}true{% else %}false{% endif %} }">
-        <div class="flex items-center justify-between mb-4">
-            <h2 class="text-base font-semibold text-gray-900">Customer</h2>
-            {% if not sale.is_locked %}
-            <button type="button" @click="editing = !editing"
-                    class="text-xs text-blue-600 hover:underline" x-text="editing ? 'Cancel' : 'Edit'"></button>
-            {% endif %}
-        </div>
-
-        <!-- Read view -->
-        <div x-show="!editing">
-            <dl class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                <div>
-                    <dt class="text-gray-500">Customer</dt>
-                    <dd class="text-gray-900">
-                        {% if sale.client %}
-                            <a href="{% url 'core:client_detail' sale.client_id %}" class="text-blue-600 hover:underline">{{ sale.client.name }}</a>
-                        {% else %}<span class="text-gray-400">Walk-in (anonymous)</span>{% endif %}
-                    </dd>
-                </div>
-                <div><dt class="text-gray-500">Contact</dt><dd class="text-gray-900">{{ sale.contact|default:"—" }}</dd></div>
-                <div><dt class="text-gray-500">Added</dt><dd class="text-gray-900">{{ sale.created_at|date:"M j, Y" }}</dd></div>
-            </dl>
-            {% if sale.notes %}
-            <div class="mt-4 pt-4 border-t border-gray-100">
-                <dt class="text-gray-500 text-sm mb-1">Notes</dt>
-                <dd class="text-sm text-gray-900 whitespace-pre-line">{{ sale.notes }}</dd>
-            </div>
-            {% endif %}
-        </div>
-
-        <!-- Edit view -->
-        <div x-show="editing" x-cloak>
-            <form method="post" action="{% url 'core:sale_quick_update' sale.pk %}" class="space-y-4">
-                {% csrf_token %}
-                <p class="text-xs text-gray-400">Leave Customer blank for an anonymous walk-in cash sale — it stays a Murphy's Bench-only record.</p>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Client</label>
-                        {{ sale_form.client }}
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Contact</label>
-                        {{ sale_form.contact }}
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                    {{ sale_form.notes }}
-                </div>
-                <div class="flex justify-end">
-                    <button type="submit" class="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">Save</button>
-                </div>
-            </form>
-        </div>
-    </div>
+    {% include "core/partials/sale_customer_card.html" %}
 
     <!-- Line items -->
     <div class="bg-white rounded-lg shadow p-6"
