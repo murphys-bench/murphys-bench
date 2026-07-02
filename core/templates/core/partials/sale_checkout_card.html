@@ -1,6 +1,8 @@
 {% load mb_icons %}
-{# Checkout / payment card for a Sale. Draft → payment form; completed → recorded
-   payment + Invoice Ninja status with a retry / re-send path. #}
+{% comment %}
+Checkout / payment card for a Sale. Draft → payment form; completed → recorded
+payment + Invoice Ninja status with a retry / re-send path.
+{% endcomment %}
 <div class="bg-white rounded-lg shadow p-6" id="sale-checkout-card">
 
     {% if sale.status == 'completed' %}
