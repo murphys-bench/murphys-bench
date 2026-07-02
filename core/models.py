@@ -1182,6 +1182,46 @@ class Estimate(models.Model):
         return f"EST-{next_num:05d}"
 
 
+class EstimateOption(models.Model):
+    """A named, self-contained pricing option on an Estimate — lets a tech quote
+    several comparable choices (e.g. budget/standard/premium device replacement)
+    on one document instead of three separate estimates. Each option totals its
+    own LineItems independently; rejected options stay on record for history
+    (Mike's call — nothing is deleted when the client picks one)."""
+
+    estimate = models.ForeignKey(Estimate, on_delete=models.CASCADE, related_name='options')
+    label = models.CharField(max_length=120, help_text='e.g. "Budget", "Standard", "Premium".')
+    description = models.TextField(blank=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    is_selected = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    line_items = GenericRelation('LineItem')
+
+    class Meta:
+        db_table = 'estimate_options'
+        ordering = ['sort_order', 'created_at']
+
+    def __str__(self):
+        return f'{self.label} ({self.estimate.estimate_number})'
+
+    @property
+    def total(self):
+        from decimal import Decimal
+        total = Decimal('0')
+        for li in self.line_items.all():
+            lt = li.line_total
+            if lt is not None:
+                total += lt
+        return total
+
+    def select(self):
+        """Mark this option selected, clearing any sibling selection."""
+        EstimateOption.objects.filter(estimate_id=self.estimate_id).exclude(pk=self.pk).update(is_selected=False)
+        self.is_selected = True
+        self.save(update_fields=['is_selected'])
+
+
 class Sale(models.Model):
     """A counter/walk-in sale — Lane B (Counter). Client is optional (nullable):
     a cash walk-in with no client stays MB-only and is never pushed to Invoice

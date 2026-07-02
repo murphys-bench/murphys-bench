@@ -51,7 +51,7 @@
 
     <!-- Line items -->
     <div class="bg-white rounded-lg shadow p-6"
-         x-data="{ logOpen: false, customOpen: false }">
+         x-data="{ logOpen: false, customOpen: false, optionOpen: false }">
         <div class="flex items-center justify-between mb-3">
             <h2 class="text-lg font-semibold text-gray-900">Line Items</h2>
             {% if not estimate.is_locked %}
@@ -68,8 +68,30 @@
                     + Log Item
                 </button>
                 {% endif %}
+                <button type="button" @click="optionOpen = !optionOpen"
+                        class="text-xs px-2 py-1 rounded border"
+                        :class="optionOpen ? 'bg-purple-600 text-white border-purple-600' : 'text-purple-600 border-purple-300 hover:bg-purple-50'">
+                    + Add Option
+                </button>
             </div>
             {% endif %}
+        </div>
+
+        <!-- Add option form (for comparing several priced choices on one quote) -->
+        <div x-show="optionOpen" x-cloak class="mb-4 p-3 bg-purple-50 rounded-lg border border-purple-100">
+            <form method="post" action="{% url 'core:estimate_option_create' estimate.pk %}"
+                  hx-post="{% url 'core:estimate_option_create' estimate.pk %}"
+                  hx-target="#estimate-line-items-section"
+                  hx-swap="innerHTML"
+                  hx-on:htmx:after-request="if(event.detail.successful){this.reset(); optionOpen = false;}"
+                  class="flex gap-2">
+                {% csrf_token %}
+                <input type="text" name="label" placeholder="Option name, e.g. Budget / Standard / Premium"
+                       class="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                       required>
+                <button type="submit"
+                        class="px-3 py-1.5 bg-purple-600 text-white text-sm rounded hover:bg-purple-700">Add</button>
+            </form>
         </div>
 
         <!-- Custom entry form -->
@@ -137,7 +159,7 @@
 
         <!-- Logged entries -->
         <div id="estimate-line-items-section">
-            {% include "core/partials/estimate_line_items.html" with entries=entries estimate=estimate %}
+            {% include "core/partials/estimate_line_items.html" with entries=entries estimate=estimate options=options %}
         </div>
     </div>
 

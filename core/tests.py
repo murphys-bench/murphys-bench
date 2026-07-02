@@ -2622,7 +2622,7 @@ def test_billing_check_in_view_updates_card(client, admin_user):
 # Slice 2a — Estimate model + CRUD + line items
 # ---------------------------------------------------------------------------
 
-from core.models import Estimate, Prospect as _Prospect, QuickLaborItem
+from core.models import Estimate, Prospect as _Prospect, QuickLaborItem, EstimateOption
 
 
 @pytest.mark.django_db
@@ -2979,6 +2979,123 @@ def test_accept_client_estimate_creates_wo_with_copied_lines(client, admin_user,
     assert wo.reported_problem == 'Tune-up + SSD'
     assert wo.line_items.count() == 2
     assert wo.line_items_total == Decimal('180')
+
+
+# ── Estimate Options — comparative pricing choices on one quote ─────────────
+
+@pytest.mark.django_db
+def test_estimate_option_create_and_totals_independent(client, admin_user, client_obj):
+    from decimal import Decimal
+    est = Estimate.objects.create(client=client_obj)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_option_create', args=[est.pk]), {'label': 'Budget'})
+    assert resp.status_code == 200
+    resp = client.post(reverse('core:estimate_option_create', args=[est.pk]), {'label': 'Premium'})
+    assert resp.status_code == 200
+    assert est.options.count() == 2
+    budget, premium = est.options.order_by('sort_order')
+    assert budget.label == 'Budget'
+    assert premium.label == 'Premium'
+
+    budget.line_items.create(kind='part', description='Refurb SSD', quantity=1, unit_price=Decimal('150'))
+    premium.line_items.create(kind='part', description='New NVMe', quantity=1, unit_price=Decimal('400'))
+    assert budget.total == Decimal('150')
+    assert premium.total == Decimal('400')
+    # Options are self-contained — an item on one never bleeds into the other's total.
+    assert est.line_items_total == Decimal('0')
+
+
+@pytest.mark.django_db
+def test_estimate_option_select_clears_sibling_selection(client, admin_user, client_obj):
+    est = Estimate.objects.create(client=client_obj)
+    a = est.options.create(label='A')
+    b = est.options.create(label='B', is_selected=True)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_option_select', args=[a.pk]))
+    assert resp.status_code == 200
+    a.refresh_from_db()
+    b.refresh_from_db()
+    assert a.is_selected is True
+    assert b.is_selected is False
+
+
+@pytest.mark.django_db
+def test_estimate_option_delete_removes_its_line_items(client, admin_user, client_obj):
+    from decimal import Decimal
+    est = Estimate.objects.create(client=client_obj)
+    option = est.options.create(label='Standard')
+    option.line_items.create(kind='part', description='Battery', quantity=1, unit_price=Decimal('60'))
+    li_pk = option.line_items.first().pk
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_option_delete', args=[option.pk]))
+    assert resp.status_code == 200
+    assert not EstimateOption.objects.filter(pk=option.pk).exists()
+    from core.models import LineItem
+    assert not LineItem.objects.filter(pk=li_pk).exists()
+
+
+@pytest.mark.django_db
+def test_estimate_option_custom_log_creates_scoped_line_item(client, admin_user, client_obj):
+    est = Estimate.objects.create(client=client_obj)
+    option = est.options.create(label='Standard')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_option_custom_log', args=[option.pk]), {
+        'kind': 'part', 'custom_label': '1TB SSD', 'quantity': '1', 'unit_price': '120',
+    })
+    assert resp.status_code == 200
+    assert option.line_items.count() == 1
+    li = option.line_items.first()
+    assert li.description == '1TB SSD'
+    assert li.content_object == option
+    assert est.line_items.count() == 0
+
+
+@pytest.mark.django_db
+def test_estimate_accept_requires_selection_when_options_exist(client, admin_user, client_obj):
+    est = Estimate.objects.create(client=client_obj)
+    est.options.create(label='A')
+    est.options.create(label='B')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_accept', args=[est.pk]))
+    assert resp.status_code == 302
+    est.refresh_from_db()
+    assert est.status == 'draft'
+    assert est.work_order is None
+
+
+@pytest.mark.django_db
+def test_estimate_accept_copies_only_selected_option_lines(client, admin_user, client_obj):
+    from decimal import Decimal
+    est = Estimate.objects.create(client=client_obj, scope='Replace device')
+    est.line_items.create(kind='labor', description='Diagnostic', quantity=1, unit_price=Decimal('40'))
+    budget = est.options.create(label='Budget')
+    budget.line_items.create(kind='part', description='Refurb unit', quantity=1, unit_price=Decimal('150'))
+    premium = est.options.create(label='Premium', is_selected=True)
+    premium.line_items.create(kind='part', description='New unit', quantity=1, unit_price=Decimal('400'))
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_accept', args=[est.pk]))
+    assert resp.status_code == 302
+    est.refresh_from_db()
+    assert est.status == 'accepted'
+    wo = est.work_order
+    descriptions = set(wo.line_items.values_list('description', flat=True))
+    assert descriptions == {'Diagnostic', 'New unit'}
+    assert wo.line_items_total == Decimal('440')
+
+
+@pytest.mark.django_db
+def test_estimate_option_actions_blocked_when_locked(client, admin_user, client_obj):
+    est = Estimate.objects.create(client=client_obj, status='accepted')
+    option = est.options.create(label='Standard')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_option_create', args=[est.pk]), {'label': 'New Option'})
+    assert resp.status_code == 200
+    assert est.options.count() == 1
+    resp = client.post(reverse('core:estimate_option_custom_log', args=[option.pk]), {
+        'kind': 'part', 'custom_label': 'Should not save', 'quantity': '1', 'unit_price': '10',
+    })
+    assert resp.status_code == 200
+    assert option.line_items.count() == 0
 
 
 @pytest.mark.django_db

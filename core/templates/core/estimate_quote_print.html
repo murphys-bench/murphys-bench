@@ -206,7 +206,7 @@
             {% endfor %}
         </div>
         {% endfor %}
-        {% if estimate.line_items_total %}
+        {% if not option_blocks and estimate.line_items_total %}
         <div class="work-item" style="display:flex; justify-content:space-between; border-top:1px solid #999; margin-top:8px; padding-top:6px; font-weight:bold;">
             <span>Total</span>
             <span>${{ estimate.line_items_total|floatformat:2 }}</span>
@@ -214,6 +214,33 @@
         {% endif %}
     </div>
     {% endif %}
+
+    <!-- Options — compared choices, each priced independently -->
+    {% for block in option_blocks %}
+    <div class="section">
+        <div class="section-title">
+            Option: {{ block.option.label }}{% if block.option.is_selected %} (Selected){% endif %}
+        </div>
+        {% for category, entries in block.categories.items %}
+        <div class="work-category">
+            <div class="work-category-name">{{ category }}</div>
+            {% for entry in entries %}
+            <div class="work-item" style="display:flex; justify-content:space-between; gap:12px;">
+                <span>{{ entry.description }}{% if entry.quantity != 1 %} <span style="color:#666;">× {{ entry.quantity|floatformat:"-2" }}</span>{% endif %}</span>
+                {% if entry.line_total != None %}<span style="white-space:nowrap;">${{ entry.line_total|floatformat:2 }}</span>{% endif %}
+            </div>
+            {% with desc=entry.print_description %}
+            {% if desc %}<div class="work-item-desc">{{ desc }}</div>{% endif %}
+            {% endwith %}
+            {% endfor %}
+        </div>
+        {% endfor %}
+        <div class="work-item" style="display:flex; justify-content:space-between; border-top:1px solid #999; margin-top:8px; padding-top:6px; font-weight:bold;">
+            <span>Total</span>
+            <span>${{ block.total|floatformat:2 }}</span>
+        </div>
+    </div>
+    {% endfor %}
 
     <!-- Signature -->
     <div class="sig-section">
