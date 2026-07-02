@@ -17,7 +17,7 @@ has — options are opt-in via "+ Add Option" in estimate_detail.html.
                hx-post="{% url 'core:estimate_general_label_update' estimate.pk %}"
                hx-trigger="blur"
                hx-target="#estimate-line-items-section" hx-swap="innerHTML"
-               class="text-sm font-semibold text-gray-800 border-0 border-b border-transparent hover:border-gray-300 focus:border-blue-400 focus:outline-none bg-transparent px-0 py-0.5 w-40">
+               class="text-sm font-semibold text-gray-800 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 w-48">
         {% endif %}
         {% if not estimate.is_locked %}
         <button type="button" @click="customOpen = !customOpen"
