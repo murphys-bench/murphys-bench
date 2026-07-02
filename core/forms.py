@@ -178,6 +178,23 @@ class EstimateForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         for f in ('client', 'prospect', 'ticket', 'contact', 'device', 'expires_on'):
             self.fields[f].required = False
+        # Auto-save wiring for the Estimate detail page's Details card — each
+        # field saves independently via EstimateQuickUpdateView (selects on
+        # change, Scope on blur), same pattern as SaleForm's Customer card.
+        # This form is only used to render those widgets now; saving happens
+        # field-by-field in the view, not via form.save(), so the exclusivity
+        # rule below is enforced procedurally there instead of by clean().
+        if self.instance.pk:
+            post_url = reverse('core:estimate_quick_update', args=[self.instance.pk])
+            hx_common = {
+                'hx-post': post_url,
+                'hx-target': '#estimate-details-card',
+                'hx-swap': 'outerHTML',
+            }
+            for f in ('client', 'prospect', 'ticket', 'contact', 'device'):
+                self.fields[f].widget.attrs.update({**hx_common, 'hx-trigger': 'change'})
+            self.fields['expires_on'].widget.attrs.update({**hx_common, 'hx-trigger': 'change'})
+            self.fields['scope'].widget.attrs.update({**hx_common, 'hx-trigger': 'blur'})
 
     def clean(self):
         cleaned = super().clean()

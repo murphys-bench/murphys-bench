@@ -1543,41 +1543,78 @@ class EstimateDetailView(EstimateAccessMixin, DetailView):
             labor_by_category.setdefault(item.category, []).append(item)
         ctx['labor_by_category'] = labor_by_category
         ctx['entries'] = _line_items_for(self.object)
+        # Details card: inline edit form (Client/Prospect/Context/Scope), same
+        # fields used at creation — editing and creating are the same UI.
+        ctx['estimate_form'] = EstimateForm(instance=self.object)
         return ctx
 
 
-class EstimateCreateView(EstimateAccessMixin, CreateView):
-    model = Estimate
-    form_class = EstimateForm
-    template_name = 'core/estimate_form.html'
-
-    def form_valid(self, form):
-        form.instance.created_by = self.request.user
-        return super().form_valid(form)
-
-    def get_success_url(self):
-        return reverse_lazy('core:estimate_detail', kwargs={'pk': self.object.pk})
-
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        ctx['title'] = 'New Estimate'
-        ctx['cancel_url'] = reverse_lazy('core:estimate_list')
-        return ctx
+def _render_estimate_details_card(request, estimate):
+    """Render the Details card partial — used for the initial page render
+    (via include) and returned directly by EstimateQuickUpdateView's auto-save
+    POST so the HTMX swap shows the just-saved state."""
+    from django.template.loader import render_to_string
+    return HttpResponse(render_to_string(request=request, template_name='core/partials/estimate_details_card.html', context={
+        'estimate': estimate,
+        'estimate_form': EstimateForm(instance=estimate),
+    }))
 
 
-class EstimateUpdateView(EstimateAccessMixin, UpdateView):
-    model = Estimate
-    form_class = EstimateForm
-    template_name = 'core/estimate_form.html'
+class EstimateCreateView(EstimateAccessMixin, View):
+    """Creates a blank draft Estimate and lands directly on its detail page —
+    no intermediate form. Client/Prospect/Context/Scope are set later via the
+    inline edit card on estimate_detail, the same UI used to edit them
+    afterward (Mike's call: creation and editing should be one page, not two,
+    mirroring the Sale rebuild)."""
 
-    def get_success_url(self):
-        return reverse_lazy('core:estimate_detail', kwargs={'pk': self.object.pk})
+    def post(self, request):
+        estimate = Estimate.objects.create(created_by=request.user)
+        return redirect('core:estimate_detail', pk=estimate.pk)
 
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        ctx['title'] = f'Edit {self.object.estimate_number}'
-        ctx['cancel_url'] = reverse_lazy('core:estimate_detail', kwargs={'pk': self.object.pk})
-        return ctx
+
+class EstimateQuickUpdateView(EstimateAccessMixin, View):
+    """Auto-save endpoint for the Estimate detail page's Details card: each
+    select saves on change, Scope saves on blur — no button, no separate edit
+    page. Client and Prospect are mutually exclusive (an estimate anchors to
+    exactly one) — setting either one here clears the other, rather than
+    surfacing a validation error the way the old full-page form did, since an
+    auto-save flow has nowhere good to show a field error."""
+
+    def post(self, request, pk):
+        estimate = get_object_or_404(Estimate, pk=pk)
+        if not estimate.is_locked:
+            if 'client' in request.POST:
+                client_id = request.POST.get('client')
+                estimate.client_id = int(client_id) if client_id else None
+                if estimate.client_id:
+                    estimate.prospect_id = None
+                estimate.save(update_fields=['client', 'prospect'])
+            if 'prospect' in request.POST:
+                prospect_id = request.POST.get('prospect')
+                estimate.prospect_id = int(prospect_id) if prospect_id else None
+                if estimate.prospect_id:
+                    estimate.client_id = None
+                estimate.save(update_fields=['client', 'prospect'])
+            if 'ticket' in request.POST:
+                ticket_id = request.POST.get('ticket')
+                estimate.ticket_id = int(ticket_id) if ticket_id else None
+                estimate.save(update_fields=['ticket'])
+            if 'contact' in request.POST:
+                contact_id = request.POST.get('contact')
+                estimate.contact_id = int(contact_id) if contact_id else None
+                estimate.save(update_fields=['contact'])
+            if 'device' in request.POST:
+                device_id = request.POST.get('device')
+                estimate.device_id = int(device_id) if device_id else None
+                estimate.save(update_fields=['device'])
+            if 'scope' in request.POST:
+                estimate.scope = request.POST.get('scope', '')
+                estimate.save(update_fields=['scope'])
+            if 'expires_on' in request.POST:
+                expires_on = request.POST.get('expires_on') or None
+                estimate.expires_on = expires_on
+                estimate.save(update_fields=['expires_on'])
+        return _render_estimate_details_card(request, estimate)
 
 
 class EstimateMarkSentView(EstimateAccessMixin, View):
