@@ -1,5 +1,6 @@
 from django import forms
 from django.core.files.uploadedfile import UploadedFile
+from django.urls import reverse
 from .models import WorkOrder, Client, Contact, ContactPhone, Device, Ticket, RepairType, HelpTopic, SLAPlan, KBCategory, KBArticle, Mileage, SiteSettings, Prospect, Estimate
 
 
@@ -192,18 +193,30 @@ class SaleForm(forms.ModelForm):
     class Meta:
         from .models import Sale
         model = Sale
-        fields = ['client', 'contact', 'notes']
+        fields = ['client', 'notes']
         widgets = {
             'client': forms.Select(attrs={'class': _PROSPECT_INPUT}),
-            'contact': forms.Select(attrs={'class': _PROSPECT_INPUT}),
             'notes': forms.Textarea(attrs={'class': _PROSPECT_INPUT, 'rows': 3, 'placeholder': 'Optional notes…'}),
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['client'].required = False
-        self.fields['contact'].required = False
         self.fields['notes'].required = False
+        # Auto-save wiring for the Sale detail page's Customer card: Client
+        # saves on change, Notes on blur — no separate Save button, no edit
+        # toggle. Baked into the widgets here since this form has exactly one
+        # consumer (the customer card), so hx-* attrs belong with the field
+        # definitions rather than duplicated in the template.
+        if self.instance.pk:
+            post_url = reverse('core:sale_quick_update', args=[self.instance.pk])
+            hx_common = {
+                'hx-post': post_url,
+                'hx-target': '#sale-customer-card',
+                'hx-swap': 'outerHTML',
+            }
+            self.fields['client'].widget.attrs.update({**hx_common, 'hx-trigger': 'change'})
+            self.fields['notes'].widget.attrs.update({**hx_common, 'hx-trigger': 'blur'})
 
 
 class SaleCheckoutForm(forms.ModelForm):
