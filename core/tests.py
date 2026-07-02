@@ -3267,6 +3267,17 @@ def test_sale_checkout_role_block_403(client, client_obj):
     assert resp.status_code == 403
 
 
+@pytest.mark.django_db
+def test_sale_detail_does_not_leak_template_comment(client, admin_user, client_obj):
+    """Regression: a multi-line {# #} comment in sale_checkout_card.html isn't
+    valid Django comment syntax (only single-line) and was rendering as literal
+    text on the page. Must use {% comment %}...{% endcomment %} for multi-line."""
+    sale = _priced_draft_sale(client_obj)
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:sale_detail', args=[sale.pk]))
+    assert b'Checkout / payment card for a Sale' not in resp.content
+
+
 # ── Slice 3c — Sale receipt PDF/email (mirrors the Slice 2b quote pattern) ───
 
 def _completed_sale(client_obj=None, amount='30.00'):
