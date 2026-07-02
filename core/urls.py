@@ -57,6 +57,7 @@ urlpatterns = [
     path('estimates/<int:est_pk>/log-labor/<int:item_pk>/', views.EstimateLaborLogView.as_view(), name='estimate_labor_log'),
     path('estimates/<int:est_pk>/log-custom/', views.EstimateCustomLogView.as_view(), name='estimate_custom_log'),
     path('estimates/<int:est_pk>/options/', views.EstimateOptionCreateView.as_view(), name='estimate_option_create'),
+    path('estimates/<int:pk>/general-label/', views.EstimateGeneralLabelUpdateView.as_view(), name='estimate_general_label_update'),
     path('estimates/options/<int:pk>/select/', views.EstimateOptionSelectView.as_view(), name='estimate_option_select'),
     path('estimates/options/<int:pk>/delete/', views.EstimateOptionDeleteView.as_view(), name='estimate_option_delete'),
     path('estimates/options/<int:opt_pk>/log-labor/<int:item_pk>/', views.EstimateOptionLaborLogView.as_view(), name='estimate_option_labor_log'),

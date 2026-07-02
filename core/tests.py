@@ -3030,6 +3030,46 @@ def test_estimate_general_subtotal_still_shown_when_options_exist(client, admin_
 
 
 @pytest.mark.django_db
+def test_estimate_general_label_defaults_and_renames(client, admin_user, client_obj):
+    est = Estimate.objects.create(client=client_obj)
+    assert est.general_label == 'General'
+    est.options.create(label='Cisco')  # label only renders once options exist
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_general_label_update', args=[est.pk]), {
+        'general_label': 'Common Costs',
+    })
+    assert resp.status_code == 200
+    est.refresh_from_db()
+    assert est.general_label == 'Common Costs'
+    assert 'Common Costs' in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_estimate_general_label_blank_falls_back_to_default(client, admin_user, client_obj):
+    est = Estimate.objects.create(client=client_obj, general_label='Custom')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_general_label_update', args=[est.pk]), {
+        'general_label': '   ',
+    })
+    assert resp.status_code == 200
+    est.refresh_from_db()
+    assert est.general_label == 'General'
+
+
+@pytest.mark.django_db
+def test_estimate_general_label_blocked_when_locked(client, admin_user, client_obj):
+    est = Estimate.objects.create(client=client_obj, status='accepted', general_label='Original')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:estimate_general_label_update', args=[est.pk]), {
+        'general_label': 'Should not save',
+    })
+    assert resp.status_code == 200
+    est.refresh_from_db()
+    assert est.general_label == 'Original'
+
+
+@pytest.mark.django_db
 def test_estimate_option_select_clears_sibling_selection(client, admin_user, client_obj):
     est = Estimate.objects.create(client=client_obj)
     a = est.options.create(label='A')

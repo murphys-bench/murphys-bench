@@ -1101,6 +1101,10 @@ class Estimate(models.Model):
     scope = models.TextField(blank=True, help_text='What we\'re quoting — free text.')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', db_index=True)
     expires_on = models.DateField(null=True, blank=True)
+    # Label for the estimate's own (unscoped) line items — only shown once
+    # EstimateOptions exist, so it can be renamed to read like a real option
+    # ("Base", "Common Costs", etc.) instead of the generic default.
+    general_label = models.CharField(max_length=120, default='General')
 
     # Decline path (populated in Slice 2c).
     decline_reason = models.TextField(blank=True)
