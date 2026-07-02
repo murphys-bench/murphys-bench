@@ -31,7 +31,7 @@ from .models import (
     SuppressedAddress,
     BlockedSender,
     SLAPlan, HelpTopic, TechSkill,
-    Notification, Prospect, Estimate, Sale,
+    Notification, Prospect, Estimate, Sale, EstimateOption,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm, DeviceQuickAddForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
@@ -1543,6 +1543,7 @@ class EstimateDetailView(EstimateAccessMixin, DetailView):
             labor_by_category.setdefault(item.category, []).append(item)
         ctx['labor_by_category'] = labor_by_category
         ctx['entries'] = _line_items_for(self.object)
+        ctx['options'] = self.object.options.all()
         # Details card: inline edit form (Client/Prospect/Context/Scope), same
         # fields used at creation — editing and creating are the same UI.
         ctx['estimate_form'] = EstimateForm(instance=self.object)
@@ -1685,6 +1686,85 @@ class EstimateCustomLogView(EstimateAccessMixin, View):
         return _render_line_items(request, estimate)
 
 
+class EstimateOptionCreateView(EstimateAccessMixin, View):
+    """HTMX: add a named pricing option (e.g. "Budget"/"Standard"/"Premium")
+    to an Estimate — see EstimateOption. Blank label is ignored (no accidental
+    empty option cards)."""
+
+    def post(self, request, est_pk):
+        estimate = get_object_or_404(Estimate, pk=est_pk)
+        label = request.POST.get('label', '').strip()
+        if label and not estimate.is_locked:
+            next_order = estimate.options.count()
+            estimate.options.create(label=label[:120], sort_order=next_order)
+        return _render_line_items(request, estimate)
+
+
+class EstimateOptionSelectView(EstimateAccessMixin, View):
+    """HTMX: mark one option as the client's pick — clears any sibling
+    selection (mutually exclusive within the estimate). Rejected options stay
+    on record, just unselected (Mike's call — nothing is deleted)."""
+
+    def post(self, request, pk):
+        option = get_object_or_404(EstimateOption, pk=pk)
+        if not option.estimate.is_locked:
+            option.select()
+        return _render_line_items(request, option)
+
+
+class EstimateOptionDeleteView(EstimateAccessMixin, View):
+    """HTMX: remove a pricing option and its line items entirely (unlike
+    de-selecting, this is a real delete — for a mistakenly-added option)."""
+
+    def post(self, request, pk):
+        option = get_object_or_404(EstimateOption, pk=pk)
+        estimate = option.estimate
+        if not estimate.is_locked:
+            option.delete()
+        return _render_line_items(request, estimate)
+
+
+class EstimateOptionLaborLogView(EstimateAccessMixin, View):
+    """HTMX: log a QuickLaborItem against one option as a labor line item."""
+
+    def post(self, request, opt_pk, item_pk):
+        option = get_object_or_404(EstimateOption, pk=opt_pk)
+        item = get_object_or_404(QuickLaborItem, pk=item_pk, is_active=True)
+        if not option.estimate.is_locked:
+            option.line_items.create(
+                kind='labor',
+                description=item.label[:255],
+                quantity=1,
+                unit_price=item.default_price,
+                source_labor_item=item,
+                logged_by=request.user,
+            )
+        return _render_line_items(request, option)
+
+
+class EstimateOptionCustomLogView(EstimateAccessMixin, View):
+    """HTMX: log a fully custom line item — labor or part — on one option."""
+
+    def post(self, request, opt_pk):
+        option = get_object_or_404(EstimateOption, pk=opt_pk)
+        label = request.POST.get('custom_label', '').strip()
+        notes = request.POST.get('notes', '').strip()
+        kind = request.POST.get('kind', 'labor')
+        if kind not in ('labor', 'part'):
+            kind = 'labor'
+        qty = _parse_qty(request.POST.get('quantity'))
+        if label and not option.estimate.is_locked:
+            option.line_items.create(
+                kind=kind,
+                description=label[:255],
+                quantity=qty if qty is not None else 1,
+                unit_price=_parse_price(request.POST.get('unit_price')),
+                notes=notes,
+                logged_by=request.user,
+            )
+        return _render_line_items(request, option)
+
+
 class EstimateQuotePrintView(EstimateAccessMixin, View):
     """Browser preview of the quote (new tab) — same template the emailed PDF uses."""
 
@@ -1811,6 +1891,13 @@ class EstimateAcceptView(EstimateAccessMixin, View):
             messages.error(request, f'{estimate.estimate_number} cannot be accepted from its current status.')
             return redirect('core:estimate_detail', pk=pk)
 
+        selected_option = None
+        if estimate.options.exists():
+            selected_option = estimate.options.filter(is_selected=True).first()
+            if not selected_option:
+                messages.error(request, f'{estimate.estimate_number} has multiple options — select one before accepting.')
+                return redirect('core:estimate_detail', pk=pk)
+
         try:
             with transaction.atomic():
                 # Promote a prospect-anchored estimate to a real Client, then re-anchor.
@@ -1842,6 +1929,8 @@ class EstimateAcceptView(EstimateAccessMixin, View):
                     status='new',
                 )
                 _copy_line_items(estimate, wo, request.user)
+                if selected_option:
+                    _copy_line_items(selected_option, wo, request.user)
 
                 estimate.status = 'accepted'
                 estimate.accepted_at = timezone.now()
@@ -3825,15 +3914,22 @@ def _parse_qty(val):
 
 
 def _render_line_items(request, host):
-    """Render the logged-line-items partial for a WorkOrder, an Estimate, or a Sale.
-
-    All three hosts attach LineItem via the same GenericRelation; only the
-    template (and its context var name) differs."""
+    """Render the logged-line-items partial for a WorkOrder, an Estimate, a
+    Sale, or an EstimateOption (a named pricing option nested under an
+    Estimate — see EstimateOption). All four hosts attach LineItem via the
+    same GenericRelation; only the template (and its context var name)
+    differs. An option-scoped edit/delete/log always re-renders the WHOLE
+    Estimate line-items section (general items + every option), not just the
+    one option, since they share a single #estimate-line-items-section swap
+    target on the page."""
     from django.template.loader import render_to_string
+    if isinstance(host, EstimateOption):
+        host = host.estimate
     if isinstance(host, Estimate):
         return render(request, 'core/partials/estimate_line_items.html', {
             'estimate': host,
             'entries': _line_items_for(host),
+            'options': host.options.all(),
         })
     if isinstance(host, Sale):
         # The Checkout card lives outside #sale-line-items-section (the swap
@@ -4016,10 +4112,29 @@ def _quote_report_context(estimate, site):
             'phone': prospect.phone,
         }
 
+    option_blocks = []
+    for option in estimate.options.select_related().order_by('sort_order', 'created_at'):
+        opt_items = option.line_items.select_related('source_labor_item').order_by('kind', 'logged_at')
+        opt_categories = {}
+        for entry in opt_items:
+            if entry.kind == 'part':
+                cat = 'Parts'
+            elif entry.source_labor_item:
+                cat = entry.source_labor_item.category
+            else:
+                cat = 'Other'
+            opt_categories.setdefault(cat, []).append(entry)
+        option_blocks.append({
+            'option': option,
+            'categories': opt_categories,
+            'total': option.total,
+        })
+
     return {
         'estimate': estimate,
         'site': site,
         'wp_categories': categories,
+        'option_blocks': option_blocks,
         'bill_to': bill_to,
         'print_date': timezone.now(),
     }
