@@ -2967,25 +2967,54 @@ def test_sale_client_is_optional_for_anonymous_walkin():
 
 
 @pytest.mark.django_db
-def test_sale_create_sets_created_by(client, admin_user, client_obj):
-    client.force_login(admin_user)
-    resp = client.post(reverse('core:sale_create'), {
-        'client': client_obj.pk, 'notes': 'Cable + adapter',
-    })
-    assert resp.status_code == 302
-    sale = Sale.objects.get()
-    assert sale.created_by == admin_user
-    assert sale.client_id == client_obj.pk
-    assert sale.status == 'draft'
-
-
-@pytest.mark.django_db
-def test_sale_create_with_no_client_is_valid(client, admin_user):
+def test_sale_create_is_instant_and_lands_on_detail(client, admin_user):
+    """New Sale is a one-click action (no intermediate form): POSTing creates
+    a blank draft and redirects straight to its detail page."""
     client.force_login(admin_user)
     resp = client.post(reverse('core:sale_create'), {})
     assert resp.status_code == 302
     sale = Sale.objects.get()
+    assert sale.created_by == admin_user
     assert sale.client_id is None
+    assert sale.status == 'draft'
+    assert resp.url == reverse('core:sale_detail', args=[sale.pk])
+
+
+@pytest.mark.django_db
+def test_sale_quick_update_sets_customer_and_notes(client, admin_user, client_obj):
+    sale = Sale.objects.create(created_by=admin_user)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_quick_update', args=[sale.pk]), {
+        'client': client_obj.pk, 'notes': 'Cable + adapter',
+    })
+    assert resp.status_code == 302
+    sale.refresh_from_db()
+    assert sale.client_id == client_obj.pk
+    assert sale.notes == 'Cable + adapter'
+
+
+@pytest.mark.django_db
+def test_sale_quick_update_blocked_when_locked(client, admin_user, client_obj):
+    sale = _completed_sale(client_obj)
+    original_client_id = sale.client_id
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_quick_update', args=[sale.pk]), {
+        'client': '', 'notes': 'should not save',
+    })
+    assert resp.status_code == 302
+    sale.refresh_from_db()
+    assert sale.client_id == original_client_id
+    assert sale.notes != 'should not save'
+
+
+@pytest.mark.django_db
+def test_sale_quick_update_role_block_403(client, client_obj):
+    role = Role.objects.create(name='NoSales3', can_view_sales=False)
+    user = User.objects.create_user(username='tech4', password='x', role_obj=role)
+    sale = Sale.objects.create(client=client_obj)
+    client.force_login(user)
+    resp = client.post(reverse('core:sale_quick_update', args=[sale.pk]), {'client': client_obj.pk})
+    assert resp.status_code == 403
 
 
 @pytest.mark.django_db
@@ -3091,6 +3120,20 @@ def _priced_draft_sale(client_obj=None):
     sale = Sale.objects.create(client=client_obj)
     sale.line_items.create(kind='part', description='Widget', quantity=1, unit_price=Decimal('30'))
     return sale
+
+
+@pytest.mark.django_db
+def test_sale_checkout_amount_prefill_is_quantized_to_cents(client, admin_user, client_obj):
+    """Regression: a fractional quantity (e.g. 0.5 hrs labor) can make
+    line_items_total carry more than 2 decimal places, which then fails the
+    checkout amount field's own step=0.01 validation if submitted unedited."""
+    from decimal import Decimal
+    sale = Sale.objects.create(client=client_obj)
+    sale.line_items.create(kind='labor', description='Setup', quantity=Decimal('0.5'), unit_price=Decimal('60'))
+    assert sale.line_items_total == Decimal('30.000')  # confirms the bug precondition
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:sale_detail', args=[sale.pk]))
+    assert resp.context['checkout_form'].initial['amount'] == Decimal('30.00')
 
 
 @pytest.mark.django_db
