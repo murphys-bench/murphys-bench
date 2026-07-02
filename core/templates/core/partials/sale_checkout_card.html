@@ -3,7 +3,7 @@
 Checkout / payment card for a Sale. Draft → payment form; completed → recorded
 payment + Invoice Ninja status with a retry / re-send path.
 {% endcomment %}
-<div class="bg-white rounded-lg shadow p-6" id="sale-checkout-card">
+<div class="bg-white rounded-lg shadow p-6" id="sale-checkout-card" {% if oob %}hx-swap-oob="true"{% endif %}>
 
     {% if sale.status == 'completed' %}
         <h2 class="text-base font-semibold text-gray-900 mb-4">Payment</h2>
