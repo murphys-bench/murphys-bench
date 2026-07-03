@@ -10,12 +10,15 @@
             <h1 class="text-2xl font-bold text-gray-900">{{ sale.sale_number }}</h1>
             <p class="text-sm text-gray-500">{{ sale.display_name }}</p>
         </div>
-        <span class="inline-flex px-3 py-1 rounded-full text-sm font-medium
-            {% if sale.status == 'completed' %}bg-green-100 text-green-800
-            {% elif sale.status == 'void' %}bg-gray-200 text-gray-600
-            {% else %}bg-yellow-100 text-yellow-800{% endif %}">
-            {{ sale.get_status_display }}
-        </span>
+        <div class="flex items-center gap-3">
+            {% include "core/partials/header_bell.html" %}
+            <span class="inline-flex px-3 py-1 rounded-full text-sm font-medium
+                {% if sale.status == 'completed' %}bg-green-100 text-green-800
+                {% elif sale.status == 'void' %}bg-gray-200 text-gray-600
+                {% else %}bg-yellow-100 text-yellow-800{% endif %}">
+                {{ sale.get_status_display }}
+            </span>
+        </div>
     </div>
 </div>
 {% endblock %}

@@ -14,6 +14,7 @@
             <p class="text-gray-500 text-sm">{{ ticket.client.name }}{% if ticket.device %} — {{ ticket.device.name }}{% endif %}</p>
         </div>
         <div class="flex flex-wrap items-center gap-3">
+            {% include "core/partials/header_bell.html" %}
             {% status_badge ticket.status 'ticket' %}
             <div id="overdue-section">
                 {% include "core/partials/overdue_badge.html" %}

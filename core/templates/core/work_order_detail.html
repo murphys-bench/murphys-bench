@@ -4,69 +4,15 @@
 {% block title %}{{ work_order.work_order_number }} - Murphy's Bench{% endblock %}
 
 {% block page_header %}
-<!-- Unified black action toolbar -->
-<div class="bg-gray-900 text-white">
-    <div class="max-w-7xl mx-auto px-4 py-0 sm:px-6 lg:px-8">
-        <div class="flex flex-wrap items-center gap-0 text-sm">
-            {% if work_order.client %}
-            <a href="{% url 'core:client_detail' work_order.client.pk %}"
-               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">View Client</a>
-            <a href="{% url 'core:client_edit' work_order.client.pk %}"
-               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Edit Client</a>
-            {% else %}
-            <a href="{% url 'core:work_order_list' %}"
-               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">← Work Orders</a>
-            {% endif %}
-            {% if work_order.device %}
-            <a href="{% url 'core:device_edit' work_order.device.pk %}"
-               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Edit Device</a>
-            {% endif %}
-            <a href="{% url 'core:work_order_edit' work_order.pk %}"
-               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Edit WO</a>
-            {% if work_order.client %}
-            <a href="{% url 'core:client_detail' work_order.client.pk %}#wo-history"
-               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">WO History</a>
-            {% endif %}
-            <a href="{% url 'core:work_order_print' work_order.pk %}" target="_blank"
-               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap flex items-center gap-1">{% icon "printer" 4 %} Repair Report</a>
-            <a href="{% url 'core:work_order_email_report' work_order.pk %}"
-               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap flex items-center gap-1">{% icon "envelope" 4 %} Email Report</a>
-            <a href="{% url 'core:work_order_print' work_order.pk %}?type=claim" target="_blank"
-               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Claim Ticket</a>
-            {% if is_admin %}
-            <form method="post" action="{% url 'core:work_order_delete' work_order.pk %}" class="inline"
-                  onsubmit="return confirm('Permanently delete {{ work_order.work_order_number }}? This removes its line items, notes, and attachments. This cannot be undone.');">
-                {% csrf_token %}
-                <button type="submit"
-                        class="px-3 py-3 hover:bg-red-700 text-red-300 hover:text-white transition-colors whitespace-nowrap">Delete WO</button>
-            </form>
-            {% endif %}
-            <!-- Quick status update -->
-            <form method="post" action="{% url 'core:work_order_quick_update' work_order.pk %}" class="ml-auto flex items-center">
-                {% csrf_token %}
-                <input type="hidden" name="priority" value="{{ work_order.priority }}">
-                <input type="hidden" name="service_type" value="{{ work_order.service_type }}">
-                <input type="hidden" name="assigned_to" value="{{ work_order.assigned_to_id|default:'' }}">
-                <input type="hidden" name="contact" value="{{ work_order.contact_id|default:'' }}">
-                <input type="hidden" name="repair_type" value="{{ work_order.repair_type_id|default:'' }}">
-                <input type="hidden" name="scheduled_date" value="{{ work_order.scheduled_date|date:'Y-m-d'|default:'' }}">
-                <input type="hidden" name="invoice_ninja_ref" value="{{ work_order.invoice_ninja_ref }}">
-                <select name="status" onchange="this.form.submit()"
-                        class="bg-gray-800 text-white text-sm border border-gray-600 rounded px-2 py-1.5 mx-3 focus:outline-none focus:ring-1 focus:ring-gray-400">
-                    {% for val, label in wo_status_choices %}
-                    <option value="{{ val }}" {% if work_order.status == val %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Page header -->
 <div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex items-start justify-between">
+    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex items-start justify-between gap-4">
         <div>
-            <p class="text-xs text-gray-400 uppercase tracking-wide">Work Order</p>
+            {% if work_order.client %}
+            <a href="{% url 'core:client_detail' work_order.client.pk %}" class="text-gray-400 hover:text-gray-600 text-sm">← {{ work_order.client.name }}</a>
+            {% else %}
+            <a href="{% url 'core:work_order_list' %}" class="text-gray-400 hover:text-gray-600 text-sm">← Work Orders</a>
+            {% endif %}
+            <p class="text-xs text-gray-400 uppercase tracking-wide mt-1">Work Order</p>
             <h1 class="text-2xl font-bold text-gray-900">{{ work_order.work_order_number }}</h1>
             <div class="flex flex-wrap items-center gap-2 mt-1">
                 {% status_badge work_order.status 'workorder' %}
@@ -93,12 +39,61 @@
                 {% endif %}
             </div>
         </div>
-        <div class="text-right text-sm text-gray-500 shrink-0 ml-4">
-            <p class="text-2xl font-bold text-gray-700">{{ days_open }}<span class="text-sm font-normal ml-1">day{{ days_open|pluralize }} open</span></p>
-            <p class="text-xs mt-1">Opened {{ work_order.created_at|date:"M d, Y" }}</p>
-            {% if work_order.completed_date %}
-            <p class="text-xs text-green-600">Completed {{ work_order.completed_date|date:"M d, Y" }}</p>
-            {% endif %}
+        <div class="flex flex-col items-end gap-2 shrink-0">
+            <div class="flex items-center gap-2">
+                {% include "core/partials/header_bell.html" %}
+                <form method="post" action="{% url 'core:work_order_quick_update' work_order.pk %}" class="inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="priority" value="{{ work_order.priority }}">
+                    <input type="hidden" name="service_type" value="{{ work_order.service_type }}">
+                    <input type="hidden" name="assigned_to" value="{{ work_order.assigned_to_id|default:'' }}">
+                    <input type="hidden" name="contact" value="{{ work_order.contact_id|default:'' }}">
+                    <input type="hidden" name="repair_type" value="{{ work_order.repair_type_id|default:'' }}">
+                    <input type="hidden" name="scheduled_date" value="{{ work_order.scheduled_date|date:'Y-m-d'|default:'' }}">
+                    <input type="hidden" name="invoice_ninja_ref" value="{{ work_order.invoice_ninja_ref }}">
+                    <select name="status" onchange="this.form.submit()"
+                            class="text-sm border border-gray-300 rounded px-2 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        {% for val, label in wo_status_choices %}
+                        <option value="{{ val }}" {% if work_order.status == val %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </form>
+                <div x-data="{ open: false }" class="relative">
+                    <button type="button" @click="open = !open"
+                            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium flex items-center gap-1">
+                        Actions {% icon "chevron-down" 4 %}
+                    </button>
+                    <div x-show="open" x-cloak @click.outside="open = false"
+                         class="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg border border-gray-200 py-1 z-20 text-sm">
+                        {% if work_order.client %}
+                        <a href="{% url 'core:client_edit' work_order.client.pk %}" class="block px-4 py-2 text-gray-700 hover:bg-gray-50">Edit Client</a>
+                        <a href="{% url 'core:client_detail' work_order.client.pk %}#wo-history" class="block px-4 py-2 text-gray-700 hover:bg-gray-50">WO History</a>
+                        {% endif %}
+                        {% if work_order.device %}
+                        <a href="{% url 'core:device_edit' work_order.device.pk %}" class="block px-4 py-2 text-gray-700 hover:bg-gray-50">Edit Device</a>
+                        {% endif %}
+                        <a href="{% url 'core:work_order_edit' work_order.pk %}" class="block px-4 py-2 text-gray-700 hover:bg-gray-50">Edit WO</a>
+                        <a href="{% url 'core:work_order_print' work_order.pk %}" target="_blank" class="block px-4 py-2 text-gray-700 hover:bg-gray-50">Repair Report</a>
+                        <a href="{% url 'core:work_order_email_report' work_order.pk %}" class="block px-4 py-2 text-gray-700 hover:bg-gray-50">Email Report</a>
+                        <a href="{% url 'core:work_order_print' work_order.pk %}?type=claim" target="_blank" class="block px-4 py-2 text-gray-700 hover:bg-gray-50">Claim Ticket</a>
+                        {% if is_admin %}
+                        <div class="border-t border-gray-100 my-1"></div>
+                        <form method="post" action="{% url 'core:work_order_delete' work_order.pk %}"
+                              onsubmit="return confirm('Permanently delete {{ work_order.work_order_number }}? This removes its line items, notes, and attachments. This cannot be undone.');">
+                            {% csrf_token %}
+                            <button type="submit" class="block w-full text-left px-4 py-2 text-red-600 hover:bg-red-50">Delete WO</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="text-right text-sm text-gray-500">
+                <p class="text-2xl font-bold text-gray-700">{{ days_open }}<span class="text-sm font-normal ml-1">day{{ days_open|pluralize }} open</span></p>
+                <p class="text-xs mt-1">Opened {{ work_order.created_at|date:"M d, Y" }}</p>
+                {% if work_order.completed_date %}
+                <p class="text-xs text-green-600">Completed {{ work_order.completed_date|date:"M d, Y" }}</p>
+                {% endif %}
+            </div>
         </div>
     </div>
 </div>

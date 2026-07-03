@@ -21,6 +21,7 @@
             </div>
         </div>
         <div class="flex gap-2">
+            {% include "core/partials/header_bell.html" %}
             <a href="{% url 'core:work_order_create' %}?client={{ client.pk }}"
                class="px-4 py-2 bg-green-700 text-white rounded-md hover:bg-green-800 text-sm font-medium">+ Work Order</a>
             <a href="{% url 'core:client_edit' client.pk %}"

@@ -1066,11 +1066,16 @@ class NotificationListView(LoginRequiredMixin, View):
 
 
 class NotificationCountView(LoginRequiredMixin, View):
-    """Sidebar bell badge fragment — polled via HTMX."""
+    """Bell badge fragment — polled via HTMX from the sidebar and page headers."""
 
     def get(self, request):
         count = request.user.notifications.filter(is_read=False).count()
-        return render(request, 'core/partials/notification_badge.html', {'count': count})
+        template = (
+            'core/partials/notification_badge_header.html'
+            if request.GET.get('style') == 'header'
+            else 'core/partials/notification_badge.html'
+        )
+        return render(request, template, {'count': count})
 
 
 class NotificationOpenView(LoginRequiredMixin, View):
