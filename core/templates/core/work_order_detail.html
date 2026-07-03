@@ -373,7 +373,7 @@
                       hx-post="{% url 'core:work_performed_custom' work_order.pk %}"
                       hx-target="#work-performed-section"
                       hx-swap="innerHTML"
-                      hx-on:htmx:after-request="customOpen = false"
+                      hx-on:htmx:after-request="if(event.detail.successful){this.reset(); customOpen = false;}"
                       class="space-y-2">
                     {% csrf_token %}
                     <div class="flex gap-2">
