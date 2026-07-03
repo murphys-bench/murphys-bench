@@ -19,6 +19,7 @@
                     {% endfor %}
                 </select>
             </form>
+            {% include "core/partials/header_bell.html" %}
             <form method="post" action="{% url 'core:estimate_create' %}">
                 {% csrf_token %}
                 <button type="submit"
