@@ -10,14 +10,17 @@
             <h1 class="text-2xl font-bold text-gray-900">{{ estimate.estimate_number }}</h1>
             <p class="text-sm text-gray-500">{{ estimate.display_name }}</p>
         </div>
-        <span class="inline-flex px-3 py-1 rounded-full text-sm font-medium
-            {% if estimate.status == 'accepted' %}bg-green-100 text-green-800
-            {% elif estimate.status == 'declined' %}bg-red-100 text-red-700
-            {% elif estimate.status == 'expired' %}bg-gray-200 text-gray-600
-            {% elif estimate.status == 'sent' %}bg-blue-100 text-blue-800
-            {% else %}bg-yellow-100 text-yellow-800{% endif %}">
-            {{ estimate.get_status_display }}
-        </span>
+        <div class="flex items-center gap-3">
+            {% include "core/partials/header_bell.html" %}
+            <span class="inline-flex px-3 py-1 rounded-full text-sm font-medium
+                {% if estimate.status == 'accepted' %}bg-green-100 text-green-800
+                {% elif estimate.status == 'declined' %}bg-red-100 text-red-700
+                {% elif estimate.status == 'expired' %}bg-gray-200 text-gray-600
+                {% elif estimate.status == 'sent' %}bg-blue-100 text-blue-800
+                {% else %}bg-yellow-100 text-yellow-800{% endif %}">
+                {{ estimate.get_status_display }}
+            </span>
+        </div>
     </div>
 </div>
 {% endblock %}

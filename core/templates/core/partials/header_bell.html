@@ -1,0 +1,7 @@
+{% load mb_icons %}
+<a href="{% url 'core:notifications' %}" title="Notifications"
+   class="relative inline-flex items-center justify-center w-10 h-10 rounded-md border border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-gray-700 shrink-0">
+    {% icon 'bell' 5 %}
+    <span hx-get="{% url 'core:notification_count' %}?style=header" hx-trigger="load, every 60s"
+          hx-swap="innerHTML" class="contents"></span>
+</a>
