@@ -13,6 +13,9 @@
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">View Client</a>
             <a href="{% url 'core:client_edit' work_order.client.pk %}"
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Edit Client</a>
+            {% else %}
+            <a href="{% url 'core:work_order_list' %}"
+               class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">← Work Orders</a>
             {% endif %}
             {% if work_order.device %}
             <a href="{% url 'core:device_edit' work_order.device.pk %}"
