@@ -6,10 +6,13 @@
 <div class="bg-white shadow page-title-bar">
     <div class="px-6 py-4 flex items-center justify-between">
         <h1 class="text-xl font-bold text-gray-900">Ticket Queues</h1>
-        <a href="{% url 'core:queue_create' %}"
-           class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
-            + New Queue
-        </a>
+        <div class="flex items-center gap-3">
+            {% include "core/partials/header_bell.html" %}
+            <a href="{% url 'core:queue_create' %}"
+               class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
+                + New Queue
+            </a>
+        </div>
     </div>
 </div>
 {% endblock %}

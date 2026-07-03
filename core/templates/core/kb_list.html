@@ -25,6 +25,7 @@
                 <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 shrink-0">Search</button>
                 <a href="{% url 'core:kb_list' %}" class="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-md text-sm hover:bg-gray-200 shrink-0">Clear</a>
             </form>
+            {% include "core/partials/header_bell.html" %}
             {% if user.is_staff or user.role_obj and user.role_obj.can_manage_kb %}
             <a href="{% url 'core:kb_create' %}"
                class="px-4 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">
