@@ -51,7 +51,7 @@
       <span class="mt-0.5 flex-shrink-0 w-2 h-2 rounded-full" style="background-color:{{ wo_dot_color }};"></span>
       <div class="min-w-0">
         <div class="font-medium truncate">{{ wo.work_order_number }}</div>
-        <div class="truncate" style="opacity:0.7">{{ wo.client.name }}</div>
+        <div class="truncate" style="opacity:0.7">{{ wo.client.name|default:"Walk-in" }}</div>
         {% with last=wo.notes.last %}
         <div class="truncate" style="opacity:0.55">{% if last %}{{ last.content|truncatechars:35 }}{% else %}{{ wo.description|truncatechars:35 }}{% endif %}</div>
         {% endwith %}

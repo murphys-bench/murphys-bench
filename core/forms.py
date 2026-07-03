@@ -67,6 +67,7 @@ class WorkOrderForm(forms.ModelForm):
     def __init__(self, *args, client_id=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['client'].queryset = Client.objects.filter(is_active=True).order_by('name')
+        self.fields['client'].required = False
         from .models import User, StatusDefinition
         self.fields['assigned_to'].queryset = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
         self.fields['assigned_to'].required = False
@@ -92,12 +93,21 @@ class WorkOrderForm(forms.ModelForm):
             self.fields['contact'].queryset = Contact.objects.filter(
                 client_id=client_id
             ).order_by('last_name', 'first_name')
+            self.fields['device'].queryset = Device.objects.filter(
+                client_id=client_id
+            ).order_by('name')
         elif self.instance and self.instance.pk:
             self.fields['contact'].queryset = Contact.objects.filter(
                 client=self.instance.client
             ).order_by('last_name', 'first_name')
+            # A walk-in WO's device has no client either — scope to the same
+            # unclaimed pool so a previously-created walk-in device is reselectable.
+            self.fields['device'].queryset = Device.objects.filter(
+                client=self.instance.client
+            ).order_by('name')
         else:
             self.fields['contact'].queryset = Contact.objects.none()
+            self.fields['device'].queryset = Device.objects.filter(client__isnull=True).order_by('name')
 
 
 class ClientForm(forms.ModelForm):

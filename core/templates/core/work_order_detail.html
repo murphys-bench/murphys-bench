@@ -8,18 +8,22 @@
 <div class="bg-gray-900 text-white">
     <div class="max-w-7xl mx-auto px-4 py-0 sm:px-6 lg:px-8">
         <div class="flex flex-wrap items-center gap-0 text-sm">
+            {% if work_order.client %}
             <a href="{% url 'core:client_detail' work_order.client.pk %}"
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">View Client</a>
             <a href="{% url 'core:client_edit' work_order.client.pk %}"
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Edit Client</a>
+            {% endif %}
             {% if work_order.device %}
             <a href="{% url 'core:device_edit' work_order.device.pk %}"
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Edit Device</a>
             {% endif %}
             <a href="{% url 'core:work_order_edit' work_order.pk %}"
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">Edit WO</a>
+            {% if work_order.client %}
             <a href="{% url 'core:client_detail' work_order.client.pk %}#wo-history"
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap">WO History</a>
+            {% endif %}
             <a href="{% url 'core:work_order_print' work_order.pk %}" target="_blank"
                class="px-3 py-3 hover:bg-gray-700 transition-colors whitespace-nowrap flex items-center gap-1">{% icon "printer" 4 %} Repair Report</a>
             <a href="{% url 'core:work_order_email_report' work_order.pk %}"
@@ -110,8 +114,11 @@
             <div class="bg-white rounded-lg shadow p-4">
                 <div class="flex items-center justify-between mb-2">
                     <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Client</h3>
+                    {% if work_order.client %}
                     <a href="{% url 'core:client_detail' work_order.client.pk %}" class="text-xs text-blue-600 hover:underline">View →</a>
+                    {% endif %}
                 </div>
+                {% if work_order.client %}
                 <p class="text-sm font-semibold text-gray-900">{{ work_order.client.name }}</p>
                 {% if work_order.contact %}
                 <p class="text-sm text-gray-700 mt-0.5">{{ work_order.contact.first_name }} {{ work_order.contact.last_name }}</p>
@@ -123,6 +130,12 @@
                     {{ work_order.client.address_line1 }}{% if work_order.client.address_line2 %}, {{ work_order.client.address_line2 }}{% endif %},
                     {{ work_order.client.address_city }}{% if work_order.client.address_state %}, {{ work_order.client.address_state }}{% endif %} {{ work_order.client.address_zip }}
                 </p>
+                {% endif %}
+                {% else %}
+                <p class="text-sm font-semibold text-gray-400 italic">Walk-in (anonymous)</p>
+                {% if work_order.contact %}
+                <p class="text-sm text-gray-700 mt-0.5">{{ work_order.contact.first_name }} {{ work_order.contact.last_name }}</p>
+                {% endif %}
                 {% endif %}
             </div>
 

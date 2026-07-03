@@ -3803,3 +3803,108 @@ def test_receipt_email_requires_address(client, admin_user, client_obj):
     from core.models import EmailSendLog
     assert not EmailSendLog.objects.filter(trigger='sale_receipt').exists()
 
+
+# ── Walk-in (client-less) Work Orders + Devices ──────────────────────────────
+# WorkOrder.client and Device.client went nullable (SET_NULL) so an anonymous
+# repair is a real, permanent WorkOrder/Device row instead of piling onto a
+# shared placeholder Client that would grow forever.
+
+def _wo_post_payload(**overrides):
+    payload = {
+        'service_type': 'in_shop',
+        'status': 'new',
+        'priority': 'normal',
+        'device-device_type': 'laptop',
+    }
+    payload.update(overrides)
+    return payload
+
+
+@pytest.mark.django_db
+def test_work_order_create_without_client_is_walkin(client, admin_user):
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:work_order_create'), _wo_post_payload())
+    assert resp.status_code == 302
+    wo = WorkOrder.objects.get()
+    assert wo.client_id is None
+    assert str(wo) == f'{wo.work_order_number}: Walk-in'
+
+
+@pytest.mark.django_db
+def test_work_order_create_with_client_still_works(client, admin_user, client_obj):
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:work_order_create'), _wo_post_payload(client=client_obj.pk))
+    assert resp.status_code == 302
+    wo = WorkOrder.objects.get()
+    assert wo.client_id == client_obj.pk
+
+
+@pytest.mark.django_db
+def test_work_order_create_with_new_walkin_device(client, admin_user):
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:work_order_create'), _wo_post_payload(**{
+        'device-name': 'Counter Laptop',
+        'device-manufacturer': 'Dell',
+    }))
+    assert resp.status_code == 302
+    wo = WorkOrder.objects.get()
+    assert wo.device is not None
+    assert wo.device.name == 'Counter Laptop'
+    assert wo.device.client_id is None
+    assert str(wo.device) == 'Counter Laptop (Walk-in)'
+
+
+@pytest.mark.django_db
+def test_work_order_create_with_new_device_attaches_to_selected_client(client, admin_user, client_obj):
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:work_order_create'), _wo_post_payload(**{
+        'client': client_obj.pk,
+        'device-name': "Front Desk PC",
+    }))
+    assert resp.status_code == 302
+    wo = WorkOrder.objects.get()
+    assert wo.device.client_id == client_obj.pk
+
+
+@pytest.mark.django_db
+def test_work_order_form_device_queryset_scoped_to_client(client_obj):
+    """Regression: the device dropdown was never scoped to the selected
+    client — every device for every client showed in one flat list."""
+    from core.forms import WorkOrderForm
+    from core.models import Client as ClientModel
+    other_client = ClientModel.objects.create(name='Other Co')
+    own_device = Device.objects.create(client=client_obj, name='Mine')
+    other_device = Device.objects.create(client=other_client, name='Not Mine')
+    form = WorkOrderForm(client_id=client_obj.pk)
+    device_qs = form.fields['device'].queryset
+    assert own_device in device_qs
+    assert other_device not in device_qs
+
+
+@pytest.mark.django_db
+def test_work_order_detail_renders_for_walkin(client, admin_user):
+    wo = WorkOrder.objects.create()
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:work_order_detail', args=[wo.pk]))
+    assert resp.status_code == 200
+    assert b'Walk-in' in resp.content
+
+
+@pytest.mark.django_db
+def test_device_detail_renders_for_walkin(client, admin_user):
+    device = Device.objects.create(name='Loose Laptop')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:device_detail', args=[device.pk]))
+    assert resp.status_code == 200
+    assert b'Walk-in' in resp.content
+
+
+@pytest.mark.django_db
+def test_reset_operational_data_deletes_walkin_wo_and_device(admin_user):
+    from django.core.management import call_command
+    WorkOrder.objects.create()
+    Device.objects.create(name='Orphan Device')
+    call_command('reset_operational_data', confirm='DELETE ALL OPERATIONAL DATA')
+    assert WorkOrder.objects.count() == 0
+    assert Device.objects.count() == 0
+
