@@ -186,14 +186,27 @@ if EMAIL_BACKEND != 'django.core.mail.backends.console.EmailBackend':
 # Attachments
 ATTACHMENT_STORAGE_BACKEND = config('ATTACHMENT_STORAGE_BACKEND', default='local')
 
+# Django 5.1 removed DEFAULT_FILE_STORAGE in favour of the STORAGES dict, so both
+# keys are always restated here. In production, staticfiles uses
+# ManifestStaticFilesStorage (content-hashed filenames, e.g. app.3f9a1c.css) so
+# a deploy that only changes CSS/JS always busts any browser cache — update.sh
+# already runs collectstatic after every build, which is this backend's only
+# requirement. Without this, a browser can keep serving a pre-deploy stylesheet
+# indefinitely since the static URL never changes (found live: a new purple
+# button rendered with no text/color at all until a hard-refresh, mid the
+# Estimate-options session). Local dev (DEBUG=True) keeps the plain backend —
+# `manage.py runserver` never runs collectstatic, so Manifest's hashed-name
+# lookup would 500 on `{% static %}` for anyone who hasn't run it by hand.
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': (
+        'django.contrib.staticfiles.storage.StaticFilesStorage' if DEBUG
+        else 'django.contrib.staticfiles.storage.ManifestStaticFilesStorage'
+    )},
+}
+
 if ATTACHMENT_STORAGE_BACKEND == 's3':
-    # Django 5.1 removed DEFAULT_FILE_STORAGE in favour of the STORAGES dict.
-    # Setting STORAGES replaces the whole default, so the staticfiles backend
-    # must be restated alongside the default file backend.
-    STORAGES = {
-        'default': {'BACKEND': 'storages.backends.s3boto3.S3Boto3Storage'},
-        'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
-    }
+    STORAGES['default'] = {'BACKEND': 'storages.backends.s3boto3.S3Boto3Storage'}
     AWS_STORAGE_BUCKET_NAME = config('S3_BUCKET_NAME', default='')
     AWS_ACCESS_KEY_ID = config('S3_ACCESS_KEY', default='')
     AWS_SECRET_ACCESS_KEY = config('S3_SECRET_KEY', default='')
