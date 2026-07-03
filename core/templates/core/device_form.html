@@ -6,6 +6,9 @@
 {% block page_header %}
 <div class="bg-white shadow page-title-bar">
     <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        {% if back_client %}
+        <a href="{% url 'core:client_detail' back_client.pk %}" class="text-gray-400 hover:text-gray-600 text-sm">← {{ back_client.name }}</a>
+        {% endif %}
         <h1 class="text-2xl font-bold text-gray-900">{{ title }}</h1>
     </div>
 </div>

@@ -1202,7 +1202,13 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['title'] = 'New Work Order'
-        context['cancel_url'] = reverse_lazy('core:work_order_list')
+        client_id = self.request.GET.get('client')
+        back_client = Client.objects.filter(pk=client_id).first() if client_id else None
+        context['back_client'] = back_client
+        context['cancel_url'] = (
+            reverse_lazy('core:client_detail', kwargs={'pk': back_client.pk})
+            if back_client else reverse_lazy('core:work_order_list')
+        )
         context['is_create'] = True
         context.setdefault('device_form', DeviceQuickAddForm(prefix='device'))
         fields = _get_custom_fields_for_workorder(None)
@@ -2369,6 +2375,8 @@ class DeviceCreateView(LoginRequiredMixin, CreateView):
         next_url = self.request.GET.get('next', '')
         context['cancel_url'] = next_url or str(reverse_lazy('core:device_list'))
         context['next_url'] = next_url
+        client_id = self.request.GET.get('client')
+        context['back_client'] = Client.objects.filter(pk=client_id).first() if client_id else None
         return context
 
 
