@@ -84,7 +84,7 @@
                                 <a href="{% url 'core:work_order_detail' wo.pk %}">{{ wo.work_order_number }}</a>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                {{ wo.client.name }}
+                                {{ wo.client.name|default:"Walk-in" }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                                 {{ wo.device.name|default:"—" }}

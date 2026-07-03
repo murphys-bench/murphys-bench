@@ -207,7 +207,7 @@
             <!-- Client -->
             <div>
                 <div class="section-title">Client</div>
-                <div class="field-value">{{ work_order.client.name }}</div>
+                <div class="field-value">{{ work_order.client.name|default:"Walk-in" }}</div>
                 {% if contact %}
                 <div class="field-sub">{{ contact.first_name }} {{ contact.last_name }}</div>
                 {% for phone in contact.phone_numbers.all %}

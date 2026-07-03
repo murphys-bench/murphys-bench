@@ -222,7 +222,10 @@ def push_work_order(work_order):
             'least one line first.'
         )
 
-    in_client_id = find_or_create_client(work_order.client)
+    in_client_id = (
+        find_or_create_client(work_order.client) if work_order.client_id
+        else find_or_create_walkin_client()
+    )
     payload = {
         'client_id': in_client_id,
         'po_number': work_order.work_order_number,  # WO# for bank→IN→MB traceability

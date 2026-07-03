@@ -3,7 +3,7 @@
 {% block page_header %}
 <div class="bg-white border-b border-gray-200 px-6 py-4">
     <h1 class="text-xl font-semibold text-gray-900">Email Repair Report</h1>
-    <p class="text-sm text-gray-500 mt-0.5">{{ work_order.work_order_number }} · {{ work_order.client.name }}</p>
+    <p class="text-sm text-gray-500 mt-0.5">{{ work_order.work_order_number }} · {{ work_order.client.name|default:"Walk-in" }}</p>
 </div>
 {% endblock %}
 

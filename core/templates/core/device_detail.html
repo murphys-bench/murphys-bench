@@ -7,7 +7,11 @@
 <div class="bg-white shadow page-title-bar">
     <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex items-center justify-between">
         <div>
+            {% if device.client %}
             <a href="{% url 'core:client_detail' device.client.pk %}" class="text-gray-400 hover:text-gray-600 text-sm">← {{ device.client.name }}</a>
+            {% else %}
+            <a href="{% url 'core:device_list' %}" class="text-gray-400 hover:text-gray-600 text-sm">← Walk-in devices</a>
+            {% endif %}
             <h1 class="text-2xl font-bold text-gray-900 mt-1">{{ device.name }}</h1>
             <p class="text-gray-500 text-sm">{{ device.get_device_type_display }}</p>
         </div>
@@ -106,9 +110,13 @@
                 <div>
                     <dt class="text-xs font-medium text-gray-500 uppercase">Client</dt>
                     <dd class="text-sm text-gray-900 mt-1">
+                        {% if device.client %}
                         <a href="{% url 'core:client_detail' device.client.pk %}" class="text-blue-600 hover:underline">
                             {{ device.client.name }}
                         </a>
+                        {% else %}
+                        <span class="text-gray-400 italic">Walk-in (anonymous)</span>
+                        {% endif %}
                     </dd>
                 </div>
                 <div>

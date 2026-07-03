@@ -462,7 +462,12 @@ class Device(models.Model):
     ]
 
     id = models.AutoField(primary_key=True)
-    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='devices')
+    # Nullable so a walk-in/anonymous repair's device is a real, permanent
+    # Device row (full manufacturer/model/type/repair history) rather than
+    # forcing it onto a shared placeholder Client that would accumulate every
+    # one-off repair forever. Device-level trend reporting (failure rates by
+    # make/model/type) never needed to go through Client anyway.
+    client = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True, blank=True, related_name='devices')
     repair_type = models.ForeignKey(RepairType, on_delete=models.SET_NULL, null=True, related_name='devices')
     assigned_contact = models.ForeignKey('Contact', on_delete=models.SET_NULL, null=True, blank=True, related_name='devices')
     name = models.CharField(max_length=255, help_text="e.g., 'Mike\'s Laptop'")
@@ -496,7 +501,8 @@ class Device(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.name} ({self.client.name})"
+        owner = self.client.name if self.client_id else 'Walk-in'
+        return f"{self.name} ({owner})"
 
     def save(self, *args, **kwargs):
         # Store blank serials as NULL so the unique constraint permits many
@@ -831,7 +837,9 @@ class WorkOrder(models.Model):
     id = models.AutoField(primary_key=True)
     work_order_number = models.CharField(max_length=20, unique=True, db_index=True)
     ticket = models.OneToOneField(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_order_created')
-    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='work_orders')
+    # Nullable — a walk-in/anonymous WO has no Client row at all, mirroring Sale
+    # (never a shared placeholder that would accumulate every one-off repair).
+    client = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
     device = models.ForeignKey(Device, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
     contact = models.ForeignKey('Contact', on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
     repair_type = models.ForeignKey(RepairType, on_delete=models.SET_NULL, null=True, related_name='work_orders')
@@ -877,7 +885,8 @@ class WorkOrder(models.Model):
     line_items = GenericRelation('LineItem')
 
     def __str__(self):
-        return f"{self.work_order_number}: {self.client.name}"
+        owner = self.client.name if self.client_id else 'Walk-in'
+        return f"{self.work_order_number}: {owner}"
 
     @property
     def line_items_total(self):

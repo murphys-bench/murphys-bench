@@ -873,11 +873,12 @@ class WorkOrderMileageCreateView(LoginRequiredMixin, View):
     def _context(self, work_order, form):
         settings = SiteSettings.get()
         client = work_order.client
-        # Build client full address for destination pre-fill
+        # Build client full address for destination pre-fill (blank for a
+        # walk-in WO with no client — nothing to prefill, tech types it in)
         parts = [
             client.address_line1, client.address_city,
             client.address_state, client.address_zip,
-        ]
+        ] if client else []
         client_address = ', '.join(p for p in parts if p)
         return {
             'form': form,
@@ -891,7 +892,7 @@ class WorkOrderMileageCreateView(LoginRequiredMixin, View):
         work_order = get_object_or_404(WorkOrder, pk=pk)
         settings = SiteSettings.get()
         client = work_order.client
-        parts = [client.address_line1, client.address_city, client.address_state, client.address_zip]
+        parts = [client.address_line1, client.address_city, client.address_state, client.address_zip] if client else []
         client_address = ', '.join(p for p in parts if p)
         form = MileageForm(initial={
             'trip_date': timezone.now().date(),
@@ -1154,18 +1155,28 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
             kwargs['client_id'] = client_id
         return kwargs
 
-    def form_valid(self, form):
-        form.instance.work_order_number = WorkOrder.generate_work_order_number()
-        response = super().form_valid(form)
-        _save_attachments(self.request, self.object)
+    def post(self, request, *args, **kwargs):
+        from django.db import transaction
 
-        # Optionally apply checklist items from the flat bank filtered by device type
-        if form.cleaned_data.get('apply_checklist'):
-            _apply_checklist_items(self.object)
-
-        fields = _get_custom_fields_for_workorder(self.object)
-        _save_custom_field_values(self.request, self.object, fields)
-        return response
+        self.object = None
+        form = self.get_form()
+        device_form = DeviceQuickAddForm(request.POST, prefix='device')
+        if form.is_valid() and device_form.is_valid():
+            with transaction.atomic():
+                if device_form.cleaned_data.get('name'):
+                    device = device_form.save(commit=False)
+                    device.client = form.cleaned_data.get('client')  # None = walk-in device
+                    device.save()
+                    form.instance.device = device
+                form.instance.work_order_number = WorkOrder.generate_work_order_number()
+                self.object = form.save()
+            _save_attachments(self.request, self.object)
+            if form.cleaned_data.get('apply_checklist'):
+                _apply_checklist_items(self.object)
+            fields = _get_custom_fields_for_workorder(self.object)
+            _save_custom_field_values(self.request, self.object, fields)
+            return redirect(self.get_success_url())
+        return self.render_to_response(self.get_context_data(form=form, device_form=device_form))
 
     def get_success_url(self):
         return reverse_lazy('core:work_order_detail', kwargs={'pk': self.object.pk})
@@ -1193,6 +1204,7 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
         context['title'] = 'New Work Order'
         context['cancel_url'] = reverse_lazy('core:work_order_list')
         context['is_create'] = True
+        context.setdefault('device_form', DeviceQuickAddForm(prefix='device'))
         fields = _get_custom_fields_for_workorder(None)
         context['custom_field_entries'] = [{'field': f, 'value': ''} for f in fields]
         return context
@@ -4077,7 +4089,7 @@ def _repair_report_context(work_order, site, report_type='repair'):
 
     # Named contact: use WO contact FK, fall back to client's primary contact
     contact = work_order.contact
-    if not contact:
+    if not contact and work_order.client_id:
         contact = work_order.client.contacts.filter(is_primary=True).first()
 
     return {
@@ -4314,6 +4326,8 @@ def _report_recipient_contact(work_order):
     contact = work_order.contact
     if contact and contact.email:
         return contact
+    if not work_order.client_id:
+        return contact
     return (work_order.client.contacts.filter(is_primary=True, is_active=True, email__gt='').first()
             or work_order.client.contacts.filter(is_active=True, email__gt='').first()
             or contact)
@@ -4358,11 +4372,13 @@ class WorkOrderReportEmailView(LoginRequiredMixin, View):
         if wo is None:
             raise Http404
         default = _report_recipient_contact(wo)
+        contacts = wo.client.contacts.filter(is_active=True) if wo.client_id else Contact.objects.none()
+        default_email = (default.email if default else '') or (wo.client.email if wo.client_id else '')
         return render(request, 'core/work_order_email_report.html', {
             'work_order': wo,
-            'contacts': wo.client.contacts.filter(is_active=True),
+            'contacts': contacts,
             'default_contact': default,
-            'default_email': (default.email if default else '') or wo.client.email,
+            'default_email': default_email,
         })
 
     def post(self, request, pk):
@@ -4378,7 +4394,7 @@ class WorkOrderReportEmailView(LoginRequiredMixin, View):
         contact = None
         to_email = (request.POST.get('custom_email') or '').strip()
         contact_id = request.POST.get('contact')
-        if not to_email and contact_id:
+        if not to_email and contact_id and wo.client_id:
             contact = wo.client.contacts.filter(pk=contact_id).first()
             to_email = contact.email if contact else ''
         if not to_email:

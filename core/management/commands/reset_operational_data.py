@@ -6,10 +6,12 @@ for real and want the demo/test data gone, while keeping everything you've
 configured.
 
 DELETES (operational data):
-  Clients (cascades to Contacts, Devices, Tickets, replies, locks, links,
-  Work Orders, notes, items, work-performed, invoices), Mileage, Attachments
-  (rows AND files on disk), Custom-field VALUES, email send/receive logs, the
-  audit-log history, device-credential access logs, and all non-superuser users.
+  Work Orders and Devices explicitly (client is nullable — walk-in rows and
+  orphans wouldn't cascade-delete from Client), then Clients (cascades to
+  Contacts, Tickets, replies, locks, links, notes, items, work-performed,
+  invoices), Mileage, Attachments (rows AND files on disk), Custom-field
+  VALUES, email send/receive logs, the audit-log history, device-credential
+  access logs, and all non-superuser users.
 
 KEEPS (configuration + you):
   SiteSettings, Roles, Status definitions, Help Topics, SLA Plans, Repair Types
@@ -128,7 +130,13 @@ class Command(BaseCommand):
             DeviceCredentialAccessLog.objects.all().delete()
             Mileage.objects.all().delete()
 
-            # Clients cascade to contacts, devices, tickets, WOs and everything under them
+            # WorkOrder.client and Device.client are SET_NULL (walk-in/anonymous
+            # support), so they no longer cascade-delete from Client — wipe them
+            # explicitly first, including walk-in rows that never had a client.
+            WorkOrder.objects.all().delete()
+            Device.objects.all().delete()
+
+            # Clients cascade to contacts, tickets, and everything else under them
             Client.objects.all().delete()
 
             # Non-superuser users last (their personal queues cascade with them)

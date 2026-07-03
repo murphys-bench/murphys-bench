@@ -70,9 +70,13 @@
                                 <a href="{% url 'core:device_detail' device.pk %}">{{ device.name }}</a>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {% if device.client %}
                                 <a href="{% url 'core:client_detail' device.client.pk %}" class="hover:underline" onclick="event.stopPropagation()">
                                     {{ device.client.name }}
                                 </a>
+                                {% else %}
+                                <span class="text-gray-400 italic">Walk-in</span>
+                                {% endif %}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                                 {{ device.get_device_type_display }}

@@ -34,22 +34,87 @@
 
         <!-- Client & Device -->
         <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-base font-semibold text-gray-900 mb-4">Client & Device</h2>
+            <h2 class="text-base font-semibold text-gray-900 mb-1">Client & Device</h2>
+            <p class="text-xs text-gray-400 mb-4">Leave Client blank for a walk-in/anonymous work order — no placeholder customer is created.</p>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Client <span class="text-red-500">*</span></label>
-                    {{ form.client }}
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Client</label>
+                    <select name="client" id="id_client"
+                        hx-get="{% url 'core:ticket_contacts_by_client' %}"
+                        hx-trigger="change"
+                        hx-target="#id_contact"
+                        hx-include="this"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                        {% for val, label in form.fields.client.choices %}
+                            <option value="{{ val }}"{% if form.client.value|stringformat:"s" == val|stringformat:"s" %} selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Contact</label>
-                    {{ form.contact }}
+                    <select name="contact" id="id_contact"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                        {% for val, label in form.fields.contact.choices %}
+                            <option value="{{ val }}"{% if form.contact.value|stringformat:"s" == val|stringformat:"s" %} selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
                 </div>
                 <div class="md:col-span-2">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Device</label>
-                    {{ form.device }}
+                    <select name="device" id="id_device"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                        {% for val, label in form.fields.device.choices %}
+                            <option value="{{ val }}"{% if form.device.value|stringformat:"s" == val|stringformat:"s" %} selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
                 </div>
             </div>
         </div>
+
+        {% if is_create %}
+        <!-- New Device (optional) -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-base font-semibold text-gray-900 mb-1">New Device <span class="text-gray-400 font-normal">(optional)</span></h2>
+            <p class="text-xs text-gray-400 mb-4">Fill in a device name to log a new device with this work order instead of picking one above. Leave blank to skip.</p>
+
+            {% if device_form.errors %}
+            <div class="bg-red-50 border border-red-200 rounded-md p-4 mb-4">
+                <p class="text-sm font-medium text-red-800">Please fix the errors below:</p>
+                <ul class="mt-2 text-sm text-red-700 list-disc list-inside">
+                    {% for field in device_form %}
+                        {% for error in field.errors %}
+                            <li>{{ field.label }}: {{ error }}</li>
+                        {% endfor %}
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Device Name</label>
+                    {{ device_form.name }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Device Type</label>
+                    {{ device_form.device_type }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Manufacturer</label>
+                    {{ device_form.manufacturer }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                    {{ device_form.model }}
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Serial Number</label>
+                    {{ device_form.serial_number }}
+                </div>
+            </div>
+            <p class="text-xs text-gray-400 mt-3">This device will be attached to whichever Client is selected above — or left as a walk-in device if Client is blank.</p>
+        </div>
+        {% endif %}
 
         <!-- Reported Issue / Work Requested -->
         <div class="bg-white rounded-lg shadow p-6">
