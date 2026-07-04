@@ -1,0 +1,64 @@
+{# A collapsible catalog card (Services or Products). Items are grouped by
+   category with a divider per category. Inherits can_edit + type_choices from
+   the parent context. Expects: title, groups (by_category dict), count,
+   empty_text. #}
+<div class="bg-white rounded-lg shadow" x-data="{ open: true }">
+    <button type="button" @click="open = !open"
+            class="w-full flex items-center justify-between px-6 py-4 text-left">
+        <span class="text-base font-semibold text-gray-900">{{ title }}
+            <span class="text-gray-400 font-normal">({{ count }})</span></span>
+        <svg class="w-4 h-4 text-gray-400 transition-transform" :class="open && 'rotate-180'"
+             fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+    </button>
+    <div x-show="open" x-cloak class="border-t border-gray-100">
+        {% for category, group_items in groups.items %}
+        <div class="px-6 py-2 bg-gray-50 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            {{ category }}
+        </div>
+        {% for item in group_items %}
+        <div class="border-b border-gray-50 last:border-0 {% if not item.is_active %}opacity-50{% endif %}" x-data="{ editing: false }">
+            <div class="px-6 py-2.5 flex items-center gap-3">
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-gray-900">{{ item.name }}{% if not item.is_active %} <span class="text-xs text-gray-400">(inactive)</span>{% endif %}</p>
+                    {% if item.print_description %}<p class="text-xs text-gray-400 truncate">{{ item.print_description }}</p>{% endif %}
+                </div>
+                <div class="text-sm text-gray-700 whitespace-nowrap">{% if item.default_price != None %}${{ item.default_price }}{% else %}<span class="text-gray-300">—</span>{% endif %}</div>
+                {% if can_edit %}<button type="button" @click="editing = !editing" class="text-xs text-blue-600 hover:underline shrink-0">Edit</button>{% endif %}
+            </div>
+            {% if can_edit %}
+            <div x-show="editing" x-cloak class="px-6 pb-3 bg-gray-50">
+                <form method="post" action="{% url 'core:catalog_update' item.pk %}" class="grid grid-cols-1 sm:grid-cols-6 gap-2 items-end pt-3">
+                    {% csrf_token %}
+                    <div><label class="block text-xs text-gray-500 mb-1">Type</label>
+                        <select name="item_type" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm">
+                            {% for value, label in type_choices %}<option value="{{ value }}" {% if item.item_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                        </select></div>
+                    <div class="sm:col-span-2"><label class="block text-xs text-gray-500 mb-1">Name</label>
+                        <input type="text" name="name" value="{{ item.name }}" required class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"></div>
+                    <div><label class="block text-xs text-gray-500 mb-1">Category</label>
+                        <input type="text" name="category" value="{{ item.category }}" required class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"></div>
+                    <div><label class="block text-xs text-gray-500 mb-1">Price ($)</label>
+                        <input type="number" name="default_price" value="{{ item.default_price|default_if_none:'' }}" step="0.01" min="0" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"></div>
+                    <label class="flex items-center gap-1 text-xs text-gray-600">
+                        <input type="checkbox" name="is_active" value="1" {% if item.is_active %}checked{% endif %} class="h-4 w-4 rounded border-gray-300"> Active
+                    </label>
+                    <div class="sm:col-span-5"><label class="block text-xs text-gray-500 mb-1">Client-facing description</label>
+                        <input type="text" name="print_description" value="{{ item.print_description }}" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"></div>
+                    <div><button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Save</button></div>
+                </form>
+                <form method="post" action="{% url 'core:catalog_delete' item.pk %}" class="mt-2"
+                      onsubmit="return confirm('Delete {{ item.name|escapejs }} from the catalog?')">
+                    {% csrf_token %}
+                    <button type="submit" class="text-xs text-red-600 hover:underline">Delete this item</button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+        {% empty %}
+        <p class="px-6 py-4 text-sm text-gray-400">{{ empty_text }}</p>
+        {% endfor %}
+    </div>
+</div>
