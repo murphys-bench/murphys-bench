@@ -3908,3 +3908,113 @@ def test_reset_operational_data_deletes_walkin_wo_and_device(admin_user):
     assert WorkOrder.objects.count() == 0
     assert Device.objects.count() == 0
 
+
+
+# ── Monthly Clients (Lane C recurring — reuses Sale, no new model) ──────────
+
+@pytest.mark.django_db
+def test_client_form_saves_is_managed_and_monthly_amount(client, admin_user, client_obj):
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:client_edit', args=[client_obj.pk]), {
+        'name': client_obj.name, 'client_type': client_obj.client_type,
+        'is_managed': 'on', 'monthly_amount': '75.00',
+    })
+    client_obj.refresh_from_db()
+    assert resp.status_code == 302
+    assert client_obj.is_managed is True
+    from decimal import Decimal
+    assert client_obj.monthly_amount == Decimal('75.00')
+
+
+@pytest.mark.django_db
+def test_monthly_clients_list_filters_to_managed_only(client, admin_user, client_obj):
+    from core.models import Client as ClientModel
+    client_obj.is_managed = True
+    client_obj.save()
+    unmanaged = ClientModel.objects.create(name='Unmanaged Co')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:monthly_clients_list'))
+    clients_shown = [row['client'] for row in resp.context['rows']]
+    assert client_obj in clients_shown
+    assert unmanaged not in clients_shown
+
+
+@pytest.mark.django_db
+def test_monthly_clients_list_ignores_non_recurring_sale_this_month(client, admin_user, client_obj):
+    """A regular counter Sale for a managed client this month must NOT count
+    as this month's recurring charge — proves is_recurring is load-bearing."""
+    client_obj.is_managed = True
+    client_obj.save()
+    Sale.objects.create(client=client_obj, is_recurring=False)
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:monthly_clients_list'))
+    row = next(r for r in resp.context['rows'] if r['client'] == client_obj)
+    assert row['sale'] is None
+
+
+@pytest.mark.django_db
+def test_charge_now_creates_draft_sale_with_prefilled_line_item(client, admin_user, client_obj):
+    from decimal import Decimal
+    client_obj.is_managed = True
+    client_obj.monthly_amount = Decimal('50.00')
+    client_obj.save()
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:client_charge_monthly', args=[client_obj.pk]))
+    assert resp.status_code == 302
+    sale = Sale.objects.get(client=client_obj, is_recurring=True)
+    assert resp.url == reverse('core:sale_detail', args=[sale.pk])
+    assert sale.status == 'draft'
+    li = sale.line_items.get()
+    assert li.description == 'Monthly Service'
+    assert li.unit_price == Decimal('50.00')
+
+
+@pytest.mark.django_db
+def test_charge_now_blank_monthly_amount_creates_unpriced_line(client, admin_user, client_obj):
+    client_obj.is_managed = True
+    client_obj.save()
+    client.force_login(admin_user)
+    client.post(reverse('core:client_charge_monthly', args=[client_obj.pk]))
+    sale = Sale.objects.get(client=client_obj, is_recurring=True)
+    li = sale.line_items.get()
+    assert li.unit_price is None
+    assert sale.line_items_total == 0
+    # Existing checkout guard blocks completion until a price is entered.
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_checkout', args=[sale.pk]), {
+        'payment_method': 'cash', 'amount': '0',
+    })
+    sale.refresh_from_db()
+    assert sale.status == 'draft'
+
+
+@pytest.mark.django_db
+def test_charge_now_is_idempotent_within_the_month(client, admin_user, client_obj):
+    client_obj.is_managed = True
+    client_obj.save()
+    client.force_login(admin_user)
+    client.post(reverse('core:client_charge_monthly', args=[client_obj.pk]))
+    first_sale = Sale.objects.get(client=client_obj, is_recurring=True)
+    client.post(reverse('core:client_charge_monthly', args=[client_obj.pk]))
+    assert Sale.objects.filter(client=client_obj, is_recurring=True).count() == 1
+    assert Sale.objects.get(client=client_obj, is_recurring=True).pk == first_sale.pk
+
+
+@pytest.mark.django_db
+def test_monthly_clients_list_role_block_403(client, client_obj):
+    role = Role.objects.create(name='NoSales', can_view_sales=False)
+    user = User.objects.create_user(username='tech3', password='x', role_obj=role)
+    client.force_login(user)
+    resp = client.get(reverse('core:monthly_clients_list'))
+    assert resp.status_code == 403
+
+
+@pytest.mark.django_db
+def test_charge_now_role_block_403(client, client_obj):
+    role = Role.objects.create(name='NoSales2', can_view_sales=False)
+    user = User.objects.create_user(username='tech4', password='x', role_obj=role)
+    client_obj.is_managed = True
+    client_obj.save()
+    client.force_login(user)
+    resp = client.post(reverse('core:client_charge_monthly', args=[client_obj.pk]))
+    assert resp.status_code == 403
