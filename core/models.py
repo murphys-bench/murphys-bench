@@ -198,6 +198,17 @@ class Client(models.Model):
     # Invoice Ninja client id, saved after the first push (link once, don't sync).
     # Later pushes use this directly — no re-search, no duplicate IN clients.
     invoice_ninja_id = models.CharField(max_length=64, blank=True, default='')
+    # Recurring/managed monthly billing (Lane C) — Client is the group membership;
+    # the actual charge each month is a Sale (is_recurring=True), not a separate model.
+    is_managed = models.BooleanField(
+        default=False, db_index=True,
+        help_text='In the recurring monthly billing group — appears on the Monthly Clients list.',
+    )
+    monthly_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(0)],
+        help_text='Optional. Pre-fills the monthly charge amount. Leave blank to enter it each month.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1260,6 +1271,10 @@ class Sale(models.Model):
 
     sale_number = models.CharField(max_length=20, unique=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', db_index=True)
+    is_recurring = models.BooleanField(
+        default=False,
+        help_text='This sale is a recurring monthly charge (Lane C), not a counter/walk-in sale.',
+    )
     notes = models.TextField(blank=True)
 
     # Checkout / payment record (Slice 3b).

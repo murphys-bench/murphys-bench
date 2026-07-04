@@ -2178,6 +2178,58 @@ class SaleDeleteView(SaleAccessMixin, View):
         return redirect('core:sale_list')
 
 
+class MonthlyClientsListView(SaleAccessMixin, ListView):
+    """The recurring-billing worklist (Lane C): every is_managed client, with
+    this month's recurring Sale (if any) resolved so Mike can work down the
+    list — Not started / Draft in progress / Completed. Reuses can_view_sales;
+    no dedicated flag (a recurring charge is just a kind of Sale)."""
+
+    model = Client
+    template_name = 'core/monthly_clients_list.html'
+    context_object_name = 'clients'
+
+    def get_queryset(self):
+        return Client.objects.filter(is_managed=True, is_active=True).order_by('name')
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        today = timezone.localdate()
+        sales_this_month = {
+            sale.client_id: sale
+            for sale in Sale.objects.filter(
+                client__in=ctx['clients'], is_recurring=True,
+                created_at__year=today.year, created_at__month=today.month,
+            )
+        }
+        rows = []
+        for client in ctx['clients']:
+            rows.append({'client': client, 'sale': sales_this_month.get(client.id)})
+        ctx['rows'] = rows
+        return ctx
+
+
+class MonthlyChargeView(SaleAccessMixin, View):
+    """'Charge Now' on the Monthly Clients list. Idempotent within a calendar
+    month — a second click (or a page revisit) lands on the SAME Sale rather
+    than creating a duplicate recurring charge for the same client/month."""
+
+    def post(self, request, pk):
+        client = get_object_or_404(Client, pk=pk, is_managed=True)
+        today = timezone.localdate()
+        sale = Sale.objects.filter(
+            client=client, is_recurring=True,
+            created_at__year=today.year, created_at__month=today.month,
+        ).first()
+        if sale is None:
+            sale = Sale.objects.create(client=client, is_recurring=True, created_by=request.user)
+            LineItem.objects.create(
+                content_object=sale, kind='labor', description='Monthly Service',
+                quantity=1, unit_price=client.monthly_amount,
+                logged_by=request.user,
+            )
+        return redirect('core:sale_detail', pk=sale.pk)
+
+
 class SaleLaborLogView(SaleAccessMixin, View):
     """HTMX: log a QuickLaborItem against a Sale as a labor line item."""
 

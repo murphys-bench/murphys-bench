@@ -20,6 +20,8 @@
                 </select>
             </form>
             {% include "core/partials/header_bell.html" %}
+            <a href="{% url 'core:monthly_clients_list' %}"
+               class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">Monthly Clients →</a>
             <form method="post" action="{% url 'core:sale_create' %}">
                 {% csrf_token %}
                 <button type="submit"

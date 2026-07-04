@@ -224,6 +224,22 @@
             </div>
         </div>
 
+        <!-- Recurring Billing -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-base font-semibold text-gray-900 mb-2">Recurring Billing</h2>
+            <div class="flex items-start gap-3 mb-4">
+                <div class="mt-0.5">{{ form.is_managed }}</div>
+                <div>
+                    <label class="text-sm font-medium text-gray-700">Monthly client</label>
+                    <p class="text-xs text-gray-500 mt-0.5">Adds this client to the Monthly Clients list for recurring charges.</p>
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Monthly Amount <span class="text-gray-400 font-normal">(optional)</span></label>
+                {{ form.monthly_amount }}
+            </div>
+        </div>
+
         <!-- Save / Cancel -->
         <div class="flex gap-3">
             <button type="submit"
