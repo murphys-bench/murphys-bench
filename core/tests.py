@@ -4084,23 +4084,28 @@ def test_catalog_create_by_admin(client, admin_user):
 
 
 @pytest.mark.django_db
-def test_catalog_list_filters_by_type_and_search(client, admin_user):
+def test_catalog_list_search_filters(client, admin_user):
     CatalogItem.objects.create(name='Tune-up', category='Software', item_type='service')
     CatalogItem.objects.create(name='1TB SSD', category='Hardware', item_type='product')
     client.force_login(admin_user)
-    resp = client.get(reverse('core:catalog_list'), {'type': 'product'})
-    names = [i.name for i in resp.context['items']]
-    assert names == ['1TB SSD']
     resp = client.get(reverse('core:catalog_list'), {'search': 'tune'})
     names = [i.name for i in resp.context['items']]
     assert names == ['Tune-up']
 
 
 @pytest.mark.django_db
-def test_catalog_list_services_lead(client, admin_user):
+def test_catalog_list_splits_services_and_products_by_category(client, admin_user):
     CatalogItem.objects.create(name='Widget', category='Hardware', item_type='product')
     CatalogItem.objects.create(name='Fix', category='Software', item_type='service')
+    CatalogItem.objects.create(name='Cleanup', category='Software', item_type='service')
     client.force_login(admin_user)
     resp = client.get(reverse('core:catalog_list'))
-    types = [i.item_type for i in resp.context['items']]
-    assert types == ['service', 'product']   # services first
+    services = resp.context['services_by_category']
+    products = resp.context['products_by_category']
+    # Services grouped by category (a divider per category); products separate.
+    assert list(services.keys()) == ['Software']
+    assert [i.name for i in services['Software']] == ['Cleanup', 'Fix']
+    assert list(products.keys()) == ['Hardware']
+    assert [i.name for i in products['Hardware']] == ['Widget']
+    assert resp.context['services_count'] == 2
+    assert resp.context['products_count'] == 1

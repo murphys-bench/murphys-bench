@@ -5238,33 +5238,31 @@ class CatalogListView(LoginRequiredMixin, ListView):
     model = CatalogItem
     template_name = 'core/catalog_list.html'
     context_object_name = 'items'
-    paginate_by = 50
 
     def get_queryset(self):
-        # Services first (services lead), then products; grouped view uses the
-        # same '-item_type' trick as the inline picker.
-        qs = CatalogItem.objects.order_by('-item_type', 'category', 'sort_order', 'name')
+        qs = CatalogItem.objects.order_by('category', 'sort_order', 'name')
         search = self.request.GET.get('search')
         if search:
             qs = qs.filter(Q(name__icontains=search) | Q(category__icontains=search))
-        item_type = self.request.GET.get('type')
-        if item_type in dict(CatalogItem.ITEM_TYPE_CHOICES):
-            qs = qs.filter(item_type=item_type)
-        category = self.request.GET.get('category')
-        if category:
-            qs = qs.filter(category=category)
         if not self.request.GET.get('show_inactive'):
             qs = qs.filter(is_active=True)
         return qs
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        ctx['active_type'] = self.request.GET.get('type', '')
-        ctx['active_category'] = self.request.GET.get('category', '')
+        # Split into Services and Products, each grouped by category (a divider
+        # per category inside the card). Insertion order follows the queryset
+        # (category, sort_order, name), so categories render alphabetically.
+        services, products = {}, {}
+        for item in ctx['items']:
+            bucket = products if item.item_type == 'product' else services
+            bucket.setdefault(item.category, []).append(item)
+        ctx['services_by_category'] = services
+        ctx['products_by_category'] = products
+        ctx['services_count'] = sum(len(v) for v in services.values())
+        ctx['products_count'] = sum(len(v) for v in products.values())
         ctx['show_inactive'] = bool(self.request.GET.get('show_inactive'))
         ctx['type_choices'] = CatalogItem.ITEM_TYPE_CHOICES
-        ctx['categories'] = (CatalogItem.objects.order_by('category')
-                             .values_list('category', flat=True).distinct())
         ctx['can_edit'] = _is_admin(self.request.user)
         return ctx
 
