@@ -1,0 +1,193 @@
+{% extends "core/base.html" %}
+{% load mb_icons %}
+
+{% block title %}Products & Services - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow page-title-bar">
+    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
+        <div class="flex items-center gap-4 flex-wrap">
+            <h1 class="text-2xl font-bold text-gray-900 shrink-0">Products &amp; Services</h1>
+            <form method="get" class="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
+                <input type="text" name="search" value="{{ request.GET.search }}"
+                       placeholder="Search name or category…"
+                       class="flex-1 min-w-[10rem] px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <select name="type" onchange="this.form.submit()"
+                        class="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">All types</option>
+                    {% for value, label in type_choices %}
+                        <option value="{{ value }}" {% if active_type == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <select name="category" onchange="this.form.submit()"
+                        class="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">All categories</option>
+                    {% for c in categories %}
+                        <option value="{{ c }}" {% if active_category == c %}selected{% endif %}>{{ c }}</option>
+                    {% endfor %}
+                </select>
+                {% if show_inactive %}<input type="hidden" name="show_inactive" value="1">{% endif %}
+                <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Search</button>
+                <a href="{% url 'core:catalog_list' %}" class="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium shrink-0">Clear</a>
+            </form>
+            {% include "core/partials/header_bell.html" %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto space-y-6">
+
+    {% if can_edit %}
+    <!-- Add new item (admins only) -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-base font-semibold text-gray-900 mb-1">Add Item</h2>
+        <p class="text-sm text-gray-500 mb-4">Services and products in your catalog. Clicking one on a work order, estimate, or sale logs a priced line.</p>
+        <form method="post" action="{% url 'core:catalog_create' %}" class="grid grid-cols-1 sm:grid-cols-6 gap-3 items-end">
+            {% csrf_token %}
+            <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Type</label>
+                <select name="item_type" class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    {% for value, label in type_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="sm:col-span-2">
+                <label class="block text-xs font-medium text-gray-600 mb-1">Name</label>
+                <input type="text" name="name" required placeholder="e.g. Virus Removal / 1TB SSD"
+                       class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Category</label>
+                <input type="text" name="category" required placeholder="e.g. Software"
+                       class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Price ($)</label>
+                <input type="number" name="default_price" step="0.01" min="0" placeholder="optional"
+                       class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+            </div>
+            <div>
+                <button type="submit" class="w-full px-4 py-1.5 bg-green-600 text-white rounded text-sm font-medium hover:bg-green-700">Add</button>
+            </div>
+            <div class="sm:col-span-6">
+                <label class="block text-xs font-medium text-gray-600 mb-1">Client-facing description <span class="text-gray-400">(optional — printed on documents; blank uses the name)</span></label>
+                <input type="text" name="print_description" placeholder="Client-facing text on reports/receipts…"
+                       class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+            </div>
+        </form>
+    </div>
+    {% endif %}
+
+    <!-- Catalog table -->
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        {% if items %}
+        <div class="px-4 py-2 border-b border-gray-200 text-sm text-gray-500 flex items-center justify-between">
+            <span>{{ paginator.count }} item{{ paginator.count|pluralize }}</span>
+            <a href="?{% if active_type %}type={{ active_type }}&{% endif %}{% if not show_inactive %}show_inactive=1{% endif %}"
+               class="text-xs {% if show_inactive %}text-blue-600{% else %}text-gray-400{% endif %} hover:underline">
+                {% if show_inactive %}Hide inactive{% else %}Show inactive{% endif %}
+            </a>
+        </div>
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
+                    {% if can_edit %}<th class="px-4 py-3"></th>{% endif %}
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                {% for item in items %}
+                <tr class="hover:bg-gray-50 {% if not item.is_active %}opacity-50{% endif %}" x-data="{ editing: false }">
+                    <td class="px-4 py-3 whitespace-nowrap">
+                        {% if item.item_type == 'product' %}
+                            <span class="px-2 py-0.5 text-xs font-semibold rounded bg-emerald-100 text-emerald-700">Product</span>
+                        {% else %}
+                            <span class="px-2 py-0.5 text-xs font-semibold rounded bg-blue-100 text-blue-700">Service</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-sm font-medium text-gray-900">
+                        {{ item.name }}
+                        {% if not item.is_active %}<span class="ml-1 text-xs text-gray-400">(inactive)</span>{% endif %}
+                        {% if item.print_description %}<p class="text-xs text-gray-400">{{ item.print_description }}</p>{% endif %}
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{{ item.category }}</td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700 text-right">
+                        {% if item.default_price != None %}${{ item.default_price }}{% else %}<span class="text-gray-300">—</span>{% endif %}
+                    </td>
+                    {% if can_edit %}
+                    <td class="px-4 py-3 whitespace-nowrap text-right">
+                        <button type="button" @click="editing = !editing" class="text-xs text-blue-600 hover:underline">Edit</button>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% if can_edit %}
+                <tr x-show="editing" x-cloak>
+                    <td colspan="5" class="px-4 py-3 bg-gray-50">
+                        <form method="post" action="{% url 'core:catalog_update' item.pk %}" class="grid grid-cols-1 sm:grid-cols-6 gap-3 items-end">
+                            {% csrf_token %}
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Type</label>
+                                <select name="item_type" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm">
+                                    {% for value, label in type_choices %}<option value="{{ value }}" {% if item.item_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                                </select>
+                            </div>
+                            <div class="sm:col-span-2">
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Name</label>
+                                <input type="text" name="name" value="{{ item.name }}" required class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Category</label>
+                                <input type="text" name="category" value="{{ item.category }}" required class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Price ($)</label>
+                                <input type="number" name="default_price" value="{{ item.default_price|default_if_none:'' }}" step="0.01" min="0" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm">
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <label class="flex items-center gap-1 text-xs text-gray-600">
+                                    <input type="checkbox" name="is_active" value="1" {% if item.is_active %}checked{% endif %} class="h-4 w-4 rounded border-gray-300"> Active
+                                </label>
+                            </div>
+                            <div class="sm:col-span-5">
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Client-facing description</label>
+                                <input type="text" name="print_description" value="{{ item.print_description }}" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm">
+                            </div>
+                            <div class="flex gap-2">
+                                <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Save</button>
+                            </div>
+                        </form>
+                        <form method="post" action="{% url 'core:catalog_delete' item.pk %}" class="mt-2"
+                              onsubmit="return confirm('Delete {{ item.name|escapejs }} from the catalog?')">
+                            {% csrf_token %}
+                            <button type="submit" class="text-xs text-red-600 hover:underline">Delete this item</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% if is_paginated %}
+        <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200">
+            <p class="text-sm text-gray-700">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</p>
+            <div class="flex gap-2">
+                {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}" class="px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300">Previous</a>{% endif %}
+                {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}" class="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Next</a>{% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% else %}
+        <div class="px-6 py-16 text-center">
+            <p class="text-gray-400 text-lg mb-2">No catalog items {% if request.GET.search or active_type or active_category %}match your filters{% else %}yet{% endif %}.</p>
+            {% if can_edit %}<p class="text-gray-400 text-sm">Add your first service or product above.</p>{% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

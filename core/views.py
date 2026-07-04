@@ -21,7 +21,7 @@ from .models import (
     Ticket, TicketReply, TicketLock, TicketLink, Attachment, SiteSettings,
     KBCategory, KBArticle, TicketQueue, DashboardTile, User,
     CustomField, CustomFieldChoice, CustomFieldValue,
-    QuickLaborItem, LineItem, ContactPhone,
+    CatalogItem, LineItem, ContactPhone,
     Contact, RepairType, RepairTypeCategory,
     CannedResponseCategory, CannedResponse, Invoice,
     OrgCredential, CredentialAccessLog,
@@ -512,12 +512,8 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         # Custom fields
         fields = _get_custom_fields_for_workorder(self.object)
         context['custom_field_values'] = _custom_fields_with_values(fields, self.object)
-        # Quick Labor buttons grouped by category
-        labor_items = QuickLaborItem.objects.filter(is_active=True).order_by('category', 'sort_order', 'label')
-        labor_by_category = {}
-        for item in labor_items:
-            labor_by_category.setdefault(item.category, []).append(item)
-        context['labor_by_category'] = labor_by_category
+        # Catalog picker (Products & Services) grouped by category, services first
+        context['catalog_by_category'] = _catalog_by_category()
         context['wp_entries'] = _line_items_for(self.object)
         # Inline update form data
         context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
@@ -1560,11 +1556,7 @@ class EstimateDetailView(EstimateAccessMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        labor_items = QuickLaborItem.objects.filter(is_active=True).order_by('category', 'sort_order', 'label')
-        labor_by_category = {}
-        for item in labor_items:
-            labor_by_category.setdefault(item.category, []).append(item)
-        ctx['labor_by_category'] = labor_by_category
+        ctx['catalog_by_category'] = _catalog_by_category()
         ctx['entries'] = _line_items_for(self.object)
         ctx['options'] = self.object.options.all()
         # Details card: inline edit form (Client/Prospect/Context/Scope), same
@@ -1670,19 +1662,12 @@ class EstimateDeleteView(EstimateAccessMixin, View):
 
 
 class EstimateLaborLogView(EstimateAccessMixin, View):
-    """HTMX: log a QuickLaborItem against an Estimate as a labor line item."""
+    """HTMX: log a catalog item (Product or Service) against an Estimate."""
 
     def post(self, request, est_pk, item_pk):
         estimate = get_object_or_404(Estimate, pk=est_pk)
-        item = get_object_or_404(QuickLaborItem, pk=item_pk, is_active=True)
-        estimate.line_items.create(
-            kind='labor',
-            description=item.label[:255],
-            quantity=1,
-            unit_price=item.default_price,
-            source_labor_item=item,
-            logged_by=request.user,
-        )
+        item = get_object_or_404(CatalogItem, pk=item_pk, is_active=True)
+        _log_catalog_item(estimate, item, request.user)
         return _render_line_items(request, estimate)
 
 
@@ -1764,20 +1749,13 @@ class EstimateOptionDeleteView(EstimateAccessMixin, View):
 
 
 class EstimateOptionLaborLogView(EstimateAccessMixin, View):
-    """HTMX: log a QuickLaborItem against one option as a labor line item."""
+    """HTMX: log a catalog item (Product or Service) against one option."""
 
     def post(self, request, opt_pk, item_pk):
         option = get_object_or_404(EstimateOption, pk=opt_pk)
-        item = get_object_or_404(QuickLaborItem, pk=item_pk, is_active=True)
+        item = get_object_or_404(CatalogItem, pk=item_pk, is_active=True)
         if not option.estimate.is_locked:
-            option.line_items.create(
-                kind='labor',
-                description=item.label[:255],
-                quantity=1,
-                unit_price=item.default_price,
-                source_labor_item=item,
-                logged_by=request.user,
-            )
+            _log_catalog_item(option, item, request.user)
         return _render_line_items(request, option)
 
 
@@ -1922,7 +1900,7 @@ def _copy_line_items(source, target, user):
             description=li.description,
             quantity=li.quantity,
             unit_price=li.unit_price,
-            source_labor_item=li.source_labor_item,
+            catalog_item=li.catalog_item,
             notes=li.notes,
             logged_by=user,
         )
@@ -2116,11 +2094,7 @@ class SaleDetailView(SaleAccessMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        labor_items = QuickLaborItem.objects.filter(is_active=True).order_by('category', 'sort_order', 'label')
-        labor_by_category = {}
-        for item in labor_items:
-            labor_by_category.setdefault(item.category, []).append(item)
-        ctx['labor_by_category'] = labor_by_category
+        ctx['catalog_by_category'] = _catalog_by_category()
         ctx['entries'] = _line_items_for(self.object)
         # Customer card: inline edit form (Client/Contact/Notes), same fields
         # used at creation — editing and creating are the same UI.
@@ -2231,19 +2205,12 @@ class MonthlyChargeView(SaleAccessMixin, View):
 
 
 class SaleLaborLogView(SaleAccessMixin, View):
-    """HTMX: log a QuickLaborItem against a Sale as a labor line item."""
+    """HTMX: log a catalog item (Product or Service) against a Sale."""
 
     def post(self, request, sale_pk, item_pk):
         sale = get_object_or_404(Sale, pk=sale_pk)
-        item = get_object_or_404(QuickLaborItem, pk=item_pk, is_active=True)
-        sale.line_items.create(
-            kind='labor',
-            description=item.label[:255],
-            quantity=1,
-            unit_price=item.default_price,
-            source_labor_item=item,
-            logged_by=request.user,
-        )
+        item = get_object_or_404(CatalogItem, pk=item_pk, is_active=True)
+        _log_catalog_item(sale, item, request.user)
         return _render_line_items(request, sale)
 
 
@@ -3991,8 +3958,35 @@ class RoleDeleteView(LoginRequiredMixin, View):
 def _line_items_for(work_order):
     return (
         work_order.line_items
-        .select_related('source_labor_item', 'logged_by')
+        .select_related('catalog_item', 'logged_by')
         .order_by('kind', 'logged_at')
+    )
+
+
+def _catalog_by_category():
+    """Active catalog items grouped by category for the inline picker on WO /
+    Estimate / Sale detail. Services lead (services-first), then products —
+    '-item_type' puts 'service' before 'product' since s > p descending."""
+    items = CatalogItem.objects.filter(is_active=True).order_by(
+        '-item_type', 'category', 'sort_order', 'name')
+    grouped = {}
+    for item in items:
+        grouped.setdefault(item.category, []).append(item)
+    return grouped
+
+
+def _log_catalog_item(host, item, user):
+    """Create a LineItem on `host` from a catalog item — a labor line for a
+    Service, a part line for a Product — prefilled with its name + default
+    price, and linked back to the catalog item for the print-description
+    fallback. Shared by all four host log views (WO/Estimate/Option/Sale)."""
+    return host.line_items.create(
+        kind=item.line_kind,
+        description=item.name[:255],
+        quantity=1,
+        unit_price=item.default_price,
+        catalog_item=item,
+        logged_by=user,
     )
 
 
@@ -4055,20 +4049,13 @@ def _render_line_items(request, host):
 
 
 class WorkPerformedLogView(LoginRequiredMixin, View):
-    """HTMX: log a QuickLaborItem against a WorkOrder as a labor line item.
-    The button's optional default_price prefills the line price."""
+    """HTMX: log a catalog item (Product or Service) against a WorkOrder.
+    The item's optional default_price prefills the line price."""
 
     def post(self, request, wo_pk, item_pk):
         work_order = get_object_or_404(WorkOrder, pk=wo_pk)
-        item = get_object_or_404(QuickLaborItem, pk=item_pk, is_active=True)
-        work_order.line_items.create(
-            kind='labor',
-            description=item.label[:255],
-            quantity=1,
-            unit_price=item.default_price,
-            source_labor_item=item,
-            logged_by=request.user,
-        )
+        item = get_object_or_404(CatalogItem, pk=item_pk, is_active=True)
+        _log_catalog_item(work_order, item, request.user)
         return _render_line_items(request, work_order)
 
 
@@ -4137,15 +4124,15 @@ def _repair_report_context(work_order, site, report_type='repair'):
     # their source button's category; parts under "Parts"; custom labor under "Other".
     line_items = (
         work_order.line_items
-        .select_related('source_labor_item')
+        .select_related('catalog_item')
         .order_by('kind', 'logged_at')
     )
     categories = {}
     for entry in line_items:
         if entry.kind == 'part':
             cat = 'Parts'
-        elif entry.source_labor_item:
-            cat = entry.source_labor_item.category
+        elif entry.catalog_item:
+            cat = entry.catalog_item.category
         else:
             cat = 'Other'
         categories.setdefault(cat, []).append(entry)
@@ -4177,15 +4164,15 @@ def _quote_report_context(estimate, site):
 
     line_items = (
         estimate.line_items
-        .select_related('source_labor_item')
+        .select_related('catalog_item')
         .order_by('kind', 'logged_at')
     )
     categories = {}
     for entry in line_items:
         if entry.kind == 'part':
             cat = 'Parts'
-        elif entry.source_labor_item:
-            cat = entry.source_labor_item.category
+        elif entry.catalog_item:
+            cat = entry.catalog_item.category
         else:
             cat = 'Other'
         categories.setdefault(cat, []).append(entry)
@@ -4216,13 +4203,13 @@ def _quote_report_context(estimate, site):
 
     option_blocks = []
     for option in estimate.options.select_related().order_by('sort_order', 'created_at'):
-        opt_items = option.line_items.select_related('source_labor_item').order_by('kind', 'logged_at')
+        opt_items = option.line_items.select_related('catalog_item').order_by('kind', 'logged_at')
         opt_categories = {}
         for entry in opt_items:
             if entry.kind == 'part':
                 cat = 'Parts'
-            elif entry.source_labor_item:
-                cat = entry.source_labor_item.category
+            elif entry.catalog_item:
+                cat = entry.catalog_item.category
             else:
                 cat = 'Other'
             opt_categories.setdefault(cat, []).append(entry)
@@ -4248,15 +4235,15 @@ def _receipt_context(sale, site):
     bare 'Walk-in' label for an anonymous counter sale."""
     line_items = (
         sale.line_items
-        .select_related('source_labor_item')
+        .select_related('catalog_item')
         .order_by('kind', 'logged_at')
     )
     categories = {}
     for entry in line_items:
         if entry.kind == 'part':
             cat = 'Parts'
-        elif entry.source_labor_item:
-            cat = entry.source_labor_item.category
+        elif entry.catalog_item:
+            cat = entry.catalog_item.category
         else:
             cat = 'Other'
         categories.setdefault(cat, []).append(entry)
@@ -4654,7 +4641,6 @@ SETTINGS_TABS = [
     ('invoice_ninja', 'Invoice Ninja', InvoiceNinjaSettingsForm),
     ('repair_types',     'Repair Types',     None),
     ('canned_responses', 'Canned Responses', None),
-    ('quick_labor',      'Quick Labor',      None),
     ('checklist_items',  'Checklist Items',  None),
     ('colors',           'Colors',           ColorSettingsForm),
     ('display',          'Display',          None),
@@ -4895,8 +4881,6 @@ class SettingsView(LoginRequiredMixin, View):
             ctx.update(_repair_types_context())
         if active_tab == 'canned_responses':
             ctx.update(_canned_responses_context())
-        if active_tab == 'quick_labor':
-            ctx.update(_quick_labor_context())
         if active_tab == 'checklist_items':
             ctx.update(_checklist_items_context())
         if active_tab == 'colors':
@@ -4986,8 +4970,6 @@ class SettingsView(LoginRequiredMixin, View):
             ctx.update(_repair_types_context())
         if tab == 'canned_responses':
             ctx.update(_canned_responses_context())
-        if tab == 'quick_labor':
-            ctx.update(_quick_labor_context())
         if tab == 'checklist_items':
             ctx.update(_checklist_items_context())
         if tab == 'colors':
@@ -5236,71 +5218,106 @@ class CannedResponsePickerView(LoginRequiredMixin, View):
         return JsonResponse({'groups': result})
 
 # ---------------------------------------------------------------------------
-# Settings — Quick Labor CRUD
+# Products & Services catalog (top-level section; management replaces the old
+# Settings → Quick Labor tab). Viewing is open to any logged-in user (the
+# picker already exposes these items); create/edit/delete is admin-gated.
 # ---------------------------------------------------------------------------
 
-QL_REDIRECT = 'core:settings'
-QL_TAB = '?tab=quick_labor'
 
-QUICK_LABOR_CATEGORIES = ['Software', 'Hardware', 'Data', 'Maintenance', 'General']
+class CatalogAdminMixin(LoginRequiredMixin):
+    """Editing the catalog is admin-only (matches how it was gated under
+    Settings); the list/browse view is intentionally NOT gated by this."""
 
-
-def _quick_labor_context():
-    from .models import QuickLaborItem
-    items = QuickLaborItem.objects.order_by('category', 'sort_order', 'label')
-    grouped = {}
-    for cat in QUICK_LABOR_CATEGORIES:
-        grouped[cat] = [i for i in items if i.category == cat]
-    # catch any items with unknown categories
-    known = set(QUICK_LABOR_CATEGORIES)
-    other = [i for i in items if i.category not in known]
-    return {
-        'ql_grouped': grouped,
-        'ql_categories': QUICK_LABOR_CATEGORIES,
-        'ql_other': other,
-    }
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _is_admin(request.user):
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
 
 
-class QuickLaborCreateView(LoginRequiredMixin, View):
+class CatalogListView(LoginRequiredMixin, ListView):
+    model = CatalogItem
+    template_name = 'core/catalog_list.html'
+    context_object_name = 'items'
+    paginate_by = 50
+
+    def get_queryset(self):
+        # Services first (services lead), then products; grouped view uses the
+        # same '-item_type' trick as the inline picker.
+        qs = CatalogItem.objects.order_by('-item_type', 'category', 'sort_order', 'name')
+        search = self.request.GET.get('search')
+        if search:
+            qs = qs.filter(Q(name__icontains=search) | Q(category__icontains=search))
+        item_type = self.request.GET.get('type')
+        if item_type in dict(CatalogItem.ITEM_TYPE_CHOICES):
+            qs = qs.filter(item_type=item_type)
+        category = self.request.GET.get('category')
+        if category:
+            qs = qs.filter(category=category)
+        if not self.request.GET.get('show_inactive'):
+            qs = qs.filter(is_active=True)
+        return qs
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['active_type'] = self.request.GET.get('type', '')
+        ctx['active_category'] = self.request.GET.get('category', '')
+        ctx['show_inactive'] = bool(self.request.GET.get('show_inactive'))
+        ctx['type_choices'] = CatalogItem.ITEM_TYPE_CHOICES
+        ctx['categories'] = (CatalogItem.objects.order_by('category')
+                             .values_list('category', flat=True).distinct())
+        ctx['can_edit'] = _is_admin(self.request.user)
+        return ctx
+
+
+class CatalogCreateView(CatalogAdminMixin, View):
     def post(self, request):
-        from .models import QuickLaborItem
-        label = request.POST.get('label', '').strip()
+        name = request.POST.get('name', '').strip()
         category = request.POST.get('category', '').strip()
-        print_description = request.POST.get('print_description', '').strip()
-        if label and category:
-            QuickLaborItem.objects.create(
-                label=label,
+        item_type = request.POST.get('item_type', 'service')
+        if item_type not in dict(CatalogItem.ITEM_TYPE_CHOICES):
+            item_type = 'service'
+        if name and category:
+            CatalogItem.objects.create(
+                name=name,
+                item_type=item_type,
                 category=category,
-                print_description=print_description,
+                print_description=request.POST.get('print_description', '').strip(),
                 default_price=_parse_price(request.POST.get('default_price')),
             )
-        return redirect(reverse_lazy(QL_REDIRECT) + QL_TAB)
+            messages.success(request, f'Added "{name}" to the catalog.')
+        else:
+            messages.error(request, 'Name and category are required.')
+        return redirect('core:catalog_list')
 
 
-class QuickLaborUpdateView(LoginRequiredMixin, View):
+class CatalogUpdateView(CatalogAdminMixin, View):
     def post(self, request, pk):
-        from .models import QuickLaborItem
-        item = get_object_or_404(QuickLaborItem, pk=pk)
-        label = request.POST.get('label', '').strip()
+        item = get_object_or_404(CatalogItem, pk=pk)
+        name = request.POST.get('name', '').strip()
         category = request.POST.get('category', '').strip()
-        print_description = request.POST.get('print_description', '').strip()
-        is_active = request.POST.get('is_active') == '1'
-        if label and category:
-            item.label = label
+        item_type = request.POST.get('item_type', item.item_type)
+        if item_type not in dict(CatalogItem.ITEM_TYPE_CHOICES):
+            item_type = item.item_type
+        if name and category:
+            item.name = name
+            item.item_type = item_type
             item.category = category
-            item.print_description = print_description
-            item.is_active = is_active
+            item.print_description = request.POST.get('print_description', '').strip()
+            item.is_active = request.POST.get('is_active') == '1'
             item.default_price = _parse_price(request.POST.get('default_price'))
-            item.save(update_fields=['label', 'category', 'print_description', 'is_active', 'default_price'])
-        return redirect(reverse_lazy(QL_REDIRECT) + QL_TAB)
+            item.save(update_fields=['name', 'item_type', 'category',
+                                     'print_description', 'is_active', 'default_price'])
+            messages.success(request, f'Updated "{name}".')
+        return redirect('core:catalog_list')
 
 
-class QuickLaborDeleteView(LoginRequiredMixin, View):
+class CatalogDeleteView(CatalogAdminMixin, View):
     def post(self, request, pk):
-        from .models import QuickLaborItem
-        item = get_object_or_404(QuickLaborItem, pk=pk)
+        item = get_object_or_404(CatalogItem, pk=pk)
+        name = item.name
         item.delete()
-        return redirect(reverse_lazy(QL_REDIRECT) + QL_TAB)
+        messages.success(request, f'Deleted "{name}" from the catalog.')
+        return redirect('core:catalog_list')
 
 # ---------------------------------------------------------------------------
 # Settings — Checklist Items CRUD
