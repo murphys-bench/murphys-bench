@@ -195,10 +195,11 @@ urlpatterns = [
     path('settings/canned-responses/<int:pk>/delete/', views.CannedResponseDeleteView.as_view(), name='cr_delete'),
     path('settings/canned-responses/picker/', views.CannedResponsePickerView.as_view(), name='cr_picker'),
 
-    # Settings — Quick Labor CRUD
-    path('settings/quick-labor/new/', views.QuickLaborCreateView.as_view(), name='ql_create'),
-    path('settings/quick-labor/<int:pk>/edit/', views.QuickLaborUpdateView.as_view(), name='ql_update'),
-    path('settings/quick-labor/<int:pk>/delete/', views.QuickLaborDeleteView.as_view(), name='ql_delete'),
+    # Products & Services catalog (top-level; replaces Settings → Quick Labor)
+    path('catalog/', views.CatalogListView.as_view(), name='catalog_list'),
+    path('catalog/new/', views.CatalogCreateView.as_view(), name='catalog_create'),
+    path('catalog/<int:pk>/edit/', views.CatalogUpdateView.as_view(), name='catalog_update'),
+    path('catalog/<int:pk>/delete/', views.CatalogDeleteView.as_view(), name='catalog_delete'),
 
     # Settings — Checklist Items CRUD
     path('settings/checklist-items/new/', views.ChecklistItemCreateView.as_view(), name='cli_create'),

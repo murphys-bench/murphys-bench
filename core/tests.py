@@ -1244,7 +1244,7 @@ def test_non_upload_value_passes_through():
 
 @pytest.mark.django_db
 def test_repair_report_prints_with_custom_labor_entry(client, client_obj, admin_user):
-    # A custom labor line has no source_labor_item; the print report groups by
+    # A custom labor line has no catalog_item; the print report groups by
     # category and must not 500 on it (groups under "Other"). Regression guard.
     wo = WorkOrder.objects.create(client=client_obj)
     wo.line_items.create(kind='labor', description='Reseated RAM', notes='Was loose')
@@ -1552,17 +1552,17 @@ def test_line_item_total_math_and_unpriced(client_obj):
 @pytest.mark.django_db
 def test_quicklabor_button_prefills_default_price(client, client_obj, admin_user):
     from decimal import Decimal
-    from core.models import QuickLaborItem, LineItem
+    from core.models import CatalogItem, LineItem
     wo = WorkOrder.objects.create(client=client_obj)
-    item = QuickLaborItem.objects.create(label='Virus Removal', category='Software',
-                                         default_price=Decimal('120.00'))
+    item = CatalogItem.objects.create(name='Virus Removal', category='Software',
+                                      default_price=Decimal('120.00'))
     client.force_login(admin_user)
     resp = client.post(reverse('core:work_performed_log', args=[wo.pk, item.pk]))
     assert resp.status_code == 200
     li = LineItem.objects.get(object_id=wo.pk, description='Virus Removal')
     assert li.kind == 'labor'
     assert li.unit_price == Decimal('120.00')
-    assert li.source_labor_item_id == item.pk
+    assert li.catalog_item_id == item.pk
 
 
 @pytest.mark.django_db
@@ -2622,7 +2622,7 @@ def test_billing_check_in_view_updates_card(client, admin_user):
 # Slice 2a — Estimate model + CRUD + line items
 # ---------------------------------------------------------------------------
 
-from core.models import Estimate, Prospect as _Prospect, QuickLaborItem, EstimateOption
+from core.models import Estimate, Prospect as _Prospect, CatalogItem, EstimateOption
 
 
 @pytest.mark.django_db
@@ -2785,14 +2785,14 @@ def test_estimate_access_mixin_blocks_on_role_flag(client, client_obj):
 
 @pytest.mark.django_db
 def test_estimate_labor_log_creates_line_item_on_estimate(client, admin_user, client_obj):
-    item = QuickLaborItem.objects.create(label='Virus Removal', category='Software', default_price='75.00')
+    item = CatalogItem.objects.create(name='Virus Removal', category='Software', default_price='75.00')
     est = Estimate.objects.create(client=client_obj)
     client.force_login(admin_user)
     resp = client.post(reverse('core:estimate_labor_log', args=[est.pk, item.pk]))
     assert resp.status_code == 200
     li = est.line_items.get()
     assert li.description == 'Virus Removal'
-    assert li.source_labor_item_id == item.pk
+    assert li.catalog_item_id == item.pk
 
 
 @pytest.mark.django_db
@@ -3427,14 +3427,14 @@ def test_sale_access_mixin_blocks_on_role_flag(client, client_obj):
 
 @pytest.mark.django_db
 def test_sale_labor_log_creates_line_item_on_sale(client, admin_user, client_obj):
-    item = QuickLaborItem.objects.create(label='Data Transfer', category='Software', default_price='45.00')
+    item = CatalogItem.objects.create(name='Data Transfer', category='Software', default_price='45.00')
     sale = Sale.objects.create(client=client_obj)
     client.force_login(admin_user)
     resp = client.post(reverse('core:sale_labor_log', args=[sale.pk, item.pk]))
     assert resp.status_code == 200
     li = sale.line_items.get()
     assert li.description == 'Data Transfer'
-    assert li.source_labor_item_id == item.pk
+    assert li.catalog_item_id == item.pk
 
 
 @pytest.mark.django_db
@@ -4018,3 +4018,89 @@ def test_charge_now_role_block_403(client, client_obj):
     client.force_login(user)
     resp = client.post(reverse('core:client_charge_monthly', args=[client_obj.pk]))
     assert resp.status_code == 403
+
+
+# ── Products & Services catalog (was QuickLaborItem) ────────────────────────
+
+@pytest.mark.django_db
+def test_catalog_item_line_kind_maps_type_to_kind():
+    svc = CatalogItem.objects.create(name='Tune-up', category='Software', item_type='service')
+    prod = CatalogItem.objects.create(name='1TB SSD', category='Hardware', item_type='product')
+    assert svc.line_kind == 'labor'
+    assert prod.line_kind == 'part'
+
+
+@pytest.mark.django_db
+def test_logging_product_creates_part_line(client, admin_user, client_obj):
+    from decimal import Decimal
+    from core.models import LineItem
+    wo = WorkOrder.objects.create(client=client_obj)
+    prod = CatalogItem.objects.create(name='1TB SSD', category='Hardware',
+                                      item_type='product', default_price=Decimal('90.00'))
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:work_performed_log', args=[wo.pk, prod.pk]))
+    assert resp.status_code == 200
+    li = LineItem.objects.get(object_id=wo.pk, description='1TB SSD')
+    assert li.kind == 'part'
+    assert li.unit_price == Decimal('90.00')
+    assert li.catalog_item_id == prod.pk
+
+
+@pytest.mark.django_db
+def test_catalog_list_visible_to_all_but_edit_admin_only(client, client_obj):
+    role = Role.objects.create(name='Tech', can_manage_settings=False)
+    tech = User.objects.create_user(username='techc', password='x', role_obj=role)
+    CatalogItem.objects.create(name='Tune-up', category='Software')
+    client.force_login(tech)
+    resp = client.get(reverse('core:catalog_list'))
+    assert resp.status_code == 200          # list visible to a non-admin
+    assert resp.context['can_edit'] is False
+
+
+@pytest.mark.django_db
+def test_catalog_create_and_delete_gated_to_admin(client, client_obj):
+    role = Role.objects.create(name='Tech2', can_manage_settings=False)
+    tech = User.objects.create_user(username='techd', password='x', role_obj=role)
+    client.force_login(tech)
+    resp = client.post(reverse('core:catalog_create'), {
+        'name': 'Sneaky', 'category': 'Software', 'item_type': 'service',
+    })
+    assert resp.status_code == 403
+    assert not CatalogItem.objects.filter(name='Sneaky').exists()
+
+
+@pytest.mark.django_db
+def test_catalog_create_by_admin(client, admin_user):
+    from decimal import Decimal
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:catalog_create'), {
+        'name': 'Data Recovery', 'category': 'Data', 'item_type': 'service',
+        'default_price': '150.00',
+    })
+    assert resp.status_code == 302
+    item = CatalogItem.objects.get(name='Data Recovery')
+    assert item.item_type == 'service'
+    assert item.default_price == Decimal('150.00')
+
+
+@pytest.mark.django_db
+def test_catalog_list_filters_by_type_and_search(client, admin_user):
+    CatalogItem.objects.create(name='Tune-up', category='Software', item_type='service')
+    CatalogItem.objects.create(name='1TB SSD', category='Hardware', item_type='product')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:catalog_list'), {'type': 'product'})
+    names = [i.name for i in resp.context['items']]
+    assert names == ['1TB SSD']
+    resp = client.get(reverse('core:catalog_list'), {'search': 'tune'})
+    names = [i.name for i in resp.context['items']]
+    assert names == ['Tune-up']
+
+
+@pytest.mark.django_db
+def test_catalog_list_services_lead(client, admin_user):
+    CatalogItem.objects.create(name='Widget', category='Hardware', item_type='product')
+    CatalogItem.objects.create(name='Fix', category='Software', item_type='service')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:catalog_list'))
+    types = [i.item_type for i in resp.context['items']]
+    assert types == ['service', 'product']   # services first

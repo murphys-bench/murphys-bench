@@ -1618,32 +1618,52 @@ class TicketLink(models.Model):
         return f"{self.ticket_a.ticket_number} ↔ {self.ticket_b.ticket_number} ({self.link_type})"
 
 
-class QuickLaborItem(models.Model):
-    """Admin-managed labor buttons shown on WO detail. Clicking one logs a labor LineItem."""
+class CatalogItem(models.Model):
+    """A reusable Product or Service in MB's own catalog. Services lead (MB is built
+    for services companies); the Product type exists for shops that sell/stock goods
+    but never leads the design. Clicking one logs a LineItem — labor for a service,
+    part for a product — prefilled from this item's name + price. MB OWNS this catalog;
+    it is NOT synced from a billing backend, so it works regardless of backend.
 
-    label = models.CharField(max_length=100, help_text='Button label shown to techs, e.g. "Virus / Malware Removal"')
-    category = models.CharField(max_length=100, help_text='Groups buttons by category, e.g. "Software"')
+    (Was QuickLaborItem — labor-only — before the Products & Services catalog.)"""
+
+    ITEM_TYPE_CHOICES = [
+        ('service', 'Service'),
+        ('product', 'Product'),
+    ]
+
+    name = models.CharField(max_length=100, help_text='Display name, e.g. "Virus / Malware Removal" or "1TB SSD".')
+    item_type = models.CharField(
+        max_length=10, choices=ITEM_TYPE_CHOICES, default='service', db_index=True,
+        help_text='Service (logs a labor line) or Product (logs a part line).',
+    )
+    category = models.CharField(max_length=100, help_text='Groups items by category, e.g. "Software"')
     print_description = models.TextField(
         blank=True,
-        help_text='Client-facing description printed on the repair report. Leave blank to use the label.',
+        help_text='Client-facing description printed on documents. Leave blank to use the name.',
     )
     default_price = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True,
         validators=[MinValueValidator(0)],
-        help_text='Optional. Prefills the price when this button logs a line item. Leave blank for no price.',
+        help_text='Optional. Prefills the price when this item logs a line. Leave blank for no price.',
     )
     is_active = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
 
     class Meta:
-        db_table = 'quick_labor_items'
-        ordering = ['category', 'sort_order', 'label']
+        db_table = 'catalog_items'
+        ordering = ['category', 'sort_order', 'name']
 
     def __str__(self):
-        return f"{self.category} / {self.label}"
+        return f"{self.category} / {self.name}"
+
+    @property
+    def line_kind(self):
+        """Map catalog vocab (Service/Product) to LineItem.KIND_CHOICES (labor/part)."""
+        return 'part' if self.item_type == 'product' else 'labor'
 
     def get_print_description(self):
-        return self.print_description.strip() if self.print_description.strip() else self.label
+        return self.print_description.strip() if self.print_description.strip() else self.name
 
 
 class LineItem(models.Model):
@@ -1670,10 +1690,12 @@ class LineItem(models.Model):
         max_digits=10, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(0)],
         help_text='Per-unit price. Blank = unpriced (not counted in the total).',
     )
-    # Where a labor line came from (a QuickLabor button), kept for the report's
-    # client-facing print description fallback. Null for custom or part lines.
-    source_labor_item = models.ForeignKey(
-        QuickLaborItem, on_delete=models.SET_NULL, null=True, blank=True, related_name='line_items',
+    # Which catalog item this line came from (a Product or Service), kept for the
+    # document print-description fallback. Null for free-text/custom lines — a line
+    # never REQUIRES a catalog item. This is also the hook a future per-job
+    # part-procurement build links to (cost/margin on the line).
+    catalog_item = models.ForeignKey(
+        'CatalogItem', on_delete=models.SET_NULL, null=True, blank=True, related_name='line_items',
     )
     notes = models.TextField(blank=True)
     logged_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='line_items_logged')
@@ -1702,8 +1724,8 @@ class LineItem(models.Model):
         else the source button's print description."""
         if self.notes.strip():
             return self.notes.strip()
-        if self.source_labor_item:
-            return self.source_labor_item.get_print_description()
+        if self.catalog_item:
+            return self.catalog_item.get_print_description()
         return ''
 
 

@@ -325,6 +325,12 @@
         </a>
         {% endif %}
 
+        <a href="{% url 'core:catalog_list' %}" title="Products & Services"
+           class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
+                  {% if u and 'catalog' in u %}bg-white/15{% endif %}">
+            {% icon 'tag' 5 %}<span class="nav-label">Products &amp; Services</span>
+        </a>
+
         <a href="{% url 'core:kb_list' %}" title="Knowledge Base"
            class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
                   {% if u and 'kb' in u %}bg-white/15{% endif %}">

@@ -6,7 +6,7 @@ from .models import (
     Role, TechSkill, SLAPlan, HelpTopic, KBCategory, KBArticle,
     InboundEmailLog, TicketQueue, DashboardTile,
     CustomField, CustomFieldChoice, CustomFieldValue,
-    QuickLaborItem, LineItem, ContactPhone, MFAResetLog,
+    CatalogItem, LineItem, ContactPhone, MFAResetLog,
 )
 
 
@@ -484,13 +484,13 @@ class CustomFieldValueAdmin(admin.ModelAdmin):
     readonly_fields = ['content_type', 'object_id', 'field']
 
 
-@admin.register(QuickLaborItem)
-class QuickLaborItemAdmin(admin.ModelAdmin):
-    list_display = ['label', 'category', 'is_active', 'sort_order']
-    list_filter = ['category', 'is_active']
+@admin.register(CatalogItem)
+class CatalogItemAdmin(admin.ModelAdmin):
+    list_display = ['name', 'item_type', 'category', 'default_price', 'is_active', 'sort_order']
+    list_filter = ['item_type', 'category', 'is_active']
     list_editable = ['is_active', 'sort_order']
-    search_fields = ['label', 'category']
-    ordering = ['category', 'sort_order', 'label']
+    search_fields = ['name', 'category']
+    ordering = ['category', 'sort_order', 'name']
 
 
 @admin.register(LineItem)
