@@ -4109,3 +4109,14 @@ def test_catalog_list_splits_services_and_products_by_category(client, admin_use
     assert [i.name for i in products['Hardware']] == ['Widget']
     assert resp.context['services_count'] == 2
     assert resp.context['products_count'] == 1
+
+
+@pytest.mark.django_db
+def test_catalog_card_does_not_leak_template_comment(client, admin_user):
+    """Regression: the catalog_card partial opened with a multi-line {# #}
+    comment, which Django only treats as a comment on a single line — it
+    rendered as literal text once per card. Must use {% comment %}."""
+    CatalogItem.objects.create(name='Tune-up', category='Software')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:catalog_list'))
+    assert b'A collapsible catalog card' not in resp.content
