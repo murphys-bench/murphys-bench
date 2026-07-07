@@ -730,6 +730,26 @@ class EmailBrandingForm(forms.ModelForm):
         self.fields['email_logo'].required = False
 
 
+class SLADefaultsForm(forms.ModelForm):
+    """Client-type default SLA (SLA Plans tab) — drives the response clock every
+    new ticket gets at creation, keyed solely on Client.client_type."""
+    class Meta:
+        model = SiteSettings
+        fields = ['default_business_sla', 'default_residential_sla']
+        widgets = {
+            'default_business_sla': forms.Select(attrs=SELECT_WIDGET),
+            'default_residential_sla': forms.Select(attrs=SELECT_WIDGET),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        active_plans = SLAPlan.objects.filter(is_active=True).order_by('name')
+        self.fields['default_business_sla'].queryset = active_plans
+        self.fields['default_business_sla'].required = False
+        self.fields['default_residential_sla'].queryset = active_plans
+        self.fields['default_residential_sla'].required = False
+
+
 # ---------------------------------------------------------------------------
 # User management forms
 # ---------------------------------------------------------------------------

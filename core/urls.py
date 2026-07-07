@@ -229,6 +229,7 @@ urlpatterns = [
     path('settings/sla-plans/new/', views.SLAPlanCreateView.as_view(), name='sla_plan_create'),
     path('settings/sla-plans/<int:pk>/edit/', views.SLAPlanUpdateView.as_view(), name='sla_plan_update'),
     path('settings/sla-plans/<int:pk>/delete/', views.SLAPlanDeleteView.as_view(), name='sla_plan_delete'),
+    path('settings/sla-defaults/save/', views.SLADefaultsUpdateView.as_view(), name='sla_defaults_save'),
 
     # Settings — Help Topics
     path('settings/help-topics/new/', views.HelpTopicCreateView.as_view(), name='help_topic_create'),

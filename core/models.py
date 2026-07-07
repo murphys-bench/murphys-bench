@@ -673,11 +673,33 @@ class Ticket(models.Model):
 
     def save(self, *args, **kwargs):
         if self._state.adding:
+            if not self.sla_plan_id and self.client_id:
+                self.assign_default_sla_for_client()
             return _save_with_unique_number(
                 self, 'ticket_number', self.generate_ticket_number,
                 lambda: super(Ticket, self).save(*args, **kwargs),
             )
         return super().save(*args, **kwargs)
+
+    def assign_default_sla_for_client(self):
+        """Stamp sla_plan/due_at from the client-type default (SiteSettings).
+
+        Driven solely by Client.client_type — help topic has no say. No-op if
+        the matching default isn't configured (tickets stay clock-less, same
+        as today, until an admin sets one).
+        """
+        site = SiteSettings.get()
+        plan = (
+            site.default_business_sla if self.client.client_type == 'business'
+            else site.default_residential_sla
+        )
+        if plan:
+            self.due_at = (self.created_at or timezone.now()) + timezone.timedelta(
+                hours=plan.grace_period_hours
+            )
+            self.sla_plan = plan
+            self.overdue_acknowledged_by = None
+            self.overdue_acknowledged_at = None
 
     @classmethod
     def generate_ticket_number(cls):
@@ -1817,6 +1839,20 @@ class SiteSettings(models.Model):
     inbound_default_client_name = models.CharField(
         max_length=255, blank=True, default='',
         help_text='When no client matches the sender email, new tickets are filed under a new client. Leave blank to auto-name from the sender email domain.',
+    )
+
+    # Client-type default SLA — every ticket gets a response clock at creation,
+    # driven solely by who the client is (help topic has no say). Blank = no
+    # auto-assignment (existing manual sla_plan picker on the ticket form still works).
+    default_business_sla = models.ForeignKey(
+        'SLAPlan', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='+',
+        help_text='Default SLA plan for business clients. New tickets inherit this unless one is picked manually.',
+    )
+    default_residential_sla = models.ForeignKey(
+        'SLAPlan', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='+',
+        help_text='Default SLA plan for residential clients (also covers the Unsorted bucket until triaged).',
     )
 
     # Company Info (used in repair report header and nav)
