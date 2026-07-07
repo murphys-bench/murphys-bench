@@ -2165,6 +2165,138 @@ def test_sla_defaults_save_view(admin_user, client):
     assert site.default_residential_sla_id == res_plan.pk
 
 
+# ── SLA Slice 3: diagnostic metrics (reporting only, no model change) ──────
+
+@pytest.mark.django_db
+def test_median_first_response_time_reported(admin_user, client, client_obj):
+    """Median (not mean) first-response time next to the SLA %, computed from
+    tickets that have actually been responded to in the period."""
+    from django.utils import timezone
+
+    def mk(hours_to_respond):
+        t = Ticket.objects.create(client=client_obj, subject='S', description='D')
+        Ticket.objects.filter(pk=t.pk).update(
+            first_responded_at=t.created_at + timezone.timedelta(hours=hours_to_respond)
+        )
+        return t
+
+    mk(1)
+    mk(2)
+    mk(9)  # median of [1, 2, 9] = 2
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'))
+    assert resp.status_code == 200
+    assert resp.context['median_response_hours'] == 2
+
+
+@pytest.mark.django_db
+def test_sla_breakdown_by_tech_and_client(admin_user, client):
+    """SLA rate + median response time broken down per tech and per client —
+    help topic plays no part, matching the client-type-only SLA design."""
+    from django.utils import timezone
+    now = timezone.now()
+    hour = timezone.timedelta(hours=1)
+    tech = User.objects.create_user(username='tech1', password='x')
+    biz_client = Client.objects.create(name='Breakdown Biz', client_type='business')
+
+    def mk(client_, assigned_to=None, **fields):
+        t = Ticket.objects.create(client=client_, subject='S', description='D', assigned_to=assigned_to)
+        Ticket.objects.filter(pk=t.pk).update(**fields)
+        return t
+
+    mk(biz_client, assigned_to=tech, due_at=now, first_responded_at=now - hour)
+    mk(biz_client, assigned_to=tech, due_at=now - hour, first_responded_at=None)
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'))
+    assert resp.status_code == 200
+
+    tech_label = tech.get_full_name() or tech.username
+    tech_row = next(r for r in resp.context['sla_by_tech'] if r['label'] == tech_label)
+    assert tech_row['judged'] == 2
+    assert tech_row['on_time'] == 1
+    assert tech_row['sla_rate'] == 50.0
+
+    client_row = next(r for r in resp.context['sla_by_client'] if r['label'] == 'Breakdown Biz')
+    assert client_row['judged'] == 2
+    assert client_row['on_time'] == 1
+
+
+@pytest.mark.django_db
+def test_backlog_health_is_live_snapshot_not_date_filtered(admin_user, client, client_obj):
+    """Backlog health counts currently-open tickets regardless of the reports
+    date range — it's forward-looking ('what's on the plate now'), not historical."""
+    from django.utils import timezone
+    now = timezone.now()
+
+    def mk(age_days, status='open'):
+        t = Ticket.objects.create(client=client_obj, subject='S', description='D', status=status)
+        Ticket.objects.filter(pk=t.pk).update(created_at=now - timezone.timedelta(days=age_days))
+        return t
+
+    mk(0.5)   # under 1 day
+    mk(2)     # 1-3 days
+    mk(5)     # 3-7 days
+    mk(10)    # 7+ days
+    mk(20, status='closed')  # closed — excluded from backlog entirely
+
+    client.force_login(admin_user)
+    # Date range set far in the past — must NOT affect the live backlog snapshot.
+    resp = client.get(reverse('core:reports'), {'start_date': '2020-01-01', 'end_date': '2020-01-02'})
+    assert resp.status_code == 200
+    assert resp.context['backlog_open_count'] == 4
+    assert resp.context['backlog_buckets']['lt_1d'] == 1
+    assert resp.context['backlog_buckets']['1_3d'] == 1
+    assert resp.context['backlog_buckets']['3_7d'] == 1
+    assert resp.context['backlog_buckets']['7d_plus'] == 1
+
+
+@pytest.mark.django_db
+def test_created_vs_closed_in_period(admin_user, client, client_obj):
+    """Created-vs-closed counts within the selected date range — 'are we keeping up?'."""
+    from django.utils import timezone
+    now = timezone.now()
+
+    Ticket.objects.create(client=client_obj, subject='new1', description='D')
+    Ticket.objects.create(client=client_obj, subject='new2', description='D')
+    closed = Ticket.objects.create(client=client_obj, subject='closed1', description='D', status='closed')
+    Ticket.objects.filter(pk=closed.pk).update(updated_at=now)
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'))
+    assert resp.status_code == 200
+    assert resp.context['created_in_period'] == 3
+    assert resp.context['closed_in_period'] == 1
+
+
+@pytest.mark.django_db
+def test_backlog_csv_export(admin_user, client, client_obj):
+    """CSV export for the new Backlog Health report."""
+    Ticket.objects.create(client=client_obj, subject='S', description='D')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports_csv', args=['backlog']))
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    assert 'Open tickets (now)' in body
+    assert '7+ days old' in body
+
+
+@pytest.mark.django_db
+def test_sla_breakdown_csv_export(admin_user, client, client_obj):
+    """CSV export for the new SLA-by-tech/client breakdown report."""
+    from django.utils import timezone
+    now = timezone.now()
+    t = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    Ticket.objects.filter(pk=t.pk).update(due_at=now - timezone.timedelta(hours=1), first_responded_at=None)
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports_csv', args=['sla_breakdown']))
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    assert 'Group' in body and 'Client' in body
+
+
 @pytest.mark.django_db
 def test_overdue_queryset_matches_is_overdue_property():
     """The DB-level overdue_queryset (dashboard tile, ?overdue filter, queue

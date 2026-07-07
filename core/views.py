@@ -3327,6 +3327,45 @@ class SidebarFragmentView(LoginRequiredMixin, View):
 
 # ─── Reports ──────────────────────────────────────────────────────────────────
 
+def _median(values):
+    """Median of a list of numbers, or None if empty. Median (not mean) so one
+    disaster ticket doesn't define the metric."""
+    import statistics
+    return round(statistics.median(values), 1) if values else None
+
+
+def _sla_breakdown_by(tickets_with_sla, key_func, label_func):
+    """Group an SLA-eligible ticket queryset (due_at set) by an arbitrary key,
+    returning per-group judged/on-time/rate + median first-response hours.
+    Shared by the by-tech and by-client breakdowns — same math, different grouping."""
+    from django.utils import timezone
+    now = timezone.now()
+    groups = {}
+    for t in tickets_with_sla:
+        key = key_func(t)
+        if key is None:
+            continue
+        g = groups.setdefault(key, {'label': label_func(t), 'judged': 0, 'on_time': 0, 'response_hours': []})
+        is_judged = bool(t.first_responded_at) or (t.due_at and t.due_at < now)
+        if is_judged:
+            g['judged'] += 1
+            if t.first_responded_at and t.first_responded_at <= t.due_at:
+                g['on_time'] += 1
+        if t.first_responded_at:
+            g['response_hours'].append((t.first_responded_at - t.created_at).total_seconds() / 3600)
+    rows = []
+    for g in groups.values():
+        rows.append({
+            'label': g['label'],
+            'judged': g['judged'],
+            'on_time': g['on_time'],
+            'sla_rate': round(100 * g['on_time'] / g['judged'], 1) if g['judged'] else None,
+            'median_response_hours': _median(g['response_hours']),
+        })
+    rows.sort(key=lambda r: r['label'] or '')
+    return rows
+
+
 class ReportsView(LoginRequiredMixin, View):
     def get(self, request):
         if not (_is_admin(request.user) or request.user.has_perm_flag('can_view_reports')):
@@ -3432,6 +3471,56 @@ class ReportsView(LoginRequiredMixin, View):
         pending_sla = total_sla - judged_sla
         sla_rate = round(100 * responded_on_time / judged_sla, 1) if judged_sla else None
 
+        # 6b. Median first-response time (magnitude, not just pass/fail — median
+        # not mean so one disaster ticket doesn't define it).
+        response_hours = [
+            (t.first_responded_at - t.created_at).total_seconds() / 3600
+            for t in tickets_in_range.filter(first_responded_at__isnull=False).only('first_responded_at', 'created_at')
+        ]
+        median_response_hours = _median(response_hours)
+
+        # 6c. SLA % + median response time broken down by tech and by client
+        # (help-topic breakdown deferred — help topic has no bearing on the SLA itself).
+        sla_tickets_qs = list(
+            tickets_with_sla.select_related('assigned_to', 'client')
+            .only('due_at', 'first_responded_at', 'created_at', 'assigned_to__first_name',
+                  'assigned_to__last_name', 'assigned_to__username', 'client__name')
+        )
+        sla_by_tech = _sla_breakdown_by(
+            [t for t in sla_tickets_qs if t.assigned_to_id],
+            key_func=lambda t: t.assigned_to_id,
+            label_func=lambda t: t.assigned_to.get_full_name() or t.assigned_to.username,
+        )
+        sla_by_client = _sla_breakdown_by(
+            sla_tickets_qs,
+            key_func=lambda t: t.client_id,
+            label_func=lambda t: t.client.name,
+        )
+
+        # 6d. Backlog health — a live, forward-looking snapshot (NOT date-range
+        # filtered; "how much is on the plate right now", not historical).
+        now = timezone.now()
+        open_tickets_qs = Ticket.objects.exclude(status__in=Ticket.CLOSED_STATUSES).only('created_at')
+        backlog_open_count = 0
+        backlog_buckets = {'lt_1d': 0, '1_3d': 0, '3_7d': 0, '7d_plus': 0}
+        for t in open_tickets_qs:
+            backlog_open_count += 1
+            age_days = (now - t.created_at).total_seconds() / 86400
+            if age_days < 1:
+                backlog_buckets['lt_1d'] += 1
+            elif age_days < 3:
+                backlog_buckets['1_3d'] += 1
+            elif age_days < 7:
+                backlog_buckets['3_7d'] += 1
+            else:
+                backlog_buckets['7d_plus'] += 1
+
+        # 6e. Created vs. closed in the period — "are we keeping up?"
+        created_in_period = tickets_in_range.count()
+        closed_in_period = Ticket.objects.filter(
+            status__in=['closed', 'resolved'], updated_at__range=(start_dt, end_dt)
+        ).count()
+
         # 7. Ticket → WO conversion rate
         total_tickets = tickets_in_range.count()
         converted_count = tickets_in_range.filter(status='converted').count()
@@ -3530,6 +3619,13 @@ class ReportsView(LoginRequiredMixin, View):
             'responded_on_time': responded_on_time,
             'judged_sla': judged_sla,
             'pending_sla': pending_sla,
+            'median_response_hours': median_response_hours,
+            'sla_by_tech': sla_by_tech,
+            'sla_by_client': sla_by_client,
+            'backlog_open_count': backlog_open_count,
+            'backlog_buckets': backlog_buckets,
+            'created_in_period': created_in_period,
+            'closed_in_period': closed_in_period,
             # 7
             'conversion_rate': conversion_rate,
             'converted_count': converted_count,
@@ -3621,6 +3717,60 @@ class ReportsCSVView(LoginRequiredMixin, View):
             writer.writerow(['Judged (answered or deadline passed)', judged])
             writer.writerow(['Still within SLA window', pending])
             writer.writerow(['Compliance rate', f"{round(100*on_time/judged,1) if judged else 'N/A'}%"])
+            response_hours = [
+                (r.first_responded_at - r.created_at).total_seconds() / 3600
+                for r in t.filter(first_responded_at__isnull=False).only('first_responded_at', 'created_at')
+            ]
+            median_hours = _median(response_hours)
+            writer.writerow(['Median first-response (hours)', median_hours if median_hours is not None else 'N/A'])
+
+        elif report == 'sla_breakdown':
+            writer.writerow(['Group', 'Name', 'Judged', 'On Time', 'SLA Rate', 'Median Response (hrs)'])
+            sla_tickets_qs = list(
+                tickets_in_range.filter(due_at__isnull=False)
+                .select_related('assigned_to', 'client')
+            )
+            for row in _sla_breakdown_by(
+                [t for t in sla_tickets_qs if t.assigned_to_id],
+                key_func=lambda t: t.assigned_to_id,
+                label_func=lambda t: t.assigned_to.get_full_name() or t.assigned_to.username,
+            ):
+                writer.writerow(['Tech', row['label'], row['judged'], row['on_time'],
+                                  f"{row['sla_rate']}%" if row['sla_rate'] is not None else 'N/A',
+                                  row['median_response_hours'] if row['median_response_hours'] is not None else 'N/A'])
+            for row in _sla_breakdown_by(
+                sla_tickets_qs,
+                key_func=lambda t: t.client_id,
+                label_func=lambda t: t.client.name,
+            ):
+                writer.writerow(['Client', row['label'], row['judged'], row['on_time'],
+                                  f"{row['sla_rate']}%" if row['sla_rate'] is not None else 'N/A',
+                                  row['median_response_hours'] if row['median_response_hours'] is not None else 'N/A'])
+
+        elif report == 'backlog':
+            writer.writerow(['Metric', 'Value'])
+            now = timezone.now()
+            open_tickets_qs = Ticket.objects.exclude(status__in=Ticket.CLOSED_STATUSES).only('created_at')
+            buckets = {'lt_1d': 0, '1_3d': 0, '3_7d': 0, '7d_plus': 0}
+            total_open = 0
+            for t in open_tickets_qs:
+                total_open += 1
+                age_days = (now - t.created_at).total_seconds() / 86400
+                if age_days < 1:
+                    buckets['lt_1d'] += 1
+                elif age_days < 3:
+                    buckets['1_3d'] += 1
+                elif age_days < 7:
+                    buckets['3_7d'] += 1
+                else:
+                    buckets['7d_plus'] += 1
+            writer.writerow(['Open tickets (now)', total_open])
+            writer.writerow(['Under 1 day old', buckets['lt_1d']])
+            writer.writerow(['1-3 days old', buckets['1_3d']])
+            writer.writerow(['3-7 days old', buckets['3_7d']])
+            writer.writerow(['7+ days old', buckets['7d_plus']])
+            writer.writerow(['Created in period', tickets_in_range.count()])
+            writer.writerow(['Closed in period', Ticket.objects.filter(status__in=['closed', 'resolved'], updated_at__range=(start_dt, end_dt)).count()])
 
         elif report == 'conversion':
             writer.writerow(['Metric', 'Value'])
