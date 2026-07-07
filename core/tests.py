@@ -1946,6 +1946,42 @@ def test_internal_note_does_not_meet_sla(client, client_obj, admin_user):
 
 
 @pytest.mark.django_db
+def test_sla_compliance_report_first_response_and_sets_aside_pending(client, client_obj, admin_user):
+    """Report 6 (SLA Compliance) is a RESPONSE SLA measured on the first staff reply vs
+    due_at (Ticket.first_responded_at), NOT on closure. A still-in-window unanswered
+    ticket is SET ASIDE (not counted as a miss) until its deadline passes. This locks
+    both the first-response basis and the 'judged only' denominator, and guards against
+    regressing to the old closure-based logic."""
+    from django.utils import timezone
+    now = timezone.now()
+    hour = timezone.timedelta(hours=1)
+
+    def mk(subject, **fields):
+        t = Ticket.objects.create(client=client_obj, subject=subject, description='d')
+        Ticket.objects.filter(pk=t.pk).update(**fields)
+        return t
+
+    # Answered before the deadline → HIT.
+    mk('answered-on-time', due_at=now, first_responded_at=now - hour)
+    # Deadline passed, never answered → MISS (judged).
+    mk('unanswered-overdue', due_at=now - hour, first_responded_at=None)
+    # Answered, but after the deadline → MISS (judged).
+    mk('answered-late', due_at=now - 2 * hour, first_responded_at=now - hour)
+    # Still inside its window, not answered yet → SET ASIDE (not judged, not a miss).
+    mk('still-in-window', due_at=now + hour, first_responded_at=None)
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'))
+    assert resp.status_code == 200
+    assert resp.context['total_sla'] == 4
+    assert resp.context['responded_on_time'] == 1
+    assert resp.context['judged_sla'] == 3      # on-time + overdue + late
+    assert resp.context['pending_sla'] == 1      # the still-in-window ticket is set aside
+    # 1 hit of 3 judged → 33.3% (the set-aside ticket does not drag it down to 25%).
+    assert resp.context['sla_rate'] == 33.3
+
+
+@pytest.mark.django_db
 def test_overdue_queryset_matches_is_overdue_property():
     """The DB-level overdue_queryset (dashboard tile, ?overdue filter, queue
     criteria, SLA command) must agree with the is_overdue property for every

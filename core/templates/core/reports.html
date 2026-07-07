@@ -306,18 +306,23 @@
 <div class="bg-white rounded-lg shadow p-5" id="section-sla">
     <h2 class="text-base font-semibold text-gray-900 mb-4">6. SLA Compliance Rate</h2>
     {% if total_sla %}
-    <div class="flex items-center gap-8">
-        <div>
-            <p class="text-5xl font-bold {% if sla_rate >= 90 %}text-green-600{% elif sla_rate >= 70 %}text-yellow-600{% else %}text-red-600{% endif %}">
-                {{ sla_rate }}%
-            </p>
-            <p class="text-sm text-gray-500 mt-1">Tickets closed before due date</p>
+        {% if sla_rate is not None %}
+        <div class="flex items-center gap-8">
+            <div>
+                <p class="text-5xl font-bold {% if sla_rate >= 90 %}text-green-600{% elif sla_rate >= 70 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                    {{ sla_rate }}%
+                </p>
+                <p class="text-sm text-gray-500 mt-1">First response before SLA due date</p>
+            </div>
+            <div class="text-sm text-gray-600 space-y-1">
+                <p>Total tickets with SLA: <strong>{{ total_sla }}</strong></p>
+                <p>Answered on time: <strong>{{ responded_on_time }}</strong> of <strong>{{ judged_sla }}</strong> judged</p>
+                {% if pending_sla %}<p class="text-gray-400">{{ pending_sla }} still within their SLA window (not yet counted)</p>{% endif %}
+            </div>
         </div>
-        <div class="text-sm text-gray-600 space-y-1">
-            <p>Total tickets with SLA: <strong>{{ total_sla }}</strong></p>
-            <p>Closed on time: <strong>{{ closed_on_time }}</strong></p>
-        </div>
-    </div>
+        {% else %}
+        <p class="text-sm text-gray-400 italic">{{ total_sla }} ticket{{ total_sla|pluralize }} with an SLA — all still within their response window; none judged yet.</p>
+        {% endif %}
     {% else %}
     <p class="text-sm text-gray-400 italic">No tickets with SLA plans in this period.</p>
     {% endif %}
