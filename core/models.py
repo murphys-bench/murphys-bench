@@ -629,6 +629,13 @@ class Ticket(models.Model):
     description = models.TextField()
     source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='email')
     status = models.CharField(max_length=50, default='open', db_index=True)
+    closed_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Stamped when the ticket enters resolved/closed; cleared when it '
+                  'leaves those statuses. Gates the reply reopen window (Slice 4) — '
+                  'deliberately NOT stamped for "converted" (the work order is the '
+                  'active record there, not the ticket).',
+    )
     contact = models.ForeignKey(
         'Contact',
         on_delete=models.SET_NULL,
@@ -700,6 +707,25 @@ class Ticket(models.Model):
             self.sla_plan = plan
             self.overdue_acknowledged_by = None
             self.overdue_acknowledged_at = None
+
+    # Statuses that stamp/clear closed_at. Deliberately excludes 'converted' —
+    # the work order is the active record there, not the ticket (see closed_at
+    # help_text). Kept as its own tuple rather than importing views.TICKET_CLOSED_STATUSES
+    # to avoid a models->views dependency; the two are intentionally kept in sync.
+    CLOSED_AT_STATUSES = ('resolved', 'closed')
+
+    def apply_status_change(self, new_status):
+        """Set status, stamping/clearing closed_at accordingly. Caller still
+        saves. Entering resolved/closed for the first time stamps closed_at;
+        leaving them clears it; resolved<->closed (still "done") doesn't
+        re-stamp — closed_at means 'when did this stop being active', not
+        'which done-flavor is it currently in'."""
+        old_status = self.status
+        if new_status in self.CLOSED_AT_STATUSES and old_status not in self.CLOSED_AT_STATUSES:
+            self.closed_at = timezone.now()
+        elif new_status not in self.CLOSED_AT_STATUSES:
+            self.closed_at = None
+        self.status = new_status
 
     @classmethod
     def generate_ticket_number(cls):
@@ -1828,6 +1854,13 @@ class SiteSettings(models.Model):
     strip_quoted_replies = models.BooleanField(
         default=True,
         help_text='Strip quoted reply text (> lines, On … wrote: blocks) from inbound replies.',
+    )
+    ticket_reopen_window_days = models.PositiveIntegerField(
+        default=14,
+        help_text='A client reply to a closed/resolved ticket within this many days '
+                  'threads in and flags it for review, but leaves it closed — a tech '
+                  'reopens or dismisses it explicitly. Past the window, the reply '
+                  'starts a new ticket linked to the old one for context instead.',
     )
 
     # MFA enforcement

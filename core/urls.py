@@ -95,6 +95,7 @@ urlpatterns = [
     path('attachments/<int:pk>/download/', views.AttachmentDownloadView.as_view(), name='attachment_download'),
     path('tickets/<int:pk>/acknowledge-overdue/', views.TicketAcknowledgeOverdueView.as_view(), name='ticket_acknowledge_overdue'),
     path('tickets/<int:pk>/dismiss-response/', views.TicketDismissNeedsResponseView.as_view(), name='ticket_dismiss_response'),
+    path('tickets/<int:pk>/reopen/', views.TicketReopenView.as_view(), name='ticket_reopen'),
     path('tickets/<int:pk>/assign/', views.TicketAssignView.as_view(), name='ticket_assign'),
     path('tickets/<int:pk>/escalate/', views.TicketEscalateView.as_view(), name='ticket_escalate'),
     path('tickets/<int:pk>/close/', views.TicketCloseView.as_view(), name='ticket_close'),
