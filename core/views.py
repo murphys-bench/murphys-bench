@@ -3316,7 +3316,7 @@ class ReportsView(LoginRequiredMixin, View):
             raise PermissionDenied
 
         from datetime import timedelta, date
-        from django.db.models import Count, Avg, F, Sum, ExpressionWrapper, DurationField, FloatField
+        from django.db.models import Count, Avg, F, Q, Sum, ExpressionWrapper, DurationField, FloatField
         from django.db.models.functions import TruncDay, TruncWeek
 
         # Date range
@@ -3396,14 +3396,23 @@ class ReportsView(LoginRequiredMixin, View):
             for k, v in tech_res_agg.items()
         ]
 
-        # 6. SLA compliance
+        # 6. SLA compliance — a RESPONSE SLA (due_at = created_at + grace period): met when
+        # the first staff customer-visible reply lands before the deadline (first_responded_at),
+        # NOT by when the ticket was closed. A ticket is only "judged" once its outcome is
+        # decided — it has been answered, or its deadline has already passed. A still-in-window,
+        # unanswered ticket is set aside (its clock is still running; it hasn't failed yet).
+        sla_now = timezone.now()
         tickets_with_sla = tickets_in_range.filter(due_at__isnull=False)
         total_sla = tickets_with_sla.count()
-        closed_on_time = tickets_with_sla.filter(
-            status__in=['closed', 'resolved'],
-            updated_at__lte=F('due_at'),
+        responded_on_time = tickets_with_sla.filter(
+            first_responded_at__isnull=False,
+            first_responded_at__lte=F('due_at'),
         ).count()
-        sla_rate = round(100 * closed_on_time / total_sla, 1) if total_sla else None
+        judged_sla = tickets_with_sla.filter(
+            Q(first_responded_at__isnull=False) | Q(due_at__lt=sla_now)
+        ).count()
+        pending_sla = total_sla - judged_sla
+        sla_rate = round(100 * responded_on_time / judged_sla, 1) if judged_sla else None
 
         # 7. Ticket → WO conversion rate
         total_tickets = tickets_in_range.count()
@@ -3500,7 +3509,9 @@ class ReportsView(LoginRequiredMixin, View):
             # 6
             'sla_rate': sla_rate,
             'total_sla': total_sla,
-            'closed_on_time': closed_on_time,
+            'responded_on_time': responded_on_time,
+            'judged_sla': judged_sla,
+            'pending_sla': pending_sla,
             # 7
             'conversion_rate': conversion_rate,
             'converted_count': converted_count,
@@ -3581,12 +3592,17 @@ class ReportsCSVView(LoginRequiredMixin, View):
 
         elif report == 'sla':
             writer.writerow(['Metric', 'Value'])
+            from django.db.models import Q
             t = tickets_in_range.filter(due_at__isnull=False)
             total = t.count()
-            on_time = t.filter(status__in=['closed', 'resolved'], updated_at__lte=F('due_at')).count()
+            on_time = t.filter(first_responded_at__isnull=False, first_responded_at__lte=F('due_at')).count()
+            judged = t.filter(Q(first_responded_at__isnull=False) | Q(due_at__lt=timezone.now())).count()
+            pending = total - judged
             writer.writerow(['Total tickets with SLA', total])
-            writer.writerow(['Closed on time', on_time])
-            writer.writerow(['Compliance rate', f"{round(100*on_time/total,1) if total else 'N/A'}%"])
+            writer.writerow(['Answered on time', on_time])
+            writer.writerow(['Judged (answered or deadline passed)', judged])
+            writer.writerow(['Still within SLA window', pending])
+            writer.writerow(['Compliance rate', f"{round(100*on_time/judged,1) if judged else 'N/A'}%"])
 
         elif report == 'conversion':
             writer.writerow(['Metric', 'Value'])
