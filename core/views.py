@@ -2638,10 +2638,28 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
         # never auto-closes its ticket — see AUTO_RESOLVE_TICKET_ON_WO_CLOSE.)
         # If client changed, clear device (it belongs to the old client)
         new_client = form.cleaned_data.get('client')
-        if new_client and self.object.client_id != new_client.pk:
+        # Ticket.objects.get() (not self.object) — by the time form_valid runs,
+        # form.is_valid()'s _post_clean() has already mutated self.object.client
+        # in memory to the NEW client, so self.object no longer reflects what's
+        # still in the DB. Read the pre-save row fresh to get the real old client.
+        old_client_id, old_client_was_unsorted = Ticket.objects.filter(
+            pk=self.object.pk
+        ).values_list('client_id', 'client__is_unsorted').first()
+        client_changed = bool(new_client) and old_client_id != new_client.pk
+        if client_changed:
             form.instance.device = None
+        # Triage: an Unsorted ticket picks up its real client's type-default SLA
+        # the moment it's reassigned off the bucket — unless this same edit also
+        # picked an SLA plan by hand, which always wins.
+        triage_resnapshot = (
+            client_changed and old_client_was_unsorted
+            and 'sla_plan' not in form.changed_data
+        )
         old_status = self.object.status
         response = super().form_valid(form)
+        if triage_resnapshot:
+            self.object.assign_default_sla_for_client()
+            self.object.save(update_fields=['sla_plan', 'due_at', 'overdue_acknowledged_by', 'overdue_acknowledged_at'])
         fields = _get_custom_fields_for_ticket(self.object)
         _save_custom_field_values(self.request, self.object, fields)
         if self.object.status in ('resolved', 'closed') and self.object.wo_complete:
@@ -4917,6 +4935,8 @@ class SettingsView(LoginRequiredMixin, View):
             ctx['blocked_senders'] = BlockedSender.objects.all()
         if active_tab == 'sla_plans':
             ctx['sla_plans'] = SLAPlan.objects.all()
+            from .forms import SLADefaultsForm
+            ctx['sla_defaults_form'] = SLADefaultsForm(instance=site)
         if active_tab == 'help_topics':
             ctx['help_topics'] = HelpTopic.objects.all()
             ctx['sla_plans_all'] = SLAPlan.objects.filter(is_active=True)
@@ -5626,6 +5646,24 @@ class EmailBrandingUpdateView(LoginRequiredMixin, View):
         else:
             messages.error(request, 'Could not save email branding — check the values.')
         return redirect(reverse('core:settings') + '?tab=email_templates')
+
+
+class SLADefaultsUpdateView(LoginRequiredMixin, View):
+    """Settings: client-type default SLA (SLA Plans tab)."""
+
+    def post(self, request):
+        if not _is_admin(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        from .forms import SLADefaultsForm
+        site = SiteSettings.get()
+        form = SLADefaultsForm(request.POST, instance=site)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'SLA defaults saved.')
+        else:
+            messages.error(request, 'Could not save SLA defaults — check the values.')
+        return redirect(reverse('core:settings') + '?tab=sla_plans')
 
 
 # --- Status Management ---
