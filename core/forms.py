@@ -613,7 +613,7 @@ class InboundEmailSettingsForm(forms.ModelForm):
             'inbound_email_enabled', 'inbound_protocol', 'inbound_host', 'inbound_port',
             'inbound_ssl', 'inbound_username', 'inbound_password', 'inbound_folder',
             'inbound_delete_after_fetch', 'strip_quoted_replies',
-            'inbound_default_client_name',
+            'inbound_default_client_name', 'ticket_reopen_window_days',
         ]
         widgets = {
             'inbound_email_enabled': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
@@ -627,6 +627,7 @@ class InboundEmailSettingsForm(forms.ModelForm):
             'inbound_delete_after_fetch': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
             'strip_quoted_replies': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
             'inbound_default_client_name': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'Walk-in / Unknown'}),
+            'ticket_reopen_window_days': forms.NumberInput(attrs={'class': _SS_INPUT, 'min': 1}),
         }
 
 

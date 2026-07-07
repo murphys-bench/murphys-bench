@@ -769,24 +769,219 @@ def test_reply_to_converted_ticket_threads_instead_of_new_ticket(client_obj):
 
 
 @pytest.mark.django_db
-def test_reply_to_closed_ticket_reopens_and_threads(client_obj):
+def test_reply_to_closed_ticket_within_window_flags_but_stays_closed(client_obj):
+    """SLA Slice 4: MB used to auto-reopen a closed ticket on ANY reply — a
+    client's "thanks!" or re-engaging after Mike closed a stale unanswered
+    ticket became busywork. Now: thread in + flag, but stay closed; a human
+    explicitly Reopens or Dismisses."""
+    from django.utils import timezone
     from core.management.commands.fetch_inbound_email import _process_message
     site = SiteSettings.get()
     ticket = Ticket.objects.create(
         client=client_obj, subject='S', description='D',
         ticket_number='TKT-20260610-0002', status='closed',
     )
+    ticket.closed_at = timezone.now() - timezone.timedelta(days=1)
+    ticket.save(update_fields=['closed_at'])
     before = Ticket.objects.count()
 
     status, detail, _ = _process_message(
         _raw_reply_email('TKT-20260610-0002'), site, verbosity=0)
 
-    assert status == 'reply', f'Expected reply, got {status}: {detail}'
-    assert Ticket.objects.count() == before
+    assert status == 'reply_flagged', f'Expected reply_flagged, got {status}: {detail}'
+    assert Ticket.objects.count() == before, 'Must not create a new ticket within the reopen window.'
     ticket.refresh_from_db()
     assert ticket.replies.count() == 1
-    assert ticket.status == 'open', 'A reply to a closed ticket should reopen it.'
+    assert ticket.status == 'closed', 'A reply within the reopen window must NOT reopen the ticket.'
     assert ticket.needs_response is True
+
+
+@pytest.mark.django_db
+def test_reply_to_resolved_ticket_within_window_flags_but_stays_resolved(client_obj):
+    """Same rule for 'resolved' as 'closed' — both are CLOSED_AT_STATUSES."""
+    from django.utils import timezone
+    from core.management.commands.fetch_inbound_email import _process_message
+    site = SiteSettings.get()
+    ticket = Ticket.objects.create(
+        client=client_obj, subject='S', description='D',
+        ticket_number='TKT-20260610-0009', status='resolved',
+    )
+    ticket.closed_at = timezone.now()
+    ticket.save(update_fields=['closed_at'])
+
+    status, detail, _ = _process_message(
+        _raw_reply_email('TKT-20260610-0009'), site, verbosity=0)
+
+    assert status == 'reply_flagged'
+    ticket.refresh_from_db()
+    assert ticket.status == 'resolved'
+    assert ticket.needs_response is True
+
+
+@pytest.mark.django_db
+def test_reply_to_closed_ticket_past_reopen_window_creates_linked_ticket(client_obj):
+    """Past the configured reopen window, a reply to a long-closed ticket starts
+    a NEW ticket (the old context is stale) but links it to the old one so the
+    history isn't lost."""
+    from django.utils import timezone
+    from core.management.commands.fetch_inbound_email import _process_message
+    from core.models import TicketLink
+    site = SiteSettings.get()
+    site.ticket_reopen_window_days = 14
+    site.save(update_fields=['ticket_reopen_window_days'])
+    old_ticket = Ticket.objects.create(
+        client=client_obj, subject='S', description='D',
+        ticket_number='TKT-20260610-0003', status='closed',
+    )
+    old_ticket.closed_at = timezone.now() - timezone.timedelta(days=30)
+    old_ticket.save(update_fields=['closed_at'])
+    before = Ticket.objects.count()
+
+    status, detail, new_ticket = _process_message(
+        _raw_reply_email('TKT-20260610-0003'), site, verbosity=0)
+
+    assert status == 'new_ticket_linked', f'Expected new_ticket_linked, got {status}: {detail}'
+    assert Ticket.objects.count() == before + 1
+    assert new_ticket.pk != old_ticket.pk
+    old_ticket.refresh_from_db()
+    assert old_ticket.status == 'closed', 'The old ticket itself must not be touched.'
+    assert TicketLink.objects.filter(ticket_a=old_ticket, ticket_b=new_ticket).exists()
+
+
+@pytest.mark.django_db
+def test_reply_to_closed_ticket_null_closed_at_stays_within_window(client_obj):
+    """A closed ticket with no closed_at (pre-Slice-4 historical data, since
+    this is forward-only with no backfill) is treated as still within the
+    reopen window — the safer default vs. silently spawning a disconnected
+    new ticket due to missing data."""
+    from core.management.commands.fetch_inbound_email import _process_message
+    site = SiteSettings.get()
+    ticket = Ticket.objects.create(
+        client=client_obj, subject='S', description='D',
+        ticket_number='TKT-20260610-0004', status='closed',
+    )
+    assert ticket.closed_at is None
+
+    status, detail, _ = _process_message(
+        _raw_reply_email('TKT-20260610-0004'), site, verbosity=0)
+
+    assert status == 'reply_flagged'
+    ticket.refresh_from_db()
+    assert ticket.status == 'closed'
+
+
+@pytest.mark.django_db
+def test_reply_to_waiting_on_customer_ticket_still_reopens(client_obj):
+    """Unchanged by Slice 4 — waiting_on_customer is not a CLOSED_AT_STATUS;
+    the client responding is exactly what that status was waiting for."""
+    from core.management.commands.fetch_inbound_email import _process_message
+    site = SiteSettings.get()
+    ticket = Ticket.objects.create(
+        client=client_obj, subject='S', description='D',
+        ticket_number='TKT-20260610-0005', status='waiting_on_customer',
+    )
+
+    status, detail, _ = _process_message(
+        _raw_reply_email('TKT-20260610-0005'), site, verbosity=0)
+
+    assert status == 'reply'
+    ticket.refresh_from_db()
+    assert ticket.status == 'open'
+    assert ticket.needs_response is True
+
+
+@pytest.mark.django_db
+def test_apply_status_change_stamps_and_clears_closed_at():
+    """Ticket.apply_status_change: stamps closed_at entering resolved/closed,
+    clears it leaving them, and does NOT re-stamp resolved<->closed (still
+    'done', just a different flavor)."""
+    from django.utils import timezone
+    client_obj = Client.objects.create(name='Closed-At Co')
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    assert ticket.closed_at is None
+
+    ticket.apply_status_change('closed')
+    assert ticket.status == 'closed'
+    assert ticket.closed_at is not None
+    first_stamp = ticket.closed_at
+
+    ticket.apply_status_change('resolved')
+    assert ticket.closed_at == first_stamp, 'resolved<->closed must not re-stamp closed_at.'
+
+    ticket.apply_status_change('open')
+    assert ticket.closed_at is None, 'Leaving a CLOSED_AT_STATUS must clear closed_at.'
+
+
+@pytest.mark.django_db
+def test_ticket_close_view_stamps_closed_at(admin_user, client, client_obj):
+    """The one-click Resolve shortcut (TicketCloseView) stamps closed_at too,
+    not just the full edit form / quick-status dropdown."""
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:ticket_close', args=[ticket.pk]))
+    assert resp.status_code == 302
+    ticket.refresh_from_db()
+    assert ticket.status == 'resolved'
+    assert ticket.closed_at is not None
+
+
+@pytest.mark.django_db
+def test_ticket_edit_form_stamps_closed_at_and_true_old_status_for_email(admin_user, client, client_obj):
+    """Regression: TicketUpdateView.form_valid used to read `self.object.status`
+    for old_status AFTER Django's _post_clean() had already mutated it to the
+    NEW status in memory (same class of bug as the Slice 2 client caching
+    issue) — so the status-changed email condition was always false and
+    closed_at would have been stamped off the wrong 'old' value. Both are now
+    read from a fresh DB query before the mutation."""
+    from unittest.mock import patch
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D', status='open')
+    client.force_login(admin_user)
+
+    with patch('core.email_utils.send_ticket_email') as mock_send:
+        resp = client.post(reverse('core:ticket_edit', args=[ticket.pk]), {
+            'client': client_obj.pk, 'subject': 'S', 'description': 'D',
+            'source': 'phone', 'status': 'closed',
+        })
+    assert resp.status_code == 302
+    ticket.refresh_from_db()
+    assert ticket.status == 'closed'
+    assert ticket.closed_at is not None
+    mock_send.assert_any_call('status_changed', ticket, {'old_status': 'open'})
+
+
+@pytest.mark.django_db
+def test_ticket_reopen_view_one_click(admin_user, client, client_obj):
+    """The Reopen button on a closed+flagged ticket's needs_response banner —
+    one click, no note required (Dismiss is the one that requires a note)."""
+    from django.utils import timezone
+    ticket = Ticket.objects.create(
+        client=client_obj, subject='S', description='D', status='closed', needs_response=True,
+    )
+    ticket.closed_at = timezone.now()
+    ticket.save(update_fields=['closed_at'])
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:ticket_reopen', args=[ticket.pk]))
+    assert resp.status_code == 302
+    ticket.refresh_from_db()
+    assert ticket.status == 'open'
+    assert ticket.closed_at is None
+    assert ticket.needs_response is True, 'Reopen must not silently clear the flag — replying does that.'
+
+
+@pytest.mark.django_db
+def test_inbound_settings_save_persists_reopen_window(admin_user, client):
+    """Settings → Inbound Email persists the new reopen-window field via the
+    existing generic settings POST dispatcher."""
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:settings'), {
+        'tab': 'inbound', 'inbound-ticket_reopen_window_days': '21',
+        'inbound-inbound_protocol': 'imap', 'inbound-inbound_port': '993',
+        'inbound-inbound_folder': 'INBOX',
+    })
+    assert resp.status_code == 302
+    site = SiteSettings.get()
+    assert site.ticket_reopen_window_days == 21
 
 
 # ── Inbound: the everyday paths — new ticket, reply threading, dedup, routing ─

@@ -45,7 +45,7 @@ _FORWARDED_FROM_RE = re.compile(r'^\s*From:\s*(.+)$', re.IGNORECASE | re.MULTILI
 
 from core.models import (
     Attachment, BlockedSender, Client, Contact, InboundEmailLog, SiteSettings,
-    Ticket, TicketReply,
+    Ticket, TicketLink, TicketReply,
 )
 
 TICKET_RE = re.compile(r'\[?(TKT-[\d-]+)\]?', re.IGNORECASE)
@@ -318,6 +318,30 @@ def _extract_forwarded_sender(body):
     return (name or ''), addr
 
 
+def _create_new_ticket(subject, body, from_email, from_name, settings, msg):
+    """Resolve client/contact and create a fresh ticket from an inbound email.
+    Shared by the no-subject-match path and the past-reopen-window path
+    (Slice 4) — same ticket-creation logic either way."""
+    client, contact = _resolve_client_contact(from_email, from_name, settings)
+
+    if client.suppress_emails:
+        return 'error', f'Client {client.name} has suppress_emails — skipping', None
+
+    ticket = Ticket(
+        ticket_number=Ticket.generate_ticket_number(),
+        client=client,
+        contact=contact,
+        subject=subject[:255],
+        description=body,
+        source='email',
+        status='new',
+        created_by=None,
+    )
+    ticket.save()
+    _save_attachments(ticket, msg, settings)
+    return 'new_ticket', f'Created {ticket.ticket_number} for {client.name}', ticket
+
+
 def _process_message(raw_msg_bytes, settings, verbosity):
     """Parse and process one raw email message. Returns (status, detail, ticket)."""
     try:
@@ -373,11 +397,46 @@ def _process_message(raw_msg_bytes, settings, verbosity):
         ticket_number = ticket_match.group(1).upper()
         ticket = Ticket.objects.filter(ticket_number=ticket_number).first()
         if ticket:
-            # A client reply always threads into the matched ticket — including
-            # 'converted' and 'closed'. The ticket is the single client-facing
-            # channel; a reply must never spawn an orphan ticket just because the
-            # ticket moved on. We do NOT un-convert a converted ticket (it's a WO
-            # now) — we only flag it for response so the tech sees the reply.
+            if ticket.status in Ticket.CLOSED_AT_STATUSES:
+                # Closed/resolved: MB used to auto-reopen on ANY reply, which
+                # turned a client's "thanks!" or a re-engagement after Mike
+                # closed a stale unanswered ticket into busywork (re-close) and
+                # polluted any reopen-rate metric. Now: thread in + flag, but
+                # stay closed — a human explicitly Reopens or Dismisses.
+                window_days = SiteSettings.get().ticket_reopen_window_days
+                closed_at = ticket.closed_at
+                within_window = closed_at is None or (timezone.now() - closed_at).days < window_days
+                if within_window:
+                    reply = TicketReply.objects.create(
+                        ticket=ticket, reply_type='customer_visible',
+                        content=body, created_by=None,
+                    )
+                    _save_attachments(reply, msg, settings)
+                    ticket.needs_response = True
+                    ticket.save(update_fields=['needs_response', 'updated_at'])
+                    return (
+                        'reply_flagged',
+                        f'Flagged closed ticket {ticket_number} for review (reply threaded, not reopened)',
+                        ticket,
+                    )
+                # Past the reopen window — the original context is stale
+                # enough that reviving it isn't useful; start a fresh ticket
+                # but link it to the old one so the history isn't lost.
+                status, detail, new_ticket = _create_new_ticket(subject, body, from_email, from_name, settings, msg)
+                if new_ticket:
+                    TicketLink.objects.create(ticket_a=ticket, ticket_b=new_ticket, link_type='related')
+                    return (
+                        'new_ticket_linked',
+                        f'{ticket_number} closed past the {window_days}-day reopen window — '
+                        f'created {new_ticket.ticket_number}, linked',
+                        new_ticket,
+                    )
+                return status, detail, new_ticket
+
+            # 'converted' and every other still-active status: thread in.
+            # 'converted' never reopens (the work order is the active record,
+            # not the ticket status) — waiting_on_customer does, since the
+            # client responding is exactly what that status was waiting for.
             reply = TicketReply.objects.create(
                 ticket=ticket,
                 reply_type='customer_visible',
@@ -387,33 +446,14 @@ def _process_message(raw_msg_bytes, settings, verbosity):
             _save_attachments(reply, msg, settings)
             update_fields = ['needs_response', 'updated_at']
             ticket.needs_response = True
-            # Reopen tickets that had been considered done; leave 'converted'
-            # alone (the active record is the work order, not the ticket status).
-            if ticket.status in ('resolved', 'waiting_on_customer', 'closed'):
+            if ticket.status == 'waiting_on_customer':
                 ticket.status = 'open'
                 update_fields.append('status')
             ticket.save(update_fields=update_fields)
             return 'reply', f'Added reply to {ticket_number}', ticket
 
     # --- New ticket ---
-    client, contact = _resolve_client_contact(from_email, from_name, settings)
-
-    if client.suppress_emails:
-        return 'error', f'Client {client.name} has suppress_emails — skipping', None
-
-    ticket = Ticket(
-        ticket_number=Ticket.generate_ticket_number(),
-        client=client,
-        contact=contact,
-        subject=subject[:255],
-        description=body,
-        source='email',
-        status='new',
-        created_by=None,
-    )
-    ticket.save()
-    _save_attachments(ticket, msg, settings)
-    return 'new_ticket', f'Created {ticket.ticket_number} for {client.name}', ticket
+    return _create_new_ticket(subject, body, from_email, from_name, settings, msg)
 
 
 class Command(BaseCommand):
@@ -471,7 +511,10 @@ class Command(BaseCommand):
                 self.stdout.write('  No new messages.')
             return
 
-        counts = {'new_ticket': 0, 'reply': 0, 'duplicate': 0, 'error': 0}
+        counts = {
+            'new_ticket': 0, 'reply': 0, 'duplicate': 0, 'error': 0,
+            'reply_flagged': 0, 'new_ticket_linked': 0,
+        }
         for raw_bytes in messages:
             if dry_run:
                 msg = email.message_from_bytes(raw_bytes)
@@ -530,13 +573,19 @@ class Command(BaseCommand):
                 # be visible rather than swallowed.
                 logger.exception('Failed to write InboundEmailLog row for a fetched message.')
 
-            style = self.style.SUCCESS if status in ('new_ticket', 'reply') else self.style.WARNING
+            style = (
+                self.style.SUCCESS
+                if status in ('new_ticket', 'reply', 'reply_flagged', 'new_ticket_linked')
+                else self.style.WARNING
+            )
             if verbosity >= 1:
                 self.stdout.write(style(f'  [{status}] {detail}'))
 
         if not dry_run and verbosity >= 1:
             self.stdout.write(
                 f'Done — {counts["new_ticket"]} new tickets, {counts["reply"]} replies, '
+                f'{counts["reply_flagged"]} flagged on closed tickets, '
+                f'{counts["new_ticket_linked"]} new tickets linked past reopen window, '
                 f'{counts["duplicate"]} duplicates, {counts["error"]} errors.'
             )
 
