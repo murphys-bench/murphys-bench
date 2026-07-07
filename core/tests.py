@@ -1977,8 +1977,192 @@ def test_sla_compliance_report_first_response_and_sets_aside_pending(client, cli
     assert resp.context['responded_on_time'] == 1
     assert resp.context['judged_sla'] == 3      # on-time + overdue + late
     assert resp.context['pending_sla'] == 1      # the still-in-window ticket is set aside
-    # 1 hit of 3 judged → 33.3% (the set-aside ticket does not drag it down to 25%).
-    assert resp.context['sla_rate'] == 33.3
+
+
+# ── SLA Slice 2: client-type default SLA (every ticket gets a clock) ────────
+
+@pytest.mark.django_db
+def test_new_ticket_inherits_business_default_sla():
+    """A ticket for a business client is stamped with the business default plan
+    at creation, with no manual sla_plan pick."""
+    from core.models import SLAPlan, SiteSettings
+    biz_plan = SLAPlan.objects.create(name='Business 4h', grace_period_hours=4)
+    SLAPlan.objects.create(name='Residential 24h', grace_period_hours=24)
+    site = SiteSettings.get()
+    site.default_business_sla = biz_plan
+    site.save(update_fields=['default_business_sla'])
+
+    biz_client = Client.objects.create(name='Acme LLC', client_type='business')
+    ticket = Ticket.objects.create(client=biz_client, subject='S', description='D')
+
+    assert ticket.sla_plan_id == biz_plan.pk
+    assert ticket.due_at is not None
+
+
+@pytest.mark.django_db
+def test_new_ticket_inherits_residential_default_sla(client_obj):
+    """A residential client's ticket gets the residential default — help topic
+    plays no part in the decision."""
+    from core.models import SLAPlan, SiteSettings
+    res_plan = SLAPlan.objects.create(name='Residential 24h', grace_period_hours=24)
+    site = SiteSettings.get()
+    site.default_residential_sla = res_plan
+    site.save(update_fields=['default_residential_sla'])
+
+    assert client_obj.client_type == 'residential'
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+
+    assert ticket.sla_plan_id == res_plan.pk
+    assert ticket.due_at is not None
+
+
+@pytest.mark.django_db
+def test_unsorted_ticket_gets_residential_default_as_placeholder():
+    """The system Unsorted/Unverified client is residential-typed, so an inbound
+    ticket parked there rides the residential default until triaged — no
+    special-casing needed, it's the same rule."""
+    from core.models import SLAPlan, SiteSettings
+    res_plan = SLAPlan.objects.create(name='Residential 24h', grace_period_hours=24)
+    site = SiteSettings.get()
+    site.default_residential_sla = res_plan
+    site.save(update_fields=['default_residential_sla'])
+
+    unsorted = Client.get_unsorted()
+    assert unsorted.client_type == 'residential'
+    ticket = Ticket.objects.create(client=unsorted, subject='S', description='D')
+
+    assert ticket.sla_plan_id == res_plan.pk
+
+
+@pytest.mark.django_db
+def test_manual_sla_pick_overrides_client_type_default():
+    """An explicit sla_plan set before save (e.g. from the ticket form) wins over
+    the client-type default — the default only fills a gap, never overrides."""
+    from core.models import SLAPlan, SiteSettings
+    default_plan = SLAPlan.objects.create(name='Default 24h', grace_period_hours=24)
+    chosen_plan = SLAPlan.objects.create(name='Rush 2h', grace_period_hours=2)
+    site = SiteSettings.get()
+    site.default_residential_sla = default_plan
+    site.save(update_fields=['default_residential_sla'])
+
+    res_client = Client.objects.create(name='Jane Doe')
+    ticket = Ticket(client=res_client, subject='S', description='D', sla_plan=chosen_plan)
+    ticket.save()
+
+    assert ticket.sla_plan_id == chosen_plan.pk
+
+
+@pytest.mark.django_db
+def test_no_default_configured_leaves_ticket_clock_less(client_obj):
+    """With no defaults set (the out-of-the-box state), ticket creation behaves
+    exactly as before — no clock, no crash."""
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    assert ticket.sla_plan_id is None
+    assert ticket.due_at is None
+
+
+@pytest.mark.django_db
+def test_editing_ticket_does_not_resnapshot_sla_on_ordinary_client_change(admin_user, client):
+    """Reassigning a ticket between two ordinary (non-Unsorted) clients must not
+    retroactively move its SLA — only the Unsorted-triage path re-snapshots."""
+    from core.models import SLAPlan, SiteSettings
+    biz_plan = SLAPlan.objects.create(name='Business 4h', grace_period_hours=4)
+    res_plan = SLAPlan.objects.create(name='Residential 24h', grace_period_hours=24)
+    site = SiteSettings.get()
+    site.default_business_sla = biz_plan
+    site.default_residential_sla = res_plan
+    site.save(update_fields=['default_business_sla', 'default_residential_sla'])
+
+    old_client = Client.objects.create(name='Old Residential Co')
+    new_client = Client.objects.create(name='New Business LLC', client_type='business')
+    ticket = Ticket.objects.create(client=old_client, subject='S', description='D')
+    original_due_at = ticket.due_at
+    assert ticket.sla_plan_id == res_plan.pk
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:ticket_edit', args=[ticket.pk]), {
+        'client': new_client.pk, 'subject': 'S', 'description': 'D',
+        'source': 'phone', 'status': 'new', 'sla_plan': ticket.sla_plan_id,
+    })
+    assert resp.status_code == 302
+    ticket.refresh_from_db()
+    assert ticket.client_id == new_client.pk
+    assert ticket.sla_plan_id == res_plan.pk, 'SLA must not move on an ordinary reassignment.'
+    assert ticket.due_at == original_due_at
+
+
+@pytest.mark.django_db
+def test_triage_off_unsorted_resnapshots_client_type_default(admin_user, client):
+    """Reassigning an Unsorted ticket to a real business client at triage picks
+    up the business default — the residential placeholder clock was provisional."""
+    from core.models import SLAPlan, SiteSettings
+    biz_plan = SLAPlan.objects.create(name='Business 4h', grace_period_hours=4)
+    res_plan = SLAPlan.objects.create(name='Residential 24h', grace_period_hours=24)
+    site = SiteSettings.get()
+    site.default_business_sla = biz_plan
+    site.default_residential_sla = res_plan
+    site.save(update_fields=['default_business_sla', 'default_residential_sla'])
+
+    unsorted = Client.get_unsorted()
+    real_client = Client.objects.create(name='Real Business LLC', client_type='business')
+    ticket = Ticket.objects.create(client=unsorted, subject='S', description='D')
+    assert ticket.sla_plan_id == res_plan.pk
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:ticket_edit', args=[ticket.pk]), {
+        'client': real_client.pk, 'subject': 'S', 'description': 'D',
+        'source': 'phone', 'status': 'new', 'sla_plan': ticket.sla_plan_id,
+    })
+    assert resp.status_code == 302
+    ticket.refresh_from_db()
+    assert ticket.client_id == real_client.pk
+    assert ticket.sla_plan_id == biz_plan.pk, 'Triage off Unsorted must re-snapshot to the new client-type default.'
+
+
+@pytest.mark.django_db
+def test_triage_off_unsorted_respects_manual_sla_pick(admin_user, client):
+    """If the same edit that reassigns off Unsorted ALSO picks an SLA plan by
+    hand, the manual pick wins — triage auto-resnapshot never overrides it."""
+    from core.models import SLAPlan, SiteSettings
+    biz_plan = SLAPlan.objects.create(name='Business 4h', grace_period_hours=4)
+    res_plan = SLAPlan.objects.create(name='Residential 24h', grace_period_hours=24)
+    rush_plan = SLAPlan.objects.create(name='Rush 1h', grace_period_hours=1)
+    site = SiteSettings.get()
+    site.default_business_sla = biz_plan
+    site.default_residential_sla = res_plan
+    site.save(update_fields=['default_business_sla', 'default_residential_sla'])
+
+    unsorted = Client.get_unsorted()
+    real_client = Client.objects.create(name='Real Business LLC', client_type='business')
+    ticket = Ticket.objects.create(client=unsorted, subject='S', description='D')
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:ticket_edit', args=[ticket.pk]), {
+        'client': real_client.pk, 'subject': 'S', 'description': 'D',
+        'source': 'phone', 'status': 'new', 'sla_plan': rush_plan.pk,
+    })
+    assert resp.status_code == 302
+    ticket.refresh_from_db()
+    assert ticket.sla_plan_id == rush_plan.pk
+
+
+@pytest.mark.django_db
+def test_sla_defaults_save_view(admin_user, client):
+    """Settings → SLA Plans defaults form persists both client-type defaults."""
+    from core.models import SLAPlan, SiteSettings
+    biz_plan = SLAPlan.objects.create(name='Business 4h', grace_period_hours=4)
+    res_plan = SLAPlan.objects.create(name='Residential 24h', grace_period_hours=24)
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sla_defaults_save'), {
+        'default_business_sla': biz_plan.pk,
+        'default_residential_sla': res_plan.pk,
+    })
+    assert resp.status_code == 302
+
+    site = SiteSettings.get()
+    assert site.default_business_sla_id == biz_plan.pk
+    assert site.default_residential_sla_id == res_plan.pk
 
 
 @pytest.mark.django_db

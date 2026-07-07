@@ -2042,6 +2042,26 @@
 
         <!-- ── SLA Plans ─────────────────────────────────────────────── -->
         {% if active_tab == 'sla_plans' %}
+        <div class="bg-white rounded-lg shadow mb-6">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-lg font-semibold text-gray-900">Client-Type Default SLA</h2>
+                <p class="text-sm text-gray-500 mt-1">Every new ticket inherits a response clock from its client's type at creation — help topic has no say. Leave blank to leave that type clock-less (manual SLA picks on the ticket form still work). An Unsorted/unverified ticket rides the Residential default until triaged onto a real client.</p>
+            </div>
+            <div class="p-6">
+                <form method="post" action="{% url 'core:sla_defaults_save' %}" class="flex flex-wrap gap-4 items-end">
+                    {% csrf_token %}
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Default Business SLA</label>
+                        {{ sla_defaults_form.default_business_sla }}
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Default Residential SLA</label>
+                        {{ sla_defaults_form.default_residential_sla }}
+                    </div>
+                    <button type="submit" class="px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Save Defaults</button>
+                </form>
+            </div>
+        </div>
         <div class="bg-white rounded-lg shadow">
             <div class="px-6 py-4 border-b border-gray-200">
                 <h2 class="text-lg font-semibold text-gray-900">SLA Plans</h2>
