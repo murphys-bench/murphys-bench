@@ -2639,12 +2639,17 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
         # If client changed, clear device (it belongs to the old client)
         new_client = form.cleaned_data.get('client')
         # Ticket.objects.get() (not self.object) — by the time form_valid runs,
-        # form.is_valid()'s _post_clean() has already mutated self.object.client
-        # in memory to the NEW client, so self.object no longer reflects what's
-        # still in the DB. Read the pre-save row fresh to get the real old client.
-        old_client_id, old_client_was_unsorted = Ticket.objects.filter(
+        # form.is_valid()'s _post_clean() has already mutated self.object (client,
+        # status, everything in Meta.fields) in memory to the NEW values, so
+        # self.object no longer reflects what's still in the DB. Read the
+        # pre-save row fresh to get the real old client/status. (This same bug
+        # previously meant `old_status = self.object.status` below was always
+        # equal to the new status — status-changed emails from this edit form
+        # never fired. Fixed here alongside the Slice 4 closed_at stamping that
+        # needs the real old status too.)
+        old_client_id, old_client_was_unsorted, old_status = Ticket.objects.filter(
             pk=self.object.pk
-        ).values_list('client_id', 'client__is_unsorted').first()
+        ).values_list('client_id', 'client__is_unsorted', 'status').first()
         client_changed = bool(new_client) and old_client_id != new_client.pk
         if client_changed:
             form.instance.device = None
@@ -2655,7 +2660,13 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
             client_changed and old_client_was_unsorted
             and 'sla_plan' not in form.changed_data
         )
-        old_status = self.object.status
+        # Stamp/clear closed_at before the save (TicketForm.save() writes the
+        # whole instance, so this rides the same DB write — no extra query).
+        if new_status:
+            if new_status in Ticket.CLOSED_AT_STATUSES and old_status not in Ticket.CLOSED_AT_STATUSES:
+                form.instance.closed_at = timezone.now()
+            elif new_status not in Ticket.CLOSED_AT_STATUSES:
+                form.instance.closed_at = None
         response = super().form_valid(form)
         if triage_resnapshot:
             self.object.assign_default_sla_for_client()
@@ -2777,6 +2788,24 @@ class TicketDismissNeedsResponseView(LoginRequiredMixin, View):
         ticket.needs_response = False
         ticket.save(update_fields=['needs_response', 'updated_at'])
         messages.success(request, 'Response flag dismissed.')
+        return redirect('core:ticket_detail', pk=pk)
+
+
+class TicketReopenView(LoginRequiredMixin, View):
+    """One-click reopen for a closed/resolved ticket flagged by a client reply
+    (Slice 4 — the reply threads in and flags but deliberately does not reopen
+    on its own; a human decides Reopen vs Dismiss). Leaves needs_response as-is
+    — Reopen makes the ticket active again; actually replying is what clears
+    the flag, same as any other needs_response ticket."""
+
+    def post(self, request, pk):
+        ticket = get_object_or_404(Ticket, pk=pk)
+        if ticket.status not in Ticket.CLOSED_AT_STATUSES:
+            messages.info(request, 'Ticket is not closed.')
+            return redirect('core:ticket_detail', pk=pk)
+        ticket.apply_status_change('open')
+        ticket.save(update_fields=['status', 'closed_at', 'updated_at'])
+        messages.success(request, f'{ticket.ticket_number} reopened.')
         return redirect('core:ticket_detail', pk=pk)
 
 
@@ -3056,9 +3085,9 @@ class TicketCloseView(LoginRequiredMixin, View):
         if ticket.status in TICKET_CLOSED_STATUSES:
             messages.info(request, 'Ticket is already closed.')
             return redirect('core:ticket_detail', pk=pk)
-        ticket.status = 'resolved'
+        ticket.apply_status_change('resolved')
         ticket.wo_complete = False
-        ticket.save(update_fields=['status', 'wo_complete', 'updated_at'])
+        ticket.save(update_fields=['status', 'closed_at', 'wo_complete', 'updated_at'])
         messages.success(request, f'{ticket.ticket_number} resolved.')
         return redirect('core:ticket_detail', pk=pk)
 
@@ -6180,10 +6209,10 @@ class TicketStatusUpdateView(LoginRequiredMixin, View):
             return redirect('core:ticket_detail', pk=pk)
         # No block on closing a ticket with an open linked WO — see TicketUpdateView.form_valid.
         old_status = ticket.status
-        ticket.status = new_status
+        ticket.apply_status_change(new_status)
         if new_status in TICKET_CLOSED_STATUSES and ticket.wo_complete:
             ticket.wo_complete = False
-        ticket.save(update_fields=['status', 'wo_complete', 'updated_at'])
+        ticket.save(update_fields=['status', 'closed_at', 'wo_complete', 'updated_at'])
         if new_status != old_status:
             from .email_utils import send_ticket_email
             send_ticket_email('status_changed', ticket, {'old_status': old_status})
