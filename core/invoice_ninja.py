@@ -281,14 +281,23 @@ def find_or_create_walkin_client():
     return in_id
 
 
-def push_sale(sale):
-    """Create a PAID invoice in IN from a counter sale's priced lines.
+def push_sale(sale, draft=False):
+    """Create an invoice in IN from a sale's priced lines.
+
+    ``draft=False`` (counter lane, Lane B): after creating the invoice we post a
+    payment for the sale's recorded amount so IN marks it **Paid** — MB is
+    mirroring a payment already taken at the counter.
+
+    ``draft=True`` (recurring lane, Lane C): create the invoice **only**, no
+    payment posted → it lands in IN as an unpaid **Draft**. MB charges nothing;
+    the operator charges the tokenized card (or receives the check) by hand in
+    IN, and MB learns the result later via ``check_sale_status``. This is the
+    crawl-walk-run phase-1 path — prove each card individually before any
+    automation.
 
     A sale with a client bills under that client; an anonymous walk-in bills under
-    the standing 'Walk-In' client. After creating the invoice we post a payment for
-    the sale's recorded amount so IN marks it Paid. Fail loud on any problem; on
-    failure nothing partial is trusted on the sale (the checkout view surfaces the
-    error and offers a retry).
+    the standing 'Walk-In' client. Fail loud on any problem; on failure nothing
+    partial is trusted on the sale (the caller surfaces the error and offers a retry).
     """
     from django.utils import timezone
 
@@ -314,6 +323,15 @@ def push_sale(sale):
     sale.invoice_ninja_id = invoice_id
     sale.invoice_ninja_ref = str(invoice.get('number') or '')
 
+    if draft:
+        # No payment posted — the invoice stays an unpaid Draft in IN.
+        sale.in_status = 'Draft'
+        sale.in_status_checked_at = timezone.now()
+        sale.save(update_fields=[
+            'invoice_ninja_id', 'invoice_ninja_ref', 'in_status', 'in_status_checked_at',
+        ])
+        return sale.invoice_ninja_ref or sale.invoice_ninja_id
+
     # Post the payment → IN marks the invoice Paid (not Draft).
     amount = float(sale.amount if sale.amount is not None else sale.line_items_total)
     payment_payload = {
@@ -335,3 +353,26 @@ def push_sale(sale):
         'invoice_ninja_id', 'invoice_ninja_ref', 'in_status', 'in_status_checked_at',
     ])
     return sale.invoice_ninja_ref or sale.invoice_ninja_id
+
+
+def check_sale_status(sale):
+    """Read a pushed sale's current invoice status back from IN and record it on
+    the sale — the read-back that keeps MB's mirror complete once the operator has
+    charged the card (or the check has cleared) in IN, without MB re-entering
+    anything. Mirrors check_invoice_status (WorkOrder), but writes the sale's own
+    in_status trio. Returns the human-readable status; raises on any problem."""
+    from django.utils import timezone
+
+    in_id = (sale.invoice_ninja_id or '').strip()
+    if not in_id:
+        raise InvoiceNinjaError('This sale has not been pushed to Invoice Ninja yet.')
+
+    data = _request('GET', f'/invoices/{in_id}')
+    invoice_data = data.get('data', {})
+    status_id = invoice_data.get('status_id')
+    label = _IN_STATUS_LABELS.get(int(status_id), f'Unknown ({status_id})') if status_id is not None else 'Unknown'
+
+    sale.in_status = label
+    sale.in_status_checked_at = timezone.now()
+    sale.save(update_fields=['in_status', 'in_status_checked_at'])
+    return label

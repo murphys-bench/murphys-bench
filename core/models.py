@@ -3,7 +3,7 @@ from django.contrib.auth.models import AbstractUser
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
-from django.core.validators import MinValueValidator
+from django.core.validators import MinValueValidator, MaxValueValidator
 from encrypted_model_fields.fields import EncryptedCharField, EncryptedTextField
 from django.conf import settings as django_settings
 from django.core.files.storage import FileSystemStorage
@@ -209,6 +209,13 @@ class Client(models.Model):
         validators=[MinValueValidator(0)],
         help_text='Optional. Pre-fills the monthly charge amount. Leave blank to enter it each month.',
     )
+    billing_day = models.PositiveSmallIntegerField(
+        default=1,
+        validators=[MinValueValidator(1), MaxValueValidator(31)],
+        help_text='Day of the month this managed client is billed (1–31). Nothing '
+                  'is hard-coded to the 1st — set each client to their own day. A day '
+                  'past the month end bills on the last day (e.g. 31 → Feb 28/29).',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -234,6 +241,24 @@ class Client(models.Model):
         return cls.objects.create(
             name=cls.UNSORTED_NAME, is_unsorted=True, is_active=True,
         )
+
+    def effective_billing_date(self, year, month):
+        """This managed client's billing date for the given month, clamped to the
+        month's actual last day so a billing_day past the month end still resolves
+        (31 → Feb 28/29, 30 → Feb, etc.). No day is treated specially — it's purely
+        this client's own billing_day."""
+        import calendar
+        from datetime import date
+        last_day = calendar.monthrange(year, month)[1]
+        return date(year, month, min(self.billing_day, last_day))
+
+    def is_billing_due(self, as_of=None):
+        """True once this client's billing day has arrived in as_of's month
+        (month-end-clamped). Drives the Monthly Clients worklist's 'due' filter —
+        a client billed on the 15th isn't due on the 1st."""
+        from django.utils import timezone
+        as_of = as_of or timezone.localdate()
+        return as_of >= self.effective_billing_date(as_of.year, as_of.month)
 
 
 class Contact(models.Model):

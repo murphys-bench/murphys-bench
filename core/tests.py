@@ -4506,7 +4506,7 @@ def test_charge_now_creates_draft_sale_with_prefilled_line_item(client, admin_us
     client_obj.monthly_amount = Decimal('50.00')
     client_obj.save()
     client.force_login(admin_user)
-    resp = client.post(reverse('core:client_charge_monthly', args=[client_obj.pk]))
+    resp = client.post(reverse('core:client_prepare_monthly', args=[client_obj.pk]))
     assert resp.status_code == 302
     sale = Sale.objects.get(client=client_obj, is_recurring=True)
     assert resp.url == reverse('core:sale_detail', args=[sale.pk])
@@ -4521,7 +4521,7 @@ def test_charge_now_blank_monthly_amount_creates_unpriced_line(client, admin_use
     client_obj.is_managed = True
     client_obj.save()
     client.force_login(admin_user)
-    client.post(reverse('core:client_charge_monthly', args=[client_obj.pk]))
+    client.post(reverse('core:client_prepare_monthly', args=[client_obj.pk]))
     sale = Sale.objects.get(client=client_obj, is_recurring=True)
     li = sale.line_items.get()
     assert li.unit_price is None
@@ -4540,9 +4540,9 @@ def test_charge_now_is_idempotent_within_the_month(client, admin_user, client_ob
     client_obj.is_managed = True
     client_obj.save()
     client.force_login(admin_user)
-    client.post(reverse('core:client_charge_monthly', args=[client_obj.pk]))
+    client.post(reverse('core:client_prepare_monthly', args=[client_obj.pk]))
     first_sale = Sale.objects.get(client=client_obj, is_recurring=True)
-    client.post(reverse('core:client_charge_monthly', args=[client_obj.pk]))
+    client.post(reverse('core:client_prepare_monthly', args=[client_obj.pk]))
     assert Sale.objects.filter(client=client_obj, is_recurring=True).count() == 1
     assert Sale.objects.get(client=client_obj, is_recurring=True).pk == first_sale.pk
 
@@ -4563,8 +4563,215 @@ def test_charge_now_role_block_403(client, client_obj):
     client_obj.is_managed = True
     client_obj.save()
     client.force_login(user)
-    resp = client.post(reverse('core:client_charge_monthly', args=[client_obj.pk]))
+    resp = client.post(reverse('core:client_prepare_monthly', args=[client_obj.pk]))
     assert resp.status_code == 403
+
+
+# ── Lane C Slice 5b: billing day, draft push, batch + safety catch ──────────
+
+@pytest.mark.django_db
+def test_billing_day_month_end_clamp():
+    """A billing_day past a short month's end resolves to that month's last day —
+    31 → Feb 28 in a common year, not an invalid date."""
+    from datetime import date
+    c = Client.objects.create(name='Clamp Co', is_managed=True, billing_day=31)
+    assert c.effective_billing_date(2026, 2) == date(2026, 2, 28)   # 2026 not a leap year
+    assert c.effective_billing_date(2024, 2) == date(2024, 2, 29)   # leap year
+    assert c.effective_billing_date(2026, 1) == date(2026, 1, 31)   # long month unchanged
+
+
+@pytest.mark.django_db
+def test_is_billing_due_respects_client_day():
+    """Due only once the client's own billing day has arrived — no hard-coded 1st."""
+    from datetime import date
+    on_5th = Client.objects.create(name='Fifth Co', is_managed=True, billing_day=5)
+    on_15th = Client.objects.create(name='Fifteenth Co', is_managed=True, billing_day=15)
+    tenth = date(2026, 3, 10)
+    assert on_5th.is_billing_due(tenth) is True       # 5th has passed
+    assert on_15th.is_billing_due(tenth) is False     # 15th not reached
+
+
+@pytest.mark.django_db
+def test_push_sale_draft_creates_invoice_without_payment(client_obj, monkeypatch):
+    """Draft push posts /invoices only — never /payments — and marks the sale
+    Draft (not Paid). This is the phase-1 guarantee: MB charges nothing."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    sale = Sale.objects.create(client=client_obj, is_recurring=True)
+    LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
+                            quantity=1, unit_price=Decimal('100.00'))
+
+    calls = []
+    def fake_request(method, path, **kwargs):
+        calls.append((method, path))
+        if path == '/invoices':
+            return {'data': {'id': 987, 'number': 'INV-987'}}
+        raise AssertionError(f'Unexpected IN call in draft mode: {method} {path}')
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+
+    ref = invoice_ninja.push_sale(sale, draft=True)
+    sale.refresh_from_db()
+    assert ('POST', '/invoices') in calls
+    assert ('POST', '/payments') not in calls          # nothing charged
+    assert sale.invoice_ninja_id == '987'
+    assert sale.in_status == 'Draft'
+    assert ref == 'INV-987'
+
+
+@pytest.mark.django_db
+def test_push_sale_paid_still_posts_payment(client_obj, monkeypatch):
+    """Regression: the counter lane (draft=False) still posts /payments and marks Paid."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    sale = Sale.objects.create(client=client_obj, amount=Decimal('40.00'))
+    LineItem.objects.create(content_object=sale, kind='labor', description='Bench',
+                            quantity=1, unit_price=Decimal('40.00'))
+    calls = []
+    def fake_request(method, path, **kwargs):
+        calls.append((method, path))
+        if path == '/invoices':
+            return {'data': {'id': 5, 'number': 'INV-5'}}
+        return {'data': {'id': 1}}
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+
+    invoice_ninja.push_sale(sale, draft=False)
+    sale.refresh_from_db()
+    assert ('POST', '/payments') in calls
+    assert sale.in_status == 'Paid'
+
+
+@pytest.mark.django_db
+def test_check_sale_status_reads_back(client_obj, monkeypatch):
+    """check_sale_status maps IN's status_id to a label and records it on the sale."""
+    from core import invoice_ninja
+    sale = Sale.objects.create(client=client_obj, is_recurring=True, invoice_ninja_id='77')
+    monkeypatch.setattr(invoice_ninja, '_request',
+                        lambda method, path, **kw: {'data': {'status_id': '4'}})  # 4 = Paid
+    label = invoice_ninja.check_sale_status(sale)
+    sale.refresh_from_db()
+    assert label == 'Paid'
+    assert sale.in_status == 'Paid'
+
+
+@pytest.mark.django_db
+def test_send_draft_view_pushes_draft(client, admin_user, client_obj, monkeypatch):
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem, SiteSettings
+    site = SiteSettings.get(); site.invoice_ninja_enabled = True; site.save()
+    sale = Sale.objects.create(client=client_obj, is_recurring=True)
+    LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
+                            quantity=1, unit_price=Decimal('60.00'))
+    captured = {}
+    def fake_push(s, draft=False):
+        captured['draft'] = draft
+        s.invoice_ninja_id = '111'; s.in_status = 'Draft'
+        s.save(update_fields=['invoice_ninja_id', 'in_status'])
+        return 'INV-111'
+    monkeypatch.setattr(invoice_ninja, 'push_sale', fake_push)
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_send_draft', args=[sale.pk]))
+    assert resp.status_code == 302
+    assert captured['draft'] is True
+    sale.refresh_from_db()
+    assert sale.in_status == 'Draft'
+
+
+@pytest.mark.django_db
+def test_batch_prepare_only_due_clients(client, admin_user):
+    """'Prepare all due' creates drafts for due managed clients only, and is
+    idempotent (a second run adds nothing)."""
+    from datetime import date, datetime
+    from unittest.mock import patch
+    from django.utils import timezone as dj_tz
+    due = Client.objects.create(name='Due Co', is_managed=True, billing_day=1, monthly_amount=50)
+    not_due = Client.objects.create(name='Later Co', is_managed=True, billing_day=28, monthly_amount=50)
+    client.force_login(admin_user)
+    # Freeze "today" to the 10th so the 1st client is due, the 28th isn't. Freeze
+    # timezone.now() to the same month too, so the idempotency key (the sale's
+    # created_at month) lines up with the frozen billing month — in prod these
+    # are always the same clock; only a test that jumps months can split them.
+    frozen_now = dj_tz.make_aware(datetime(2026, 6, 10, 12, 0))
+    with patch('core.views.timezone.localdate', return_value=date(2026, 6, 10)), \
+         patch('django.utils.timezone.now', return_value=frozen_now):
+        client.post(reverse('core:monthly_batch_prepare'))
+        assert Sale.objects.filter(client=due, is_recurring=True).count() == 1
+        assert Sale.objects.filter(client=not_due, is_recurring=True).count() == 0
+        client.post(reverse('core:monthly_batch_prepare'))   # idempotent
+        assert Sale.objects.filter(client=due, is_recurring=True).count() == 1
+
+
+@pytest.mark.django_db
+def test_batch_send_confirmation_lists_prepared_and_total(client, admin_user, client_obj):
+    """The safety catch: GET shows exactly what will be sent + the grand total,
+    and pushes NOTHING (no IN call happens on the confirmation view)."""
+    from decimal import Decimal
+    from core.models import LineItem, SiteSettings
+    site = SiteSettings.get(); site.invoice_ninja_enabled = True; site.save()
+    client_obj.is_managed = True; client_obj.save()
+    sale = Sale.objects.create(client=client_obj, is_recurring=True)
+    LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
+                            quantity=1, unit_price=Decimal('125.00'))
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:monthly_batch_send'))
+    assert resp.status_code == 200
+    assert resp.context['count'] == 1
+    assert resp.context['total'] == Decimal('125.00')
+
+
+@pytest.mark.django_db
+def test_batch_send_post_pushes_drafts(client, admin_user, client_obj, monkeypatch):
+    """Confirming the batch pushes each prepared sale as a DRAFT."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem, SiteSettings
+    site = SiteSettings.get(); site.invoice_ninja_enabled = True; site.save()
+    client_obj.is_managed = True; client_obj.save()
+    sale = Sale.objects.create(client=client_obj, is_recurring=True)
+    LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
+                            quantity=1, unit_price=Decimal('125.00'))
+    modes = []
+    def fake_push(s, draft=False):
+        modes.append(draft)
+        s.invoice_ninja_id = '222'; s.save(update_fields=['invoice_ninja_id'])
+        return 'INV-222'
+    monkeypatch.setattr(invoice_ninja, 'push_sale', fake_push)
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:monthly_batch_send'))
+    assert resp.status_code == 302
+    assert modes == [True]                 # pushed as draft
+    sale.refresh_from_db()
+    assert sale.invoice_ninja_id == '222'
+
+
+@pytest.mark.django_db
+def test_worklist_states_reflect_lifecycle(client, admin_user, client_obj, monkeypatch):
+    """Worklist row state moves not_prepared → prepared → draft_in_in → paid."""
+    from decimal import Decimal
+    from core.models import LineItem, SiteSettings
+    site = SiteSettings.get(); site.invoice_ninja_enabled = True; site.save()
+    client_obj.is_managed = True; client_obj.save()
+    client.force_login(admin_user)
+
+    def state_for(c):
+        resp = client.get(reverse('core:monthly_clients_list'))
+        return next(r['state'] for r in resp.context['rows'] if r['client'] == c)
+
+    assert state_for(client_obj) == 'not_prepared'
+    sale = Sale.objects.create(client=client_obj, is_recurring=True)
+    LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
+                            quantity=1, unit_price=Decimal('50.00'))
+    assert state_for(client_obj) == 'prepared'
+    sale.invoice_ninja_id = '333'; sale.in_status = 'Draft'; sale.save()
+    assert state_for(client_obj) == 'draft_in_in'
+    sale.in_status = 'Paid'; sale.save()
+    assert state_for(client_obj) == 'paid'
 
 
 # ── Products & Services catalog (was QuickLaborItem) ────────────────────────
