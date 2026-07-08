@@ -234,9 +234,16 @@
                     <p class="text-xs text-gray-500 mt-0.5">Adds this client to the Monthly Clients list for recurring charges.</p>
                 </div>
             </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Monthly Amount <span class="text-gray-400 font-normal">(optional)</span></label>
-                {{ form.monthly_amount }}
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Monthly Amount <span class="text-gray-400 font-normal">(optional)</span></label>
+                    {{ form.monthly_amount }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Billing Day <span class="text-gray-400 font-normal">(1–31)</span></label>
+                    {{ form.billing_day }}
+                    <p class="text-xs text-gray-500 mt-0.5">Day of the month this client is billed. A day past a short month's end bills on its last day (31 → Feb 28).</p>
+                </div>
             </div>
         </div>
 

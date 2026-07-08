@@ -120,8 +120,13 @@
         </div>
     </div>
 
-    <!-- Checkout / payment -->
-    {% include "core/partials/sale_checkout_card.html" %}
+    <!-- Checkout / payment (recurring Lane C sales use the draft-push card;
+         counter sales use the paid-checkout card) -->
+    {% if sale.is_recurring %}
+        {% include "core/partials/sale_recurring_card.html" %}
+    {% else %}
+        {% include "core/partials/sale_checkout_card.html" %}
+    {% endif %}
 
     <!-- Actions -->
     <div class="flex flex-wrap gap-3">

@@ -1,0 +1,68 @@
+{% extends "core/base.html" %}
+
+{% block title %}Confirm Send Drafts - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow page-title-bar">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        <a href="{% url 'core:monthly_clients_list' %}" class="text-sm text-gray-400 hover:text-gray-600">← Monthly Clients</a>
+        <h1 class="text-2xl font-bold text-gray-900">Send drafts to Invoice Ninja</h1>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    {% if count %}
+    <div class="bg-amber-50 border border-amber-200 border-l-4 border-l-amber-500 rounded-lg px-4 py-3 mb-4">
+        <p class="text-sm text-amber-800">
+            This will create <strong>{{ count }}</strong> draft invoice{{ count|pluralize }} in Invoice Ninja totalling
+            <strong>${{ total }}</strong>. Drafts are <strong>not charged</strong> — you charge each card by hand in
+            Invoice Ninja afterward. Review the list below before confirming.
+        </p>
+    </div>
+
+    <div class="bg-white rounded-lg shadow overflow-hidden mb-4">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Billing Date</th>
+                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                {% for row in rows %}
+                <tr>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{{ row.client.name }}</td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{{ row.billing_date|date:"M j, Y" }}</td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900">${{ row.amount }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot class="bg-gray-50">
+                <tr>
+                    <td class="px-4 py-3 text-sm font-semibold text-gray-900" colspan="2">Total</td>
+                    <td class="px-4 py-3 text-sm font-bold text-right text-gray-900">${{ total }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+
+    <div class="flex items-center gap-3">
+        <form method="post" action="{% url 'core:monthly_batch_send' %}">
+            {% csrf_token %}
+            <button type="submit" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">
+                Confirm — send {{ count }} draft{{ count|pluralize }}
+            </button>
+        </form>
+        <a href="{% url 'core:monthly_clients_list' %}" class="px-5 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">Cancel</a>
+    </div>
+    {% else %}
+    <div class="bg-white rounded-lg shadow px-6 py-12 text-center">
+        <p class="text-gray-400 mb-3">No prepared drafts waiting to send.</p>
+        <a href="{% url 'core:monthly_clients_list' %}" class="text-blue-600 hover:underline text-sm">← Back to Monthly Clients</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
