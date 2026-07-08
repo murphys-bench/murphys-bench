@@ -1,7 +1,7 @@
 {% comment %}A collapsible catalog card (Services or Products). Items are grouped by
 category with a divider per category. Inherits can_edit + type_choices from
 the parent context. Expects: title, groups (by_category dict), count, empty_text.{% endcomment %}
-<div class="bg-white rounded-lg shadow" x-data="{ open: true }">
+<div class="bg-white rounded-lg shadow" x-data="{ open: false }">
     <button type="button" @click="open = !open"
             style="background-color: var(--color-accent);"
             class="w-full flex items-center justify-between px-6 py-4 text-left rounded-t-lg text-white">
@@ -14,7 +14,7 @@ the parent context. Expects: title, groups (by_category dict), count, empty_text
     </button>
     <div x-show="open" x-cloak class="border-t border-gray-100">
         {% for category, group_items in groups.items %}
-        <div x-data="{ catOpen: true }">
+        <div x-data="{ catOpen: false }">
         <button type="button" @click="catOpen = !catOpen"
                 style="color: var(--color-accent); border-left: 4px solid var(--color-accent);"
                 class="w-full flex items-center justify-between px-6 py-2 bg-gray-100 border-b border-gray-200 text-xs font-bold uppercase tracking-wide hover:bg-gray-200 text-left">
