@@ -2152,18 +2152,60 @@ class SaleDeleteView(SaleAccessMixin, View):
         return redirect('core:sale_list')
 
 
+def _recurring_sale_this_month(client, today=None):
+    """This calendar month's recurring Sale for a client, or None. The idempotency
+    key for the whole lane — one recurring charge per client per month."""
+    today = today or timezone.localdate()
+    return Sale.objects.filter(
+        client=client, is_recurring=True,
+        created_at__year=today.year, created_at__month=today.month,
+    ).first()
+
+
+def _monthly_row_state(sale):
+    """Derive a managed client's state for this month from its recurring Sale:
+      not_prepared → no sale yet
+      prepared     → sale exists in MB, not yet pushed to IN
+      draft_in_in  → pushed as a draft invoice, awaiting payment
+      paid         → IN reports it Paid (read back)
+    """
+    if sale is None:
+        return 'not_prepared'
+    if not sale.invoice_ninja_id:
+        return 'prepared'
+    if (sale.in_status or '').lower() == 'paid':
+        return 'paid'
+    return 'draft_in_in'
+
+
+def _prepare_recurring_sale(client, user, today=None):
+    """Create this month's recurring draft Sale + its 'Monthly Service' line at the
+    client's monthly_amount. Idempotent per calendar month — returns the existing
+    one untouched if already prepared. Nothing touches Invoice Ninja here."""
+    sale = _recurring_sale_this_month(client, today)
+    if sale is not None:
+        return sale, False
+    sale = Sale.objects.create(client=client, is_recurring=True, created_by=user)
+    LineItem.objects.create(
+        content_object=sale, kind='labor', description='Monthly Service',
+        quantity=1, unit_price=client.monthly_amount,
+        logged_by=user,
+    )
+    return sale, True
+
+
 class MonthlyClientsListView(SaleAccessMixin, ListView):
-    """The recurring-billing worklist (Lane C): every is_managed client, with
-    this month's recurring Sale (if any) resolved so Mike can work down the
-    list — Not started / Draft in progress / Completed. Reuses can_view_sales;
-    no dedicated flag (a recurring charge is just a kind of Sale)."""
+    """The recurring-billing worklist (Lane C): every is_managed client, each with
+    this month's recurring Sale resolved to a state (Not prepared / Prepared /
+    Draft in IN / Paid), their own billing day, and whether they're due yet.
+    Reuses can_view_sales — a recurring charge is just a kind of Sale."""
 
     model = Client
     template_name = 'core/monthly_clients_list.html'
     context_object_name = 'clients'
 
     def get_queryset(self):
-        return Client.objects.filter(is_managed=True, is_active=True).order_by('name')
+        return Client.objects.filter(is_managed=True, is_active=True).order_by('billing_day', 'name')
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -2176,32 +2218,173 @@ class MonthlyClientsListView(SaleAccessMixin, ListView):
             )
         }
         rows = []
+        due_unprepared = 0        # due, no sale yet → the batch "Prepare all due" target
+        prepared_unsent = 0       # prepared in MB, not yet pushed → "Send drafts" target
         for client in ctx['clients']:
-            rows.append({'client': client, 'sale': sales_this_month.get(client.id)})
+            sale = sales_this_month.get(client.id)
+            state = _monthly_row_state(sale)
+            is_due = client.is_billing_due(today)
+            rows.append({
+                'client': client,
+                'sale': sale,
+                'state': state,
+                'is_due': is_due,
+                'billing_date': client.effective_billing_date(today.year, today.month),
+            })
+            if is_due and state == 'not_prepared':
+                due_unprepared += 1
+            if state == 'prepared':
+                prepared_unsent += 1
         ctx['rows'] = rows
+        ctx['due_unprepared_count'] = due_unprepared
+        ctx['prepared_unsent_count'] = prepared_unsent
+        ctx['invoice_ninja_enabled'] = SiteSettings.get().invoice_ninja_enabled
+        ctx['today'] = today
         return ctx
 
 
-class MonthlyChargeView(SaleAccessMixin, View):
-    """'Charge Now' on the Monthly Clients list. Idempotent within a calendar
-    month — a second click (or a page revisit) lands on the SAME Sale rather
-    than creating a duplicate recurring charge for the same client/month."""
+class MonthlyPrepareView(SaleAccessMixin, View):
+    """Single 'Prepare draft' on the worklist — creates this month's editable
+    recurring Sale for one client and lands on it so the amount can be reviewed.
+    Idempotent per month. Nothing is sent to Invoice Ninja here."""
 
     def post(self, request, pk):
         client = get_object_or_404(Client, pk=pk, is_managed=True)
-        today = timezone.localdate()
-        sale = Sale.objects.filter(
-            client=client, is_recurring=True,
-            created_at__year=today.year, created_at__month=today.month,
-        ).first()
-        if sale is None:
-            sale = Sale.objects.create(client=client, is_recurring=True, created_by=request.user)
-            LineItem.objects.create(
-                content_object=sale, kind='labor', description='Monthly Service',
-                quantity=1, unit_price=client.monthly_amount,
-                logged_by=request.user,
-            )
+        sale, _created = _prepare_recurring_sale(client, request.user)
         return redirect('core:sale_detail', pk=sale.pk)
+
+
+class SaleDraftSendView(SaleAccessMixin, View):
+    """Send ONE recurring sale to Invoice Ninja as an unpaid DRAFT (no payment
+    posted, nothing charged). Phase-1 path: MB creates the draft, the operator
+    charges the card by hand in IN. Duplicate-guarded like the counter re-send."""
+
+    def post(self, request, pk):
+        from . import invoice_ninja
+        sale = get_object_or_404(Sale, pk=pk, is_recurring=True)
+        if not SiteSettings.get().invoice_ninja_enabled:
+            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
+            return redirect('core:sale_detail', pk=pk)
+        if sale.line_items_total <= 0:
+            messages.error(request, 'Add a priced line item before sending a draft.')
+            return redirect('core:sale_detail', pk=pk)
+        if sale.invoice_ninja_id and request.POST.get('confirm_resend') != '1':
+            messages.warning(
+                request,
+                f'{sale.sale_number} was already sent as a draft '
+                f'(#{sale.invoice_ninja_ref or sale.invoice_ninja_id}). Use "Re-send draft" to push again.'
+            )
+            return redirect('core:sale_detail', pk=pk)
+        try:
+            ref = invoice_ninja.push_sale(sale, draft=True)
+            messages.success(
+                request,
+                f'{sale.sale_number} sent to Invoice Ninja as a draft — invoice #{ref}. '
+                'Charge the card in Invoice Ninja, then use "Check IN" to record payment.'
+            )
+        except invoice_ninja.InvoiceNinjaError as e:
+            messages.error(request, f'Sending the draft to Invoice Ninja failed: {e}')
+        return redirect('core:sale_detail', pk=pk)
+
+
+class SaleCheckINView(SaleAccessMixin, View):
+    """Read a recurring sale's invoice status back from IN (Draft/Paid/…) so the
+    worklist reflects payments the operator made by hand in IN, without re-entry."""
+
+    def post(self, request, pk):
+        from . import invoice_ninja
+        sale = get_object_or_404(Sale, pk=pk)
+        next_url = request.POST.get('next') or reverse('core:sale_detail', kwargs={'pk': pk})
+        if not sale.invoice_ninja_id:
+            messages.error(request, f'{sale.sale_number} has not been sent to Invoice Ninja yet.')
+            return redirect(next_url)
+        try:
+            label = invoice_ninja.check_sale_status(sale)
+            messages.success(request, f'{sale.sale_number}: Invoice Ninja reports {label}.')
+        except invoice_ninja.InvoiceNinjaError as e:
+            messages.error(request, f'Could not read status from Invoice Ninja: {e}')
+        return redirect(next_url)
+
+
+class MonthlyBatchPrepareView(SaleAccessMixin, View):
+    """Batch 'Prepare all due' — create this month's editable draft Sale for every
+    managed+active client whose billing day has arrived and who has no sale yet.
+    Nothing touches IN; the operator reviews the worklist before sending."""
+
+    def post(self, request):
+        today = timezone.localdate()
+        clients = Client.objects.filter(is_managed=True, is_active=True)
+        prepared = 0
+        for client in clients:
+            if not client.is_billing_due(today):
+                continue
+            _sale, created = _prepare_recurring_sale(client, request.user, today)
+            if created:
+                prepared += 1
+        if prepared:
+            messages.success(request, f'Prepared {prepared} draft{"s" if prepared != 1 else ""}. Review amounts, then send to Invoice Ninja.')
+        else:
+            messages.info(request, 'No new drafts to prepare — every due client already has one.')
+        return redirect('core:monthly_clients_list')
+
+
+class MonthlyBatchSendView(SaleAccessMixin, View):
+    """Batch 'Send prepared drafts to Invoice Ninja' — the safety catch. GET shows
+    a confirmation listing exactly what will be created in IN (each client, amount,
+    billing date, and the grand total); POST (confirmed) pushes each as a DRAFT.
+    Only prepared-but-not-yet-pushed sales are eligible — never re-pushes."""
+
+    def _prepared_sales(self, today):
+        return list(
+            Sale.objects.filter(
+                is_recurring=True, invoice_ninja_id='',
+                created_at__year=today.year, created_at__month=today.month,
+                client__is_managed=True, client__is_active=True,
+            ).select_related('client').order_by('client__billing_day', 'client__name')
+        )
+
+    def get(self, request):
+        from decimal import Decimal
+        if not SiteSettings.get().invoice_ninja_enabled:
+            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
+            return redirect('core:monthly_clients_list')
+        today = timezone.localdate()
+        sales = self._prepared_sales(today)
+        rows = [{
+            'sale': s,
+            'client': s.client,
+            'amount': s.line_items_total,
+            'billing_date': s.client.effective_billing_date(today.year, today.month),
+        } for s in sales]
+        total = sum((r['amount'] for r in rows), Decimal('0'))
+        return render(request, 'core/monthly_batch_send_confirm.html', {
+            'rows': rows, 'total': total, 'count': len(rows),
+        })
+
+    def post(self, request):
+        from . import invoice_ninja
+        if not SiteSettings.get().invoice_ninja_enabled:
+            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
+            return redirect('core:monthly_clients_list')
+        today = timezone.localdate()
+        sales = self._prepared_sales(today)
+        sent, failed = 0, []
+        for sale in sales:
+            if sale.line_items_total <= 0:
+                failed.append(f'{sale.client.name} (no priced line)')
+                continue
+            try:
+                invoice_ninja.push_sale(sale, draft=True)
+                sent += 1
+            except invoice_ninja.InvoiceNinjaError as e:
+                failed.append(f'{sale.client.name} ({e})')
+        if sent:
+            messages.success(request, f'Sent {sent} draft{"s" if sent != 1 else ""} to Invoice Ninja.')
+        if failed:
+            messages.warning(request, 'Some drafts were not sent: ' + '; '.join(failed))
+        if not sent and not failed:
+            messages.info(request, 'No prepared drafts to send.')
+        return redirect('core:monthly_clients_list')
 
 
 class SaleLaborLogView(SaleAccessMixin, View):

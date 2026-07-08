@@ -116,12 +116,13 @@ class ClientForm(forms.ModelForm):
         fields = [
             'name', 'client_type', 'email', 'phone',
             'address_line1', 'address_line2', 'address_city', 'address_state', 'address_zip',
-            'notes', 'is_active', 'is_managed', 'monthly_amount',
+            'notes', 'is_active', 'is_managed', 'monthly_amount', 'billing_day',
         ]
         widgets = {
             'name': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'is_managed': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
             'monthly_amount': forms.NumberInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'step': '0.01', 'min': '0', 'placeholder': 'Optional'}),
+            'billing_day': forms.NumberInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'min': '1', 'max': '31'}),
             'email': forms.EmailInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'phone': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'address_line1': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'Street address'}),
@@ -133,6 +134,15 @@ class ClientForm(forms.ModelForm):
             'client_type': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'is_active': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # billing_day only matters for managed clients; tolerate an omitted/blank
+        # value by falling back to the model default rather than erroring the form.
+        self.fields['billing_day'].required = False
+
+    def clean_billing_day(self):
+        return self.cleaned_data.get('billing_day') or 1
 
 
 _PROSPECT_INPUT = ('w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm '

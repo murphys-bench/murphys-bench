@@ -1,0 +1,44 @@
+{% comment %}
+Recurring (Lane C) charge card. Phase 1: MB sends a DRAFT invoice to Invoice
+Ninja — nothing is charged. The operator charges the card by hand in IN, then
+"Check IN" reads the status back so MB's record stays complete.
+{% endcomment %}
+<div class="bg-white rounded-lg shadow p-6" id="sale-recurring-card">
+    <h2 class="text-base font-semibold text-gray-900 mb-1">Recurring charge</h2>
+    <p class="text-xs text-gray-500 mb-4">Monthly billing. Sending creates a <strong>draft</strong> invoice in Invoice Ninja — it charges nothing. Charge the card in Invoice Ninja, then Check IN to record payment here.</p>
+
+    {% if sale.invoice_ninja_id %}
+        <div class="flex flex-wrap items-center gap-3">
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium
+                {% if sale.in_status|lower == 'paid' %}bg-green-100 text-green-800{% else %}bg-blue-100 text-blue-800{% endif %}">
+                Invoice Ninja → #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }}{% if sale.in_status %} · {{ sale.in_status }}{% endif %}
+            </span>
+            {% if sale.in_status_checked_at %}<span class="text-xs text-gray-400">checked {{ sale.in_status_checked_at|date:"M j, g:i A" }}</span>{% endif %}
+        </div>
+        {% if invoice_ninja_enabled %}
+        <div class="mt-4 pt-4 border-t border-gray-100 flex flex-wrap gap-3">
+            <form method="post" action="{% url 'core:sale_check_in' sale.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 font-medium">Check IN</button>
+            </form>
+            <form method="post" action="{% url 'core:sale_send_draft' sale.pk %}"
+                  onsubmit="return confirm('Re-send this as another draft invoice in Invoice Ninja?');">
+                {% csrf_token %}
+                <input type="hidden" name="confirm_resend" value="1">
+                <button type="submit" class="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-md hover:bg-gray-50">Re-send draft</button>
+            </form>
+        </div>
+        {% endif %}
+    {% elif invoice_ninja_enabled %}
+        {% if has_priced_lines %}
+        <form method="post" action="{% url 'core:sale_send_draft' sale.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">Send draft to Invoice Ninja</button>
+        </form>
+        {% else %}
+        <p class="text-sm text-gray-500">Add a priced line item above before sending a draft.</p>
+        {% endif %}
+    {% else %}
+        <p class="text-sm text-gray-400">Recorded in Murphy's Bench only (Invoice Ninja not enabled).</p>
+    {% endif %}
+</div>
