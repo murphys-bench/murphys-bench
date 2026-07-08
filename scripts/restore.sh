@@ -101,21 +101,23 @@ if [ "$WITH_ENV" = 1 ]; then
     log ".env restored (chmod 600)"
 fi
 
-# 7) Restart and health-check (same logic as update.sh: 2xx/3xx/4xx = alive).
+# 7) Restart and health-check (same logic as update.sh: real Host header, 2xx/3xx = alive).
 log "starting murphys-bench..."
 sudo systemctl start murphys-bench || fail "service start failed (current state preserved in $SAFE)"
 
+PROBE_HOST="$(grep -E '^ALLOWED_HOSTS=' .env 2>/dev/null | cut -d= -f2- | cut -d, -f1)"
+PROBE_HOST="${PROBE_HOST:-127.0.0.1}"
 code=000
 for _ in $(seq 1 15); do
     if systemctl is-active --quiet murphys-bench; then
-        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/ || echo 000)"
-        case "$code" in 2*|3*|4*) break ;; esac
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "Host: $PROBE_HOST" http://127.0.0.1/ || echo 000)"
+        case "$code" in 2*|3*) break ;; esac
     fi
     sleep 1
 done
 case "$code" in
-    2*|3*|4*) log "app healthy (HTTP $code)" ;;
-    *)        fail "app not healthy after restore (HTTP $code). Pre-restore state is in $SAFE — to revert: scripts/restore.sh of that copy, or copy it back by hand and restart." ;;
+    2*|3*) log "app healthy (HTTP $code, Host: $PROBE_HOST)" ;;
+    *)     fail "app not healthy after restore (HTTP $code, Host: $PROBE_HOST). Pre-restore state is in $SAFE — to revert: scripts/restore.sh of that copy, or copy it back by hand and restart." ;;
 esac
 
 # 8) FIELD_ENCRYPTION_KEY reminder — the one thing a DB restore can't carry on its own.
