@@ -719,6 +719,9 @@ class ClientDetailView(LoginRequiredMixin, DetailView):
             amount__isnull=False,
         ).aggregate(total=Sum('amount'))['total']
         context['outstanding_balance'] = outstanding
+        if self.object.is_managed:
+            context['catalog_by_category'] = _catalog_by_category()
+            context['recurring_entries'] = _line_items_for(self.object)
         return context
 
 
@@ -2179,18 +2182,29 @@ def _monthly_row_state(sale):
 
 
 def _prepare_recurring_sale(client, user, today=None):
-    """Create this month's recurring draft Sale + its 'Monthly Service' line at the
-    client's monthly_amount. Idempotent per calendar month — returns the existing
-    one untouched if already prepared. Nothing touches Invoice Ninja here."""
+    """Create this month's recurring draft Sale by CLONING the client's recurring
+    template lines (named catalog services / custom lines, each with qty + price)
+    into it. A client with no template lines falls back to a single generic
+    'Monthly Service' line at its flat monthly_amount — so simple clients stay
+    simple. Idempotent per calendar month. Nothing touches Invoice Ninja here."""
     sale = _recurring_sale_this_month(client, today)
     if sale is not None:
         return sale, False
     sale = Sale.objects.create(client=client, is_recurring=True, created_by=user)
-    LineItem.objects.create(
-        content_object=sale, kind='labor', description='Monthly Service',
-        quantity=1, unit_price=client.monthly_amount,
-        logged_by=user,
-    )
+    template = list(client.line_items.all())
+    if template:
+        for tl in template:
+            LineItem.objects.create(
+                content_object=sale, kind=tl.kind, description=tl.description,
+                quantity=tl.quantity, unit_price=tl.unit_price,
+                catalog_item=tl.catalog_item, notes=tl.notes, logged_by=user,
+            )
+    else:
+        LineItem.objects.create(
+            content_object=sale, kind='labor', description='Monthly Service',
+            quantity=1, unit_price=client.monthly_amount,
+            logged_by=user,
+        )
     return sale, True
 
 
@@ -2385,6 +2399,39 @@ class MonthlyBatchSendView(SaleAccessMixin, View):
         if not sent and not failed:
             messages.info(request, 'No prepared drafts to send.')
         return redirect('core:monthly_clients_list')
+
+
+class ClientRecurringLogView(SaleAccessMixin, View):
+    """HTMX: add a catalog item to a client's recurring monthly template."""
+
+    def post(self, request, client_pk, item_pk):
+        client = get_object_or_404(Client, pk=client_pk)
+        item = get_object_or_404(CatalogItem, pk=item_pk, is_active=True)
+        _log_catalog_item(client, item, request.user)
+        return _render_line_items(request, client)
+
+
+class ClientRecurringCustomLogView(SaleAccessMixin, View):
+    """HTMX: add a fully custom line to a client's recurring monthly template."""
+
+    def post(self, request, client_pk):
+        client = get_object_or_404(Client, pk=client_pk)
+        label = request.POST.get('custom_label', '').strip()
+        notes = request.POST.get('notes', '').strip()
+        kind = request.POST.get('kind', 'labor')
+        if kind not in ('labor', 'part'):
+            kind = 'labor'
+        qty = _parse_qty(request.POST.get('quantity'))
+        if label:
+            client.line_items.create(
+                kind=kind,
+                description=label[:255],
+                quantity=qty if qty is not None else 1,
+                unit_price=_parse_price(request.POST.get('unit_price')),
+                notes=notes,
+                logged_by=request.user,
+            )
+        return _render_line_items(request, client)
 
 
 class SaleLaborLogView(SaleAccessMixin, View):
@@ -4417,6 +4464,13 @@ def _render_line_items(request, host):
     from django.template.loader import render_to_string
     if isinstance(host, EstimateOption):
         host = host.estimate
+    if isinstance(host, Client):
+        # Client hosts recurring billing TEMPLATE lines (Lane C) — same editable
+        # line UI as everywhere else, its own swap target.
+        return render(request, 'core/partials/client_recurring_lines.html', {
+            'client': host,
+            'entries': _line_items_for(host),
+        })
     if isinstance(host, Estimate):
         return render(request, 'core/partials/estimate_line_items.html', {
             'estimate': host,
