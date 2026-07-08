@@ -130,20 +130,27 @@ sudo systemctl restart murphys-bench || rollback "service restart failed"
 # 8) Health check — poll until the app finishes warming up after the restart, then
 #    confirm it answers. We probe nginx on :80 (works whether gunicorn is on a unix
 #    socket or a TCP port — nginx fronts both); we do NOT assume a specific socket
-#    path. A 2xx/3xx/4xx means the stack is alive (a 4xx is just ALLOWED_HOSTS
-#    rejecting the bare-IP request — still healthy); a 5xx or no connection after
-#    the grace window is a real failure.
+#    path. We connect to 127.0.0.1 (no dependency on LAN routing/DNS) but send the
+#    real Host header from ALLOWED_HOSTS, so the probe exercises the same
+#    Django ALLOWED_HOSTS check real traffic hits — previously this probed with
+#    Host: 127.0.0.1, which prod's ALLOWED_HOSTS omitted, so it always got a 400
+#    that was then excused as "still healthy." That masked the check rather than
+#    passing it: a real ALLOWED_HOSTS misconfiguration would have reported
+#    healthy too. Now a 2xx/3xx means genuinely healthy; a 4xx or 5xx (or no
+#    connection) after the grace window is a real failure and triggers rollback.
+PROBE_HOST="$(grep -E '^ALLOWED_HOSTS=' .env 2>/dev/null | cut -d= -f2- | cut -d, -f1)"
+PROBE_HOST="${PROBE_HOST:-127.0.0.1}"
 code=000
 for _ in $(seq 1 15); do
     if systemctl is-active --quiet murphys-bench; then
-        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/ || echo 000)"
-        case "$code" in 2*|3*|4*) break ;; esac
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "Host: $PROBE_HOST" http://127.0.0.1/ || echo 000)"
+        case "$code" in 2*|3*) break ;; esac
     fi
     sleep 1
 done
 case "$code" in
-    2*|3*|4*) log "app healthy (HTTP $code)" ;;
-    *)        rollback "app not healthy after restart (HTTP $code)" ;;
+    2*|3*) log "app healthy (HTTP $code, Host: $PROBE_HOST)" ;;
+    *)     rollback "app not healthy after restart (HTTP $code, Host: $PROBE_HOST)" ;;
 esac
 
 log "DONE: $PREV_VER ($PREV) -> $NEW_VER ($NEW)."
