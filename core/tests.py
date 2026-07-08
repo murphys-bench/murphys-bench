@@ -4925,6 +4925,19 @@ def test_catalog_list_visible_to_all_but_edit_admin_only(client, client_obj):
 
 
 @pytest.mark.django_db
+def test_catalog_list_items_alphabetical_within_category(client, admin_user):
+    # Items within a category sort alphabetically by name (case-insensitive),
+    # ignoring sort_order (which carries legacy values with no UI to edit).
+    CatalogItem.objects.create(name='Tutoring', category='General', sort_order=1)
+    CatalogItem.objects.create(name='New System Setup', category='General', sort_order=2)
+    CatalogItem.objects.create(name='printer install', category='General', sort_order=3)
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:catalog_list'))
+    names = [i.name for i in resp.context['services_by_category']['General']]
+    assert names == ['New System Setup', 'printer install', 'Tutoring']
+
+
+@pytest.mark.django_db
 def test_catalog_create_and_delete_gated_to_admin(client, client_obj):
     role = Role.objects.create(name='Tech2', can_manage_settings=False)
     tech = User.objects.create_user(username='techd', password='x', role_obj=role)
