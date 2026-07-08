@@ -4774,6 +4774,119 @@ def test_worklist_states_reflect_lifecycle(client, admin_user, client_obj, monke
     assert state_for(client_obj) == 'paid'
 
 
+# ── Lane C: per-client recurring line templates (cloned into the monthly draft) ──
+
+@pytest.mark.django_db
+def test_prepare_clones_client_recurring_template_lines(admin_user):
+    """A managed client's recurring template lines (multiple services, quantities,
+    negotiated prices) are cloned into the month's draft — not a single generic
+    Monthly Service line."""
+    from decimal import Decimal
+    from core.models import LineItem, CatalogItem
+    from core.views import _prepare_recurring_sale
+    c = Client.objects.create(name='Multi Svc Co', is_managed=True)
+    svc = CatalogItem.objects.create(name='Managed IT', category='Managed', item_type='service')
+    # Template: a catalog service + a per-endpoint line at a negotiated qty/price.
+    c.line_items.create(kind='labor', description='Managed IT', quantity=1,
+                        unit_price=Decimal('150.00'), catalog_item=svc)
+    c.line_items.create(kind='labor', description='Managed Workstation', quantity=4,
+                        unit_price=Decimal('45.00'))
+
+    sale, created = _prepare_recurring_sale(c, admin_user)
+    assert created
+    lines = {li.description: li for li in sale.line_items.all()}
+    assert set(lines) == {'Managed IT', 'Managed Workstation'}
+    assert lines['Managed Workstation'].quantity == Decimal('4')
+    assert lines['Managed Workstation'].unit_price == Decimal('45.00')
+    assert lines['Managed IT'].catalog_item_id == svc.pk
+    # 150 + 4×45 = 330
+    assert sale.line_items_total == Decimal('330.00')
+
+
+@pytest.mark.django_db
+def test_prepare_falls_back_to_monthly_amount_without_template(admin_user):
+    """A managed client with NO template lines still gets the simple single
+    Monthly Service line at monthly_amount — simple clients stay simple."""
+    from decimal import Decimal
+    from core.views import _prepare_recurring_sale
+    c = Client.objects.create(name='Simple Co', is_managed=True, monthly_amount=Decimal('75.00'))
+    sale, _created = _prepare_recurring_sale(c, admin_user)
+    li = sale.line_items.get()
+    assert li.description == 'Monthly Service'
+    assert li.unit_price == Decimal('75.00')
+
+
+@pytest.mark.django_db
+def test_client_recurring_total_sums_priced_lines():
+    from decimal import Decimal
+    c = Client.objects.create(name='Total Co', is_managed=True)
+    c.line_items.create(kind='labor', description='A', quantity=2, unit_price=Decimal('10.00'))
+    c.line_items.create(kind='labor', description='B', quantity=1, unit_price=None)  # unpriced ignored
+    assert c.recurring_total == Decimal('20.00')
+
+
+@pytest.mark.django_db
+def test_client_recurring_catalog_and_custom_log_views(client, admin_user):
+    """Adding catalog + custom lines to a client's recurring template via the
+    HTMX views, re-rendering the client recurring partial."""
+    from decimal import Decimal
+    from core.models import CatalogItem
+    c = Client.objects.create(name='Editable Co', is_managed=True)
+    svc = CatalogItem.objects.create(name='Backup', category='Managed', item_type='service',
+                                     default_price=Decimal('40.00'))
+    client.force_login(admin_user)
+    r1 = client.post(reverse('core:client_recurring_log', args=[c.pk, svc.pk]))
+    assert r1.status_code == 200
+    r2 = client.post(reverse('core:client_recurring_custom', args=[c.pk]), {
+        'kind': 'labor', 'custom_label': 'Onsite hour', 'quantity': '2', 'unit_price': '90',
+    })
+    assert r2.status_code == 200
+    descs = sorted(li.description for li in c.line_items.all())
+    assert descs == ['Backup', 'Onsite hour']
+    assert c.recurring_total == Decimal('40.00') + Decimal('180.00')
+
+
+@pytest.mark.django_db
+def test_client_recurring_line_edit_and_delete_rerender_client_partial(client, admin_user):
+    """The host-agnostic WorkPerformed update/delete views handle a Client-hosted
+    line and re-render the client recurring partial (not a WO/Sale one)."""
+    c = Client.objects.create(name='EditDel Co', is_managed=True)
+    li = c.line_items.create(kind='labor', description='Svc', quantity=1, unit_price=10)
+    client.force_login(admin_user)
+    r = client.post(reverse('core:work_performed_update', args=[li.pk]), {
+        'custom_label': 'Svc renamed', 'quantity': '3', 'unit_price': '15',
+    })
+    assert r.status_code == 200
+    assert b'client-recurring-entry' in r.content   # re-rendered the CLIENT partial
+    li.refresh_from_db()
+    assert li.description == 'Svc renamed' and li.quantity == 3
+    client.post(reverse('core:work_performed_delete', args=[li.pk]))
+    assert c.line_items.count() == 0
+
+
+@pytest.mark.django_db
+def test_client_detail_shows_recurring_card_only_for_managed(client, admin_user):
+    managed = Client.objects.create(name='Managed Detail Co', is_managed=True)
+    plain = Client.objects.create(name='Plain Detail Co', is_managed=False)
+    client.force_login(admin_user)
+    r_managed = client.get(reverse('core:client_detail', args=[managed.pk]))
+    r_plain = client.get(reverse('core:client_detail', args=[plain.pk]))
+    assert b'Recurring monthly charges' in r_managed.content
+    assert b'Recurring monthly charges' not in r_plain.content
+
+
+@pytest.mark.django_db
+def test_client_recurring_role_block_403(client):
+    role = Role.objects.create(name='NoSalesRec', can_view_sales=False)
+    user = User.objects.create_user(username='techrec', password='x', role_obj=role)
+    c = Client.objects.create(name='Blocked Co', is_managed=True)
+    client.force_login(user)
+    resp = client.post(reverse('core:client_recurring_custom', args=[c.pk]), {
+        'custom_label': 'X', 'quantity': '1',
+    })
+    assert resp.status_code == 403
+
+
 # ── Products & Services catalog (was QuickLaborItem) ────────────────────────
 
 @pytest.mark.django_db

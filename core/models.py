@@ -216,6 +216,13 @@ class Client(models.Model):
                   'is hard-coded to the 1st — set each client to their own day. A day '
                   'past the month end bills on the last day (e.g. 31 → Feb 28/29).',
     )
+    # Recurring monthly billing TEMPLATE (Lane C). The Client is the 5th LineItem
+    # host (after WorkOrder/Estimate/Sale/EstimateOption) — these are the standing
+    # monthly charges (named catalog services or custom lines, each with qty +
+    # negotiated price) that the monthly run CLONES into that month's draft Sale.
+    # No DB column: GenericRelation is a reverse accessor. A client with no lines
+    # falls back to the flat monthly_amount (one generic "Monthly Service" line).
+    line_items = GenericRelation('LineItem')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -259,6 +266,19 @@ class Client(models.Model):
         from django.utils import timezone
         as_of = as_of or timezone.localdate()
         return as_of >= self.effective_billing_date(as_of.year, as_of.month)
+
+    @property
+    def recurring_total(self):
+        """Sum of the priced recurring template lines — what this client's monthly
+        draft will total. Unpriced lines ignored (same vocabulary as the other
+        LineItem hosts' line_items_total)."""
+        from decimal import Decimal
+        total = Decimal('0')
+        for li in self.line_items.all():
+            lt = li.line_total
+            if lt is not None:
+                total += lt
+        return total
 
 
 class Contact(models.Model):
