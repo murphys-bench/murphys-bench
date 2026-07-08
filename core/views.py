@@ -5692,7 +5692,11 @@ class CatalogListView(LoginRequiredMixin, ListView):
     context_object_name = 'items'
 
     def get_queryset(self):
-        qs = CatalogItem.objects.order_by('category', 'sort_order', 'name')
+        from django.db.models.functions import Lower
+        # Alphabetical by name within each category (case-insensitive), ignoring
+        # sort_order — the catalog list is a browse/reference view, not a curated
+        # ordering (sort_order carries legacy QuickLaborItem values with no UI to edit).
+        qs = CatalogItem.objects.order_by(Lower('category'), Lower('name'))
         search = self.request.GET.get('search')
         if search:
             qs = qs.filter(Q(name__icontains=search) | Q(category__icontains=search))
@@ -5704,7 +5708,8 @@ class CatalogListView(LoginRequiredMixin, ListView):
         ctx = super().get_context_data(**kwargs)
         # Split into Services and Products, each grouped by category (a divider
         # per category inside the card). Insertion order follows the queryset
-        # (category, sort_order, name), so categories render alphabetically.
+        # (category, name — both case-insensitive), so categories render
+        # alphabetically and items within a category are alphabetical by name.
         services, products = {}, {}
         for item in ctx['items']:
             bucket = products if item.item_type == 'product' else services
