@@ -869,6 +869,7 @@ class RoleForm(forms.ModelForm):
             'can_reply_customer', 'can_view_device_credentials', 'can_reset_user_mfa',
             'can_create_workorder', 'can_edit_workorder', 'can_close_workorder',
             'can_view_prospects', 'can_view_estimates', 'can_view_sales',
+            'can_process_payments',
         ]
         widgets = {
             'name': forms.TextInput(attrs={'class': _INPUT}),

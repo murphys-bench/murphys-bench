@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import timedelta
 from django.shortcuts import render, get_object_or_404, redirect
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -31,7 +32,7 @@ from .models import (
     SuppressedAddress,
     BlockedSender,
     SLAPlan, HelpTopic, TechSkill,
-    Notification, Prospect, Estimate, Sale, EstimateOption,
+    Notification, Prospect, Estimate, Sale, EstimateOption, PaymentChargeAttempt,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm, DeviceQuickAddForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
@@ -140,6 +141,15 @@ def _can_view_sales(user):
     """Sales are visible to everyone unless a role explicitly turns the flag
     off. Admins always qualify."""
     return _is_admin(user) or user.has_perm_flag('can_view_sales')
+
+
+def _can_process_payments(user):
+    """Who may trigger an on-file card charge (Slice 5d). Unlike the can_view_*
+    flags (visible-unless-blocked, default True), this is opt-in-only, default
+    False — charging money is deliberately NOT granted to admins-by-default the
+    way can_manage_settings is. Gated on superuser (same bar as MFA reset,
+    _can_reset_mfa) or the dedicated flag."""
+    return user.is_superuser or user.has_perm_flag('can_process_payments')
 
 
 def _can_reset_mfa(user):
@@ -2320,6 +2330,93 @@ class SaleCheckINView(SaleAccessMixin, View):
         return redirect(next_url)
 
 
+class SaleChargeView(SaleAccessMixin, View):
+    """Slice 5d — trigger Invoice Ninja to charge the client's card on file for
+    an already-pushed sale. GET renders a confirmation screen (server-computed
+    amount, explicit warning) before anything fires; POST performs the guarded
+    charge. Gated on can_process_payments (opt-in, default off — see
+    _can_process_payments), separately from can_view_sales, since viewing sales
+    and moving money are very different privilege levels.
+
+    Every attempt (success or failure) writes an immutable PaymentChargeAttempt
+    row. The charge itself only PROVES the trigger was queued in IN — it never
+    marks the sale Paid; that only ever comes from the check_sale_status
+    read-back this view calls afterward (see invoice_ninja.charge_sale_on_file)."""
+
+    def _amount(self, sale):
+        # Server-side only, from the sale's current priced line items — the
+        # same total that was on the invoice when it was pushed to IN (mirrors
+        # _sale_checkout_context's prefill). sale.amount is a counter-lane-only
+        # field (set by SaleCheckoutView) and doesn't apply to recurring sales,
+        # so it is deliberately NOT used here. Never trust an amount from the request.
+        from decimal import Decimal
+        return sale.line_items_total.quantize(Decimal('0.01'))
+
+    def get(self, request, pk):
+        if not _can_process_payments(request.user):
+            return HttpResponse('Forbidden', status=403)
+        sale = get_object_or_404(Sale, pk=pk)
+        if not sale.invoice_ninja_id:
+            messages.error(request, f'{sale.sale_number} has not been sent to Invoice Ninja yet — send it as a draft first.')
+            return redirect('core:sale_detail', pk=pk)
+        if (sale.in_status or '').strip().lower() == 'paid':
+            messages.info(request, f'{sale.sale_number} is already marked Paid.')
+            return redirect('core:sale_detail', pk=pk)
+        return render(request, 'core/sale_charge_confirm.html', {
+            'sale': sale,
+            'amount': self._amount(sale),
+        })
+
+    # A charge is async on IN's side; a second trigger fired before the first
+    # settles could double-charge. Refuse another charge on the same sale within
+    # this window of a prior *successful* trigger (kills double-clicks, back-button
+    # resubmits, and the in-flight race the stored-status check can't see). A
+    # legitimate retry after a confirmed decline is still possible once it lapses.
+    _CHARGE_COOLDOWN = timedelta(minutes=5)
+
+    def post(self, request, pk):
+        from . import invoice_ninja
+        if not _can_process_payments(request.user):
+            return HttpResponse('Forbidden', status=403)
+        sale = get_object_or_404(Sale, pk=pk)
+        if not SiteSettings.get().invoice_ninja_enabled:
+            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
+            return redirect('core:sale_detail', pk=pk)
+
+        recent = PaymentChargeAttempt.objects.filter(
+            sale=sale, result='success',
+            initiated_at__gte=timezone.now() - self._CHARGE_COOLDOWN,
+        ).exists()
+        if recent:
+            messages.warning(
+                request,
+                f'{sale.sale_number} was charged moments ago. Use "Check IN" to confirm '
+                'it posted before charging again.'
+            )
+            return redirect('core:sale_detail', pk=pk)
+
+        amount = self._amount(sale)
+        try:
+            label = invoice_ninja.charge_sale_on_file(sale)
+            PaymentChargeAttempt.objects.create(
+                sale=sale, invoice_ninja_id=sale.invoice_ninja_id, amount=amount,
+                initiated_by=request.user, result='success', in_status_after=label,
+            )
+            messages.success(
+                request,
+                f'{sale.sale_number}: charge initiated in Invoice Ninja (${amount}). '
+                f'Invoice Ninja currently reports "{label}" — the charge runs '
+                'asynchronously, so use "Check IN" in a moment to confirm it posted.'
+            )
+        except invoice_ninja.InvoiceNinjaError as e:
+            PaymentChargeAttempt.objects.create(
+                sale=sale, invoice_ninja_id=sale.invoice_ninja_id, amount=amount,
+                initiated_by=request.user, result='failed', error_message=str(e),
+            )
+            messages.error(request, f'Charging the card on file failed: {e}')
+        return redirect('core:sale_detail', pk=pk)
+
+
 class MonthlyBatchPrepareView(SaleAccessMixin, View):
     """Batch 'Prepare all due' — create this month's editable draft Sale for every
     managed+active client whose billing day has arrived and who has no sale yet.
@@ -4302,6 +4399,7 @@ _ROLE_FLAGS = [
     ('can_view_prospects',         'View Prospects'),
     ('can_view_estimates',         'View Estimates'),
     ('can_view_sales',             'View Sales'),
+    ('can_process_payments',       'Process Payments'),
 ]
 
 

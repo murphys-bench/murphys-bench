@@ -376,3 +376,54 @@ def check_sale_status(sale):
     sale.in_status_checked_at = timezone.now()
     sale.save(update_fields=['in_status', 'in_status_checked_at'])
     return label
+
+
+# Slice 5d — MB-initiated charge against a client's card on file. MB never
+# touches a card or money: this triggers IN's own auto-bill action against an
+# already-pushed invoice, IN charges the client's stored Square token, and MB
+# reads the result back. See memory project_mb_card_payment_security.
+
+def charge_sale_on_file(sale):
+    """Trigger Invoice Ninja to charge the client's card on file for this sale's
+    already-pushed invoice, via IN's bulk 'auto_bill' action (confirmed against
+    IN v5-stable source: POST /invoices/bulk {action:'auto_bill', ids:[...]}
+    dispatches IN's AutoBill job against the stored token).
+
+    IMPORTANT — the charge is ASYNCHRONOUS on IN's side. This call only proves
+    the charge was successfully QUEUED, never that it was actually paid. Payment
+    truth always comes from check_sale_status() (the existing phase-1 read-back),
+    which this function calls once immediately after triggering, purely to
+    record whatever status IN reports at that moment (often still unpaid — the
+    job may not have run yet). Callers must not treat this function's return
+    value as proof of payment.
+
+    Refuses (raises InvoiceNinjaError) if the sale hasn't been pushed yet or is
+    already marked Paid — never re-charges. Fails loud on any IN/transport error.
+
+    Double-charge safety: because a prior charge is async, MB's STORED in_status
+    can lag the real IN state. So we do a FRESH read-back against IN first and
+    refuse if it now reports Paid — this closes the window where a charge that
+    has since settled would otherwise be fired again. It also means an
+    unreachable IN aborts the charge (we never fire blind).
+    """
+    in_id = (sale.invoice_ninja_id or '').strip()
+    if not in_id:
+        raise InvoiceNinjaError('This sale has not been pushed to Invoice Ninja yet — send it as a draft first.')
+
+    # Fresh status from IN (updates sale.in_status) — not the possibly-stale
+    # stored value. Fails loud if IN is unreachable, so no charge fires blind.
+    current = check_sale_status(sale)
+    if current.strip().lower() == 'paid':
+        raise InvoiceNinjaError('This sale is already marked Paid in Invoice Ninja — refusing to charge again.')
+
+    _request('POST', '/invoices/bulk', json={'action': 'auto_bill', 'ids': [in_id]})
+
+    # Best-effort immediate read-back — the async job may not have run yet, so
+    # this often still reports the pre-charge status. That's expected; the
+    # operator uses "Check IN" again shortly after to see the real outcome.
+    try:
+        return check_sale_status(sale)
+    except InvoiceNinjaError:
+        # The trigger itself succeeded (we didn't raise above); a read-back
+        # failure right after shouldn't be reported as a charge failure.
+        return sale.in_status or 'Unknown'
