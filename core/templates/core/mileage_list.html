@@ -20,10 +20,10 @@
     </div>
 </div>
 <div class="max-w-7xl mx-auto px-4 pt-4 sm:px-6 lg:px-8">
-    <form method="get" class="w-full lg:w-2/3 mx-auto bg-white rounded-lg shadow px-4 py-3 flex flex-wrap items-center gap-2">
+    <form method="get" class="w-full lg:w-2/3 mx-auto bg-white rounded-lg shadow px-4 py-3 flex items-center gap-2">
         <label class="text-sm text-gray-600 shrink-0">Month</label>
         <input type="month" name="month" value="{{ request.GET.month }}"
-               class="flex-1 min-w-[180px] px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+               class="flex-1 min-w-0 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
         <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Filter</button>
         <a href="{% url 'core:mileage_list' %}" class="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium shrink-0">Clear</a>
     </form>
