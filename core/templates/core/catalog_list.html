@@ -6,23 +6,14 @@
 {% block page_header %}
 <div class="bg-white shadow page-title-bar">
     <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
-        <div class="flex items-center gap-4 flex-wrap">
+        <div class="flex items-center gap-4">
             <h1 class="text-2xl font-bold text-gray-900 shrink-0">Products &amp; Services</h1>
-            <form method="get" class="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
-                <input type="text" name="search" value="{{ request.GET.search }}"
-                       placeholder="Search name or category…"
-                       class="flex-1 min-w-[10rem] px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <a href="?{% if request.GET.search %}search={{ request.GET.search }}&{% endif %}{% if not show_inactive %}show_inactive=1{% endif %}"
-                   class="px-3 py-1.5 rounded-md text-sm font-medium border shrink-0 {% if show_inactive %}bg-gray-600 text-white border-gray-600{% else %}bg-white text-gray-700 border-gray-300 hover:bg-gray-50{% endif %}">
-                    Show Inactive
-                </a>
-                <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Search</button>
-                <a href="{% url 'core:catalog_list' %}" class="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium shrink-0">Clear</a>
-            </form>
+            <div class="flex-1"></div>
             {% include "core/partials/header_bell.html" %}
         </div>
     </div>
 </div>
+{% include "core/partials/list_search_bar.html" with search_value=request.GET.search search_placeholder="Search name or category…" filters_template="core/partials/_catalog_filters.html" filters_active=show_inactive %}
 {% endblock %}
 
 {% block content %}

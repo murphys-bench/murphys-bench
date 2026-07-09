@@ -1,0 +1,14 @@
+<label class="text-sm text-gray-600">Status</label>
+<select name="status" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+    <option value="">All statuses</option>
+    {% for status_value, status_label in status_choices %}
+        <option value="{{ status_value }}" {% if request.GET.status == status_value %}selected{% endif %}>{{ status_label }}</option>
+    {% endfor %}
+</select>
+<label class="text-sm text-gray-600 ml-1">Technician</label>
+<select name="assigned_to" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+    <option value="">All technicians</option>
+    {% for user in all_users %}
+        <option value="{{ user.pk }}" {% if request.GET.assigned_to == user.pk|stringformat:"s" %}selected{% endif %}>{{ user.get_full_name }}</option>
+    {% endfor %}
+</select>

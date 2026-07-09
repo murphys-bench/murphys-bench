@@ -1,0 +1,36 @@
+{% load mb_icons %}
+{% comment %}
+Shared list-page search strip. Sits directly below the page title bar.
+Params (via include ... with):
+  search_placeholder - input placeholder text
+  filters_template   - optional template path rendering secondary filter controls
+                       (shown behind a "Filters" toggle); omit for search-only pages
+  filters_active     - truthy to start with the Filters panel expanded (e.g. a filter is applied)
+The search field is always named "search". A hidden tab field is preserved so a
+list with Active/Closed tabs keeps its tab on submit.
+{% endcomment %}
+<div class="max-w-7xl mx-auto px-4 pt-4 sm:px-6 lg:px-8">
+    <form method="get" x-data="{ showFilters: {{ filters_active|yesno:'true,false' }} }"
+          class="w-full lg:w-2/3 mx-auto bg-white rounded-lg shadow px-4 py-3 flex flex-wrap items-center gap-2">
+        {% if request.GET.tab %}<input type="hidden" name="tab" value="{{ request.GET.tab }}">{% endif %}
+        <input
+            type="text"
+            name="{{ search_name|default:'search' }}"
+            value="{{ search_value }}"
+            placeholder="{{ search_placeholder|default:'Search' }}"
+            class="flex-1 min-w-[180px] px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+        {% if filters_template %}
+        <button type="button" @click="showFilters = !showFilters"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 shrink-0">
+            {% icon "funnel" 4 %} Filters
+        </button>
+        {% endif %}
+        <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Search</button>
+        {% if filters_template %}
+        <div x-show="showFilters" style="display:none" class="w-full flex flex-wrap items-center gap-2 pt-2 mt-1 border-t border-gray-100">
+            {% include filters_template %}
+        </div>
+        {% endif %}
+    </form>
+</div>
