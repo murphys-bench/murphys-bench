@@ -6,19 +6,9 @@
 
 {% block page_header %}
 <div class="bg-white shadow print:hidden page-title-bar">
-    <div class="px-6 py-4 flex items-center gap-4 flex-wrap">
-        <h1 class="text-xl font-bold text-gray-900 shrink-0">Reports &amp; Analytics</h1>
-
-        <!-- Date range -->
-        <form method="get" class="flex items-center gap-2 flex-1 min-w-0" id="reports-date-form">
-            <label class="text-sm text-gray-600 shrink-0">From</label>
-            <input type="date" name="start_date" id="rpt-start" value="{{ start_date|date:'Y-m-d' }}"
-                   class="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <label class="text-sm text-gray-600 shrink-0">To</label>
-            <input type="date" name="end_date" id="rpt-end" value="{{ end_date|date:'Y-m-d' }}"
-                   class="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <button type="submit" class="px-4 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Apply</button>
-        </form>
+    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex items-center gap-4 flex-wrap">
+        <h1 class="text-2xl font-bold text-gray-900 shrink-0">Reports &amp; Analytics</h1>
+        <div class="flex-1"></div>
 
         <!-- Export dropdown -->
         <div x-data="{ open: false }" class="relative shrink-0">
@@ -94,6 +84,17 @@
             </div>
         </div>
     </div>
+</div>
+<div class="max-w-7xl mx-auto px-4 pt-4 sm:px-6 lg:px-8 print:hidden">
+    <form method="get" id="reports-date-form" class="w-full lg:w-2/3 mx-auto bg-white rounded-lg shadow px-4 py-3 flex flex-wrap items-center gap-2">
+        <label class="text-sm text-gray-600 shrink-0">From</label>
+        <input type="date" name="start_date" id="rpt-start" value="{{ start_date|date:'Y-m-d' }}"
+               class="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <label class="text-sm text-gray-600 shrink-0">To</label>
+        <input type="date" name="end_date" id="rpt-end" value="{{ end_date|date:'Y-m-d' }}"
+               class="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <button type="submit" class="px-4 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Apply</button>
+    </form>
 </div>
 {% endblock %}
 
