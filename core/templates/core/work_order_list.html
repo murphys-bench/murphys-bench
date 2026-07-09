@@ -8,35 +8,7 @@
     <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
         <div class="flex items-center gap-4">
             <h1 class="text-2xl font-bold text-gray-900 shrink-0">Work Orders</h1>
-            <form method="get" class="flex items-center gap-2 flex-1 min-w-0">
-                <input
-                    type="text"
-                    name="search"
-                    value="{{ request.GET.search }}"
-                    placeholder="Work order # or client name"
-                    class="flex-1 min-w-0 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                <select
-                    name="status"
-                    class="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                >
-                    <option value="">All Statuses</option>
-                    {% for status_value, status_label in status_choices %}
-                        <option value="{{ status_value }}" {% if request.GET.status == status_value %}selected{% endif %}>{{ status_label }}</option>
-                    {% endfor %}
-                </select>
-                <select
-                    name="assigned_to"
-                    class="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                >
-                    <option value="">All Technicians</option>
-                    {% for user in all_users %}
-                        <option value="{{ user.pk }}" {% if request.GET.assigned_to == user.pk|stringformat:"s" %}selected{% endif %}>{{ user.get_full_name }}</option>
-                    {% endfor %}
-                </select>
-                <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Search</button>
-                <a href="{% url 'core:work_order_list' %}" class="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium shrink-0">Clear</a>
-            </form>
+            <div class="flex-1"></div>
             {% include "core/partials/header_bell.html" %}
             <a href="{% url 'core:work_order_create' %}"
                class="px-4 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium shrink-0">
@@ -45,6 +17,7 @@
         </div>
     </div>
 </div>
+{% include "core/partials/list_search_bar.html" with search_value=request.GET.search search_placeholder="Work order # or client name" filters_template="core/partials/_wo_filters.html" filters_active=request.GET.status %}
 {% endblock %}
 
 {% block content %}

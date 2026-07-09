@@ -17,7 +17,7 @@
         </div>
     </div>
 </div>
-{% include "core/partials/list_search_bar.html" with search_placeholder="Ticket # or subject or client" filters_template="core/partials/_ticket_filters.html" filters_active=request.GET.status %}
+{% include "core/partials/list_search_bar.html" with search_value=request.GET.search search_placeholder="Ticket # or subject or client" filters_template="core/partials/_ticket_filters.html" filters_active=request.GET.status %}
 {% endblock %}
 
 {% block content %}

@@ -5,31 +5,20 @@
 
 {% block page_header %}
 <div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-4">
-        <h1 class="text-2xl font-bold text-gray-900">Sales</h1>
-        <div class="flex flex-wrap items-center gap-3">
-            <form method="get" class="flex items-center gap-2">
-                <input type="text" name="search" value="{{ request.GET.search }}" placeholder="Search sales…"
-                       class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                <select name="status" onchange="this.form.submit()"
-                        class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                    <option value="">Open</option>
-                    {% for value, label in status_choices %}
-                        <option value="{{ value }}" {% if active_status == value %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </form>
-            {% include "core/partials/header_bell.html" %}
-            <a href="{% url 'core:monthly_clients_list' %}"
-               class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">Monthly Clients →</a>
-            <form method="post" action="{% url 'core:sale_create' %}">
-                {% csrf_token %}
-                <button type="submit"
-                        class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">+ New Sale</button>
-            </form>
-        </div>
+    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex flex-wrap items-center gap-4">
+        <h1 class="text-2xl font-bold text-gray-900 shrink-0">Sales</h1>
+        <div class="flex-1"></div>
+        {% include "core/partials/header_bell.html" %}
+        <a href="{% url 'core:monthly_clients_list' %}"
+           class="px-4 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium shrink-0">Monthly Clients →</a>
+        <form method="post" action="{% url 'core:sale_create' %}" class="shrink-0">
+            {% csrf_token %}
+            <button type="submit"
+                    class="px-4 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">+ New Sale</button>
+        </form>
     </div>
 </div>
+{% include "core/partials/list_search_bar.html" with search_value=request.GET.search search_placeholder="Search sales…" filters_template="core/partials/_status_open_filter.html" status_all_label="Open" filters_active=active_status %}
 {% endblock %}
 
 {% block content %}

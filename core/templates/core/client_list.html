@@ -7,29 +7,7 @@
     <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
         <div class="flex items-center gap-4">
             <h1 class="text-2xl font-bold text-gray-900 shrink-0">Clients</h1>
-            <form method="get" class="flex items-center gap-2 flex-1 min-w-0">
-                <input
-                    type="text"
-                    name="search"
-                    value="{{ request.GET.search }}"
-                    placeholder="Search by name, email, phone..."
-                    class="flex-1 min-w-0 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                <a href="?{% if active_type == 'residential' %}type={% else %}type=residential{% endif %}{% if show_inactive %}&show_inactive=1{% endif %}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}"
-                   class="px-3 py-1.5 rounded-md text-sm font-medium border shrink-0 {% if active_type == 'residential' %}bg-green-600 text-white border-green-600{% else %}bg-white text-gray-700 border-gray-300 hover:bg-gray-50{% endif %}">
-                    Residential
-                </a>
-                <a href="?{% if active_type == 'business' %}type={% else %}type=business{% endif %}{% if show_inactive %}&show_inactive=1{% endif %}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}"
-                   class="px-3 py-1.5 rounded-md text-sm font-medium border shrink-0 {% if active_type == 'business' %}bg-blue-600 text-white border-blue-600{% else %}bg-white text-gray-700 border-gray-300 hover:bg-gray-50{% endif %}">
-                    Business
-                </a>
-                <a href="?{% if not show_inactive %}show_inactive=1{% endif %}{% if active_type %}&type={{ active_type }}{% endif %}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}"
-                   class="px-3 py-1.5 rounded-md text-sm font-medium border shrink-0 {% if show_inactive %}bg-gray-600 text-white border-gray-600{% else %}bg-white text-gray-700 border-gray-300 hover:bg-gray-50{% endif %}">
-                    Show Inactive
-                </a>
-                <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Search</button>
-                <a href="{% url 'core:client_list' %}" class="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium shrink-0">Clear</a>
-            </form>
+            <div class="flex-1"></div>
             {% include "core/partials/header_bell.html" %}
             <a href="{% url 'core:client_create' %}"
                class="px-4 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium shrink-0">
@@ -38,6 +16,7 @@
         </div>
     </div>
 </div>
+{% include "core/partials/list_search_bar.html" with search_value=request.GET.search search_placeholder="Search by name, email, phone..." filters_template="core/partials/_client_filters.html" filters_active=active_type %}
 {% endblock %}
 
 {% block content %}
