@@ -1,0 +1,7 @@
+<label class="text-sm text-gray-600">Type</label>
+<select name="device_type" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+    <option value="">All types</option>
+    {% for value, label in device_type_choices %}
+        <option value="{{ value }}" {% if request.GET.device_type == value %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+</select>

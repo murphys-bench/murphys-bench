@@ -1,0 +1,12 @@
+<a href="?{% if active_type == 'residential' %}type={% else %}type=residential{% endif %}{% if show_inactive %}&show_inactive=1{% endif %}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}"
+   class="px-3 py-1.5 rounded-md text-sm font-medium border shrink-0 {% if active_type == 'residential' %}bg-green-600 text-white border-green-600{% else %}bg-white text-gray-700 border-gray-300 hover:bg-gray-50{% endif %}">
+    Residential
+</a>
+<a href="?{% if active_type == 'business' %}type={% else %}type=business{% endif %}{% if show_inactive %}&show_inactive=1{% endif %}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}"
+   class="px-3 py-1.5 rounded-md text-sm font-medium border shrink-0 {% if active_type == 'business' %}bg-blue-600 text-white border-blue-600{% else %}bg-white text-gray-700 border-gray-300 hover:bg-gray-50{% endif %}">
+    Business
+</a>
+<a href="?{% if not show_inactive %}show_inactive=1{% endif %}{% if active_type %}&type={{ active_type }}{% endif %}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}"
+   class="px-3 py-1.5 rounded-md text-sm font-medium border shrink-0 {% if show_inactive %}bg-gray-600 text-white border-gray-600{% else %}bg-white text-gray-700 border-gray-300 hover:bg-gray-50{% endif %}">
+    Show inactive
+</a>

@@ -1,0 +1,9 @@
+{% comment %}Status filter for Sale/Estimate/Prospect lists. Uses active_status + status_choices;
+status_all_label sets the empty-value option text (e.g. "Open" / "Open stages").{% endcomment %}
+<label class="text-sm text-gray-600">Status</label>
+<select name="status" onchange="this.form.submit()" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+    <option value="">{{ status_all_label|default:"Open" }}</option>
+    {% for value, label in status_choices %}
+        <option value="{{ value }}" {% if active_status == value %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+</select>
