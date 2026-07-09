@@ -11,24 +11,26 @@ list with Active/Closed tabs keeps its tab on submit.
 {% endcomment %}
 <div class="max-w-7xl mx-auto px-4 pt-4 sm:px-6 lg:px-8">
     <form method="get" x-data="{ showFilters: {{ filters_active|yesno:'true,false' }} }"
-          class="w-full lg:w-2/3 mx-auto bg-white rounded-lg shadow px-4 py-3 flex flex-wrap items-center gap-2">
+          class="w-full lg:w-2/3 mx-auto bg-white rounded-lg shadow px-4 py-3">
         {% if request.GET.tab %}<input type="hidden" name="tab" value="{{ request.GET.tab }}">{% endif %}
-        <input
-            type="text"
-            name="{{ search_name|default:'search' }}"
-            value="{{ search_value }}"
-            placeholder="{{ search_placeholder|default:'Search' }}"
-            class="flex-1 min-w-[180px] px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
+        <div class="flex items-center gap-2">
+            <input
+                type="text"
+                name="{{ search_name|default:'search' }}"
+                value="{{ search_value }}"
+                placeholder="{{ search_placeholder|default:'Search' }}"
+                class="flex-1 min-w-0 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+            {% if filters_template %}
+            <button type="button" @click="showFilters = !showFilters"
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 shrink-0">
+                {% icon "funnel" 4 %} Filters
+            </button>
+            {% endif %}
+            <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Search</button>
+        </div>
         {% if filters_template %}
-        <button type="button" @click="showFilters = !showFilters"
-                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 shrink-0">
-            {% icon "funnel" 4 %} Filters
-        </button>
-        {% endif %}
-        <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Search</button>
-        {% if filters_template %}
-        <div x-show="showFilters" style="display:none" class="w-full flex flex-wrap items-center gap-2 pt-2 mt-1 border-t border-gray-100">
+        <div x-show="showFilters" style="display:none" class="flex flex-wrap items-center gap-2 pt-2 mt-2 border-t border-gray-100">
             {% include filters_template %}
         </div>
         {% endif %}
