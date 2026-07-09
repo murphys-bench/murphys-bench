@@ -266,7 +266,7 @@
     </div>
 
     <!-- Primary nav links (scrollable region so the footer stays reachable on short screens) -->
-    <div class="flex-1 min-h-0 overflow-y-auto px-2 py-3 space-y-0.5">
+    <div id="nav-scroll" class="flex-1 min-h-0 overflow-y-auto px-2 py-3 space-y-0.5">
         {% with u=request.resolver_match.url_name %}
 
         <a href="{% url 'core:dashboard' %}" title="Dashboard"
@@ -361,6 +361,21 @@
 
         {% endwith %}
     </div>
+    <script>
+        // Preserve the sidebar nav's scroll position across full-page navigations,
+        // so clicking a nav link doesn't snap the sidebar back to the top (noticeable
+        // on short laptop screens where the nav itself scrolls).
+        (function () {
+            var el = document.getElementById('nav-scroll');
+            if (!el) return;
+            var KEY = 'mb_nav_scroll';
+            var saved = sessionStorage.getItem(KEY);
+            if (saved !== null) el.scrollTop = parseInt(saved, 10) || 0;
+            el.addEventListener('scroll', function () {
+                sessionStorage.setItem(KEY, el.scrollTop);
+            }, { passive: true });
+        })();
+    </script>
 
     <!-- Footer: user info + utility links + collapse toggle -->
     <div class="flex-shrink-0 border-t p-2 space-y-0.5"
