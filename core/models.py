@@ -93,6 +93,10 @@ class Role(models.Model):
     can_view_prospects = models.BooleanField(default=True, help_text='View and manage sales prospects (leads).')
     can_view_estimates = models.BooleanField(default=True, help_text='View and manage sales estimates (quotes).')
     can_view_sales = models.BooleanField(default=True, help_text='View and manage counter sales.')
+    can_process_payments = models.BooleanField(
+        default=False,
+        help_text='Trigger a charge against a client\'s card on file in Invoice Ninja. Off by default — opt-in only.',
+    )
 
     class Meta:
         db_table = 'roles'
@@ -1439,6 +1443,36 @@ class Sale(models.Model):
         nums = [int(n[5:]) for n in existing if re.match(r'^SALE-\d{5}$', n)]
         next_num = (max(nums) + 1) if nums else 1
         return f"SALE-{next_num:05d}"
+
+
+class PaymentChargeAttempt(models.Model):
+    """Immutable audit record of every MB-initiated charge-on-file attempt
+    (Slice 5d). One row per attempt, written on both success and failure —
+    never updated afterward. `result` reflects whether the trigger call to
+    Invoice Ninja succeeded, NOT whether the card was actually charged: IN's
+    auto_bill action queues an async job, so payment truth only comes from
+    the follow-up check_sale_status() read-back (`in_status_after`)."""
+
+    RESULT_CHOICES = [
+        ('success', 'Trigger Succeeded'),
+        ('failed', 'Trigger Failed'),
+    ]
+
+    sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name='charge_attempts')
+    invoice_ninja_id = models.CharField(max_length=100, blank=True)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, help_text='Server-computed amount at the moment of the attempt.')
+    initiated_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='payment_charge_attempts')
+    initiated_at = models.DateTimeField(auto_now_add=True)
+    result = models.CharField(max_length=10, choices=RESULT_CHOICES)
+    in_status_after = models.CharField(max_length=50, blank=True, help_text='IN status read back immediately after the trigger (often still Draft/Sent — the charge is async).')
+    error_message = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'payment_charge_attempts'
+        ordering = ['-initiated_at']
+
+    def __str__(self):
+        return f'{self.sale.sale_number} — {self.get_result_display()} ({self.initiated_at:%Y-%m-%d %H:%M})'
 
 
 class OrgCredential(models.Model):

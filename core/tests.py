@@ -5000,3 +5000,249 @@ def test_catalog_card_does_not_leak_template_comment(client, admin_user):
     client.force_login(admin_user)
     resp = client.get(reverse('core:catalog_list'))
     assert b'A collapsible catalog card' not in resp.content
+
+
+# ---------------------------------------------------------------------------
+# Slice 5d — MB-initiated charge against a card on file (Path C, guarded)
+# ---------------------------------------------------------------------------
+
+from core.models import Role, PaymentChargeAttempt
+
+
+@pytest.mark.django_db
+def test_charge_sale_on_file_posts_bulk_auto_bill(client_obj, monkeypatch):
+    """charge_sale_on_file triggers IN's bulk auto_bill action against the
+    pushed invoice id, then reads the status back — it never marks Paid
+    itself (the charge is async on IN's side)."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    sale = Sale.objects.create(client=client_obj, is_recurring=True, invoice_ninja_id='42')
+    LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
+                            quantity=1, unit_price=Decimal('100.00'))
+
+    calls = []
+    def fake_request(method, path, **kwargs):
+        calls.append((method, path, kwargs.get('json')))
+        if path == '/invoices/bulk':
+            return {'data': []}
+        if path == '/invoices/42':
+            return {'data': {'status_id': '2'}}  # 2 = Sent — still not paid yet
+        raise AssertionError(f'Unexpected IN call: {method} {path}')
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+
+    label = invoice_ninja.charge_sale_on_file(sale)
+    assert ('POST', '/invoices/bulk', {'action': 'auto_bill', 'ids': ['42']}) in calls
+    assert label == 'Sent'  # async — not Paid yet, and that's expected
+    sale.refresh_from_db()
+    assert sale.in_status == 'Sent'
+
+
+@pytest.mark.django_db
+def test_charge_sale_on_file_refuses_when_not_pushed(client_obj):
+    """Can't charge a sale that hasn't been sent to Invoice Ninja yet."""
+    from core import invoice_ninja
+    sale = Sale.objects.create(client=client_obj, is_recurring=True)
+    with pytest.raises(invoice_ninja.InvoiceNinjaError, match='not been pushed'):
+        invoice_ninja.charge_sale_on_file(sale)
+
+
+@pytest.mark.django_db
+def test_charge_sale_on_file_refuses_when_fresh_status_is_paid(client_obj, monkeypatch):
+    """Double-charge safety: even if the STORED status is stale (Draft), a fresh
+    read-back showing Paid must block the charge — the bulk auto_bill trigger is
+    NEVER fired."""
+    from core import invoice_ninja
+    sale = Sale.objects.create(client=client_obj, is_recurring=True,
+                                invoice_ninja_id='42', in_status='Draft')  # stale stored value
+    calls = []
+    def fake_request(method, path, **kwargs):
+        calls.append((method, path))
+        if path == '/invoices/42':
+            return {'data': {'status_id': '4'}}  # 4 = Paid — the real current state
+        raise AssertionError(f'Must not fire the charge: {method} {path}')
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    with pytest.raises(invoice_ninja.InvoiceNinjaError, match='already marked Paid'):
+        invoice_ninja.charge_sale_on_file(sale)
+    assert ('POST', '/invoices/bulk') not in calls  # never triggered
+
+
+@pytest.mark.django_db
+def test_charge_sale_on_file_aborts_if_status_unreadable(client_obj, monkeypatch):
+    """If IN can't be reached for the pre-charge status read, the charge is
+    aborted (fail loud) — we never fire a charge blind."""
+    from core import invoice_ninja
+    sale = Sale.objects.create(client=client_obj, is_recurring=True, invoice_ninja_id='42')
+    calls = []
+    def fake_request(method, path, **kwargs):
+        calls.append((method, path))
+        if path == '/invoices/42':
+            raise invoice_ninja.InvoiceNinjaError('Could not reach Invoice Ninja')
+        raise AssertionError(f'Must not fire the charge: {method} {path}')
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    with pytest.raises(invoice_ninja.InvoiceNinjaError, match='Could not reach'):
+        invoice_ninja.charge_sale_on_file(sale)
+    assert ('POST', '/invoices/bulk') not in calls
+
+
+@pytest.mark.django_db
+def test_charge_sale_on_file_propagates_trigger_error(client_obj, monkeypatch):
+    """A failure on the bulk auto_bill call itself is fail-loud."""
+    from core import invoice_ninja
+    sale = Sale.objects.create(client=client_obj, is_recurring=True, invoice_ninja_id='42')
+    def fake_request(method, path, **kwargs):
+        if path == '/invoices/42':
+            return {'data': {'status_id': '2'}}  # pre-charge read-back: Sent (unpaid)
+        if path == '/invoices/bulk':
+            raise invoice_ninja.InvoiceNinjaError('Invoice Ninja returned 422: no payment method on file')
+        raise AssertionError(f'Unexpected call {method} {path}')
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    with pytest.raises(invoice_ninja.InvoiceNinjaError, match='no payment method on file'):
+        invoice_ninja.charge_sale_on_file(sale)
+
+
+@pytest.mark.django_db
+def test_sale_charge_view_requires_can_process_payments(client, admin_user, client_obj):
+    """403 for a user without can_process_payments — even an otherwise-admin
+    role that can view/manage sales. Charging money is opt-in, not
+    admin-by-default. No IN call is made and no attempt is recorded."""
+    role = Role.objects.create(name='SalesOnly', can_view_sales=True, can_process_payments=False)
+    user = User.objects.create_user(username='tech3', password='x', role_obj=role)
+    sale = Sale.objects.create(client=client_obj, is_recurring=True, invoice_ninja_id='42')
+    client.force_login(user)
+
+    resp = client.get(reverse('core:sale_charge', args=[sale.pk]))
+    assert resp.status_code == 403
+    resp = client.post(reverse('core:sale_charge', args=[sale.pk]))
+    assert resp.status_code == 403
+    assert PaymentChargeAttempt.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_sale_charge_view_confirm_screen_shows_server_amount(client, admin_user, client_obj):
+    """GET renders the confirm screen with the server-computed amount — the
+    amount is never taken from the request."""
+    from decimal import Decimal
+    from core.models import LineItem, SiteSettings
+    site = SiteSettings.get(); site.invoice_ninja_enabled = True; site.save()
+    sale = Sale.objects.create(client=client_obj, is_recurring=True, invoice_ninja_id='42')
+    LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
+                            quantity=1, unit_price=Decimal('75.00'))
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:sale_charge', args=[sale.pk]))
+    assert resp.status_code == 200
+    assert resp.context['amount'] == Decimal('75.00')
+
+
+@pytest.mark.django_db
+def test_sale_charge_view_success_records_attempt_and_message(client, admin_user, client_obj, monkeypatch):
+    """A successful trigger writes a success PaymentChargeAttempt with the
+    server-computed amount, and does NOT itself mark the sale Paid — only the
+    read-back inside charge_sale_on_file (mocked here) determines in_status."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem, SiteSettings
+    site = SiteSettings.get(); site.invoice_ninja_enabled = True; site.save()
+    sale = Sale.objects.create(client=client_obj, is_recurring=True, invoice_ninja_id='42')
+    LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
+                            quantity=1, unit_price=Decimal('60.00'))
+
+    def fake_charge(s):
+        s.in_status = 'Sent'  # async — still not Paid right after triggering
+        s.save(update_fields=['in_status'])
+        return 'Sent'
+    monkeypatch.setattr(invoice_ninja, 'charge_sale_on_file', fake_charge)
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_charge', args=[sale.pk]), {'amount': '99999.00'})
+    assert resp.status_code == 302
+    attempt = PaymentChargeAttempt.objects.get(sale=sale)
+    assert attempt.result == 'success'
+    assert attempt.amount == Decimal('60.00')  # server-derived, ignores the posted 99999.00
+    assert attempt.initiated_by == admin_user
+    assert attempt.in_status_after == 'Sent'
+    sale.refresh_from_db()
+    assert sale.in_status != 'Paid'  # async — the trigger alone never marks Paid
+
+
+@pytest.mark.django_db
+def test_sale_charge_view_cooldown_blocks_rapid_second_charge(client, admin_user, client_obj, monkeypatch):
+    """Double-charge safety: a second charge on the same sale within the cooldown
+    of a prior successful trigger is refused — no IN call, no new attempt row.
+    Kills double-clicks / in-flight re-charges before the async job settles."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem, SiteSettings
+    site = SiteSettings.get(); site.invoice_ninja_enabled = True; site.save()
+    sale = Sale.objects.create(client=client_obj, is_recurring=True, invoice_ninja_id='42')
+    LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
+                            quantity=1, unit_price=Decimal('60.00'))
+    # A prior successful trigger exists moments ago.
+    PaymentChargeAttempt.objects.create(sale=sale, invoice_ninja_id='42',
+                                        amount=Decimal('60.00'), result='success')
+
+    def must_not_charge(s):
+        raise AssertionError('Must not fire a charge during the cooldown window')
+    monkeypatch.setattr(invoice_ninja, 'charge_sale_on_file', must_not_charge)
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_charge', args=[sale.pk]))
+    assert resp.status_code == 302
+    # Still just the one prior attempt — no new row written.
+    assert PaymentChargeAttempt.objects.filter(sale=sale).count() == 1
+
+
+@pytest.mark.django_db
+def test_sale_charge_view_failure_records_attempt_and_error(client, admin_user, client_obj, monkeypatch):
+    """An IN failure writes a failed PaymentChargeAttempt with the error
+    message, surfaces the error, and never marks the sale Paid."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem, SiteSettings
+    site = SiteSettings.get(); site.invoice_ninja_enabled = True; site.save()
+    sale = Sale.objects.create(client=client_obj, is_recurring=True, invoice_ninja_id='42')
+    LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
+                            quantity=1, unit_price=Decimal('60.00'))
+
+    def fake_charge(s):
+        raise invoice_ninja.InvoiceNinjaError('Invoice Ninja returned 422: no payment method on file')
+    monkeypatch.setattr(invoice_ninja, 'charge_sale_on_file', fake_charge)
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_charge', args=[sale.pk]))
+    assert resp.status_code == 302
+    attempt = PaymentChargeAttempt.objects.get(sale=sale)
+    assert attempt.result == 'failed'
+    assert 'no payment method on file' in attempt.error_message
+    sale.refresh_from_db()
+    assert sale.in_status != 'Paid'
+
+
+@pytest.mark.django_db
+def test_sale_charge_view_refuses_when_in_disabled(client, admin_user, client_obj):
+    """No PaymentChargeAttempt row is written if IN isn't enabled — the view
+    guards before ever calling into invoice_ninja."""
+    from core.models import SiteSettings
+    site = SiteSettings.get(); site.invoice_ninja_enabled = False; site.save()
+    sale = Sale.objects.create(client=client_obj, is_recurring=True, invoice_ninja_id='42')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_charge', args=[sale.pk]))
+    assert resp.status_code == 302
+    assert PaymentChargeAttempt.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_recurring_card_charge_button_gated_on_permission(client, client_obj):
+    """The 'Charge card on file' button only renders for a user with
+    can_process_payments — a sales-only role never sees it."""
+    from decimal import Decimal
+    from core.models import LineItem, SiteSettings
+    site = SiteSettings.get(); site.invoice_ninja_enabled = True; site.save()
+    role = Role.objects.create(name='SalesOnly2', can_view_sales=True, can_process_payments=False)
+    user = User.objects.create_user(username='tech4', password='x', role_obj=role)
+    sale = Sale.objects.create(client=client_obj, is_recurring=True, invoice_ninja_id='42')
+    LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
+                            quantity=1, unit_price=Decimal('60.00'))
+    client.force_login(user)
+    resp = client.get(reverse('core:sale_detail', args=[sale.pk]))
+    assert b'Charge card on file' not in resp.content

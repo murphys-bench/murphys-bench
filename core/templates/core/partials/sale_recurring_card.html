@@ -21,6 +21,9 @@ Ninja — nothing is charged. The operator charges the card by hand in IN, then
                 {% csrf_token %}
                 <button type="submit" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 font-medium">Check IN</button>
             </form>
+            {% if can_process_payments and sale.in_status|lower != 'paid' %}
+            <a href="{% url 'core:sale_charge' sale.pk %}" class="px-4 py-2 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 font-medium">Charge card on file</a>
+            {% endif %}
             <form method="post" action="{% url 'core:sale_send_draft' sale.pk %}"
                   onsubmit="return confirm('Re-send this as another draft invoice in Invoice Ninja?');">
                 {% csrf_token %}
