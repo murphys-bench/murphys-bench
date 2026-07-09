@@ -81,6 +81,7 @@ urlpatterns = [
     path('sales/<int:pk>/receipt/email/', views.SaleReceiptEmailView.as_view(), name='sale_receipt_email'),
     path('sales/<int:pk>/send-draft/', views.SaleDraftSendView.as_view(), name='sale_send_draft'),
     path('sales/<int:pk>/check-in/', views.SaleCheckINView.as_view(), name='sale_check_in'),
+    path('sales/<int:pk>/charge/', views.SaleChargeView.as_view(), name='sale_charge'),
     path('clients/monthly/', views.MonthlyClientsListView.as_view(), name='monthly_clients_list'),
     path('clients/monthly/prepare-all/', views.MonthlyBatchPrepareView.as_view(), name='monthly_batch_prepare'),
     path('clients/monthly/send-drafts/', views.MonthlyBatchSendView.as_view(), name='monthly_batch_send'),
