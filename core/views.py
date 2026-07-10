@@ -3898,7 +3898,11 @@ class ReportsView(LoginRequiredMixin, View):
             amount__isnull=False,
         ).aggregate(total=Sum('amount'))['total'] or 0
 
-        paid_total = Invoice.objects.filter(
+        # WO-side paid total. "Invoiced" and "Outstanding" stay Work-Order-only
+        # below — they're accrual concepts (an invoice sent but not yet paid)
+        # that don't map onto a counter sale, which is either not-yet-done
+        # (draft) or paid on the spot, with no "invoiced but waiting" state.
+        wo_paid_total = Invoice.objects.filter(
             paid_date__range=(start_date, end_date),
             billing_status__in=['paid', 'paid_direct'],
             amount__isnull=False,
@@ -3930,6 +3934,13 @@ class ReportsView(LoginRequiredMixin, View):
         counter_sales_total = counter_sales_qs.aggregate(total=Sum('amount'))['total'] or 0
         counter_sales_count = counter_sales_qs.count()
         counter_sales_list = list(counter_sales_qs[:100])
+
+        # "Collected" in Billing Summary is TRUE revenue in the door — WO
+        # payments + counter sales combined. Mike caught that it read $0 for a
+        # shop running mostly counter sales, which looked like "no revenue"
+        # instead of "no WO revenue." Invoiced/Outstanding stay WO-only (see
+        # above) — only Collected is an honestly combinable figure.
+        paid_total = wo_paid_total + counter_sales_total
 
         # 10. Technician performance
         tech_perf = []
