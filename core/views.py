@@ -4920,6 +4920,273 @@ class SaleReceiptEmailView(SaleAccessMixin, View):
         return redirect('core:sale_detail', pk=pk)
 
 
+# ---------------------------------------------------------------------------
+# Light POS — the unified register for closed Work Orders and counter Sales.
+# Settlement is POS-only (Mike's call): the WO's old "Send to Invoice Ninja"
+# button and the Sale detail page's inline checkout card are retired in favor
+# of this single register. A tech closes a WO and never sends it anywhere;
+# the cashier finds it here by WO# or customer name and settles it. The Sale
+# side reuses the existing, unchanged, tested checkout code (sale_checkout /
+# sale_send_draft) — only its entry point moves from Sale detail to the POS.
+# See memory project_mb_pos_light_register for the full design.
+# ---------------------------------------------------------------------------
+
+class POSAccessMixin(LoginRequiredMixin):
+    """Gate POS (register) views on the can_view_sales role flag — the POS
+    supersedes the old Sale-detail checkout, so it inherits the same gate."""
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _can_view_sales(request.user):
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+
+class POSHomeView(POSAccessMixin, View):
+    """The register's landing screen: search CLOSED work orders by number or
+    customer name, or start a new counter Sale. Only 'closed' WOs are
+    eligible — a tech closing the WO is what makes it appear here."""
+
+    def get(self, request):
+        q = (request.GET.get('q') or '').strip()
+        results = []
+        if q:
+            results = list(
+                WorkOrder.objects.filter(status='closed')
+                .filter(Q(work_order_number__icontains=q) | Q(client__name__icontains=q))
+                .select_related('client', 'invoice')
+                .order_by('-completed_date', '-created_at')[:25]
+            )
+        return render(request, 'core/pos_home.html', {'query': q, 'results': results})
+
+
+class POSSaleStartView(POSAccessMixin, View):
+    """Start a new counter Sale from the register and land directly on its POS
+    settle screen (mirrors SaleCreateView; only the redirect target differs —
+    settlement now happens at the POS, not the Sale detail page)."""
+
+    def post(self, request):
+        sale = Sale.objects.create(created_by=request.user)
+        return redirect('core:pos_sale_settle', pk=sale.pk)
+
+
+class POSSaleSettleView(POSAccessMixin, DetailView):
+    """The register screen for a counter Sale — line items (reusing the exact
+    catalog/custom-entry UI from Sale detail) plus the existing, unchanged
+    checkout card (sale_checkout_card.html posts to the same sale_checkout /
+    sale_send_draft endpoints it always has). Only the entry point moved."""
+    model = Sale
+    template_name = 'core/pos_sale_settle.html'
+    context_object_name = 'sale'
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['catalog_by_category'] = _catalog_by_category()
+        ctx['entries'] = _line_items_for(self.object)
+        ctx['sale_form'] = SaleForm(instance=self.object)
+        ctx.update(_sale_checkout_context(self.object))
+        return ctx
+
+
+class POSWorkOrderSettleView(POSAccessMixin, View):
+    """The register screen for a closed Work Order. GET shows the amount,
+    current Invoice Ninja state, and payment options; POST performs the
+    settlement. This is the capability the WO never had before Slice 1 — the
+    old WorkOrderSendToINView only ever created an unpaid draft and left the
+    rest to a trip into Invoice Ninja.
+
+    State-aware by design (the plan's 'one job = one invoice' rule): if the WO
+    already has an invoice_ninja_id (e.g. a draft sent earlier), settlement
+    reuses that invoice rather than pushing a second one. The server always
+    computes the amount from the WO's own priced lines — never trusts a
+    posted amount."""
+
+    def get(self, request, pk):
+        wo = get_object_or_404(WorkOrder.objects.select_related('client', 'invoice'), pk=pk)
+        if wo.status != 'closed':
+            messages.error(request, f'{wo.work_order_number} must be closed before it can be settled at the register.')
+            return redirect('core:pos_home')
+        return render(request, 'core/pos_wo_settle.html', {
+            'wo': wo,
+            'invoice': wo.invoice,
+            'amount': wo.line_items_total,
+            'payment_methods': Invoice.PAYMENT_METHOD_CHOICES,
+        })
+
+    def post(self, request, pk):
+        from . import invoice_ninja
+        wo = get_object_or_404(WorkOrder.objects.select_related('client', 'invoice'), pk=pk)
+        if wo.status != 'closed':
+            messages.error(request, f'{wo.work_order_number} must be closed before it can be settled at the register.')
+            return redirect('core:pos_home')
+        if wo.invoice.billing_status == 'paid':
+            messages.info(request, f'{wo.work_order_number} is already marked Paid.')
+            return redirect('core:pos_wo_settle', pk=pk)
+        if not SiteSettings.get().invoice_ninja_enabled:
+            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
+            return redirect('core:pos_wo_settle', pk=pk)
+
+        amount = wo.line_items_total  # server-computed — never trust the request
+        if amount <= 0:
+            messages.error(request, 'This work order has no priced line items — nothing to settle.')
+            return redirect('core:pos_wo_settle', pk=pk)
+
+        action = request.POST.get('action')  # 'draft' or 'pay'
+        method = (request.POST.get('payment_method') or '').strip()
+        reference = (request.POST.get('reference') or '').strip()
+        valid_methods = {c[0] for c in Invoice.PAYMENT_METHOD_CHOICES}
+
+        if action == 'pay' and method not in valid_methods:
+            messages.error(request, 'Choose a valid payment method.')
+            return redirect('core:pos_wo_settle', pk=pk)
+        if action not in ('draft', 'pay'):
+            messages.error(request, 'Choose how to settle this work order.')
+            return redirect('core:pos_wo_settle', pk=pk)
+
+        try:
+            # State-aware: create the IN invoice only if this WO has never been
+            # pushed. A just-created invoice can't be paid yet; an already-pushed
+            # one might already be paid in IN (see the read-back below).
+            in_client_id = None
+            newly_pushed = False
+            if not wo.invoice_ninja_id:
+                in_id, in_ref, in_client_id = invoice_ninja.push_host_invoice(
+                    wo, po_number=wo.work_order_number,
+                    client=wo.client, is_walkin=not wo.client_id,
+                )
+                wo.invoice_ninja_id = in_id
+                wo.invoice_ninja_ref = in_ref
+                wo.save(update_fields=['invoice_ninja_id', 'invoice_ninja_ref'])
+                newly_pushed = True
+
+            if action == 'draft':
+                if newly_pushed:
+                    messages.success(
+                        request,
+                        f'{wo.work_order_number} sent to Invoice Ninja as a draft — '
+                        f'invoice #{wo.invoice_ninja_ref or wo.invoice_ninja_id}.'
+                    )
+                else:
+                    messages.info(
+                        request,
+                        f'{wo.work_order_number} is already in Invoice Ninja as '
+                        f'invoice #{wo.invoice_ninja_ref or wo.invoice_ninja_id}.'
+                    )
+                return redirect('core:pos_wo_settle', pk=pk)
+
+            # Pay path. If the invoice PRE-EXISTED, it may already have been paid
+            # directly in IN (e.g. a WO settled in IN before the POS) — MB's
+            # stored billing_status wouldn't know. Read IN's current status and
+            # refuse a duplicate payment, self-healing MB's record. (Mirrors the
+            # Slice 5d fresh-read-back guard; an unreachable IN aborts, not posts.)
+            if not newly_pushed:
+                current = invoice_ninja.check_invoice_status(wo)
+                if current.strip().lower() == 'paid':
+                    inv = wo.invoice
+                    inv.billing_status = 'paid'
+                    inv.in_status = 'Paid'
+                    inv.save(update_fields=['billing_status', 'in_status'])
+                    messages.info(
+                        request,
+                        f'{wo.work_order_number} is already Paid in Invoice Ninja — '
+                        'recorded here, no second payment posted.'
+                    )
+                    return redirect('core:pos_wo_settle', pk=pk)
+                in_client_id = (
+                    invoice_ninja.find_or_create_client(wo.client) if wo.client_id
+                    else invoice_ninja.find_or_create_walkin_client()
+                )
+
+            method_label = dict(Invoice.PAYMENT_METHOD_CHOICES).get(method, method)
+            invoice_ninja.post_payment(
+                wo.invoice_ninja_id, in_client_id,
+                amount=amount, method_label=method_label, reference=reference,
+            )
+            invoice = wo.invoice
+            invoice.billing_status = 'paid'
+            invoice.in_status = 'Paid'
+            invoice.amount = amount
+            invoice.payment_method = method
+            invoice.reference = reference
+            invoice.paid_date = timezone.localdate()
+            invoice.paid_at = timezone.now()
+            invoice.invoice_ninja_id = wo.invoice_ninja_id
+            invoice.save()
+            messages.success(
+                request,
+                f'{wo.work_order_number} settled — ${amount} paid, '
+                f'invoice #{wo.invoice_ninja_ref or wo.invoice_ninja_id}.'
+            )
+            return redirect('core:pos_wo_receipt', pk=pk)
+        except invoice_ninja.InvoiceNinjaError as e:
+            messages.error(request, f'Could not settle at Invoice Ninja: {e}')
+            return redirect('core:pos_wo_settle', pk=pk)
+
+
+def _wo_receipt_context(work_order, site):
+    """WO-side mirror of _receipt_context(sale, site) — the POS-generated
+    receipt for a settled Work Order. Kept as its own function (rather than
+    generalizing _receipt_context) so Sale's existing, tested receipt path is
+    left untouched."""
+    entries = (
+        work_order.line_items
+        .select_related('catalog_item')
+        .order_by('kind', 'logged_at')
+    )
+    categories = {}
+    for entry in entries:
+        if entry.kind == 'part':
+            cat = 'Parts'
+        elif entry.catalog_item:
+            cat = entry.catalog_item.category
+        else:
+            cat = 'Other'
+        categories.setdefault(cat, []).append(entry)
+
+    if work_order.client_id:
+        client = work_order.client
+        contact = client.contacts.filter(is_primary=True).first()
+        bill_to = {
+            'name': client.name,
+            'address_line1': client.address_line1,
+            'address_line2': client.address_line2,
+            'address_city': client.address_city,
+            'address_state': client.address_state,
+            'address_zip': client.address_zip,
+            'contact_name': f'{contact.first_name} {contact.last_name}'.strip() if contact else '',
+            'email': (contact.email if contact else '') or client.email,
+            'phone': (contact.phone if contact else '') or client.phone,
+        }
+    else:
+        bill_to = {
+            'name': 'Walk-in', 'address_line1': '', 'address_line2': '',
+            'address_city': '', 'address_state': '', 'address_zip': '',
+            'contact_name': '', 'email': '', 'phone': '',
+        }
+
+    return {
+        'work_order': work_order,
+        'invoice': work_order.invoice,
+        'site': site,
+        'wp_categories': categories,
+        'bill_to': bill_to,
+    }
+
+
+class POSWorkOrderReceiptPrintView(POSAccessMixin, View):
+    """Print/PDF-preview the MB-generated receipt for a settled Work Order —
+    replaces Invoice Ninja as the customer-facing receipt for POS-settled
+    work, and (unlike IN's) prints the transaction reference."""
+
+    def get(self, request, pk):
+        wo = get_object_or_404(WorkOrder.objects.select_related('client', 'invoice'), pk=pk)
+        if wo.invoice.billing_status != 'paid':
+            messages.error(request, 'This work order has not been paid yet — no receipt to print.')
+            return redirect('core:pos_wo_settle', pk=pk)
+        site = SiteSettings.get()
+        ctx = _wo_receipt_context(wo, site)
+        return render(request, 'core/pos_wo_receipt_print.html', ctx)
+
+
 def _report_recipient_contact(work_order):
     """The contact a report email is addressed to: the WO's contact (with an
     email), else the client's primary/any active emailable contact."""
@@ -5323,33 +5590,6 @@ class InvoiceNinjaTestView(LoginRequiredMixin, View):
         except invoice_ninja.InvoiceNinjaError as e:
             messages.error(request, f'Invoice Ninja test failed: {e}')
         return redirect('/settings/?tab=invoice_ninja')
-
-
-class WorkOrderSendToINView(LoginRequiredMixin, View):
-    """Push a work order's priced lines to Invoice Ninja as a draft invoice.
-    User-triggered so failures are visible in context (fail loud)."""
-
-    def post(self, request, pk):
-        wo = get_object_or_404(WorkOrder, pk=pk)
-        from . import invoice_ninja
-        from .models import SiteSettings
-        if not SiteSettings.get().invoice_ninja_enabled:
-            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
-            return redirect('core:work_order_detail', pk=pk)
-        # Duplicate guard: already pushed and not an explicit confirmed re-send.
-        if wo.invoice_ninja_id and request.POST.get('confirm_resend') != '1':
-            messages.warning(
-                request,
-                f'{wo.work_order_number} was already sent to Invoice Ninja '
-                f'(#{wo.invoice_ninja_ref or wo.invoice_ninja_id}). Use "Re-send" to push again.'
-            )
-            return redirect('core:work_order_detail', pk=pk)
-        try:
-            ref = invoice_ninja.push_work_order(wo)
-            messages.success(request, f'Sent to Invoice Ninja as a draft — invoice #{ref}.')
-        except invoice_ninja.InvoiceNinjaError as e:
-            messages.error(request, f'Could not send to Invoice Ninja: {e}')
-        return redirect('core:work_order_detail', pk=pk)
 
 
 def _update_status_context():

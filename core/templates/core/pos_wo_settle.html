@@ -1,0 +1,88 @@
+{% extends "core/base.html" %}
+
+{% block title %}Settle {{ wo.work_order_number }} - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow page-title-bar">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        <a href="{% url 'core:pos_home' %}" class="text-sm text-gray-400 hover:text-gray-600">← Register</a>
+        <h1 class="text-2xl font-bold text-gray-900">{{ wo.work_order_number }}</h1>
+        <p class="text-sm text-gray-500">{% if wo.client %}{{ wo.client.name }}{% else %}Walk-in{% endif %}</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-6">
+
+    <!-- Line items -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-base font-semibold text-gray-900 mb-3">Line Items</h2>
+        <table class="w-full text-sm">
+            <tbody class="divide-y divide-gray-100">
+                {% for li in wo.line_items.all %}
+                {% if li.unit_price != None %}
+                <tr>
+                    <td class="py-2 text-gray-900">{{ li.description }}{% if li.quantity != 1 %} <span class="text-gray-400">× {{ li.quantity|floatformat:"-2" }}</span>{% endif %}</td>
+                    <td class="py-2 text-right text-gray-900">${{ li.line_total|floatformat:2 }}</td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="border-t-2 border-gray-200">
+                    <td class="py-2 font-semibold text-gray-900">Total</td>
+                    <td class="py-2 text-right font-bold text-gray-900">${{ amount|floatformat:2 }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+
+    <!-- Current IN state -->
+    {% if wo.invoice_ninja_id %}
+    <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+        <p class="text-sm text-blue-800">
+            Already sent to Invoice Ninja as invoice
+            <strong>#{{ wo.invoice_ninja_ref|default:wo.invoice_ninja_id }}</strong>
+            {% if wo.invoice.in_status %}({{ wo.invoice.in_status }}){% endif %}.
+            Settling below will use this same invoice — not create a new one.
+        </p>
+    </div>
+    {% endif %}
+
+    <!-- Settle -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-base font-semibold text-gray-900 mb-4">Settle</h2>
+        <form method="post" action="{% url 'core:pos_wo_settle' wo.pk %}" class="space-y-4">
+            {% csrf_token %}
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Payment method</label>
+                <div class="flex flex-wrap gap-3">
+                    {% for value, label in payment_methods %}
+                    <label class="flex items-center gap-1.5 text-sm">
+                        <input type="radio" name="payment_method" value="{{ value }}">
+                        {{ label }}
+                    </label>
+                    {% endfor %}
+                </div>
+                <p class="text-xs text-gray-400 mt-1">For a card, run it in Square first, then enter the confirmation as the reference below.</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Reference</label>
+                <input type="text" name="reference" placeholder="Check # or Square confirmation (optional for cash)"
+                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="flex flex-wrap gap-3 pt-2">
+                <button type="submit" name="action" value="pay"
+                        class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">
+                    Mark Paid — ${{ amount|floatformat:2 }}
+                </button>
+                <button type="submit" name="action" value="draft"
+                        class="px-5 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-200 font-medium">
+                    Bill Later (Draft)
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

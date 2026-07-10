@@ -692,32 +692,32 @@
         <!-- Billing -->
         {% include "core/partials/billing_card.html" %}
 
-        <!-- Invoice Ninja push -->
+        <!-- Invoice Ninja / billing — settlement is POS-only; this card is read-only -->
         {% if site_settings.invoice_ninja_enabled %}
         <div class="bg-white rounded-lg shadow p-5">
             <h2 class="text-base font-semibold text-gray-900 mb-3">Invoice Ninja</h2>
-            {% if work_order.invoice_ninja_id %}
+            {% if work_order.invoice.billing_status == 'paid' %}
+                <p class="text-sm text-gray-700">Paid — invoice
+                    <span class="font-mono font-semibold">#{{ work_order.invoice_ninja_ref|default:work_order.invoice_ninja_id }}</span>.</p>
+                <a href="{% url 'core:pos_wo_receipt' work_order.pk %}" class="inline-block mt-3 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-200">
+                    View Receipt
+                </a>
+            {% elif work_order.invoice_ninja_id %}
                 <p class="text-sm text-gray-700">Sent as draft — invoice
                     <span class="font-mono font-semibold">#{{ work_order.invoice_ninja_ref|default:work_order.invoice_ninja_id }}</span>.</p>
-                <p class="text-xs text-gray-400 mt-1">Assemble &amp; finalize in Invoice Ninja. Re-sending creates another draft.</p>
-                <form method="post" action="{% url 'core:work_order_send_in' work_order.pk %}" class="mt-3"
-                      onsubmit="return confirm('Re-send this work order to Invoice Ninja? This creates another draft invoice.');">
-                    {% csrf_token %}
-                    <input type="hidden" name="confirm_resend" value="1">
-                    <button type="submit"
-                            class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-200">
-                        Re-send
-                    </button>
-                </form>
+                <p class="text-xs text-gray-400 mt-1">Not yet paid.</p>
+                {% if work_order.status == 'closed' %}
+                <a href="{% url 'core:pos_wo_settle' work_order.pk %}" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+                    Settle at Register
+                </a>
+                {% endif %}
+            {% elif work_order.status == 'closed' %}
+                <p class="text-sm text-gray-500 mb-3">Ready to settle at the register (total {% if work_order.line_items_total %}${{ work_order.line_items_total|floatformat:2 }}{% else %}$0.00{% endif %}).</p>
+                <a href="{% url 'core:pos_wo_settle' work_order.pk %}" class="inline-block px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+                    Settle at Register
+                </a>
             {% else %}
-                <p class="text-sm text-gray-500 mb-3">Push this work order's priced lines to Invoice Ninja as a draft invoice (total {% if work_order.line_items_total %}${{ work_order.line_items_total|floatformat:2 }}{% else %}$0.00{% endif %}).</p>
-                <form method="post" action="{% url 'core:work_order_send_in' work_order.pk %}">
-                    {% csrf_token %}
-                    <button type="submit"
-                            class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
-                        Send to Invoice Ninja
-                    </button>
-                </form>
+                <p class="text-sm text-gray-400">Close this work order to make it available at the register.</p>
             {% endif %}
         </div>
         {% endif %}
