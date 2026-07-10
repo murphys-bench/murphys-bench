@@ -1174,6 +1174,8 @@ class Invoice(models.Model):
     invoiced_date = models.DateField(null=True, blank=True)
     paid_date = models.DateField(null=True, blank=True)
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, blank=True)
+    reference = models.CharField(max_length=100, blank=True, help_text='Check number, Square confirmation, or other transaction reference — printed on the receipt.')
+    paid_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True)
     # Invoice Ninja read-back — recorded, not authoritative
     invoice_ninja_id = models.CharField(max_length=100, blank=True)

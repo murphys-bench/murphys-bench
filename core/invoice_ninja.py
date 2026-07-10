@@ -427,3 +427,56 @@ def charge_sale_on_file(sale):
         # The trigger itself succeeded (we didn't raise above); a read-back
         # failure right after shouldn't be reported as a charge failure.
         return sale.in_status or 'Unknown'
+
+
+# ---------------------------------------------------------------------------
+# Light POS — host-agnostic settlement primitives (WorkOrder or Sale). Neither
+# push_sale() nor push_work_order() above are touched by this — they remain the
+# tested, working paths for their existing callers. These two functions are
+# new, additive building blocks the POS uses to settle a WorkOrder (which had
+# no paid-push before) without duplicating push_sale's Sale-specific field
+# writes. Both take already-resolved values and return raw results; the caller
+# (the POS view) is responsible for writing fields onto its own host, since a
+# WorkOrder and a Sale disagree on where payment fields live (Sale stores them
+# on itself; WorkOrder stores them on its related Invoice row).
+# ---------------------------------------------------------------------------
+
+def push_host_invoice(host, *, po_number, client=None, is_walkin=False):
+    """Create a DRAFT invoice in IN from any host exposing a `line_items`
+    GenericRelation (WorkOrder or Sale). Does not mutate host — returns
+    (invoice_id, invoice_ref, in_client_id) for the caller to store.
+
+    Raises InvoiceNinjaError if there are no priced lines or on any API failure.
+    """
+    line_items = _line_items_payload(host)
+    if not line_items:
+        raise InvoiceNinjaError(
+            'This has no priced line items to send. Add a price to at least one line first.'
+        )
+    in_client_id = find_or_create_walkin_client() if is_walkin else find_or_create_client(client)
+    data = _request('POST', '/invoices', json={
+        'client_id': in_client_id,
+        'po_number': po_number,
+        'line_items': line_items,
+    })
+    invoice = data['data']
+    return str(invoice['id']), str(invoice.get('number') or ''), in_client_id
+
+
+def post_payment(invoice_id, in_client_id, *, amount, method_label, reference=''):
+    """Post a payment against an existing IN invoice, marking it Paid.
+
+    A thin, host-agnostic version of the payment-posting half of push_sale() —
+    used by the POS to settle a WorkOrder (or a Sale reached through the POS)
+    against an invoice that may have just been created or may already exist.
+    """
+    from django.utils import timezone
+    payload = {
+        'client_id': in_client_id,
+        'amount': float(amount),
+        'invoices': [{'invoice_id': invoice_id, 'amount': float(amount)}],
+        'transaction_reference': reference or '',
+        'private_notes': method_label or '',
+        'date': timezone.localdate().isoformat(),
+    }
+    _request('POST', '/payments', json=payload)
