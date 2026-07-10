@@ -143,7 +143,15 @@ urlpatterns = [
 
     # Invoice Ninja (Phase B)
     path('settings/invoice-ninja/test/', views.InvoiceNinjaTestView.as_view(), name='invoice_ninja_test'),
-    path('work-orders/<int:pk>/send-to-invoice-ninja/', views.WorkOrderSendToINView.as_view(), name='work_order_send_in'),
+
+    # Light POS — the register (Slice 1). Settlement is POS-only; the old
+    # per-WO "Send to Invoice Ninja" button and the Sale detail inline
+    # checkout are retired in favor of this.
+    path('pos/', views.POSHomeView.as_view(), name='pos_home'),
+    path('pos/sale/start/', views.POSSaleStartView.as_view(), name='pos_sale_start'),
+    path('pos/sale/<int:pk>/', views.POSSaleSettleView.as_view(), name='pos_sale_settle'),
+    path('pos/wo/<int:pk>/', views.POSWorkOrderSettleView.as_view(), name='pos_wo_settle'),
+    path('pos/wo/<int:pk>/receipt/', views.POSWorkOrderReceiptPrintView.as_view(), name='pos_wo_receipt'),
 
     # Quick Labor / Work Performed (HTMX)
     path('work-orders/<int:wo_pk>/log-labor/<int:item_pk>/', views.WorkPerformedLogView.as_view(), name='work_performed_log'),

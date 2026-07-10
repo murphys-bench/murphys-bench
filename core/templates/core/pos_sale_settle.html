@@ -1,0 +1,25 @@
+{% extends "core/base.html" %}
+
+{% block title %}{{ sale.sale_number }} - Register - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow page-title-bar">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        <a href="{% url 'core:pos_home' %}" class="text-sm text-gray-400 hover:text-gray-600">← Register</a>
+        <h1 class="text-2xl font-bold text-gray-900">{{ sale.sale_number }}</h1>
+        <p class="text-sm text-gray-500">{{ sale.display_name }}</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-6">
+
+    {% include "core/partials/sale_customer_card.html" %}
+
+    {% include "core/partials/sale_line_items_editor.html" %}
+
+    {% include "core/partials/sale_checkout_card.html" %}
+
+</div>
+{% endblock %}

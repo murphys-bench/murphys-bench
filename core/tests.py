@@ -1877,19 +1877,22 @@ def test_push_failure_leaves_wo_clean(client_obj, monkeypatch):
 
 
 @pytest.mark.django_db
-def test_send_to_in_duplicate_guard(client, client_obj, admin_user, monkeypatch):
+def test_push_work_order_still_used_directly(client_obj, monkeypatch):
+    """push_work_order() itself is unchanged by the POS work (Slice 1 added
+    new host-agnostic primitives alongside it, not in place of it) — its old
+    UI wrapper (WorkOrderSendToINView) was retired in favor of the POS, but
+    the function stays available/tested directly."""
     from core import invoice_ninja
     _enable_in()
-    wo = WorkOrder.objects.create(client=client_obj, invoice_ninja_id='123', invoice_ninja_ref='INV-1')
-    calls = []
-    monkeypatch.setattr(invoice_ninja, 'push_work_order', lambda w: calls.append(w))
-    client.force_login(admin_user)
-    # Already pushed, no confirm → no second push
-    client.post(reverse('core:work_order_send_in', args=[wo.pk]))
-    assert calls == []
-    # Confirmed re-send → pushes
-    client.post(reverse('core:work_order_send_in', args=[wo.pk]), {'confirm_resend': '1'})
-    assert len(calls) == 1
+    wo = WorkOrder.objects.create(client=client_obj)
+    from core.models import LineItem
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=40)
+    monkeypatch.setattr(invoice_ninja, '_request',
+                        lambda method, path, **kw: {'data': {'id': 9, 'number': 'INV-9'}})
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+    ref = invoice_ninja.push_work_order(wo)
+    assert ref == 'INV-9'
 
 
 @pytest.mark.django_db
@@ -2714,16 +2717,18 @@ def test_csp_report_endpoint_tolerates_garbage(client):
 
 @pytest.mark.django_db
 def test_redirect_flow_renders_message_in_base(client, client_obj, admin_user):
-    """The reported bug: 'Send to Invoice Ninja' gave no visible feedback.
+    """The reported bug: an Invoice Ninja action gave no visible feedback.
 
-    With IN disabled (the default) the view adds an error message and redirects
-    to the WO detail page. That page must render the message (proving base.html
-    renders the messages framework), not swallow it until logout.
+    With IN disabled (the default) the POS work-order settle view adds an
+    error message and redirects back to the settle screen. That page must
+    render the message (proving base.html renders the messages framework),
+    not swallow it until logout. (Originally reproduced via the now-retired
+    WorkOrderSendToINView; the POS settle view is its replacement.)
     """
-    wo = WorkOrder.objects.create(client=client_obj)
+    wo = WorkOrder.objects.create(client=client_obj, status='closed')
     client.force_login(admin_user)
 
-    resp = client.post(reverse('core:work_order_send_in', args=[wo.pk]), follow=True)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'draft'}, follow=True)
 
     assert resp.status_code == 200
     assert b'Invoice Ninja is not enabled' in resp.content, \
@@ -5246,3 +5251,391 @@ def test_recurring_card_charge_button_gated_on_permission(client, client_obj):
     client.force_login(user)
     resp = client.get(reverse('core:sale_detail', args=[sale.pk]))
     assert b'Charge card on file' not in resp.content
+
+
+# ---------------------------------------------------------------------------
+# Light POS — Slice 1: the register (non-charging settlement paths)
+# ---------------------------------------------------------------------------
+
+from core.models import Invoice as _POSInvoice
+
+
+@pytest.mark.django_db
+def test_pos_home_search_finds_closed_wo_by_number_and_client(client, admin_user, client_obj):
+    closed = WorkOrder.objects.create(client=client_obj, status='closed')
+    open_wo = WorkOrder.objects.create(client=client_obj, status='in_progress')
+    client.force_login(admin_user)
+
+    resp = client.get(reverse('core:pos_home'), {'q': closed.work_order_number})
+    numbers = [w.work_order_number for w in resp.context['results']]
+    assert closed.work_order_number in numbers
+    assert open_wo.work_order_number not in numbers
+
+    # Also findable by customer name
+    resp = client.get(reverse('core:pos_home'), {'q': client_obj.name})
+    numbers = [w.work_order_number for w in resp.context['results']]
+    assert closed.work_order_number in numbers
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_get_blocked_if_not_closed(client, admin_user, client_obj):
+    wo = WorkOrder.objects.create(client=client_obj, status='in_progress')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:pos_wo_settle', args=[wo.pk]))
+    assert resp.status_code == 302
+    assert resp.url == reverse('core:pos_home')
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_pushes_and_pays_in_one_invoice(client, admin_user, client_obj, monkeypatch):
+    """A closed WO with no prior IN push: settling with 'pay' creates exactly
+    ONE invoice (via push_host_invoice) and posts ONE payment against it —
+    never two separate calls that could create two invoices."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='closed')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('40.00'))
+
+    calls = []
+    def fake_request(method, path, **kwargs):
+        calls.append((method, path))
+        if path == '/invoices':
+            return {'data': {'id': 501, 'number': 'INV-501'}}
+        if path == '/payments':
+            return {'data': {'id': 1}}
+        raise AssertionError(f'Unexpected call {method} {path}')
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {
+        'action': 'pay', 'payment_method': 'cash', 'reference': '',
+    })
+    assert resp.status_code == 302
+    assert [c for c in calls if c[1] == '/invoices'] == [('POST', '/invoices')]
+    assert [c for c in calls if c[1] == '/payments'] == [('POST', '/payments')]
+
+    wo.refresh_from_db()
+    assert wo.invoice_ninja_id == '501'
+    assert wo.invoice_ninja_ref == 'INV-501'
+    invoice = wo.invoice
+    invoice.refresh_from_db()
+    assert invoice.billing_status == 'paid'
+    assert invoice.amount == Decimal('40.00')
+    assert invoice.payment_method == 'cash'
+    assert invoice.paid_at is not None
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_draft_does_not_mark_paid(client, admin_user, client_obj, monkeypatch):
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='closed')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('40.00'))
+
+    calls = []
+    def fake_request(method, path, **kwargs):
+        calls.append((method, path))
+        if path == '/invoices':
+            return {'data': {'id': 601, 'number': 'INV-601'}}
+        raise AssertionError(f'Draft must not post a payment: {method} {path}')
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'draft'})
+    assert resp.status_code == 302
+    assert ('POST', '/payments') not in calls
+    wo.refresh_from_db()
+    assert wo.invoice_ninja_id == '601'
+    assert wo.invoice.billing_status != 'paid'
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_reuses_existing_invoice_never_double_pushes(client, admin_user, client_obj, monkeypatch):
+    """State-aware settlement: a WO that already has an invoice_ninja_id (e.g.
+    a draft sent earlier) must NOT push a second invoice when later settled
+    as paid — this is the plan's 'one job = one invoice' guarantee."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='closed',
+                                   invoice_ninja_id='999', invoice_ninja_ref='INV-999')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('40.00'))
+
+    calls = []
+    def fake_request(method, path, **kwargs):
+        calls.append((method, path))
+        if path == '/invoices':
+            raise AssertionError('Must not push a second invoice for an already-pushed WO')
+        if path == '/invoices/999':
+            return {'data': {'status_id': '2'}}  # pre-pay read-back: Sent, not yet Paid
+        if path == '/payments':
+            return {'data': {'id': 1}}
+        raise AssertionError(f'Unexpected call {method} {path}')
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {
+        'action': 'pay', 'payment_method': 'check', 'reference': 'CHK-1002',
+    })
+    assert resp.status_code == 302
+    assert ('POST', '/invoices') not in calls
+    wo.refresh_from_db()
+    assert wo.invoice_ninja_id == '999'  # unchanged — reused, not re-pushed
+    invoice = wo.invoice
+    invoice.refresh_from_db()
+    assert invoice.billing_status == 'paid'
+    assert invoice.reference == 'CHK-1002'
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_already_paid_in_in_posts_no_second_payment(client, admin_user, client_obj, monkeypatch):
+    """Money-safety: a WO already pushed AND already Paid directly in Invoice
+    Ninja (MB's stored billing_status doesn't know) must NOT get a second
+    payment posted. The fresh pre-pay read-back catches it and self-heals MB's
+    record. (The near-term real case: legacy WOs settled in IN before the POS.)"""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='closed',
+                                   invoice_ninja_id='888', invoice_ninja_ref='INV-888')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('40.00'))
+    # MB's stored status is stale (not paid) — IN is the truth.
+    assert wo.invoice.billing_status != 'paid'
+
+    calls = []
+    def fake_request(method, path, **kwargs):
+        calls.append((method, path))
+        if path == '/invoices/888':
+            return {'data': {'status_id': '4'}}  # 4 = Paid in IN
+        raise AssertionError(f'Must not post a payment: {method} {path}')
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {
+        'action': 'pay', 'payment_method': 'cash',
+    })
+    assert resp.status_code == 302
+    assert ('POST', '/payments') not in calls  # never double-posted
+    wo.refresh_from_db()
+    assert wo.invoice.billing_status == 'paid'  # self-healed from IN
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_refuses_when_already_paid(client, admin_user, client_obj, monkeypatch):
+    from decimal import Decimal
+    from core import invoice_ninja
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='closed', invoice_ninja_id='777')
+    wo.invoice.billing_status = 'paid'
+    wo.invoice.save()
+
+    def must_not_call(*a, **kw):
+        raise AssertionError('Must not call IN for an already-paid WO')
+    monkeypatch.setattr(invoice_ninja, '_request', must_not_call)
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {
+        'action': 'pay', 'payment_method': 'cash',
+    })
+    assert resp.status_code == 302
+    assert resp.url == reverse('core:pos_wo_settle', kwargs={'pk': wo.pk})
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_walkin_routes_to_walkin_client(client, admin_user, monkeypatch):
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    _enable_in()
+    wo = WorkOrder.objects.create(client=None, status='closed')  # anonymous walk-in
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('25.00'))
+
+    calls = []
+    def fake_request(method, path, **kwargs):
+        calls.append((method, path, kwargs.get('json')))
+        if path == '/invoices':
+            assert kwargs['json']['client_id'] == 'walkin-in-id'
+            return {'data': {'id': 701, 'number': 'INV-701'}}
+        if path == '/payments':
+            return {'data': {'id': 1}}
+        raise AssertionError(f'Unexpected call {method} {path}')
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_walkin_client', lambda: 'walkin-in-id')
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {
+        'action': 'pay', 'payment_method': 'cash',
+    })
+    assert resp.status_code == 302
+    wo.refresh_from_db()
+    assert wo.invoice.billing_status == 'paid'
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_amount_is_server_computed_not_from_post(client, admin_user, client_obj, monkeypatch):
+    """The amount charged is always the WO's own priced-line total — a posted
+    'amount' field (if any) is ignored, same discipline as Slice 5d."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='closed')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('40.00'))
+
+    captured = {}
+    def fake_request(method, path, **kwargs):
+        if path == '/invoices':
+            return {'data': {'id': 801, 'number': 'INV-801'}}
+        if path == '/payments':
+            captured['amount'] = kwargs['json']['amount']
+            return {'data': {'id': 1}}
+        raise AssertionError(f'Unexpected call {method} {path}')
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+
+    client.force_login(admin_user)
+    client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {
+        'action': 'pay', 'payment_method': 'cash', 'amount': '999999.00',
+    })
+    assert captured['amount'] == 40.0
+    wo.invoice.refresh_from_db()
+    assert wo.invoice.amount == Decimal('40.00')
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_no_priced_lines_refused(client, admin_user, client_obj):
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='closed')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {
+        'action': 'pay', 'payment_method': 'cash',
+    })
+    assert resp.status_code == 302
+    wo.refresh_from_db()
+    assert wo.invoice_ninja_id == ''
+
+
+@pytest.mark.django_db
+def test_pos_wo_receipt_shows_reference(client, admin_user, client_obj):
+    """The MB-generated receipt prints the transaction reference — the whole
+    point of MB taking over the counter receipt from Invoice Ninja."""
+    from decimal import Decimal
+    from django.utils import timezone
+    from core.models import LineItem
+    wo = WorkOrder.objects.create(client=client_obj, status='closed', invoice_ninja_id='42')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('40.00'))
+    invoice = wo.invoice
+    invoice.billing_status = 'paid'
+    invoice.amount = Decimal('40.00')
+    invoice.payment_method = 'card'
+    invoice.reference = 'SQ-CONF-9182'
+    invoice.paid_at = timezone.now()
+    invoice.save()
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:pos_wo_receipt', args=[wo.pk]))
+    assert resp.status_code == 200
+    assert b'SQ-CONF-9182' in resp.content
+
+
+@pytest.mark.django_db
+def test_pos_wo_receipt_blocked_before_paid(client, admin_user, client_obj):
+    wo = WorkOrder.objects.create(client=client_obj, status='closed')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:pos_wo_receipt', args=[wo.pk]))
+    assert resp.status_code == 302
+
+
+@pytest.mark.django_db
+def test_pos_access_blocked_on_role_flag(client, client_obj):
+    role = Role.objects.create(name='NoPOS', can_view_sales=False)
+    user = User.objects.create_user(username='cashier1', password='x', role_obj=role)
+    client.force_login(user)
+    resp = client.get(reverse('core:pos_home'))
+    assert resp.status_code == 403
+
+
+@pytest.mark.django_db
+def test_pos_sale_start_lands_on_pos_settle_screen(client, admin_user):
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_sale_start'))
+    assert resp.status_code == 302
+    new_sale = Sale.objects.latest('created_at')
+    assert resp.url == reverse('core:pos_sale_settle', kwargs={'pk': new_sale.pk})
+
+
+@pytest.mark.django_db
+def test_pos_sale_settle_screen_renders(client, admin_user, client_obj):
+    """The POS sale screen reuses the same, unchanged checkout card/endpoints
+    Sale detail always used — just reached from a different URL."""
+    from decimal import Decimal
+    from core.models import LineItem
+    _enable_in()
+    sale = Sale.objects.create(client=client_obj, created_by=admin_user)
+    LineItem.objects.create(content_object=sale, kind='labor', description='Retail item',
+                            quantity=1, unit_price=Decimal('15.00'))
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:pos_sale_settle', args=[sale.pk]))
+    assert resp.status_code == 200
+    assert b'Complete Sale' in resp.content
+
+
+@pytest.mark.django_db
+def test_sale_detail_no_longer_has_inline_checkout_for_counter_sale(client, admin_user, client_obj):
+    """Retirement check: a non-recurring (counter) Sale's detail page no
+    longer shows the inline Complete Sale form — settlement is POS-only."""
+    from decimal import Decimal
+    from core.models import LineItem
+    sale = Sale.objects.create(client=client_obj, created_by=admin_user)
+    LineItem.objects.create(content_object=sale, kind='labor', description='Retail item',
+                            quantity=1, unit_price=Decimal('15.00'))
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:sale_detail', args=[sale.pk]))
+    assert resp.status_code == 200
+    assert b'Complete Sale' not in resp.content
+    assert reverse('core:pos_sale_settle', args=[sale.pk]).encode() in resp.content
+
+
+@pytest.mark.django_db
+def test_work_order_detail_no_longer_has_send_to_in_button(client, admin_user, client_obj):
+    """Retirement check: the WO detail page no longer offers a direct
+    'Send to Invoice Ninja' action — a closed WO links to the POS instead."""
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='closed')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:work_order_detail', args=[wo.pk]))
+    assert resp.status_code == 200
+    assert b'Send to Invoice Ninja' not in resp.content
+    assert reverse('core:pos_wo_settle', args=[wo.pk]).encode() in resp.content
+
+
+@pytest.mark.django_db
+def test_recurring_sale_detail_unaffected_by_pos_change(client, admin_user, client_obj):
+    """The recurring (Lane C) draft-push card is a different lane and must be
+    completely unaffected by the POS/counter-sale retirement above."""
+    from decimal import Decimal
+    from core.models import LineItem
+    _enable_in()
+    sale = Sale.objects.create(client=client_obj, is_recurring=True, created_by=admin_user)
+    LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
+                            quantity=1, unit_price=Decimal('60.00'))
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:sale_detail', args=[sale.pk]))
+    assert resp.status_code == 200
+    assert b'Send draft to Invoice Ninja' in resp.content

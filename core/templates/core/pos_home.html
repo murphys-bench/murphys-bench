@@ -1,0 +1,66 @@
+{% extends "core/base.html" %}
+
+{% block title %}Register - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow page-title-bar">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-4">
+        <h1 class="text-2xl font-bold text-gray-900">Register</h1>
+        {% include "core/partials/header_bell.html" %}
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto space-y-6">
+
+    <!-- Start a new counter sale -->
+    <div class="bg-white rounded-lg shadow p-6 flex items-center justify-between">
+        <div>
+            <h2 class="text-base font-semibold text-gray-900">New counter sale</h2>
+            <p class="text-sm text-gray-500">Walk-in retail or product sale — not tied to a work order.</p>
+        </div>
+        <form method="post" action="{% url 'core:pos_sale_start' %}">
+            {% csrf_token %}
+            <button type="submit" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">
+                Start New Sale
+            </button>
+        </form>
+    </div>
+
+    <!-- Pull a closed work order -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-base font-semibold text-gray-900 mb-1">Settle a closed work order</h2>
+        <p class="text-sm text-gray-500 mb-4">Find a work order by number or customer name. Only WOs the tech has closed appear here.</p>
+        <form method="get" action="{% url 'core:pos_home' %}" class="flex items-center gap-2">
+            <input type="text" name="q" value="{{ query }}" placeholder="WO number or customer name…"
+                   class="flex-1 min-w-0 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" autofocus>
+            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Search</button>
+        </form>
+
+        {% if query %}
+        <div class="mt-4">
+            {% if results %}
+            <div class="divide-y divide-gray-100 border-t border-gray-100">
+                {% for wo in results %}
+                <div class="flex items-center justify-between py-3">
+                    <div>
+                        <div class="text-sm font-medium text-gray-900">{{ wo.work_order_number }}</div>
+                        <div class="text-xs text-gray-500">{% if wo.client %}{{ wo.client.name }}{% else %}Walk-in{% endif %} · ${{ wo.line_items_total|floatformat:2 }}</div>
+                    </div>
+                    {% if wo.invoice.billing_status == 'paid' %}
+                        <a href="{% url 'core:pos_wo_receipt' wo.pk %}" class="text-sm text-gray-500 hover:text-gray-700">Paid — View Receipt</a>
+                    {% else %}
+                        <a href="{% url 'core:pos_wo_settle' wo.pk %}" class="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 font-medium">Settle</a>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-sm text-gray-400 mt-3">No closed work orders match "{{ query }}".</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
