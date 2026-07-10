@@ -5644,3 +5644,86 @@ def test_recurring_sale_detail_unaffected_by_pos_change(client, admin_user, clie
     resp = client.get(reverse('core:sale_detail', args=[sale.pk]))
     assert resp.status_code == 200
     assert b'Send draft to Invoice Ninja' in resp.content
+
+
+# ---------------------------------------------------------------------------
+# Reports — Counter Sales section (fills the gap left by removing the Sales
+# nav tab: sales history is a reporting concern, not a prominent page)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_reports_counter_sales_totals_and_excludes_recurring(client, admin_user, client_obj):
+    """The Counter Sales report totals only completed, non-recurring sales
+    paid within the date range — a recurring (Lane C) sale must NOT count,
+    since that lane has its own reporting via Monthly Clients."""
+    from decimal import Decimal
+    from django.utils import timezone
+
+    now = timezone.now()
+    counter = Sale.objects.create(client=client_obj, status='completed',
+                                   amount=Decimal('50.00'), payment_method='cash')
+    Sale.objects.filter(pk=counter.pk).update(paid_at=now)
+
+    recurring = Sale.objects.create(client=client_obj, status='completed', is_recurring=True,
+                                     amount=Decimal('200.00'), payment_method='card')
+    Sale.objects.filter(pk=recurring.pk).update(paid_at=now)
+
+    draft = Sale.objects.create(client=client_obj, status='draft')  # not paid, excluded
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'))
+    assert resp.status_code == 200
+    assert resp.context['counter_sales_total'] == Decimal('50.00')
+    assert resp.context['counter_sales_count'] == 1
+    numbers = [s.sale_number for s in resp.context['counter_sales_list']]
+    assert counter.sale_number in numbers
+    assert recurring.sale_number not in numbers
+    assert draft.sale_number not in numbers
+
+
+@pytest.mark.django_db
+def test_reports_counter_sales_walkin_shows_walkin(client, admin_user):
+    """An anonymous walk-in counter sale still appears in the report, listed
+    under its own record (display_name = 'Walk-in'), not dropped."""
+    from decimal import Decimal
+    from django.utils import timezone
+    sale = Sale.objects.create(client=None, status='completed',
+                                amount=Decimal('20.00'), payment_method='cash')
+    Sale.objects.filter(pk=sale.pk).update(paid_at=timezone.now())
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'))
+    numbers = [s.sale_number for s in resp.context['counter_sales_list']]
+    assert sale.sale_number in numbers
+
+
+@pytest.mark.django_db
+def test_reports_counter_sales_csv_export(client, admin_user, client_obj):
+    from decimal import Decimal
+    from django.utils import timezone
+    sale = Sale.objects.create(client=client_obj, status='completed',
+                                amount=Decimal('35.00'), payment_method='check', reference='CHK-42')
+    Sale.objects.filter(pk=sale.pk).update(paid_at=timezone.now())
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports_csv', args=['counter_sales']))
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    assert sale.sale_number in body
+    assert 'CHK-42' in body
+    assert client_obj.name in body
+
+
+@pytest.mark.django_db
+def test_reports_page_no_longer_shows_sales_nav_link_but_has_receipt_link(client, admin_user, client_obj):
+    """Sanity check that the report's receipt links resolve to the correct
+    (still-live) sale_receipt_print URL."""
+    from decimal import Decimal
+    from django.utils import timezone
+    sale = Sale.objects.create(client=client_obj, status='completed',
+                                amount=Decimal('10.00'), payment_method='cash')
+    Sale.objects.filter(pk=sale.pk).update(paid_at=timezone.now())
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'))
+    assert reverse('core:sale_receipt_print', args=[sale.pk]).encode() in resp.content
