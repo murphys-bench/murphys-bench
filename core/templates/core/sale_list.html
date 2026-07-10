@@ -11,11 +11,9 @@
         {% include "core/partials/header_bell.html" %}
         <a href="{% url 'core:monthly_clients_list' %}"
            class="px-4 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium shrink-0">Monthly Clients →</a>
-        <form method="post" action="{% url 'core:sale_create' %}" class="shrink-0">
-            {% csrf_token %}
-            <button type="submit"
-                    class="px-4 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">+ New Sale</button>
-        </form>
+        {# New counter sales are created at the Register, not here — this page is history. #}
+        <a href="{% url 'core:pos_home' %}"
+           class="px-4 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Register →</a>
     </div>
 </div>
 {% include "core/partials/list_search_bar.html" with search_value=request.GET.search search_placeholder="Search sales…" filters_template="core/partials/_status_open_filter.html" status_all_label="Open" filters_active=active_status %}
