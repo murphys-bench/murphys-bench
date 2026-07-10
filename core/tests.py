@@ -5727,3 +5727,26 @@ def test_reports_page_no_longer_shows_sales_nav_link_but_has_receipt_link(client
     client.force_login(admin_user)
     resp = client.get(reverse('core:reports'))
     assert reverse('core:sale_receipt_print', args=[sale.pk]).encode() in resp.content
+
+
+@pytest.mark.django_db
+def test_reports_collected_merges_wo_and_counter_sales(client, admin_user, client_obj):
+    """'Collected (period)' in Billing Summary is TRUE revenue in the door —
+    it must include counter sales, not just WO payments. Mike caught this: a
+    shop running mostly counter sales was seeing Collected=$0.00, which read
+    as 'no revenue' rather than 'no WO revenue.' Invoiced/Outstanding stay
+    Work-Order-only (accrual concepts a counter sale doesn't have)."""
+    from decimal import Decimal
+    from django.utils import timezone
+    wo = WorkOrder.objects.create(client=client_obj)
+    _POSInvoice.objects.filter(work_order=wo).update(
+        billing_status='paid', amount=Decimal('75.00'), paid_date=timezone.localdate(),
+    )
+    sale = Sale.objects.create(client=client_obj, status='completed',
+                                amount=Decimal('25.00'), payment_method='cash')
+    Sale.objects.filter(pk=sale.pk).update(paid_at=timezone.now())
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'))
+    assert resp.context['paid_total'] == Decimal('100.00')  # 75 (WO) + 25 (counter sale)
+    assert resp.context['counter_sales_total'] == Decimal('25.00')  # unchanged, still its own figure
