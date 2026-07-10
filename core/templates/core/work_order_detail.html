@@ -706,18 +706,18 @@
                 <p class="text-sm text-gray-700">Sent as draft — invoice
                     <span class="font-mono font-semibold">#{{ work_order.invoice_ninja_ref|default:work_order.invoice_ninja_id }}</span>.</p>
                 <p class="text-xs text-gray-400 mt-1">Not yet paid.</p>
-                {% if work_order.status == 'closed' %}
+                {% if work_order.status == 'completed' or work_order.status == 'closed' %}
                 <a href="{% url 'core:pos_wo_settle' work_order.pk %}" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
                     Settle at Register
                 </a>
                 {% endif %}
-            {% elif work_order.status == 'closed' %}
+            {% elif work_order.status == 'completed' or work_order.status == 'closed' %}
                 <p class="text-sm text-gray-500 mb-3">Ready to settle at the register (total {% if work_order.line_items_total %}${{ work_order.line_items_total|floatformat:2 }}{% else %}$0.00{% endif %}).</p>
                 <a href="{% url 'core:pos_wo_settle' work_order.pk %}" class="inline-block px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
                     Settle at Register
                 </a>
             {% else %}
-                <p class="text-sm text-gray-400">Close this work order to make it available at the register.</p>
+                <p class="text-sm text-gray-400">Complete this work order to make it available at the register.</p>
             {% endif %}
         </div>
         {% endif %}
