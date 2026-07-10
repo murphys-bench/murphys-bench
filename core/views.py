@@ -3920,6 +3920,17 @@ class ReportsView(LoginRequiredMixin, View):
             .order_by('-total')
         )
 
+        # 11. Counter sales (Register history — Sale is no longer a nav tab;
+        # this is where that history lives now, per Mike). Recurring/Lane-C
+        # sales are excluded — they're managed via the Monthly Clients worklist,
+        # a different reporting concern.
+        counter_sales_qs = Sale.objects.filter(
+            status='completed', is_recurring=False, paid_at__range=(start_dt, end_dt),
+        ).select_related('client').order_by('-paid_at')
+        counter_sales_total = counter_sales_qs.aggregate(total=Sum('amount'))['total'] or 0
+        counter_sales_count = counter_sales_qs.count()
+        counter_sales_list = list(counter_sales_qs[:100])
+
         # 10. Technician performance
         tech_perf = []
         for tech in User.objects.filter(is_active=True).order_by('first_name', 'last_name'):
@@ -3995,6 +4006,10 @@ class ReportsView(LoginRequiredMixin, View):
             'outstanding_by_client': outstanding_by_client,
             # 10
             'tech_perf': tech_perf,
+            # 11
+            'counter_sales_total': counter_sales_total,
+            'counter_sales_count': counter_sales_count,
+            'counter_sales_list': counter_sales_list,
         }
         return render(request, 'core/reports.html', context)
 
@@ -4169,6 +4184,20 @@ class ReportsCSVView(LoginRequiredMixin, View):
                     inv.invoiced_date or '',
                     inv.paid_date or '',
                     inv.get_payment_method_display() if inv.payment_method else '',
+                ])
+
+        elif report == 'counter_sales':
+            writer.writerow(['Sale #', 'Customer', 'Amount', 'Payment Method', 'Reference', 'Paid Date'])
+            for sale in Sale.objects.filter(
+                status='completed', is_recurring=False, paid_at__range=(start_dt, end_dt),
+            ).select_related('client').order_by('-paid_at'):
+                writer.writerow([
+                    sale.sale_number,
+                    sale.client.name if sale.client else 'Walk-in',
+                    sale.amount or '',
+                    sale.get_payment_method_display() if sale.payment_method else '',
+                    sale.reference or '',
+                    sale.paid_at.date() if sale.paid_at else '',
                 ])
 
         else:
