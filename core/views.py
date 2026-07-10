@@ -4941,17 +4941,23 @@ class POSAccessMixin(LoginRequiredMixin):
         return super().dispatch(request, *args, **kwargs)
 
 
+# A work order is eligible for the register once the tech has finished it. MB's
+# real terminal state is 'completed' (mark_completed(); the status dropdown's
+# common choice); 'closed' is a rarely-used dropdown option that also means
+# "done". Both make a WO ready to ring up.
+POS_SETTLE_STATUSES = ('completed', 'closed')
+
+
 class POSHomeView(POSAccessMixin, View):
-    """The register's landing screen: search CLOSED work orders by number or
-    customer name, or start a new counter Sale. Only 'closed' WOs are
-    eligible — a tech closing the WO is what makes it appear here."""
+    """The register's landing screen: search finished (completed/closed) work
+    orders by number or customer name, or start a new counter Sale."""
 
     def get(self, request):
         q = (request.GET.get('q') or '').strip()
         results = []
         if q:
             results = list(
-                WorkOrder.objects.filter(status='closed')
+                WorkOrder.objects.filter(status__in=POS_SETTLE_STATUSES)
                 .filter(Q(work_order_number__icontains=q) | Q(client__name__icontains=q))
                 .select_related('client', 'invoice')
                 .order_by('-completed_date', '-created_at')[:25]
@@ -5002,8 +5008,8 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
 
     def get(self, request, pk):
         wo = get_object_or_404(WorkOrder.objects.select_related('client', 'invoice'), pk=pk)
-        if wo.status != 'closed':
-            messages.error(request, f'{wo.work_order_number} must be closed before it can be settled at the register.')
+        if wo.status not in POS_SETTLE_STATUSES:
+            messages.error(request, f'{wo.work_order_number} must be completed before it can be settled at the register.')
             return redirect('core:pos_home')
         return render(request, 'core/pos_wo_settle.html', {
             'wo': wo,
@@ -5015,8 +5021,8 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
     def post(self, request, pk):
         from . import invoice_ninja
         wo = get_object_or_404(WorkOrder.objects.select_related('client', 'invoice'), pk=pk)
-        if wo.status != 'closed':
-            messages.error(request, f'{wo.work_order_number} must be closed before it can be settled at the register.')
+        if wo.status not in POS_SETTLE_STATUSES:
+            messages.error(request, f'{wo.work_order_number} must be completed before it can be settled at the register.')
             return redirect('core:pos_home')
         if wo.invoice.billing_status == 'paid':
             messages.info(request, f'{wo.work_order_number} is already marked Paid.')

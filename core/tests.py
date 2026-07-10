@@ -5261,20 +5261,25 @@ from core.models import Invoice as _POSInvoice
 
 
 @pytest.mark.django_db
-def test_pos_home_search_finds_closed_wo_by_number_and_client(client, admin_user, client_obj):
+def test_pos_home_search_finds_finished_wo_by_number_and_client(client, admin_user, client_obj):
+    """A finished WO is eligible for the register. MB's real terminal state is
+    'completed' (what techs actually set); 'closed' is also accepted. An
+    unfinished WO (in_progress) must not appear."""
+    completed = WorkOrder.objects.create(client=client_obj, status='completed')
     closed = WorkOrder.objects.create(client=client_obj, status='closed')
     open_wo = WorkOrder.objects.create(client=client_obj, status='in_progress')
     client.force_login(admin_user)
 
-    resp = client.get(reverse('core:pos_home'), {'q': closed.work_order_number})
+    resp = client.get(reverse('core:pos_home'), {'q': completed.work_order_number})
     numbers = [w.work_order_number for w in resp.context['results']]
-    assert closed.work_order_number in numbers
-    assert open_wo.work_order_number not in numbers
+    assert completed.work_order_number in numbers
 
-    # Also findable by customer name
+    # Both completed and closed appear; in_progress does not (search by customer)
     resp = client.get(reverse('core:pos_home'), {'q': client_obj.name})
     numbers = [w.work_order_number for w in resp.context['results']]
+    assert completed.work_order_number in numbers
     assert closed.work_order_number in numbers
+    assert open_wo.work_order_number not in numbers
 
 
 @pytest.mark.django_db
@@ -5295,7 +5300,7 @@ def test_pos_wo_settle_pushes_and_pays_in_one_invoice(client, admin_user, client
     from core import invoice_ninja
     from core.models import LineItem
     _enable_in()
-    wo = WorkOrder.objects.create(client=client_obj, status='closed')
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
     LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
                             quantity=1, unit_price=Decimal('40.00'))
 
@@ -5335,7 +5340,7 @@ def test_pos_wo_settle_draft_does_not_mark_paid(client, admin_user, client_obj, 
     from core import invoice_ninja
     from core.models import LineItem
     _enable_in()
-    wo = WorkOrder.objects.create(client=client_obj, status='closed')
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
     LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
                             quantity=1, unit_price=Decimal('40.00'))
 
@@ -5366,7 +5371,7 @@ def test_pos_wo_settle_reuses_existing_invoice_never_double_pushes(client, admin
     from core import invoice_ninja
     from core.models import LineItem
     _enable_in()
-    wo = WorkOrder.objects.create(client=client_obj, status='closed',
+    wo = WorkOrder.objects.create(client=client_obj, status='completed',
                                    invoice_ninja_id='999', invoice_ninja_ref='INV-999')
     LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
                             quantity=1, unit_price=Decimal('40.00'))
@@ -5408,7 +5413,7 @@ def test_pos_wo_settle_already_paid_in_in_posts_no_second_payment(client, admin_
     from core import invoice_ninja
     from core.models import LineItem
     _enable_in()
-    wo = WorkOrder.objects.create(client=client_obj, status='closed',
+    wo = WorkOrder.objects.create(client=client_obj, status='completed',
                                    invoice_ninja_id='888', invoice_ninja_ref='INV-888')
     LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
                             quantity=1, unit_price=Decimal('40.00'))
@@ -5438,7 +5443,7 @@ def test_pos_wo_settle_refuses_when_already_paid(client, admin_user, client_obj,
     from decimal import Decimal
     from core import invoice_ninja
     _enable_in()
-    wo = WorkOrder.objects.create(client=client_obj, status='closed', invoice_ninja_id='777')
+    wo = WorkOrder.objects.create(client=client_obj, status='completed', invoice_ninja_id='777')
     wo.invoice.billing_status = 'paid'
     wo.invoice.save()
 
@@ -5460,7 +5465,7 @@ def test_pos_wo_settle_walkin_routes_to_walkin_client(client, admin_user, monkey
     from core import invoice_ninja
     from core.models import LineItem
     _enable_in()
-    wo = WorkOrder.objects.create(client=None, status='closed')  # anonymous walk-in
+    wo = WorkOrder.objects.create(client=None, status='completed')  # anonymous walk-in
     LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
                             quantity=1, unit_price=Decimal('25.00'))
 
@@ -5493,7 +5498,7 @@ def test_pos_wo_settle_amount_is_server_computed_not_from_post(client, admin_use
     from core import invoice_ninja
     from core.models import LineItem
     _enable_in()
-    wo = WorkOrder.objects.create(client=client_obj, status='closed')
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
     LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
                             quantity=1, unit_price=Decimal('40.00'))
 
@@ -5520,7 +5525,7 @@ def test_pos_wo_settle_amount_is_server_computed_not_from_post(client, admin_use
 @pytest.mark.django_db
 def test_pos_wo_settle_no_priced_lines_refused(client, admin_user, client_obj):
     _enable_in()
-    wo = WorkOrder.objects.create(client=client_obj, status='closed')
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
     client.force_login(admin_user)
     resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {
         'action': 'pay', 'payment_method': 'cash',
@@ -5537,7 +5542,7 @@ def test_pos_wo_receipt_shows_reference(client, admin_user, client_obj):
     from decimal import Decimal
     from django.utils import timezone
     from core.models import LineItem
-    wo = WorkOrder.objects.create(client=client_obj, status='closed', invoice_ninja_id='42')
+    wo = WorkOrder.objects.create(client=client_obj, status='completed', invoice_ninja_id='42')
     LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
                             quantity=1, unit_price=Decimal('40.00'))
     invoice = wo.invoice
@@ -5556,7 +5561,7 @@ def test_pos_wo_receipt_shows_reference(client, admin_user, client_obj):
 
 @pytest.mark.django_db
 def test_pos_wo_receipt_blocked_before_paid(client, admin_user, client_obj):
-    wo = WorkOrder.objects.create(client=client_obj, status='closed')
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
     client.force_login(admin_user)
     resp = client.get(reverse('core:pos_wo_receipt', args=[wo.pk]))
     assert resp.status_code == 302
@@ -5617,7 +5622,7 @@ def test_work_order_detail_no_longer_has_send_to_in_button(client, admin_user, c
     """Retirement check: the WO detail page no longer offers a direct
     'Send to Invoice Ninja' action — a closed WO links to the POS instead."""
     _enable_in()
-    wo = WorkOrder.objects.create(client=client_obj, status='closed')
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
     client.force_login(admin_user)
     resp = client.get(reverse('core:work_order_detail', args=[wo.pk]))
     assert resp.status_code == 200
