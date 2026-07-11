@@ -1450,18 +1450,26 @@ class Sale(models.Model):
 
 class PaymentChargeAttempt(models.Model):
     """Immutable audit record of every MB-initiated charge-on-file attempt
-    (Slice 5d). One row per attempt, written on both success and failure —
+    (Slice 5d, extended in Slice 6 to cover WorkOrder settlements at the
+    Register). One row per attempt, written on both success and failure —
     never updated afterward. `result` reflects whether the trigger call to
     Invoice Ninja succeeded, NOT whether the card was actually charged: IN's
     auto_bill action queues an async job, so payment truth only comes from
-    the follow-up check_sale_status() read-back (`in_status_after`)."""
+    the follow-up check_sale_status()/check_invoice_status() read-back
+    (`in_status_after`).
+
+    Exactly one of `sale`/`work_order` is set per row — a plain second
+    nullable FK rather than a GenericForeignKey, since this only ever has
+    these two hosts (mirrors how `Invoice` already splits payment storage by
+    host rather than generalizing)."""
 
     RESULT_CHOICES = [
         ('success', 'Trigger Succeeded'),
         ('failed', 'Trigger Failed'),
     ]
 
-    sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name='charge_attempts')
+    sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name='charge_attempts', null=True, blank=True)
+    work_order = models.ForeignKey(WorkOrder, on_delete=models.CASCADE, related_name='charge_attempts', null=True, blank=True)
     invoice_ninja_id = models.CharField(max_length=100, blank=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2, help_text='Server-computed amount at the moment of the attempt.')
     initiated_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='payment_charge_attempts')
@@ -1473,9 +1481,31 @@ class PaymentChargeAttempt(models.Model):
     class Meta:
         db_table = 'payment_charge_attempts'
         ordering = ['-initiated_at']
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(sale__isnull=False, work_order__isnull=True)
+                    | models.Q(sale__isnull=True, work_order__isnull=False)
+                ),
+                name='payment_charge_attempt_exactly_one_host',
+            ),
+        ]
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if bool(self.sale_id) == bool(self.work_order_id):
+            raise ValidationError('Exactly one of sale/work_order must be set.')
+
+    @property
+    def host(self):
+        return self.sale or self.work_order
+
+    @property
+    def host_number(self):
+        return self.sale.sale_number if self.sale_id else self.work_order.work_order_number
 
     def __str__(self):
-        return f'{self.sale.sale_number} — {self.get_result_display()} ({self.initiated_at:%Y-%m-%d %H:%M})'
+        return f'{self.host_number} — {self.get_result_display()} ({self.initiated_at:%Y-%m-%d %H:%M})'
 
 
 class OrgCredential(models.Model):

@@ -1,0 +1,57 @@
+{% extends "core/base.html" %}
+
+{% block title %}Confirm Charge - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow page-title-bar">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        <a href="{% url 'core:pos_wo_settle' wo.pk %}" class="text-sm text-gray-400 hover:text-gray-600">← {{ wo.work_order_number }}</a>
+        <h1 class="text-2xl font-bold text-gray-900">Charge card on file</h1>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="bg-red-50 border border-red-200 border-l-4 border-l-red-500 rounded-lg px-4 py-3 mb-4">
+        <p class="text-sm text-red-800">
+            This charges <strong>{% if wo.client %}{{ wo.client.name }}{% else %}Walk-in{% endif %}</strong>'s
+            card on file in Invoice Ninja for <strong>${{ amount }}</strong> against invoice
+            <strong>#{{ wo.invoice_ninja_ref|default:wo.invoice_ninja_id }}</strong>.
+            Murphy's Bench never touches the card — Invoice Ninja charges the stored Square token.
+            The charge runs asynchronously; use "Check IN" afterward to confirm it posted.
+        </p>
+    </div>
+
+    <div class="bg-white rounded-lg shadow px-6 py-4 mb-4">
+        <dl class="divide-y divide-gray-100">
+            <div class="flex justify-between py-2">
+                <dt class="text-sm text-gray-500">Client</dt>
+                <dd class="text-sm font-medium text-gray-900">{% if wo.client %}{{ wo.client.name }}{% else %}Walk-in{% endif %}</dd>
+            </div>
+            <div class="flex justify-between py-2">
+                <dt class="text-sm text-gray-500">Work Order</dt>
+                <dd class="text-sm font-medium text-gray-900">{{ wo.work_order_number }}</dd>
+            </div>
+            <div class="flex justify-between py-2">
+                <dt class="text-sm text-gray-500">Invoice Ninja invoice</dt>
+                <dd class="text-sm font-medium text-gray-900">#{{ wo.invoice_ninja_ref|default:wo.invoice_ninja_id }}</dd>
+            </div>
+            <div class="flex justify-between py-2">
+                <dt class="text-sm text-gray-500">Amount</dt>
+                <dd class="text-base font-bold text-gray-900">${{ amount }}</dd>
+            </div>
+        </dl>
+    </div>
+
+    <div class="flex items-center gap-3">
+        <form method="post" action="{% url 'core:pos_wo_charge' wo.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="px-5 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 font-medium">
+                Confirm — charge ${{ amount }}
+            </button>
+        </form>
+        <a href="{% url 'core:pos_wo_settle' wo.pk %}" class="px-5 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">Cancel</a>
+    </div>
+</div>
+{% endblock %}

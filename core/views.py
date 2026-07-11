@@ -5087,6 +5087,7 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
             'invoice': wo.invoice,
             'amount': wo.line_items_total,
             'payment_methods': Invoice.PAYMENT_METHOD_CHOICES,
+            'can_process_payments': _can_process_payments(request.user),
         })
 
     def post(self, request, pk):
@@ -5247,6 +5248,84 @@ def _wo_receipt_context(work_order, site):
         'wp_categories': categories,
         'bill_to': bill_to,
     }
+
+
+class POSWorkOrderChargeView(POSAccessMixin, View):
+    """Slice 6 — trigger Invoice Ninja to charge the client's card on file for
+    an already-pushed Work Order invoice, from the Register. Mirrors
+    SaleChargeView exactly (same confirm-then-charge shape, same cooldown, same
+    audit-row discipline) but for a WO settled at the Register rather than a
+    recurring Sale. Charging is deliberately Register-only — the WO detail page
+    carries no charge action; a tech completes the work, only the Register can
+    move money against it. Stacks _can_process_payments on top of
+    POSAccessMixin's can_view_sales gate, same as SaleChargeView."""
+
+    def _amount(self, wo):
+        # Server-side only, from the WO's current priced line items — never
+        # trust an amount from the request. Mirrors SaleChargeView._amount.
+        from decimal import Decimal
+        return wo.line_items_total.quantize(Decimal('0.01'))
+
+    def get(self, request, pk):
+        if not _can_process_payments(request.user):
+            return HttpResponse('Forbidden', status=403)
+        wo = get_object_or_404(WorkOrder.objects.select_related('client', 'invoice'), pk=pk)
+        if not wo.invoice_ninja_id:
+            messages.error(request, f'{wo.work_order_number} has not been sent to Invoice Ninja yet — settle it at the Register first.')
+            return redirect('core:pos_wo_settle', pk=pk)
+        if (wo.invoice.in_status or '').strip().lower() == 'paid':
+            messages.info(request, f'{wo.work_order_number} is already marked Paid.')
+            return redirect('core:pos_wo_settle', pk=pk)
+        return render(request, 'core/pos_wo_charge_confirm.html', {
+            'wo': wo,
+            'amount': self._amount(wo),
+        })
+
+    # Same double-charge cooldown window as SaleChargeView — see that class's
+    # comment for the rationale (async charge, back-button resubmits, etc.).
+    _CHARGE_COOLDOWN = timedelta(minutes=5)
+
+    def post(self, request, pk):
+        from . import invoice_ninja
+        if not _can_process_payments(request.user):
+            return HttpResponse('Forbidden', status=403)
+        wo = get_object_or_404(WorkOrder.objects.select_related('client', 'invoice'), pk=pk)
+        if not SiteSettings.get().invoice_ninja_enabled:
+            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
+            return redirect('core:pos_wo_settle', pk=pk)
+
+        recent = PaymentChargeAttempt.objects.filter(
+            work_order=wo, result='success',
+            initiated_at__gte=timezone.now() - self._CHARGE_COOLDOWN,
+        ).exists()
+        if recent:
+            messages.warning(
+                request,
+                f'{wo.work_order_number} was charged moments ago. Use "Check IN" to confirm '
+                'it posted before charging again.'
+            )
+            return redirect('core:pos_wo_settle', pk=pk)
+
+        amount = self._amount(wo)
+        try:
+            label = invoice_ninja.charge_on_file(wo)
+            PaymentChargeAttempt.objects.create(
+                work_order=wo, invoice_ninja_id=wo.invoice_ninja_id, amount=amount,
+                initiated_by=request.user, result='success', in_status_after=label,
+            )
+            messages.success(
+                request,
+                f'{wo.work_order_number}: charge initiated in Invoice Ninja (${amount}). '
+                f'Invoice Ninja currently reports "{label}" — the charge runs '
+                'asynchronously, so use "Check IN" in a moment to confirm it posted.'
+            )
+        except invoice_ninja.InvoiceNinjaError as e:
+            PaymentChargeAttempt.objects.create(
+                work_order=wo, invoice_ninja_id=wo.invoice_ninja_id, amount=amount,
+                initiated_by=request.user, result='failed', error_message=str(e),
+            )
+            messages.error(request, f'Charging the card on file failed: {e}')
+        return redirect('core:pos_wo_settle', pk=pk)
 
 
 class POSWorkOrderReceiptPrintView(POSAccessMixin, View):
