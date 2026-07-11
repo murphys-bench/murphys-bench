@@ -26,9 +26,15 @@ the bench.**
   one-click ticket → work-order conversion.
 - **Client-centric** — clients, contacts, and devices all hang off the client, the way a
   shop actually works.
-- **Billing bridge** — captures priced labor/parts and pushes a **draft invoice to
-  [Invoice Ninja](https://invoiceninja.com/)**, which stays the system of record. MB is not
-  an accounting package.
+- **Quotes & estimates** — build a priced estimate (with side-by-side comparative options),
+  email it to the customer as a PDF, and accept it straight into a work order. Sales leads
+  ("prospects") get captured up front and promote to a full client when they say yes.
+- **Register & payments** — a **light point-of-sale register** settles a finished work order
+  or a walk-in counter sale: record cash/check (or a card you ran in Square), or trigger a
+  charge against a client's **card on file**, then print an MB receipt with the transaction
+  reference. The invoice is pushed to **[Invoice Ninja](https://invoiceninja.com/)**, which
+  stays the system of record. Managed clients can be billed **monthly (recurring)**. MB never
+  stores or processes card data itself and is not an accounting package.
 - **Encrypted credential vaults** — org-level and per-device username/password storage
   (AES-256) with a full access log.
 - **The rest** — knowledge base (Markdown), reporting with CSV export, roles/permissions,
@@ -40,22 +46,23 @@ the bench.**
 
 ## What it's not
 
-It's deliberately **not** a giant MSP suite, a retail POS, or an accounting platform. In particular, it isn't:
+It's deliberately **not** a giant MSP suite, a full retail POS, or an accounting platform. In particular, it isn't:
 
-- a POS or cash-register system
-- full inventory management
+- a **full retail POS** — it has a *light* register for settling repairs and counter sales, but there's no cash drawer, barcode scanning, or split tender
+- a **payment processor** — MB never stores or charges cards itself; card money moves through Square/Invoice Ninja, MB just records it
+- full inventory management (no stock levels or parts ordering)
 - an accounting package — [Invoice Ninja](https://invoiceninja.com/) stays the system of record for invoicing and payments
 - a customer self-service portal
 - a hosted SaaS product
 - a replacement for QuickBooks, Square, or Invoice Ninja
 
-Some of these (parts/inventory especially) may grow later — but the focus today is the ticket → bench → invoice workflow.
+Some of these (parts/inventory especially) may grow later — but the focus today is the ticket → bench → invoice → get-paid workflow.
 
 ## Today, and where it could go
 
-Right now Murphy's Bench does the **ticket → repair → invoice** core, and does it well —
-that's what it's built around. It's young and shaped by the one shop running it, so a few
-things are worth saying plainly:
+Right now Murphy's Bench does the **ticket → repair → quote → invoice → get-paid** core, and
+does it well — that's what it's built around. It's young and shaped by the one shop running it,
+so a few things are worth saying plainly:
 
 - **You host it yourself.** That's deliberate — your client data stays on your own server and
   network, not in someone else's cloud.
@@ -64,8 +71,8 @@ things are worth saying plainly:
 - **Invoicing currently goes to [Invoice Ninja](https://invoiceninja.com/)** — that's what I
   use, so it's what's wired up first. Other targets (QuickBooks and the like) make good sense
   down the road; they just aren't built yet.
-- **Plenty isn't built yet** — things like POS, parts inventory and ordering, SMS
-  notifications, a customer portal, or deeper documentation. None of it is off the table.
+- **Plenty isn't built yet** — things like parts inventory and ordering, SMS notifications, a
+  customer portal, other invoicing back-ends (QuickBooks and the like), or deeper documentation.
   Honestly, I don't yet know which of these matter most to other shops — so if something would
   make MB genuinely useful to yours, **tell me.** That's how it'll get shaped.
 
@@ -84,7 +91,7 @@ Murphy's Bench may be a fit if you're:
 - comfortable self-hosting a Django app
 
 It's probably **not** for you if you need enterprise MSP automation, a polished hosted
-product, a retail POS, deep inventory, or guaranteed support.
+product, a full retail POS, deep inventory, or guaranteed support.
 
 ---
 
