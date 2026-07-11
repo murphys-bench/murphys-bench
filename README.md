@@ -8,8 +8,8 @@ bench, track the repair (checklists, time, parts, device specs, mileage), print 
 report, and push the priced work to your invoicing system. It runs on **your** server, on
 your network — no per-seat fees, no SaaS subscription, no one else holding your client data.
 
-It's shaped like RepairShopr or Syncro — but **free, self-hosted, and focused on the work at
-the bench.**
+It's **free, self-hosted, and focused on the work at the bench** — repair-shop software you
+run and own yourself.
 
 > **Honest status:** Murphy's Bench runs in **daily production at one shop** and is actively
 > developed there. If you adopt it today you're an **early self-hoster** rather than a
