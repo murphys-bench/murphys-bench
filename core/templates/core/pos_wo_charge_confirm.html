@@ -15,9 +15,14 @@
 <div class="max-w-2xl mx-auto">
     <div class="bg-red-50 border border-red-200 border-l-4 border-l-red-500 rounded-lg px-4 py-3 mb-4">
         <p class="text-sm text-red-800">
-            This charges <strong>{% if wo.client %}{{ wo.client.name }}{% else %}Walk-in{% endif %}</strong>'s
-            card on file in Invoice Ninja for <strong>${{ amount }}</strong> against invoice
-            <strong>#{{ wo.invoice_ninja_ref|default:wo.invoice_ninja_id }}</strong>.
+            This charges <strong>{{ wo.client.name }}</strong>'s card on file in Invoice Ninja
+            for <strong>${{ amount }}</strong>
+            {% if wo.invoice_ninja_id %}
+                against invoice <strong>#{{ wo.invoice_ninja_ref|default:wo.invoice_ninja_id }}</strong>.
+            {% else %}
+                — this work order has not been sent to Invoice Ninja yet, so a new invoice
+                will be created and charged in one step.
+            {% endif %}
             Murphy's Bench never touches the card — Invoice Ninja charges the stored Square token.
             The charge runs asynchronously; use "Check IN" afterward to confirm it posted.
         </p>
@@ -35,7 +40,9 @@
             </div>
             <div class="flex justify-between py-2">
                 <dt class="text-sm text-gray-500">Invoice Ninja invoice</dt>
-                <dd class="text-sm font-medium text-gray-900">#{{ wo.invoice_ninja_ref|default:wo.invoice_ninja_id }}</dd>
+                <dd class="text-sm font-medium text-gray-900">
+                    {% if wo.invoice_ninja_id %}#{{ wo.invoice_ninja_ref|default:wo.invoice_ninja_id }}{% else %}New draft (created on charge){% endif %}
+                </dd>
             </div>
             <div class="flex justify-between py-2">
                 <dt class="text-sm text-gray-500">Amount</dt>

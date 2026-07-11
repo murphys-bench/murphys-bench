@@ -5087,7 +5087,7 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
             'invoice': wo.invoice,
             'amount': wo.line_items_total,
             'payment_methods': Invoice.PAYMENT_METHOD_CHOICES,
-            'can_process_payments': _can_process_payments(request.user),
+            'invoice_ninja_enabled': SiteSettings.get().invoice_ninja_enabled,
         })
 
     def post(self, request, pk):
@@ -5251,14 +5251,17 @@ def _wo_receipt_context(work_order, site):
 
 
 class POSWorkOrderChargeView(POSAccessMixin, View):
-    """Slice 6 — trigger Invoice Ninja to charge the client's card on file for
-    an already-pushed Work Order invoice, from the Register. Mirrors
-    SaleChargeView exactly (same confirm-then-charge shape, same cooldown, same
-    audit-row discipline) but for a WO settled at the Register rather than a
-    recurring Sale. Charging is deliberately Register-only — the WO detail page
-    carries no charge action; a tech completes the work, only the Register can
-    move money against it. Stacks _can_process_payments on top of
-    POSAccessMixin's can_view_sales gate, same as SaleChargeView."""
+    """Slice 6 — trigger Invoice Ninja to charge the client's card on file for a
+    completed Work Order, from the Register, as a first-class settlement action
+    alongside Mark Paid / Bill Later. Mirrors SaleChargeView's charge discipline
+    (confirm-then-charge, cooldown, audit row) but adds a push-then-charge path:
+    if the WO hasn't been pushed to IN yet, Confirm creates the draft invoice
+    first, then charges it — one click from the settle screen, no separate
+    'Bill Later then find the button' detour.
+
+    Charging is deliberately Register-only (the WO detail page has no charge
+    action) and client-only (a walk-in has no card on file). Stacks
+    _can_process_payments on top of POSAccessMixin's can_view_sales gate."""
 
     def _amount(self, wo):
         # Server-side only, from the WO's current priced line items — never
@@ -5266,16 +5269,30 @@ class POSWorkOrderChargeView(POSAccessMixin, View):
         from decimal import Decimal
         return wo.line_items_total.quantize(Decimal('0.01'))
 
+    def _guard(self, request, wo):
+        """Shared GET/POST preconditions. Returns a redirect response to bail,
+        or None to proceed. Order matters — cheapest/most-fundamental first."""
+        if wo.status not in POS_SETTLE_STATUSES:
+            messages.error(request, f'{wo.work_order_number} must be completed before it can be settled at the register.')
+            return redirect('core:pos_home')
+        if not wo.client_id:
+            messages.error(request, 'A walk-in work order has no card on file to charge.')
+            return redirect('core:pos_wo_settle', pk=wo.pk)
+        if (wo.invoice.in_status or '').strip().lower() == 'paid':
+            messages.info(request, f'{wo.work_order_number} is already marked Paid.')
+            return redirect('core:pos_wo_settle', pk=wo.pk)
+        if self._amount(wo) <= 0:
+            messages.error(request, 'This work order has no priced line items — nothing to charge.')
+            return redirect('core:pos_wo_settle', pk=wo.pk)
+        return None
+
     def get(self, request, pk):
         if not _can_process_payments(request.user):
             return HttpResponse('Forbidden', status=403)
         wo = get_object_or_404(WorkOrder.objects.select_related('client', 'invoice'), pk=pk)
-        if not wo.invoice_ninja_id:
-            messages.error(request, f'{wo.work_order_number} has not been sent to Invoice Ninja yet — settle it at the Register first.')
-            return redirect('core:pos_wo_settle', pk=pk)
-        if (wo.invoice.in_status or '').strip().lower() == 'paid':
-            messages.info(request, f'{wo.work_order_number} is already marked Paid.')
-            return redirect('core:pos_wo_settle', pk=pk)
+        bail = self._guard(request, wo)
+        if bail:
+            return bail
         return render(request, 'core/pos_wo_charge_confirm.html', {
             'wo': wo,
             'amount': self._amount(wo),
@@ -5293,6 +5310,9 @@ class POSWorkOrderChargeView(POSAccessMixin, View):
         if not SiteSettings.get().invoice_ninja_enabled:
             messages.error(request, 'Invoice Ninja is not enabled in Settings.')
             return redirect('core:pos_wo_settle', pk=pk)
+        bail = self._guard(request, wo)
+        if bail:
+            return bail
 
         recent = PaymentChargeAttempt.objects.filter(
             work_order=wo, result='success',
@@ -5307,6 +5327,25 @@ class POSWorkOrderChargeView(POSAccessMixin, View):
             return redirect('core:pos_wo_settle', pk=pk)
 
         amount = self._amount(wo)
+
+        # Push a draft first if this WO has never been sent to IN — a card-on-file
+        # charge needs an invoice to charge against. Kept in its own try so a PUSH
+        # failure is reported plainly and does NOT get logged as a charge attempt
+        # (the audit table is for charge attempts only). If the push succeeds but
+        # the charge then fails, the WO stays pushed (a draft in IN) — same
+        # keep-the-push behavior as the settle 'pay' path.
+        if not wo.invoice_ninja_id:
+            try:
+                in_id, in_ref, _ = invoice_ninja.push_host_invoice(
+                    wo, po_number=wo.work_order_number, client=wo.client, is_walkin=False,
+                )
+                wo.invoice_ninja_id = in_id
+                wo.invoice_ninja_ref = in_ref
+                wo.save(update_fields=['invoice_ninja_id', 'invoice_ninja_ref'])
+            except invoice_ninja.InvoiceNinjaError as e:
+                messages.error(request, f'Could not send {wo.work_order_number} to Invoice Ninja: {e}')
+                return redirect('core:pos_wo_settle', pk=pk)
+
         try:
             label = invoice_ninja.charge_on_file(wo)
             PaymentChargeAttempt.objects.create(
