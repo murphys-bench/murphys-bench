@@ -107,19 +107,57 @@ Everything is organized around the **client**, the way a shop actually thinks:
 
 ---
 
-## Billing (lightweight, on purpose)
+## Quotes and sales leads
 
-Murphy's Bench tracks billing **state** — it is not a full accounting package,
-and it doesn't try to be.
+- **Prospects** — capture a sales lead (contact-first) before they're a client,
+  track it through a simple pipeline, and **promote it to a full client** in one
+  step when they say yes.
+- **Estimates / quotes** — build a priced quote from your catalog of services and
+  parts, offer **side-by-side comparative options** (e.g. good / better / best),
+  email it to the customer as a **PDF**, and **accept it straight into a work
+  order** when they approve.
+
+## Getting paid — the Register
+
+Murphy's Bench has a **light point-of-sale register** for taking payment without
+leaving the app. It settles two kinds of sale:
+
+- a **finished work order** (the tech closes it; the cashier rings it up), or
+- an **ad-hoc counter sale** (a walk-in retail/product sale, no work order).
+
+At the register you:
+
+- **Record the payment** — cash, check, or a card you ran in Square — or trigger
+  a **charge against a client's stored card on file**, and MB records the
+  transaction reference.
+- **Print an MB receipt** for the customer, with that reference on it.
+- The sale is pushed to **[Invoice Ninja](https://invoiceninja.com/)** as a paid
+  invoice (or a draft, to bill later).
+
+**MB never stores or processes card data itself.** Card payments happen in Square
+or through Invoice Ninja's gateway; MB only *triggers* and *records* them. It is
+not a payment processor and not an accounting package.
+
+## Recurring / managed billing
+
+- Mark a client **managed** and give them a **monthly billing day**.
+- Each client carries a reusable set of **recurring line items** (their monthly
+  services, at negotiated prices).
+- A **Monthly Clients worklist** prepares each due client's invoice, with a
+  batch review-and-confirm step before anything is sent — so a month's billing
+  is one reviewed action, not manual re-entry.
+
+## Billing state and export
+
+Murphy's Bench tracks billing **state** — it is not a full accounting package.
 
 - Each work order has a billing status: uninvoiced, invoiced, paid, paid-direct
-  (cash/walk-in), or disputed.
-- **Outstanding balances** roll up per client.
+  (cash/walk-in), or disputed. **Outstanding balances** roll up per client.
 - **CSV export** of invoices and billing so it drops into whatever accounting
   system you already use.
-- **Invoice Ninja bridge** — push a work order's priced labor/parts to
-  [Invoice Ninja](https://invoiceninja.com/) as a draft invoice (one-directional;
-  IN stays the system of record and assigns the invoice number).
+- **[Invoice Ninja](https://invoiceninja.com/) stays the system of record** — it
+  assigns invoice numbers, owns assembly, and holds the payment ledger; MB feeds
+  it and reads status back.
 
 ---
 
@@ -171,10 +209,11 @@ and it doesn't try to be.
 
 Murphy's Bench is in **active daily production use** at the shop that builds it,
 and it's being hardened for use by others. It's deliberately scoped: it does
-ticketing, work orders, devices, mileage, email, credentials, and reporting
-**well**, rather than trying to be everything. It is not (yet) a customer
-self-service portal, a full accounting system, or a multi-tenant SaaS — those
-are out of scope by choice.
+ticketing, work orders, devices, mileage, email, credentials, quoting, a light
+sales register, and reporting **well**, rather than trying to be everything. It
+is not a full retail POS (no inventory, cash drawer, or barcodes), a payment
+processor, a customer self-service portal, a full accounting system, or a
+multi-tenant SaaS — those are out of scope by choice.
 
 If you run a small shop and want repair-tracking software you fully control,
 this is built for exactly that.
