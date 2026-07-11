@@ -9,6 +9,27 @@
 
 ---
 
+## Deliberate expansion (Jul 10 2026 — Mike)
+
+> "We're getting to a point with MB where improving it means expanding it. This needs to be
+> done, but I want to be deliberate about it." Take these slowly, walk the design *with* Mike,
+> don't let me (Claude) decide the shape. Memory: see per-item notes.
+
+- [ ] **Reports restructure** — make Reports a **management dig-in surface**, split into three
+      domain **pages** (Tickets / Work Orders / Financial) linked from a light `/reports/` hub
+      (separate pages, **not** accordions — chosen over the "cram it into dropdowns" option).
+      Dashboard stays the *glance*; Reports becomes the *dig-in*.
+      - **Financial page first** (the live pain point): replace the three static Billing-Summary
+        callout cards with a **filterable, color-coded (paid/unpaid) invoice + sale list**
+        (month/quarter/range), totals derived from the list — actionable (*which* items are
+        unpaid), and it fixes the honest-"outstanding" problem the Register-settle path exposed
+        (most work is paid-on-receipt, some paid later). Then Tickets + WOs reuse the pattern.
+      - Read-only reporting → low risk (no money-state), but a real ~3-page build → plan each slice.
+      - **Design contents WITH Mike per section — don't pre-fill.** Full design + open decisions:
+        memory `project_mb_reports_restructure`.
+
+---
+
 ## System assessment & remediation (Jun 22 2026 — see BookStack page 09)
 
 Full report-only audit across 8 domains. Verdict: app/code/data/security are sound (verified green);
