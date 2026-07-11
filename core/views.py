@@ -4435,6 +4435,7 @@ _ROLE_FLAGS = [
     ('can_view_restricted_kb',     'View Restricted KB'),
     ('can_manage_kb',              'Manage KB'),
     ('can_view_device_credentials','View Device Credentials'),
+    ('can_view_org_credentials',   'View Org Credential Vault'),
     ('can_reset_user_mfa',         'Reset User MFA'),
     ('can_view_prospects',         'View Prospects'),
     ('can_view_estimates',         'View Estimates'),
@@ -6305,12 +6306,25 @@ class OrgCredentialDeleteView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(CRED_REDIRECT) + CRED_TAB)
 
 
+def _can_view_org_creds(user):
+    """Who may reveal the shared org credential vault. Mirrors the device-cred
+    gate (_can_view_device_creds): admins always; other users only with the
+    explicit can_view_org_credentials flag. Closes the prior hole where ANY
+    logged-in user could reveal a non-admin_only vault entry by hitting the
+    endpoint directly (the Settings UI is admin-only, but the endpoint wasn't)."""
+    return _is_admin(user) or user.has_perm_flag('can_view_org_credentials')
+
+
 class OrgCredentialRevealView(LoginRequiredMixin, View):
     """HTMX: return plaintext credential value and log the access."""
     def get(self, request, pk, field):
+        from django.core.exceptions import PermissionDenied
         cred = get_object_or_404(OrgCredential, pk=pk)
+        # Baseline: must be permitted to view the vault at all.
+        if not _can_view_org_creds(request.user):
+            raise PermissionDenied
+        # Extra tier: an entry marked admin_only stays admin-only regardless.
         if cred.admin_only and not _is_admin(request.user):
-            from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         if field == 'password':
             value = cred.password

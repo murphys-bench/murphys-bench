@@ -86,6 +86,7 @@ class Role(models.Model):
     can_reply_internal = models.BooleanField(default=True)
     can_reply_customer = models.BooleanField(default=True)
     can_view_device_credentials = models.BooleanField(default=False, help_text='Reveal encrypted device credentials (username/password).')
+    can_view_org_credentials = models.BooleanField(default=False, help_text='Reveal the shared organization credential vault (Wi-Fi, portal logins, vendor accounts).')
     can_reset_user_mfa = models.BooleanField(default=False, help_text='Reset (clear) another user\'s two-factor devices for lost-device recovery.')
     can_create_workorder = models.BooleanField(default=True)
     can_edit_workorder = models.BooleanField(default=True)
