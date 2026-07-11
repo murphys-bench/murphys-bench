@@ -211,6 +211,22 @@ def _scope_tickets_for(qs, user):
     )
 
 
+def _get_scoped_wo_or_404(request, pk, queryset=None):
+    """Fetch a WorkOrder by pk, 404ing if it's outside the requesting user's
+    visibility (per `_scope_assignable_for`). Pass `queryset` to layer on
+    select_related/prefetch_related; defaults to WorkOrder.objects.all()."""
+    qs = queryset if queryset is not None else WorkOrder.objects.all()
+    return get_object_or_404(_scope_assignable_for(qs, request.user), pk=pk)
+
+
+def _get_scoped_ticket_or_404(request, pk, queryset=None):
+    """Fetch a Ticket by pk, 404ing if it's outside the requesting user's
+    visibility (per `_scope_tickets_for`). Pass `queryset` to layer on
+    select_related/prefetch_related; defaults to Ticket.objects.all()."""
+    qs = queryset if queryset is not None else Ticket.objects.all()
+    return get_object_or_404(_scope_tickets_for(qs, request.user), pk=pk)
+
+
 def _get_custom_fields_for_ticket(ticket_or_none):
     """Return active CustomFields applicable to a ticket (and its help topic if set)."""
     help_topic = getattr(ticket_or_none, 'help_topic', None) if ticket_or_none else None
@@ -502,10 +518,11 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
     context_object_name = 'work_order'
 
     def get_queryset(self):
-        return WorkOrder.objects.select_related(
+        qs = WorkOrder.objects.select_related(
             'client', 'assigned_to', 'device', 'device__assigned_contact',
             'repair_type', 'ticket', 'contact'
         ).prefetch_related('notes', 'items', 'notes__created_by')
+        return _scope_assignable_for(qs, self.request.user)
 
     def get_context_data(self, **kwargs):
         from django.utils import timezone
@@ -561,7 +578,7 @@ class WorkOrderAddTimeView(LoginRequiredMixin, View):
     """Add minutes to a work order's time_spent_minutes. Returns updated display fragment."""
 
     def post(self, request, pk):
-        wo = get_object_or_404(WorkOrder, pk=pk)
+        wo = _get_scoped_wo_or_404(request, pk)
         try:
             minutes = max(0, int(request.POST.get('minutes', 0)))
         except (ValueError, TypeError):
@@ -578,7 +595,7 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
     """Inline update of key WO fields from the detail page sidebar panel."""
 
     def post(self, request, pk):
-        wo = get_object_or_404(WorkOrder, pk=pk)
+        wo = _get_scoped_wo_or_404(request, pk)
         p = request.POST
 
         wo.status       = p.get('status', wo.status)
@@ -647,7 +664,7 @@ class WorkOrderClaimView(LoginRequiredMixin, View):
     """Self-assign a work order to the current user."""
 
     def post(self, request, pk):
-        wo = get_object_or_404(WorkOrder, pk=pk)
+        wo = _get_scoped_wo_or_404(request, pk)
         wo.assigned_to = request.user
         wo.save(update_fields=['assigned_to', 'updated_at'])
         return redirect('core:work_order_detail', pk=pk)
@@ -657,7 +674,7 @@ class WorkOrderAttachmentUploadView(LoginRequiredMixin, View):
     """Upload files directly to a work order (not tied to a note)."""
 
     def post(self, request, pk):
-        wo = get_object_or_404(WorkOrder, pk=pk)
+        wo = _get_scoped_wo_or_404(request, pk)
         _save_attachments(request, wo)
         return redirect('core:work_order_detail', pk=pk)
 
@@ -666,7 +683,7 @@ class WorkOrderApplyChecklistView(LoginRequiredMixin, View):
     """Re-apply checklist items from the flat bank to an existing WO."""
 
     def post(self, request, pk):
-        wo = get_object_or_404(WorkOrder, pk=pk)
+        wo = _get_scoped_wo_or_404(request, pk)
         _apply_checklist_items(wo)
         return redirect('core:work_order_detail', pk=pk)
 
@@ -898,7 +915,7 @@ class WorkOrderMileageCreateView(LoginRequiredMixin, View):
         }
 
     def get(self, request, pk):
-        work_order = get_object_or_404(WorkOrder, pk=pk)
+        work_order = _get_scoped_wo_or_404(request, pk)
         settings = SiteSettings.get()
         client = work_order.client
         parts = [client.address_line1, client.address_city, client.address_state, client.address_zip] if client else []
@@ -914,7 +931,7 @@ class WorkOrderMileageCreateView(LoginRequiredMixin, View):
         return render(request, 'core/mileage_wo_form.html', self._context(work_order, form))
 
     def post(self, request, pk):
-        work_order = get_object_or_404(WorkOrder, pk=pk)
+        work_order = _get_scoped_wo_or_404(request, pk)
         form = MileageForm(request.POST)
         if form.is_valid():
             entry = form.save(commit=False)
@@ -969,7 +986,7 @@ class WorkOrderNoteCreateView(LoginRequiredMixin, View):
     """Add a note to a work order — returns HTML fragment for HTMX"""
 
     def post(self, request, pk):
-        work_order = get_object_or_404(WorkOrder, pk=pk)
+        work_order = _get_scoped_wo_or_404(request, pk)
         note_type = request.POST.get('note_type', 'internal')
         content = request.POST.get('content', '').strip()
 
@@ -1006,10 +1023,10 @@ class TechMessageView(LoginRequiredMixin, View):
 
     def post(self, request, pk):
         if self.source == 'ticket':
-            ticket = get_object_or_404(Ticket, pk=pk)
+            ticket = _get_scoped_ticket_or_404(request, pk)
             work_order = WorkOrder.objects.filter(ticket=ticket).first()
         else:
-            work_order = get_object_or_404(WorkOrder, pk=pk)
+            work_order = _get_scoped_wo_or_404(request, pk)
             ticket = work_order.ticket
 
         if ticket is None:
@@ -1113,7 +1130,12 @@ class WorkOrderItemCheckView(LoginRequiredMixin, View):
     """HTMX: update pre_check or post_check on a checklist item, return full checklist."""
 
     def post(self, request, pk):
-        item = get_object_or_404(WorkOrderItem, pk=pk)
+        item = get_object_or_404(
+            WorkOrderItem.objects.filter(
+                work_order__in=_scope_assignable_for(WorkOrder.objects.all(), request.user)
+            ),
+            pk=pk,
+        )
         field = request.POST.get('field')
         value = request.POST.get('value', '')
         if field in ('pre_check', 'post_check'):
@@ -1234,6 +1256,9 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
     model = WorkOrder
     form_class = WorkOrderForm
     template_name = 'core/work_order_form.html'
+
+    def get_queryset(self):
+        return _scope_assignable_for(WorkOrder.objects.all(), self.request.user)
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
@@ -2957,6 +2982,9 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
     form_class = TicketForm
     template_name = 'core/ticket_form.html'
 
+    def get_queryset(self):
+        return _scope_tickets_for(Ticket.objects.all(), self.request.user)
+
     def form_valid(self, form):
         new_status = form.cleaned_data.get('status')
         # NOTE: MB deliberately does NOT block closing a ticket whose linked WO is
@@ -3027,7 +3055,7 @@ class TicketReplyCreateView(LoginRequiredMixin, View):
     """Add a reply to a ticket — returns HTML fragment for HTMX"""
 
     def post(self, request, pk):
-        ticket = get_object_or_404(Ticket, pk=pk)
+        ticket = _get_scoped_ticket_or_404(request, pk)
         reply_type = request.POST.get('reply_type', 'internal')
         content = request.POST.get('content', '').strip()
 
@@ -3074,7 +3102,7 @@ class TicketReplyResendView(LoginRequiredMixin, View):
     """Resend a specific reply email to a chosen address."""
 
     def post(self, request, pk, reply_pk):
-        ticket = get_object_or_404(Ticket, pk=pk)
+        ticket = _get_scoped_ticket_or_404(request, pk)
         reply = get_object_or_404(TicketReply, pk=reply_pk, ticket=ticket)
         to_email = request.POST.get('to_email', '').strip()
         if to_email == '__custom__':
@@ -3101,7 +3129,7 @@ class TicketDismissNeedsResponseView(LoginRequiredMixin, View):
     """Manually dismiss the needs_response flag with a required note."""
 
     def post(self, request, pk):
-        ticket = get_object_or_404(Ticket, pk=pk)
+        ticket = _get_scoped_ticket_or_404(request, pk)
         note = request.POST.get('note', '').strip()
         if not note:
             messages.error(request, 'A note is required to dismiss the response flag.')
@@ -3126,7 +3154,7 @@ class TicketReopenView(LoginRequiredMixin, View):
     the flag, same as any other needs_response ticket."""
 
     def post(self, request, pk):
-        ticket = get_object_or_404(Ticket, pk=pk)
+        ticket = _get_scoped_ticket_or_404(request, pk)
         if ticket.status not in Ticket.CLOSED_AT_STATUSES:
             messages.info(request, 'Ticket is not closed.')
             return redirect('core:ticket_detail', pk=pk)
@@ -3140,14 +3168,14 @@ class TicketConvertView(LoginRequiredMixin, View):
     """Convert a ticket to a work order"""
 
     def get(self, request, pk):
-        ticket = get_object_or_404(Ticket, pk=pk)
+        ticket = _get_scoped_ticket_or_404(request, pk)
         if ticket.status == 'converted':
             return redirect('core:ticket_detail', pk=pk)
         form = TicketConvertForm()
         return render(request, 'core/ticket_convert.html', {'ticket': ticket, 'form': form})
 
     def post(self, request, pk):
-        ticket = get_object_or_404(Ticket, pk=pk)
+        ticket = _get_scoped_ticket_or_404(request, pk)
         if ticket.status == 'converted':
             return redirect('core:ticket_detail', pk=pk)
 
@@ -3190,7 +3218,7 @@ class TicketLockStatusView(LoginRequiredMixin, View):
     """Return lock banner HTML fragment — polled every 30s by HTMX"""
 
     def get(self, request, pk):
-        ticket = get_object_or_404(Ticket, pk=pk)
+        ticket = _get_scoped_ticket_or_404(request, pk)
         lock_user = None
         try:
             lock = ticket.lock
@@ -3207,13 +3235,15 @@ class TicketLinkAddView(LoginRequiredMixin, View):
     """Add a link between two tickets — returns updated linked tickets partial"""
 
     def post(self, request, pk):
-        ticket = get_object_or_404(Ticket, pk=pk)
+        ticket = _get_scoped_ticket_or_404(request, pk)
         ticket_number = request.POST.get('ticket_number', '').strip()
         link_type = request.POST.get('link_type', 'related')
         error = None
 
         try:
-            other = Ticket.objects.get(ticket_number__iexact=ticket_number)
+            other = _scope_tickets_for(Ticket.objects.all(), request.user).get(
+                ticket_number__iexact=ticket_number
+            )
         except Ticket.DoesNotExist:
             error = f'Ticket "{ticket_number}" not found.'
             other = None
@@ -3287,7 +3317,7 @@ class TicketLinkRemoveView(LoginRequiredMixin, View):
     """Remove a ticket link — returns updated linked tickets partial"""
 
     def post(self, request, pk):
-        ticket = get_object_or_404(Ticket, pk=pk)
+        ticket = _get_scoped_ticket_or_404(request, pk)
         link_id = request.POST.get('link_id')
         try:
             link = TicketLink.objects.get(pk=link_id)
@@ -3358,11 +3388,11 @@ class TicketAcknowledgeOverdueView(LoginRequiredMixin, View):
     """Acknowledge an overdue ticket with a required internal note."""
 
     def get(self, request, pk):
-        ticket = get_object_or_404(Ticket, pk=pk)
+        ticket = _get_scoped_ticket_or_404(request, pk)
         return render(request, 'core/partials/overdue_ack_form.html', {'ticket': ticket})
 
     def post(self, request, pk):
-        ticket = get_object_or_404(Ticket, pk=pk)
+        ticket = _get_scoped_ticket_or_404(request, pk)
         note_text = request.POST.get('note', '').strip()
         if not note_text:
             # Re-render the ack form with an error
@@ -3408,7 +3438,7 @@ class TicketCloseView(LoginRequiredMixin, View):
     """Set a ticket to 'resolved' status. Used when WO is complete and tech has contacted client."""
 
     def post(self, request, pk):
-        ticket = get_object_or_404(Ticket, pk=pk)
+        ticket = _get_scoped_ticket_or_404(request, pk)
         if ticket.status in TICKET_CLOSED_STATUSES:
             messages.info(request, 'Ticket is already closed.')
             return redirect('core:ticket_detail', pk=pk)
@@ -4642,7 +4672,7 @@ class WorkPerformedLogView(LoginRequiredMixin, View):
     The item's optional default_price prefills the line price."""
 
     def post(self, request, wo_pk, item_pk):
-        work_order = get_object_or_404(WorkOrder, pk=wo_pk)
+        work_order = _get_scoped_wo_or_404(request, wo_pk)
         item = get_object_or_404(CatalogItem, pk=item_pk, is_active=True)
         _log_catalog_item(work_order, item, request.user)
         return _render_line_items(request, work_order)
@@ -4678,7 +4708,7 @@ class WorkPerformedCustomLogView(LoginRequiredMixin, View):
     """HTMX: log a fully custom line item — labor or part — with optional price."""
 
     def post(self, request, wo_pk):
-        work_order = get_object_or_404(WorkOrder, pk=wo_pk)
+        work_order = _get_scoped_wo_or_404(request, wo_pk)
         label = request.POST.get('custom_label', '').strip()
         notes = request.POST.get('notes', '').strip()
         kind = request.POST.get('kind', 'labor')
@@ -5251,11 +5281,11 @@ class WorkOrderPrintView(LoginRequiredMixin, View):
     """Print-optimised repair report for handing to the customer."""
 
     def get(self, request, pk):
-        work_order = get_object_or_404(
-            WorkOrder.objects.select_related(
+        work_order = _get_scoped_wo_or_404(
+            request, pk,
+            queryset=WorkOrder.objects.select_related(
                 'client', 'device', 'repair_type', 'assigned_to', 'contact'
             ),
-            pk=pk,
         )
         site = SiteSettings.get()
         report_type = request.GET.get('type', 'repair')  # 'repair' or 'claim'
@@ -5420,7 +5450,7 @@ class WorkOrderCredentialsSaveView(LoginRequiredMixin, View):
     """Save device credentials inline on WO detail."""
 
     def post(self, request, pk):
-        wo = get_object_or_404(WorkOrder, pk=pk)
+        wo = _get_scoped_wo_or_404(request, pk)
         wo.device_username = request.POST.get('device_username', '').strip()
         wo.device_password = request.POST.get('device_password', '').strip()
         wo.device_pin = request.POST.get('device_pin', '').strip()
@@ -5434,7 +5464,7 @@ class WorkOrderBillingUpdateView(LoginRequiredMixin, View):
 
     def post(self, request, pk):
         from django.utils import timezone
-        wo = get_object_or_404(WorkOrder, pk=pk)
+        wo = _get_scoped_wo_or_404(request, pk)
         invoice, _ = Invoice.objects.get_or_create(work_order=wo)
 
         billing_status = request.POST.get('billing_status', '').strip()
@@ -5476,7 +5506,7 @@ class WorkOrderBillingCheckINView(LoginRequiredMixin, View):
 
     def post(self, request, pk):
         from . import invoice_ninja
-        wo = get_object_or_404(WorkOrder, pk=pk)
+        wo = _get_scoped_wo_or_404(request, pk)
         invoice, _ = Invoice.objects.get_or_create(work_order=wo)
         try:
             invoice_ninja.check_invoice_status(wo)
@@ -6843,7 +6873,7 @@ class CustomFieldChoiceDeleteView(LoginRequiredMixin, View):
 class TicketStatusUpdateView(LoginRequiredMixin, View):
     """Quick status change from ticket detail page."""
     def post(self, request, pk):
-        ticket = get_object_or_404(Ticket, pk=pk)
+        ticket = _get_scoped_ticket_or_404(request, pk)
         new_status = request.POST.get('status', '').strip()
         if not new_status:
             return redirect('core:ticket_detail', pk=pk)
