@@ -28,6 +28,29 @@
       - **Design contents WITH Mike per section — don't pre-fill.** Full design + open decisions:
         memory `project_mb_reports_restructure`.
 
+## Security hardening for external testers (external review, Jul 10 2026)
+
+> Prep for controlled external testers on **fake/demo data**. Reviewer's headline: the next
+> threshold is **object-level authorization + credential tightening**, not HTTPS. All findings
+> verified against live code. Full triage: memory `project_mb_external_security_review_jul2026`.
+
+- [x] **#3 Org credential vault reveal was default-open** — ✅ FIXED (mig 0083, v0.4.38-33):
+      gated on new `can_view_org_credentials` role flag (default off), admin_only tier preserved.
+- [x] **README named-competitor comparison** — ✅ dropped.
+- [ ] **#1 Object-level authorization (THE BIG ONE — plan it).** `WorkOrderDetailView` + WO
+      mutation endpoints (add-time/quick-update/claim/upload) fetch by raw `pk`, unscoped. The
+      `_scope_assignable_for` machinery exists (used on lists) — apply it to detail+mutations;
+      also enforce role flags server-side (reviewer #2, same root cause). Ships WITH tests. This
+      is the threshold for external testers.
+- [ ] **#4 KB Markdown = stored XSS** — `markdownify` `mark_safe`s unsanitized HTML; add a
+      `bleach` allowlist (staff-authored, so lower severity but real).
+- [ ] **#5 Encrypt two plaintext secrets** — `SiteSettings.s3_secret_key` +
+      `google_maps_api_key` → `EncryptedCharField` (+ migration re-encrypting existing values).
+- [ ] **#7 `pip-audit` CVE gate in CI** — small add to `.github/workflows/ci.yml` (also a
+      standing T3 item above).
+- [ ] **#6 CSP is `.env`-gated (doc note, not a vuln)** — one clarifying sentence in
+      INSTALL/deploy docs: repo default is report-only, enforcement flipped per box via `.env`.
+
 ---
 
 ## System assessment & remediation (Jun 22 2026 — see BookStack page 09)
