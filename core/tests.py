@@ -5254,6 +5254,225 @@ def test_recurring_card_charge_button_gated_on_permission(client, client_obj):
 
 
 # ---------------------------------------------------------------------------
+# Light POS — Slice 6: card-on-file charge in the Register (WorkOrder host)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_charge_on_file_dispatches_to_work_order_status_check(client_obj, monkeypatch):
+    """charge_on_file(work_order) triggers the same bulk auto_bill action as
+    the Sale path, but reads/writes status via the WO's Invoice row, not a
+    field on the host itself."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem, Invoice
+    wo = WorkOrder.objects.create(client=client_obj, status='completed', invoice_ninja_id='77')
+    Invoice.objects.get_or_create(work_order=wo)
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('50.00'))
+
+    calls = []
+    def fake_request(method, path, **kwargs):
+        calls.append((method, path, kwargs.get('json')))
+        if path == '/invoices/bulk':
+            return {'data': []}
+        if path == '/invoices/77':
+            return {'data': {'status_id': '2'}}  # Sent — not paid yet
+        raise AssertionError(f'Unexpected IN call: {method} {path}')
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+
+    label = invoice_ninja.charge_on_file(wo)
+    assert ('POST', '/invoices/bulk', {'action': 'auto_bill', 'ids': ['77']}) in calls
+    assert label == 'Sent'
+    inv = Invoice.objects.get(work_order=wo)
+    assert inv.in_status == 'Sent'
+
+
+@pytest.mark.django_db
+def test_charge_on_file_refuses_work_order_when_not_pushed(client_obj):
+    from core import invoice_ninja
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
+    with pytest.raises(invoice_ninja.InvoiceNinjaError, match='not been pushed'):
+        invoice_ninja.charge_on_file(wo)
+
+
+@pytest.mark.django_db
+def test_charge_on_file_refuses_work_order_when_fresh_status_is_paid(client_obj, monkeypatch):
+    """Same double-charge safety as the Sale path: a fresh read-back showing
+    Paid blocks the charge even if MB's stored status is stale."""
+    from core import invoice_ninja
+    from core.models import Invoice
+    wo = WorkOrder.objects.create(client=client_obj, status='completed', invoice_ninja_id='77')
+    inv, _ = Invoice.objects.get_or_create(work_order=wo)
+    inv.in_status = 'Draft'  # stale stored value
+    inv.save()
+
+    calls = []
+    def fake_request(method, path, **kwargs):
+        calls.append((method, path))
+        if path == '/invoices/77':
+            return {'data': {'status_id': '4'}}  # Paid — the real current state
+        raise AssertionError(f'Must not fire the charge: {method} {path}')
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    with pytest.raises(invoice_ninja.InvoiceNinjaError, match='already marked Paid'):
+        invoice_ninja.charge_on_file(wo)
+    assert ('POST', '/invoices/bulk') not in calls
+
+
+@pytest.mark.django_db
+def test_charge_on_file_rejects_unsupported_host():
+    from core import invoice_ninja
+    with pytest.raises(TypeError):
+        invoice_ninja.charge_on_file(object())
+
+
+@pytest.mark.django_db
+def test_pos_wo_charge_view_requires_can_process_payments(client, client_obj):
+    """403 for a user without can_process_payments, even one who can view
+    sales / use the register. No IN call, no attempt recorded."""
+    role = Role.objects.create(name='RegisterOnly', can_view_sales=True, can_process_payments=False)
+    user = User.objects.create_user(username='reg_tech', password='x', role_obj=role)
+    wo = WorkOrder.objects.create(client=client_obj, status='completed', invoice_ninja_id='77')
+    client.force_login(user)
+
+    resp = client.get(reverse('core:pos_wo_charge', args=[wo.pk]))
+    assert resp.status_code == 403
+    resp = client.post(reverse('core:pos_wo_charge', args=[wo.pk]))
+    assert resp.status_code == 403
+    assert PaymentChargeAttempt.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_pos_wo_charge_view_confirm_screen_shows_server_amount(client, admin_user, client_obj):
+    from decimal import Decimal
+    from core.models import LineItem
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='completed', invoice_ninja_id='77')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('85.00'))
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:pos_wo_charge', args=[wo.pk]))
+    assert resp.status_code == 200
+    assert resp.context['amount'] == Decimal('85.00')
+
+
+@pytest.mark.django_db
+def test_pos_wo_charge_view_success_records_attempt_on_work_order(client, admin_user, client_obj, monkeypatch):
+    """A successful trigger writes a PaymentChargeAttempt with work_order set
+    (sale left null) and the server-computed amount; the WO is never marked
+    Paid by the trigger itself — only the async read-back does that."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem, Invoice
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='completed', invoice_ninja_id='77')
+    inv, _ = Invoice.objects.get_or_create(work_order=wo)
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('65.00'))
+
+    def fake_charge(host):
+        inv.in_status = 'Sent'
+        inv.save(update_fields=['in_status'])
+        return 'Sent'
+    monkeypatch.setattr(invoice_ninja, 'charge_on_file', fake_charge)
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_charge', args=[wo.pk]), {'amount': '99999.00'})
+    assert resp.status_code == 302
+    attempt = PaymentChargeAttempt.objects.get(work_order=wo)
+    assert attempt.sale is None
+    assert attempt.result == 'success'
+    assert attempt.amount == Decimal('65.00')  # server-derived, ignores the posted 99999.00
+    assert attempt.initiated_by == admin_user
+    assert attempt.in_status_after == 'Sent'
+    inv.refresh_from_db()
+    assert inv.in_status != 'Paid'
+
+
+@pytest.mark.django_db
+def test_pos_wo_charge_view_cooldown_blocks_rapid_second_charge(client, admin_user, client_obj, monkeypatch):
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='completed', invoice_ninja_id='77')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('65.00'))
+    PaymentChargeAttempt.objects.create(work_order=wo, invoice_ninja_id='77',
+                                        amount=Decimal('65.00'), result='success')
+
+    def must_not_charge(host):
+        raise AssertionError('Must not fire a charge during the cooldown window')
+    monkeypatch.setattr(invoice_ninja, 'charge_on_file', must_not_charge)
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_charge', args=[wo.pk]))
+    assert resp.status_code == 302
+    assert PaymentChargeAttempt.objects.filter(work_order=wo).count() == 1
+
+
+@pytest.mark.django_db
+def test_pos_wo_charge_view_failure_records_attempt_and_error(client, admin_user, client_obj, monkeypatch):
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='completed', invoice_ninja_id='77')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('65.00'))
+
+    def fake_charge(host):
+        raise invoice_ninja.InvoiceNinjaError('Invoice Ninja returned 422: no payment method on file')
+    monkeypatch.setattr(invoice_ninja, 'charge_on_file', fake_charge)
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_charge', args=[wo.pk]))
+    assert resp.status_code == 302
+    attempt = PaymentChargeAttempt.objects.get(work_order=wo)
+    assert attempt.result == 'failed'
+    assert 'no payment method on file' in attempt.error_message
+
+
+@pytest.mark.django_db
+def test_pos_wo_charge_view_refuses_when_in_disabled(client, admin_user, client_obj):
+    from core.models import SiteSettings
+    site = SiteSettings.get(); site.invoice_ninja_enabled = False; site.save()
+    wo = WorkOrder.objects.create(client=client_obj, status='completed', invoice_ninja_id='77')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_charge', args=[wo.pk]))
+    assert resp.status_code == 302
+    assert PaymentChargeAttempt.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_charge_button_hidden_for_walkin(client, admin_user):
+    """A walk-in (client-less) WO has no card on file to charge — the button
+    must not render even for a permitted user (admin_user is a superuser, so
+    can_process_payments is satisfied), regardless of push state."""
+    _enable_in()
+    wo = WorkOrder.objects.create(client=None, status='completed', invoice_ninja_id='77')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:pos_wo_settle', args=[wo.pk]))
+    assert b'Charge card on file' not in resp.content
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_charge_button_gated_on_permission(client, client_obj):
+    """The register's 'Charge card on file' link only renders for a user with
+    can_process_payments — matches the Sale-side gating."""
+    from decimal import Decimal
+    from core.models import LineItem
+    _enable_in()
+    role = Role.objects.create(name='RegisterOnly2', can_view_sales=True, can_process_payments=False)
+    user = User.objects.create_user(username='reg_tech2', password='x', role_obj=role)
+    wo = WorkOrder.objects.create(client=client_obj, status='completed', invoice_ninja_id='77')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('65.00'))
+    client.force_login(user)
+    resp = client.get(reverse('core:pos_wo_settle', args=[wo.pk]))
+    assert b'Charge card on file' not in resp.content
+
+
+# ---------------------------------------------------------------------------
 # Light POS — Slice 1: the register (non-charging settlement paths)
 # ---------------------------------------------------------------------------
 

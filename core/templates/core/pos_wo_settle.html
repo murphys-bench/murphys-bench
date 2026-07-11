@@ -47,6 +47,9 @@
             {% if wo.invoice.in_status %}({{ wo.invoice.in_status }}){% endif %}.
             Settling below will use this same invoice — not create a new one.
         </p>
+        {% if can_process_payments and wo.client and wo.invoice.in_status|lower != 'paid' %}
+        <a href="{% url 'core:pos_wo_charge' wo.pk %}" class="inline-block mt-3 px-4 py-2 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 font-medium">Charge card on file</a>
+        {% endif %}
     </div>
     {% endif %}
 
