@@ -132,7 +132,9 @@ is compiled to a static stylesheet via the standalone CLI on deploy; no Node) ·
 (single file, no DB server) · Gunicorn + Nginx. It runs **behind a
 TLS-terminating reverse proxy** (Cloudflare Tunnel, Caddy, or Nginx) rather than terminating
 TLS itself — the standard Django model; see [`docs/deployment-tls.md`](docs/deployment-tls.md). A
-Content-Security-Policy is enforced in front of the app.
+Content-Security-Policy middleware is built in; the repo default is report-only so a fresh install
+doesn't break, and each deployment flips `CSP_REPORT_ONLY=False` in its own `.env` once it's
+confirmed clean (prod and the demo instance both enforce it).
 
 ## Install
 
