@@ -5750,3 +5750,65 @@ def test_reports_collected_merges_wo_and_counter_sales(client, admin_user, clien
     resp = client.get(reverse('core:reports'))
     assert resp.context['paid_total'] == Decimal('100.00')  # 75 (WO) + 25 (counter sale)
     assert resp.context['counter_sales_total'] == Decimal('25.00')  # unchanged, still its own figure
+
+
+# ---------------------------------------------------------------------------
+# Security: org credential vault reveal is flag-gated at the ENDPOINT
+# (the Settings UI is admin-only, but the reveal endpoint was reachable by
+# any logged-in user via direct URL — external-review finding, Jul 10 2026)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_org_cred_reveal_denied_without_flag(client, client_obj):
+    """A plain logged-in user (no can_view_org_credentials, not admin) can no
+    longer reveal a non-admin_only vault entry by hitting the endpoint."""
+    from core.models import OrgCredential
+    role = Role.objects.create(name='PlainUser')  # no cred flags
+    user = User.objects.create_user(username='plain1', password='x', role_obj=role)
+    cred = OrgCredential.objects.create(name='Shop WiFi', username='admin', password='secret', admin_only=False)
+
+    client.force_login(user)
+    resp = client.get(reverse('core:cred_reveal', args=[cred.pk, 'password']))
+    assert resp.status_code == 403
+    assert b'secret' not in resp.content
+
+
+@pytest.mark.django_db
+def test_org_cred_reveal_allowed_with_flag(client, client_obj):
+    """A user granted can_view_org_credentials CAN reveal a non-admin_only
+    entry, and the access is logged."""
+    from core.models import OrgCredential, CredentialAccessLog
+    role = Role.objects.create(name='VaultViewer', can_view_org_credentials=True)
+    user = User.objects.create_user(username='viewer1', password='x', role_obj=role)
+    cred = OrgCredential.objects.create(name='Shop WiFi', username='admin', password='secret', admin_only=False)
+
+    client.force_login(user)
+    resp = client.get(reverse('core:cred_reveal', args=[cred.pk, 'password']))
+    assert resp.status_code == 200
+    assert resp.content == b'secret'
+    assert CredentialAccessLog.objects.filter(credential=cred, user=user, action='viewed').exists()
+
+
+@pytest.mark.django_db
+def test_org_cred_reveal_admin_only_entry_still_admin_only(client, client_obj):
+    """The extra admin_only tier survives: even a flag-holder can't reveal an
+    entry marked admin_only unless they're an admin."""
+    from core.models import OrgCredential
+    role = Role.objects.create(name='VaultViewer2', can_view_org_credentials=True)
+    user = User.objects.create_user(username='viewer2', password='x', role_obj=role)
+    cred = OrgCredential.objects.create(name='Root PW', username='root', password='topsecret', admin_only=True)
+
+    client.force_login(user)
+    resp = client.get(reverse('core:cred_reveal', args=[cred.pk, 'password']))
+    assert resp.status_code == 403
+
+
+@pytest.mark.django_db
+def test_org_cred_reveal_admin_always_allowed(client, admin_user):
+    """An admin reveals both normal and admin_only entries (unchanged)."""
+    from core.models import OrgCredential
+    normal = OrgCredential.objects.create(name='WiFi', username='u', password='p1', admin_only=False)
+    restricted = OrgCredential.objects.create(name='Root', username='root', password='p2', admin_only=True)
+    client.force_login(admin_user)
+    assert client.get(reverse('core:cred_reveal', args=[normal.pk, 'password'])).content == b'p1'
+    assert client.get(reverse('core:cred_reveal', args=[restricted.pk, 'password'])).content == b'p2'
