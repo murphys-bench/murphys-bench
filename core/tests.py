@@ -5812,3 +5812,114 @@ def test_org_cred_reveal_admin_always_allowed(client, admin_user):
     client.force_login(admin_user)
     assert client.get(reverse('core:cred_reveal', args=[normal.pk, 'password'])).content == b'p1'
     assert client.get(reverse('core:cred_reveal', args=[restricted.pk, 'password'])).content == b'p2'
+
+
+# ── Security #1: object-level authorization on WO detail + mutations,        ─
+# ── and ticket mutations (external review, Jul 10 2026) ─────────────────────
+#
+# Before this fix, WorkOrderDetailView and every WO/ticket mutation endpoint
+# fetched by raw pk with no visibility check — a logged-in non-admin tech
+# could view/act on any WO or ticket by guessing/incrementing the URL, not
+# just their own + the unclaimed pool. These lock in that a non-owning,
+# non-admin tech now 404s (mirroring the scoping TicketDetailView already
+# had), while the claim/take-over paths that scoping is designed to preserve
+# still work.
+
+@pytest.mark.django_db
+def test_wo_detail_404s_for_non_owning_non_admin_tech(client, client_obj):
+    owner = User.objects.create_user(username='wo_owner', password='x', is_staff=False)
+    other = User.objects.create_user(username='wo_other', password='x', is_staff=False)
+    wo = WorkOrder.objects.create(client=client_obj, assigned_to=owner)
+
+    client.force_login(other)
+    resp = client.get(reverse('core:work_order_detail', args=[wo.pk]))
+    assert resp.status_code == 404
+
+
+@pytest.mark.django_db
+def test_wo_detail_visible_to_owner_unclaimed_pool_and_admin(client, client_obj, admin_user):
+    owner = User.objects.create_user(username='wo_owner2', password='x', is_staff=False)
+    picker = User.objects.create_user(username='wo_picker', password='x', is_staff=False)
+    owned = WorkOrder.objects.create(client=client_obj, assigned_to=owner)
+    unclaimed = WorkOrder.objects.create(client=client_obj)
+
+    client.force_login(owner)
+    assert client.get(reverse('core:work_order_detail', args=[owned.pk])).status_code == 200
+
+    client.force_login(picker)
+    assert client.get(reverse('core:work_order_detail', args=[unclaimed.pk])).status_code == 200
+
+    client.force_login(admin_user)
+    assert client.get(reverse('core:work_order_detail', args=[owned.pk])).status_code == 200
+
+
+@pytest.mark.django_db
+def test_wo_quick_update_404s_for_non_owning_tech(client, client_obj):
+    owner = User.objects.create_user(username='wo_owner3', password='x', is_staff=False)
+    other = User.objects.create_user(username='wo_other3', password='x', is_staff=False)
+    wo = WorkOrder.objects.create(client=client_obj, assigned_to=owner)
+
+    client.force_login(other)
+    resp = client.post(reverse('core:work_order_quick_update', args=[wo.pk]), {'status': 'in_progress'})
+    assert resp.status_code == 404
+    wo.refresh_from_db()
+    assert wo.status != 'in_progress'
+
+
+@pytest.mark.django_db
+def test_wo_claim_still_works_on_unclaimed_pool(client, client_obj):
+    """Scoping includes the unassigned pool — a tech must still be able to
+    claim unclaimed work, the core reason the pool is in the queryset."""
+    tech = User.objects.create_user(username='wo_claimer', password='x', is_staff=False)
+    wo = WorkOrder.objects.create(client=client_obj)
+
+    client.force_login(tech)
+    resp = client.post(reverse('core:wo_claim', args=[wo.pk]))
+    assert resp.status_code == 302
+    wo.refresh_from_db()
+    assert wo.assigned_to == tech
+
+
+@pytest.mark.django_db
+def test_ticket_convert_404s_for_non_owning_tech(client, client_obj):
+    owner = User.objects.create_user(username='tkt_owner', password='x', is_staff=False)
+    other = User.objects.create_user(username='tkt_other', password='x', is_staff=False)
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D', assigned_to=owner)
+
+    client.force_login(other)
+    resp = client.get(reverse('core:ticket_convert', args=[ticket.pk]))
+    assert resp.status_code == 404
+    assert not WorkOrder.objects.filter(ticket=ticket).exists()
+
+
+@pytest.mark.django_db
+def test_ticket_delete_still_admin_gated_not_broken_by_scoping(client, client_obj, admin_user):
+    """Admins bypass scoping entirely (existing _is_admin short-circuit), so
+    the pre-existing staff-only delete guard is unaffected by this change."""
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:ticket_delete', args=[ticket.pk]))
+    assert resp.status_code == 302
+    assert not Ticket.objects.filter(pk=ticket.pk).exists()
+
+
+@pytest.mark.django_db
+def test_ticket_edit_404s_for_non_owning_tech(client, client_obj):
+    owner = User.objects.create_user(username='tkt_owner2', password='x', is_staff=False)
+    other = User.objects.create_user(username='tkt_other2', password='x', is_staff=False)
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D', assigned_to=owner)
+
+    client.force_login(other)
+    resp = client.get(reverse('core:ticket_edit', args=[ticket.pk]))
+    assert resp.status_code == 404
+
+
+@pytest.mark.django_db
+def test_wo_edit_404s_for_non_owning_tech(client, client_obj):
+    owner = User.objects.create_user(username='wo_owner4', password='x', is_staff=False)
+    other = User.objects.create_user(username='wo_other4', password='x', is_staff=False)
+    wo = WorkOrder.objects.create(client=client_obj, assigned_to=owner)
+
+    client.force_login(other)
+    resp = client.get(reverse('core:work_order_edit', args=[wo.pk]))
+    assert resp.status_code == 404
