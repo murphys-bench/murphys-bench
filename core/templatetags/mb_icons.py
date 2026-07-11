@@ -233,15 +233,44 @@ def getfield(form, field_name):
     return form[field_name]
 
 
+# KB articles are staff-authored (can_manage_kb), so this is stored-XSS-by-a-
+# trusted-writer rather than an open injection point — but a compromised staff
+# account or a pasted-in hostile snippet still shouldn't get raw <script>/onX=
+# straight into every reader's browser. Allowlist covers exactly what the
+# 'tables'/'fenced_code'/'nl2br'/'sane_lists'/'toc' extensions below emit.
+_MARKDOWN_ALLOWED_TAGS = [
+    'p', 'br', 'hr', 'strong', 'em', 'del', 'code', 'pre', 'blockquote',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'ul', 'ol', 'li',
+    'a', 'img',
+    'table', 'thead', 'tbody', 'tr', 'th', 'td',
+    'div', 'span',
+]
+_MARKDOWN_ALLOWED_ATTRS = {
+    'a': ['href', 'title'],
+    'img': ['src', 'alt', 'title'],
+    '*': ['id', 'class'],  # toc anchors + fenced-code language classes
+}
+
+
 @register.filter
 def markdownify(text):
-    """Render Markdown text to safe HTML."""
+    """Render Markdown text to safe HTML — sanitized through a bleach
+    allowlist so a stored article can't carry raw <script>/onX= handlers."""
+    import bleach
     import markdown as md
     html = md.markdown(
         text or '',
         extensions=['tables', 'fenced_code', 'nl2br', 'sane_lists', 'toc'],
     )
-    return mark_safe(html)
+    clean_html = bleach.clean(
+        html,
+        tags=_MARKDOWN_ALLOWED_TAGS,
+        attributes=_MARKDOWN_ALLOWED_ATTRS,
+        protocols=['http', 'https', 'mailto'],
+        strip=True,
+    )
+    return mark_safe(clean_html)
 
 
 # Boundaries that mark where an email reply stops and the quoted history begins.

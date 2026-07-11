@@ -37,6 +37,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: CVE gate (pip-audit)
+        # Fails the build on any known vulnerability in a pinned dependency —
+        # the "gate > tooling" call from the session-35 posture pass, now
+        # automated instead of a manual periodic check.
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt
+
       - name: Create runtime directories
         # Django's logging opens logs/murphys_bench.log at startup and won't
         # create the parent dir — every manage.py command fails without this.
