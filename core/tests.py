@@ -5923,3 +5923,85 @@ def test_wo_edit_404s_for_non_owning_tech(client, client_obj):
     client.force_login(other)
     resp = client.get(reverse('core:work_order_edit', args=[wo.pk]))
     assert resp.status_code == 404
+
+
+# ── Security #4: KB markdown = stored XSS (external review, Jul 10 2026) ────
+#
+# markdownify() ran python-markdown output straight through mark_safe with no
+# sanitizer — raw HTML (including <script>) in an article's Markdown source
+# rendered verbatim. KB articles are staff-authored (can_manage_kb), so this
+# was stored-XSS-by-a-trusted-writer rather than an open injection point, but
+# a compromised staff account or a pasted-in hostile snippet shouldn't get a
+# live <script> into every reader's browser. Fix: bleach allowlist.
+
+def test_markdownify_strips_script_tags():
+    """The <script> element itself is stripped — its text content may survive
+    as inert plain text (bleach's default strip=True behavior), but it can no
+    longer execute since there's no surrounding <script> tag."""
+    from core.templatetags.mb_icons import markdownify
+    html = str(markdownify('Hello <script>alert(1)</script> world'))
+    assert '<script' not in html
+    assert '</script>' not in html
+
+
+def test_markdownify_strips_inline_event_handlers():
+    from core.templatetags.mb_icons import markdownify
+    html = str(markdownify('<img src=x onerror="alert(1)">'))
+    assert 'onerror' not in html
+
+
+def test_markdownify_preserves_legitimate_formatting():
+    from core.templatetags.mb_icons import markdownify
+    html = str(markdownify('# Heading\n\n**bold** and _em_\n\n- item one\n- item two'))
+    assert '<h1' in html
+    assert '<strong>bold</strong>' in html
+    assert '<li>item one</li>' in html
+
+
+@pytest.mark.django_db
+def test_kb_detail_view_sanitizes_stored_script(client, admin_user):
+    from core.models import KBArticle
+    article = KBArticle.objects.create(
+        title='Test', content='Notes <script>alert(document.cookie)</script>',
+    )
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:kb_detail', args=[article.pk]))
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    # base.html legitimately carries its own <script> blocks (dark mode/font
+    # size boot script) — check the injected payload specifically, not every
+    # <script> tag on the page.
+    assert '<script>alert(document.cookie)</script>' not in body
+
+
+# ── Security #5: s3_secret_key + google_maps_api_key now encrypted at rest ──
+#
+# Both were plain CharFields while every other secret (IN token, email/inbound
+# passwords, device+org creds) was already EncryptedCharField — a consistency
+# gap flagged by the Jul 10 2026 review. Migration 0084 converts the field
+# class and re-saves each existing row so old plaintext values get encrypted
+# on upgrade (verified manually against a scratch DB during the build: raw
+# column held plaintext pre-migration, Fernet ciphertext post-migration, and
+# the ORM round-trips back to the original value). This test locks in that
+# the fields are genuinely encrypted going forward, not just typed that way.
+
+@pytest.mark.django_db
+def test_s3_secret_key_and_maps_key_encrypted_at_rest():
+    from django.db import connection
+    settings_obj = SiteSettings.objects.create(
+        google_maps_api_key='AIzaRealLookingKey123',
+        s3_secret_key='real-s3-secret-value',
+    )
+    with connection.cursor() as cur:
+        cur.execute(
+            'SELECT google_maps_api_key, s3_secret_key FROM site_settings WHERE id = %s',
+            [settings_obj.pk],
+        )
+        raw_maps_key, raw_s3_secret = cur.fetchone()
+    # Raw bytes on disk must not be the plaintext value.
+    assert raw_maps_key != 'AIzaRealLookingKey123'
+    assert raw_s3_secret != 'real-s3-secret-value'
+    # But the ORM decrypts transparently.
+    settings_obj.refresh_from_db()
+    assert settings_obj.google_maps_api_key == 'AIzaRealLookingKey123'
+    assert settings_obj.s3_secret_key == 'real-s3-secret-value'

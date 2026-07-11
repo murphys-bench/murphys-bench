@@ -1885,7 +1885,7 @@ class SiteSettings(models.Model):
     )
     s3_bucket_name = models.CharField(max_length=255, blank=True)
     s3_access_key = models.CharField(max_length=255, blank=True)
-    s3_secret_key = models.CharField(max_length=255, blank=True)
+    s3_secret_key = EncryptedCharField(max_length=255, blank=True)
     s3_endpoint_url = models.CharField(
         max_length=255, blank=True,
         help_text='For B2/MinIO/Wasabi. Leave blank for AWS S3.',
@@ -1996,7 +1996,7 @@ class SiteSettings(models.Model):
     )
 
     # Mileage / Google Maps
-    google_maps_api_key = models.CharField(
+    google_maps_api_key = EncryptedCharField(
         max_length=255, blank=True,
         help_text='Google Maps API key with Distance Matrix API enabled. Restrict to Distance Matrix API in Google Cloud Console.',
     )
