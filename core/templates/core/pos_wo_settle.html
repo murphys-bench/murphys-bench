@@ -47,9 +47,6 @@
             {% if wo.invoice.in_status %}({{ wo.invoice.in_status }}){% endif %}.
             Settling below will use this same invoice — not create a new one.
         </p>
-        {% if can_process_payments and wo.client and wo.invoice.in_status|lower != 'paid' %}
-        <a href="{% url 'core:pos_wo_charge' wo.pk %}" class="inline-block mt-3 px-4 py-2 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 font-medium">Charge card on file</a>
-        {% endif %}
     </div>
     {% endif %}
 
@@ -86,6 +83,25 @@
                 </button>
             </div>
         </form>
+
+        {% comment %}
+        Third settlement action: trigger Invoice Ninja to charge the client's
+        stored card token. Distinct from the "Card" payment method above (which
+        records a charge the operator already ran in Square by hand). Only for a
+        client-owned WO with a card on file, a permitted user, priced lines, and
+        not already Paid. Links to a confirm screen; the charge (and a draft
+        push if needed) happens there. Its own form so it never submits the
+        settle radio/reference above.
+        {% endcomment %}
+        {% if can_process_payments and wo.client and amount and invoice_ninja_enabled and wo.invoice.in_status|lower != 'paid' %}
+        <div class="mt-4 pt-4 border-t border-gray-100">
+            <a href="{% url 'core:pos_wo_charge' wo.pk %}"
+               class="inline-block px-5 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 font-medium">
+                Charge card on file — ${{ amount|floatformat:2 }}
+            </a>
+            <p class="text-xs text-gray-400 mt-1">Charges the client's stored card via Invoice Ninja. Murphy's Bench never touches the card.</p>
+        </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}
