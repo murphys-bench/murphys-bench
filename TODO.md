@@ -51,14 +51,20 @@
       (same helpers, same rules, now actually enforced). Reviewer #2 (role flags server-side)
       audited tight — destructive actions (WO/ticket delete) were already 403-gated, no further
       gaps found. 8 new tests, suite 326→**343**, no migration. PR #33.
-- [ ] **#4 KB Markdown = stored XSS** — `markdownify` `mark_safe`s unsanitized HTML; add a
-      `bleach` allowlist (staff-authored, so lower severity but real).
-- [ ] **#5 Encrypt two plaintext secrets** — `SiteSettings.s3_secret_key` +
-      `google_maps_api_key` → `EncryptedCharField` (+ migration re-encrypting existing values).
-- [ ] **#7 `pip-audit` CVE gate in CI** — small add to `.github/workflows/ci.yml` (also a
-      standing T3 item above).
-- [ ] **#6 CSP is `.env`-gated (doc note, not a vuln)** — one clarifying sentence in
-      INSTALL/deploy docs: repo default is report-only, enforcement flipped per box via `.env`.
+- [x] **#4 KB Markdown = stored XSS** — ✅ FIXED, LIVE on all 3 boxes (v0.4.38-40, Jul 11 2026).
+      `markdownify` now runs through a `bleach` allowlist scoped to exactly what the enabled
+      markdown extensions emit.
+- [x] **#5 Encrypt two plaintext secrets** — ✅ FIXED, LIVE on all 3 boxes (mig 0084, v0.4.38-40).
+      `s3_secret_key` + `google_maps_api_key` → `EncryptedCharField`; migration re-encrypted
+      existing values in place (prod's real Maps key verified: ciphertext on disk, decrypts
+      correctly through the app).
+- [x] **#7 `pip-audit` CVE gate in CI** — ✅ DONE, blocking. Had to clear real findings first:
+      Django 5.2.15→5.2.16, pytest 7.4.3→9.0.3 + pytest-django→4.12.0, black→26.3.1.
+- [x] **#6 CSP is `.env`-gated (doc note)** — ✅ DONE. README now states report-only-by-default,
+      enforcement flipped per box via `.env`.
+
+**🎉 External security review (Jul 10 2026) fully closed** — all 7 findings resolved, live on
+all 3 boxes as of Jul 11 2026 (PRs #30–34). 5 new tests this batch, suite 343→**348**.
 
 ---
 
