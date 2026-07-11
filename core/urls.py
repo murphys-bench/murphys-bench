@@ -151,6 +151,7 @@ urlpatterns = [
     path('pos/sale/start/', views.POSSaleStartView.as_view(), name='pos_sale_start'),
     path('pos/sale/<int:pk>/', views.POSSaleSettleView.as_view(), name='pos_sale_settle'),
     path('pos/wo/<int:pk>/', views.POSWorkOrderSettleView.as_view(), name='pos_wo_settle'),
+    path('pos/wo/<int:pk>/charge/', views.POSWorkOrderChargeView.as_view(), name='pos_wo_charge'),
     path('pos/wo/<int:pk>/receipt/', views.POSWorkOrderReceiptPrintView.as_view(), name='pos_wo_receipt'),
 
     # Quick Labor / Work Performed (HTMX)
