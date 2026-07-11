@@ -482,7 +482,7 @@ murphys-bench/
 │   ├── settings.py
 │   └── urls.py
 ├── core/                        # Main app
-│   ├── models.py               # All data models (48 as of mig 0066)
+│   ├── models.py               # All data models (52 as of mig 0082)
 │   ├── views.py                # All views
 │   ├── urls.py                 # Core URL patterns
 │   ├── forms.py                # All forms
@@ -549,16 +549,18 @@ murphys-bench/
     └── next-session-prompt.md
 ```
 
-### Data Models (51 current, migrations through 0079)
+### Data Models (52 current, migrations through 0082)
 
-> Full field-level detail is generated in [`docs/database-schema.md`](docs/database-schema.md).
+> ⚠ `docs/database-schema.md` is STALE (last regenerated through mig 0065) — a
+> `manage.py dump_schema` generator + refresh is the queued Slice 2 of the doc-currency sweep.
 > The list below is a conceptual summary — see that file for fields/types. Models added
 > since the original list: `RepairTypeCategory`, `ContactPhone`, `StatusDefinition`,
 > `LineItem` (the universal priced-line primitive — `WorkPerformed` was unified into it
 > and deleted), `OrgCredential` + `CredentialAccessLog`, `DeviceCredentialAccessLog`,
 > `MFAResetLog`, `EmailSignature`, `BlockedSender`, `CannedResponseCategory`, `Prospect`,
 > `Estimate`, `Sale`, `EstimateOption` (comparative pricing choices on one quote — a
-> fourth `LineItem` host alongside WorkOrder/Estimate/Sale).
+> fourth `LineItem` host alongside WorkOrder/Estimate/Sale), `PaymentChargeAttempt`
+> (immutable audit of MB-initiated card-on-file charges — Slice 5d-i).
 - **Role** — permission role with 16 boolean flags; seeded: Administrator, Technician
 - **TechSkill** — skill tags M2M on User; captured for future skill-based routing
 - **User** — extended Django user; role CharField (legacy) + role_obj FK to Role + skills M2M
