@@ -37,11 +37,20 @@
 - [x] **#3 Org credential vault reveal was default-open** — ✅ FIXED (mig 0083, v0.4.38-33):
       gated on new `can_view_org_credentials` role flag (default off), admin_only tier preserved.
 - [x] **README named-competitor comparison** — ✅ dropped.
-- [ ] **#1 Object-level authorization (THE BIG ONE — plan it).** `WorkOrderDetailView` + WO
-      mutation endpoints (add-time/quick-update/claim/upload) fetch by raw `pk`, unscoped. The
-      `_scope_assignable_for` machinery exists (used on lists) — apply it to detail+mutations;
-      also enforce role flags server-side (reviewer #2, same root cause). Ships WITH tests. This
-      is the threshold for external testers.
+- [x] **#1 Object-level authorization (THE BIG ONE)** — ✅ FIXED, merged to main (`38b2a14`),
+      CI green, **LIVE on all 3 boxes** (mb-test 343/343 suite green on-box → prod backup→B2 →
+      MB2, all healthy, no migration, Jul 11 2026). `WorkOrderDetailView` + ~20 WO/ticket mutation
+      endpoints (quick-update/claim/notes/credentials/billing/checklist/mileage/print; ticket
+      reply/convert/close/delete/reopen/link/status-update) fetched by raw `pk`, unscoped — a
+      non-admin tech could view/act on any WO or ticket by URL. New
+      `_get_scoped_wo_or_404`/`_get_scoped_ticket_or_404` wrap the existing
+      `_scope_assignable_for`/`_scope_tickets_for` helpers (already used on lists) and every raw
+      fetch now goes through them — including `WorkOrderUpdateView`/`TicketUpdateView`, which had
+      **no** `get_queryset` override at all (a second gap found during the build, not in the
+      original review). Admin bypass + unclaimed-pool claim + escalation take-over unchanged
+      (same helpers, same rules, now actually enforced). Reviewer #2 (role flags server-side)
+      audited tight — destructive actions (WO/ticket delete) were already 403-gated, no further
+      gaps found. 8 new tests, suite 326→**343**, no migration. PR #33.
 - [ ] **#4 KB Markdown = stored XSS** — `markdownify` `mark_safe`s unsanitized HTML; add a
       `bleach` allowlist (staff-authored, so lower severity but real).
 - [ ] **#5 Encrypt two plaintext secrets** — `SiteSettings.s3_secret_key` +
