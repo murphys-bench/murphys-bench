@@ -6503,3 +6503,28 @@ def test_settings_colors_tab_has_dashboard_block(client, admin_user):
     assert b'Dashboard Colors' in body
     assert b'colors-color_dash_tickets_bg' in body
     assert b'colors-color_dash_backlog4_text' in body
+
+
+@pytest.mark.django_db
+def test_admin_dashboard_counts_and_marks_triage(client, admin_user):
+    # Triage tickets are open + unassigned, so they count in the admin's Open
+    # tickets and get a "Needs triage" marker in the worklist card.
+    bucket = Client.get_unsorted()
+    Ticket.objects.create(client=bucket, subject='unsorted inbound', description='d',
+                          ticket_number='TKT-TR-1', status='new')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:dashboard'))
+    assert resp.context['open_ticket_count'] == 1
+    assert b'Needs triage' in resp.content
+
+
+@pytest.mark.django_db
+def test_tech_dashboard_shows_triage_pool_tile(client, client_obj):
+    tech = User.objects.create_user(username='dtech', password='x', is_staff=False, level=1)
+    bucket = Client.get_unsorted()
+    Ticket.objects.create(client=bucket, subject='inbound', description='d',
+                          ticket_number='TKT-TR-2', status='new')
+    client.force_login(tech)
+    resp = client.get(reverse('core:dashboard'))
+    assert resp.status_code == 200
+    assert b'Triage pool' in resp.content

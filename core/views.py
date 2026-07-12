@@ -461,14 +461,13 @@ class DashboardView(LoginRequiredMixin, View):
             needs_response_qs = needs_response_qs.filter(assigned_to=request.user)
         needs_response_count = needs_response_qs.count()
 
-        # Unsorted/Unverified triage bucket (admin only) — inbound from senders
-        # not yet matched to a real client, awaiting onboarding or rejection.
-        triage_count = 0
-        if is_admin:
-            triage_count = (
-                Ticket.objects.filter(client__is_unsorted=True)
-                .exclude(status__in=TICKET_CLOSED_STATUSES).count()
-            )
+        # Unsorted/Unverified triage bucket — inbound from senders not yet matched
+        # to a real client. These are unassigned, so they sit in every tech's
+        # claim pool; the tech dashboard surfaces them as their own tile.
+        triage_count = (
+            Ticket.objects.filter(client__is_unsorted=True)
+            .exclude(status__in=TICKET_CLOSED_STATUSES).count()
+        )
 
         # Tickets escalated above their owner's level, awaiting pickup by someone higher.
         # Admins see all of them; a tech sees those escalated up to their own level.
