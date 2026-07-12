@@ -135,7 +135,7 @@ A Content-Security-Policy middleware is included. The repo default is report-onl
 
 ## Install
 
-A fresh Ubuntu 24.04 install is documented in [INSTALL.md](INSTALL.md). It covers system packages, the app, `.env`, database setup, Gunicorn/Nginx, optional Cloudflare Tunnel, scheduled jobs, and the basic operational pieces.
+One command (`scripts/setup.sh`) takes a fresh Ubuntu 24.04 box to a working login page on your local network — system packages, the app, the database, and the web server, all done. See [INSTALL.md](INSTALL.md) for that, plus what to do if your box doesn't fit the common case, and how to go public later if you ever need to.
 
 ## Backup And Restore
 
