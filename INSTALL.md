@@ -160,14 +160,19 @@ ALLOWED_HOSTS=192.168.1.50        # this box's LAN IP (and/or hostname)
 
 # Database: SQLite (a file at db.sqlite3) — no DB settings needed.
 
-# HTTPS hardening — leave all of these OFF for a plain-HTTP LAN install.
-# Only turn them on once you've set up a TLS front door — see
-# "Going public" below. Turning them on without TLS in front breaks access.
+# HTTPS hardening — explicitly OFF for a plain-HTTP LAN install. Don't just
+# leave these commented out: SESSION_COOKIE_SECURE and CSRF_COOKIE_SECURE
+# default to "not DEBUG" in settings.py, i.e. True whenever DEBUG=False —
+# which silently breaks login/session/CSRF here, since a browser won't send
+# a Secure cookie over plain HTTP. Set them explicitly:
+SECURE_SSL_REDIRECT=False
+SESSION_COOKIE_SECURE=False
+CSRF_COOKIE_SECURE=False
+SECURE_HSTS_SECONDS=0
 # CSRF_TRUSTED_ORIGINS=https://your.hostname
-# SECURE_SSL_REDIRECT=True
-# SESSION_COOKIE_SECURE=True
-# CSRF_COOKIE_SECURE=True
-# SECURE_HSTS_SECONDS=31536000
+
+# Only flip the three above to True once you've set up a TLS front door —
+# see "Going public" below. Turning them on without TLS in front breaks access.
 ```
 
 > **CRITICAL:** Losing `FIELD_ENCRYPTION_KEY` makes all encrypted credential
