@@ -27,6 +27,22 @@
             --color-status-completed:    {{ s.color_status_completed|default:"#dcfce7" }};
             --color-status-closed:       {{ s.color_status_closed|default:"#f3f4f6" }};
             --color-status-cancelled:    {{ s.color_status_cancelled|default:"#fee2e2" }};
+            --color-dash-tickets-bg:        {{ s.color_dash_tickets_bg|default:"#e6f1fb" }};
+            --color-dash-tickets-text:      {{ s.color_dash_tickets_text|default:"#0c447c" }};
+            --color-dash-workorders-bg:     {{ s.color_dash_workorders_bg|default:"#e1f5ee" }};
+            --color-dash-workorders-text:   {{ s.color_dash_workorders_text|default:"#0f6e56" }};
+            --color-dash-ready-bg:          {{ s.color_dash_ready_bg|default:"#eaf3de" }};
+            --color-dash-ready-text:        {{ s.color_dash_ready_text|default:"#27500a" }};
+            --color-dash-outstanding-bg:    {{ s.color_dash_outstanding_bg|default:"#faeeda" }};
+            --color-dash-outstanding-text:  {{ s.color_dash_outstanding_text|default:"#633806" }};
+            --color-dash-backlog1-bg:       {{ s.color_dash_backlog1_bg|default:"#eaf3de" }};
+            --color-dash-backlog1-text:     {{ s.color_dash_backlog1_text|default:"#3b6d11" }};
+            --color-dash-backlog2-bg:       {{ s.color_dash_backlog2_bg|default:"#faeeda" }};
+            --color-dash-backlog2-text:     {{ s.color_dash_backlog2_text|default:"#854f0b" }};
+            --color-dash-backlog3-bg:       {{ s.color_dash_backlog3_bg|default:"#faece7" }};
+            --color-dash-backlog3-text:     {{ s.color_dash_backlog3_text|default:"#993c1d" }};
+            --color-dash-backlog4-bg:       {{ s.color_dash_backlog4_bg|default:"#fcebeb" }};
+            --color-dash-backlog4-text:     {{ s.color_dash_backlog4_text|default:"#a32d2d" }};
         }
         .wo-status-badge                  { background-color: var(--color-status-new); }
         .wo-status-badge.status-new       { background-color: var(--color-status-new); }
@@ -35,6 +51,7 @@
         .wo-status-badge.status-completed { background-color: var(--color-status-completed); }
         .wo-status-badge.status-closed    { background-color: var(--color-status-closed); }
         .wo-status-badge.status-cancelled { background-color: var(--color-status-cancelled); }
+        [x-cloak] { display: none !important; }
     </style>
     {% endif %}{% endwith %}
 

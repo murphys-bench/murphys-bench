@@ -1165,14 +1165,17 @@ def test_unsorted_bucket_cannot_be_deleted(client, admin_user):
 
 
 @pytest.mark.django_db
-def test_dashboard_shows_triage_card_for_admin(client, admin_user):
+def test_owner_dashboard_renders_business_tiles(client, admin_user):
+    # The owner dashboard leads with business metrics, not the old triage/attention
+    # rail. Triage stays reachable via the ticket list (?triage=1), tested elsewhere.
     bucket = Client.get_unsorted()
     Ticket.objects.create(client=bucket, subject='unsorted', description='d',
                           ticket_number='TKT-D-1', status='new')
     client.force_login(admin_user)
     resp = client.get(reverse('core:dashboard'))
     assert resp.status_code == 200
-    assert 'Unsorted — needs triage' in resp.content.decode()
+    body = resp.content.decode()
+    assert 'Ready to bill' in body and 'Outstanding invoices' in body
 
 
 @pytest.mark.django_db
@@ -6413,3 +6416,90 @@ def test_mfa_setup_survives_intervening_get(client):
     assert r.status_code == 302, 'Setup must complete despite the intervening GET (was 200/rejected before fix)'
     from django_otp.plugins.otp_totp.models import TOTPDevice
     assert TOTPDevice.objects.filter(user=u, confirmed=True).exists()
+
+# ── Owner dashboard: business metrics, billing filters, backlog age bands ────
+
+@pytest.mark.django_db
+def test_owner_dashboard_business_metrics(client, client_obj, admin_user):
+    from datetime import timedelta
+    from django.utils import timezone
+
+    # Ready to bill: completed WO whose auto-invoice is still uninvoiced.
+    ready = WorkOrder.objects.create(client=client_obj, status='completed')
+    # Outstanding: a WO billed (invoiced) and waiting on payment.
+    billed = WorkOrder.objects.create(client=client_obj, status='completed')
+    inv = billed.invoice
+    inv.billing_status = 'invoiced'
+    inv.amount = 150
+    inv.save()
+    # Paid WO must count toward neither figure.
+    paid = WorkOrder.objects.create(client=client_obj, status='completed')
+    paid.invoice.billing_status = 'paid'
+    paid.invoice.amount = 999
+    paid.invoice.save()
+    # An open WO for the open-count.
+    WorkOrder.objects.create(client=client_obj, status='in_progress')
+    # An open ticket 5 days old for the backlog band.
+    old = Ticket.objects.create(client=client_obj, subject='old', description='d')
+    Ticket.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=5))
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:dashboard'))
+    ctx = resp.context
+
+    assert ctx['ready_to_bill_count'] == 1
+    assert float(ctx['outstanding_total']) == 150.0   # billed only, not the paid 999
+    assert ctx['open_wo_count'] == 1                   # only the in_progress one
+    assert ctx['backlog_buckets']['b3to7'] == 1
+
+
+@pytest.mark.django_db
+def test_workorder_list_billing_ready_filter(client, client_obj, admin_user):
+    ready = WorkOrder.objects.create(client=client_obj, status='completed')
+    billed = WorkOrder.objects.create(client=client_obj, status='completed')
+    billed.invoice.billing_status = 'invoiced'
+    billed.invoice.save()
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:work_order_list') + '?billing=ready')
+    pks = {wo.pk for wo in resp.context['work_orders']}
+    assert ready.pk in pks and billed.pk not in pks
+
+
+@pytest.mark.django_db
+def test_workorder_list_billing_outstanding_filter(client, client_obj, admin_user):
+    ready = WorkOrder.objects.create(client=client_obj, status='completed')
+    billed = WorkOrder.objects.create(client=client_obj, status='completed')
+    billed.invoice.billing_status = 'invoiced'
+    billed.invoice.save()
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:work_order_list') + '?billing=outstanding')
+    pks = {wo.pk for wo in resp.context['work_orders']}
+    assert billed.pk in pks and ready.pk not in pks
+
+
+@pytest.mark.django_db
+def test_ticket_list_age_band_filter(client, client_obj, admin_user):
+    from datetime import timedelta
+    from django.utils import timezone
+
+    fresh = Ticket.objects.create(client=client_obj, subject='fresh', description='d')
+    old = Ticket.objects.create(client=client_obj, subject='old', description='d')
+    Ticket.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=10))
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:ticket_list') + '?age=gt7')
+    pks = {t.pk for t in resp.context['tickets']}
+    assert old.pk in pks and fresh.pk not in pks
+
+
+@pytest.mark.django_db
+def test_settings_colors_tab_has_dashboard_block(client, admin_user):
+    client.force_login(admin_user)
+    resp = client.get('/settings/?tab=colors')
+    assert resp.status_code == 200
+    body = resp.content
+    assert b'Dashboard Colors' in body
+    assert b'colors-color_dash_tickets_bg' in body
+    assert b'colors-color_dash_backlog4_text' in body

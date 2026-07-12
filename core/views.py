@@ -344,9 +344,66 @@ def _tile_count(tile, user, is_admin):
 class DashboardView(LoginRequiredMixin, View):
     template_name = 'core/dashboard.html'
 
+    def _admin_dashboard(self, request):
+        """Owner/manager view: business metrics first (open work, money to bill
+        and money owed), the two live worklists, and a backlog-aging strip."""
+        from django.db.models import Sum
+        now = timezone.now()
+
+        open_tickets_qs = (
+            Ticket.objects.select_related('client', 'assigned_to')
+            .exclude(status__in=TICKET_CLOSED_STATUSES)
+        )
+        open_wo_qs = (
+            WorkOrder.objects.select_related('client', 'assigned_to', 'device')
+            .exclude(status__in=WO_CLOSED_STATUSES)
+        )
+
+        # Ready to bill = the work is done (completed) but nothing has been sent yet.
+        ready_to_bill_count = WorkOrder.objects.filter(
+            status='completed', invoice__billing_status='uninvoiced'
+        ).count()
+        # Outstanding = billed and waiting to be paid (money owed) — deliberately
+        # NOT the uninvoiced set above, so the two figures never double-count.
+        outstanding_total = (
+            Invoice.objects.filter(billing_status='invoiced')
+            .aggregate(t=Sum('amount'))['t'] or 0
+        )
+
+        # Backlog aging on unresolved tickets. Excludes 'converted' (those have a
+        # live work order), matching the Reports backlog metric.
+        backlog_qs = Ticket.objects.exclude(status__in=Ticket.CLOSED_STATUSES).only('created_at')
+        buckets = {'lt1': 0, 'b1to3': 0, 'b3to7': 0, 'gt7': 0}
+        for t in backlog_qs:
+            age_days = (now - t.created_at).total_seconds() / 86400
+            if age_days < 1:
+                buckets['lt1'] += 1
+            elif age_days < 3:
+                buckets['b1to3'] += 1
+            elif age_days < 7:
+                buckets['b3to7'] += 1
+            else:
+                buckets['gt7'] += 1
+
+        context = {
+            'is_admin': True,
+            'open_ticket_count': open_tickets_qs.count(),
+            'open_tickets': open_tickets_qs.order_by('-created_at')[:12],
+            'open_wo_count': open_wo_qs.count(),
+            'open_work_orders': open_wo_qs.order_by('-created_at')[:12],
+            'ready_to_bill_count': ready_to_bill_count,
+            'outstanding_total': outstanding_total,
+            'backlog_buckets': buckets,
+            'backlog_total': sum(buckets.values()),
+        }
+        return render(request, self.template_name, context)
+
     def get(self, request):
         is_admin = _is_admin(request.user)
+        if is_admin:
+            return self._admin_dashboard(request)
 
+        # --- technician dashboard (unchanged) ---
         tiles_qs = DashboardTile.objects.filter(is_active=True)
         ticket_tiles = []
         wo_tiles = []
@@ -474,15 +531,24 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
         queryset = WorkOrder.objects.select_related('client', 'assigned_to', 'device')
         queryset = _scope_assignable_for(queryset, self.request.user)
 
-        status = self.request.GET.get('status')
-        if status:
-            queryset = queryset.filter(status=status)
+        # Billing-driven views from the dashboard money tiles. These cut across the
+        # active/closed tabs (a completed WO is "closed" but still bills), so they
+        # bypass the tab logic entirely.
+        billing = self.request.GET.get('billing')
+        if billing == 'ready':
+            queryset = queryset.filter(status='completed', invoice__billing_status='uninvoiced')
+        elif billing == 'outstanding':
+            queryset = queryset.filter(invoice__billing_status='invoiced')
         else:
-            tab = self.request.GET.get('tab', 'active')
-            if tab == 'closed':
-                queryset = queryset.filter(status__in=WO_CLOSED_STATUSES)
+            status = self.request.GET.get('status')
+            if status:
+                queryset = queryset.filter(status=status)
             else:
-                queryset = queryset.exclude(status__in=WO_CLOSED_STATUSES)
+                tab = self.request.GET.get('tab', 'active')
+                if tab == 'closed':
+                    queryset = queryset.filter(status__in=WO_CLOSED_STATUSES)
+                else:
+                    queryset = queryset.exclude(status__in=WO_CLOSED_STATUSES)
 
         assigned_to = self.request.GET.get('assigned_to')
         if assigned_to == 'me' and not _is_admin(self.request.user):
@@ -510,6 +576,7 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
         context['active_count'] = base_qs.exclude(status__in=WO_CLOSED_STATUSES).count()
         context['closed_count'] = base_qs.filter(status__in=WO_CLOSED_STATUSES).count()
         context['current_tab'] = self.request.GET.get('tab', 'active')
+        context['billing_filter'] = self.request.GET.get('billing', '')
         return context
 
 
@@ -2852,6 +2919,23 @@ class TicketListView(LoginRequiredMixin, ListView):
         overdue = self.request.GET.get('overdue')
         if overdue:
             queryset = Ticket.overdue_queryset(queryset)
+
+        # Backlog-aging bands from the dashboard strip. Bands are on the unresolved
+        # set (excludes converted), matching the dashboard/Reports backlog metric.
+        age = self.request.GET.get('age')
+        if age:
+            now = timezone.now()
+            queryset = queryset.exclude(status__in=Ticket.CLOSED_STATUSES)
+            if age == 'lt1':
+                queryset = queryset.filter(created_at__gt=now - timedelta(days=1))
+            elif age == '1to3':
+                queryset = queryset.filter(created_at__lte=now - timedelta(days=1),
+                                           created_at__gt=now - timedelta(days=3))
+            elif age == '3to7':
+                queryset = queryset.filter(created_at__lte=now - timedelta(days=3),
+                                           created_at__gt=now - timedelta(days=7))
+            elif age == 'gt7':
+                queryset = queryset.filter(created_at__lte=now - timedelta(days=7))
 
         search = self.request.GET.get('search')
         if search:
@@ -6353,8 +6437,21 @@ _STATUS_COLOR_ROWS = [
 ]
 
 
+# (label, bg field, bg default, text field, text default) for the owner dashboard.
+_DASH_COLOR_ROWS = [
+    ('Open tickets',         'color_dash_tickets_bg',     '#e6f1fb', 'color_dash_tickets_text',     '#0c447c'),
+    ('Open work orders',     'color_dash_workorders_bg',  '#e1f5ee', 'color_dash_workorders_text',  '#0f6e56'),
+    ('Ready to bill',        'color_dash_ready_bg',       '#eaf3de', 'color_dash_ready_text',       '#27500a'),
+    ('Outstanding invoices', 'color_dash_outstanding_bg', '#faeeda', 'color_dash_outstanding_text', '#633806'),
+    ('Backlog < 1 day',      'color_dash_backlog1_bg',    '#eaf3de', 'color_dash_backlog1_text',    '#3b6d11'),
+    ('Backlog 1–3 days',     'color_dash_backlog2_bg',    '#faeeda', 'color_dash_backlog2_text',    '#854f0b'),
+    ('Backlog 3–7 days',     'color_dash_backlog3_bg',    '#faece7', 'color_dash_backlog3_text',    '#993c1d'),
+    ('Backlog 7+ days',      'color_dash_backlog4_bg',    '#fcebeb', 'color_dash_backlog4_text',    '#a32d2d'),
+]
+
+
 def _colors_context(form):
-    """Build color_status_rows with current values from the bound/unbound form."""
+    """Build color_status_rows + color_dash_rows with current values from the form."""
     rows = []
     for status_key, status_label, field_name, default_hex in _STATUS_COLOR_ROWS:
         if form:
@@ -6363,7 +6460,16 @@ def _colors_context(form):
         else:
             current = default_hex
         rows.append((status_key, status_label, field_name, current))
-    return {'color_status_rows': rows}
+
+    dash_rows = []
+    for label, bg_name, bg_def, txt_name, txt_def in _DASH_COLOR_ROWS:
+        bg = (form[bg_name].value() or bg_def) if form else bg_def
+        txt = (form[txt_name].value() or txt_def) if form else txt_def
+        dash_rows.append({
+            'label': label, 'bg_name': bg_name, 'bg': bg,
+            'txt_name': txt_name, 'txt': txt,
+        })
+    return {'color_status_rows': rows, 'color_dash_rows': dash_rows}
 
 
 def _display_context():

@@ -705,6 +705,14 @@ class ColorSettingsForm(forms.ModelForm):
             'color_page_bg', 'color_page_title', 'color_title_bar', 'color_section_header', 'color_section_header_text',
             'color_status_new', 'color_status_assigned', 'color_status_in_progress',
             'color_status_completed', 'color_status_closed', 'color_status_cancelled',
+            'color_dash_tickets_bg', 'color_dash_tickets_text',
+            'color_dash_workorders_bg', 'color_dash_workorders_text',
+            'color_dash_ready_bg', 'color_dash_ready_text',
+            'color_dash_outstanding_bg', 'color_dash_outstanding_text',
+            'color_dash_backlog1_bg', 'color_dash_backlog1_text',
+            'color_dash_backlog2_bg', 'color_dash_backlog2_text',
+            'color_dash_backlog3_bg', 'color_dash_backlog3_text',
+            'color_dash_backlog4_bg', 'color_dash_backlog4_text',
         ]
         _hex_fields = [
             'color_primary', 'color_nav_text', 'color_accent',
@@ -712,6 +720,14 @@ class ColorSettingsForm(forms.ModelForm):
             'color_page_bg', 'color_page_title', 'color_title_bar', 'color_section_header', 'color_section_header_text',
             'color_status_new', 'color_status_assigned', 'color_status_in_progress',
             'color_status_completed', 'color_status_closed', 'color_status_cancelled',
+            'color_dash_tickets_bg', 'color_dash_tickets_text',
+            'color_dash_workorders_bg', 'color_dash_workorders_text',
+            'color_dash_ready_bg', 'color_dash_ready_text',
+            'color_dash_outstanding_bg', 'color_dash_outstanding_text',
+            'color_dash_backlog1_bg', 'color_dash_backlog1_text',
+            'color_dash_backlog2_bg', 'color_dash_backlog2_text',
+            'color_dash_backlog3_bg', 'color_dash_backlog3_text',
+            'color_dash_backlog4_bg', 'color_dash_backlog4_text',
         ]
         widgets = {f: forms.TextInput(attrs={'class': _HEX_INPUT, 'maxlength': 7, 'placeholder': '#rrggbb'})
                    for f in _hex_fields}
