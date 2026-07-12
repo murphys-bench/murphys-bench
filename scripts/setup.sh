@@ -130,12 +130,18 @@ TIMEZONE=America/Los_Angeles
 # Database: SQLite by default (a file at db.sqlite3 — no DB server needed).
 # To use PostgreSQL instead, see INSTALL.md step 5 and set DB_ENGINE=... here.
 
-# HTTPS hardening — turn ON only once TLS is confirmed end-to-end (reverse proxy
-# / Cloudflare). On a plain-HTTP LAN box leave these OFF or internal access breaks.
+# HTTPS hardening — explicitly OFF for this plain-HTTP LAN install.
+# SESSION_COOKIE_SECURE and CSRF_COOKIE_SECURE default to "not DEBUG" in
+# settings.py, i.e. True whenever DEBUG=False — which would silently break
+# login/session/CSRF here, since a browser won't send a Secure cookie over
+# plain HTTP. Set explicitly rather than relying on that default.
+# Turn these ON only once TLS is confirmed end-to-end (reverse proxy /
+# Cloudflare Tunnel) — see INSTALL.md "Going public (remote access)".
+SECURE_SSL_REDIRECT=False
+SESSION_COOKIE_SECURE=False
+CSRF_COOKIE_SECURE=False
+SECURE_HSTS_SECONDS=0
 # CSRF_TRUSTED_ORIGINS=https://your.hostname
-# SECURE_SSL_REDIRECT=True
-# SESSION_COOKIE_SECURE=True
-# CSRF_COOKIE_SECURE=True
 ENVEOF
     chmod 600 .env
     log ".env created (chmod 600)"
