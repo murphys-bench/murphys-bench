@@ -17,6 +17,8 @@ from django.contrib.contenttypes.models import ContentType
 from django.http import FileResponse, Http404
 from django.utils import timezone
 from django.utils.html import escape
+from two_factor.views import SetupView as TwoFactorSetupView
+from .middleware import mfa_setup_is_mandatory
 from .models import (
     WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist, ChecklistItem,
     Ticket, TicketReply, TicketLock, TicketLink, Attachment, SiteSettings,
@@ -7016,3 +7018,20 @@ class TicketStatusUpdateView(LoginRequiredMixin, View):
                 send_ticket_email('ticket_resolved', ticket)
         messages.success(request, f'Status updated to {new_status.replace("_", " ").title()}.')
         return redirect('core:ticket_detail', pk=pk)
+
+
+class MFASetupView(TwoFactorSetupView):
+    """two_factor's stock SetupView unconditionally offers a "Cancel" link back
+    to LOGIN_REDIRECT_URL ('/'). When MFA is mandatory and this user has no
+    confirmed device yet, that link is a trap: landing on '/' bounces them
+    straight back to this same URL via a GET (MFAEnforcementMiddleware), and a
+    GET on a wizard view silently resets its session-stored TOTP secret
+    (upstream SessionWizardView behavior) — minting a new QR code with no
+    warning, so any code already scanned into an authenticator app fails
+    forever. Drop the link in exactly that case; see mfa_setup_is_mandatory."""
+
+    def get_context_data(self, form, **kwargs):
+        context = super().get_context_data(form, **kwargs)
+        if mfa_setup_is_mandatory(self.request.user):
+            context.pop('cancel_url', None)
+        return context
