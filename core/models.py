@@ -2086,6 +2086,25 @@ class SiteSettings(models.Model):
     color_section_header      = models.CharField(max_length=7, default='#f8fafc', blank=True)  # section header bar bg
     color_section_header_text = models.CharField(max_length=7, default='#111827', blank=True)  # section header text + links
 
+    # Owner/admin dashboard — bg + text per surface, so each tile/card/backlog
+    # tier is fully themeable in Settings > Colors (defaults are the mockup pastels).
+    color_dash_tickets_bg      = models.CharField(max_length=7, default='#e6f1fb', blank=True)  # Open tickets tile/card
+    color_dash_tickets_text    = models.CharField(max_length=7, default='#0c447c', blank=True)
+    color_dash_workorders_bg   = models.CharField(max_length=7, default='#e1f5ee', blank=True)  # Open work orders tile/card
+    color_dash_workorders_text = models.CharField(max_length=7, default='#0f6e56', blank=True)
+    color_dash_ready_bg        = models.CharField(max_length=7, default='#eaf3de', blank=True)  # Ready to bill tile
+    color_dash_ready_text      = models.CharField(max_length=7, default='#27500a', blank=True)
+    color_dash_outstanding_bg   = models.CharField(max_length=7, default='#faeeda', blank=True)  # Outstanding invoices tile
+    color_dash_outstanding_text = models.CharField(max_length=7, default='#633806', blank=True)
+    color_dash_backlog1_bg     = models.CharField(max_length=7, default='#eaf3de', blank=True)  # Backlog < 1 day
+    color_dash_backlog1_text   = models.CharField(max_length=7, default='#3b6d11', blank=True)
+    color_dash_backlog2_bg     = models.CharField(max_length=7, default='#faeeda', blank=True)  # Backlog 1-3 days
+    color_dash_backlog2_text   = models.CharField(max_length=7, default='#854f0b', blank=True)
+    color_dash_backlog3_bg     = models.CharField(max_length=7, default='#faece7', blank=True)  # Backlog 3-7 days
+    color_dash_backlog3_text   = models.CharField(max_length=7, default='#993c1d', blank=True)
+    color_dash_backlog4_bg     = models.CharField(max_length=7, default='#fcebeb', blank=True)  # Backlog 7+ days
+    color_dash_backlog4_text   = models.CharField(max_length=7, default='#a32d2d', blank=True)
+
     class Meta:
         db_table = 'site_settings'
         verbose_name = 'Site Settings'

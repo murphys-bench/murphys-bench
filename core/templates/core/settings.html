@@ -1322,6 +1322,35 @@
                     </div>
                 </div>
 
+                <!-- Dashboard Colors -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-lg font-semibold text-gray-900 mb-1">Dashboard Colors</h2>
+                    <p class="text-sm text-gray-500 mb-5">Background and text for the owner dashboard tiles, worklist cards, and backlog tiers. The preview shows each pairing.</p>
+                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        {% for row in color_dash_rows %}
+                        <div x-data="{ bg: '{{ row.bg }}', txt: '{{ row.txt }}' }" class="border border-gray-200 rounded-lg p-3">
+                            <p class="text-xs font-semibold text-gray-700 mb-2">{{ row.label }}</p>
+                            <div class="flex items-center gap-2 mb-2">
+                                <input type="color" :value="bg" @input="bg=$event.target.value; $refs.bgh.value=bg"
+                                       class="w-7 h-7 rounded cursor-pointer border border-gray-300 p-0.5">
+                                <input type="text" name="colors-{{ row.bg_name }}" x-ref="bgh" :value="bg" @input="bg=$event.target.value"
+                                       maxlength="7" class="w-20 border border-gray-300 rounded px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
+                                <span class="text-xs text-gray-400">bg</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <input type="color" :value="txt" @input="txt=$event.target.value; $refs.txth.value=txt"
+                                       class="w-7 h-7 rounded cursor-pointer border border-gray-300 p-0.5">
+                                <input type="text" name="colors-{{ row.txt_name }}" x-ref="txth" :value="txt" @input="txt=$event.target.value"
+                                       maxlength="7" class="w-20 border border-gray-300 rounded px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500">
+                                <span class="text-xs text-gray-400">text</span>
+                            </div>
+                            <div class="mt-2 h-9 rounded flex items-center justify-center text-sm font-bold"
+                                 :style="'background:'+bg+';color:'+txt">{{ row.label }}</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
                 <div>
                     <button type="submit"
                             class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-5 py-2 rounded shadow">
