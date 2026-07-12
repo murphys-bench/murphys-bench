@@ -5004,7 +5004,15 @@ class SaleReceiptEmailView(SaleAccessMixin, View):
 
 class POSAccessMixin(LoginRequiredMixin):
     """Gate POS (register) views on the can_view_sales role flag — the POS
-    supersedes the old Sale-detail checkout, so it inherits the same gate."""
+    supersedes the old Sale-detail checkout, so it inherits the same gate.
+
+    Deliberately NOT further scoped to "assigned to me" (unlike
+    _get_scoped_wo_or_404 elsewhere in this file): the Register is a
+    front-desk-settles-any-completed-job model, not tech-ownership — anyone
+    permitted at the counter can ring up any completed WO/Sale, regardless of
+    who worked it. This was an explicit call made during the Jul 2026
+    object-authz security fix (which scoped every other raw-pk WO/ticket
+    fetch), not an oversight — see memory project_mb_external_security_review_jul2026."""
 
     def dispatch(self, request, *args, **kwargs):
         if request.user.is_authenticated and not _can_view_sales(request.user):
