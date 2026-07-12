@@ -9,6 +9,17 @@
 
 ---
 
+## Publish-doc/tooling follow-up (Jul 11 2026)
+
+- [ ] **Dry-run `scripts/setup.sh` end-to-end on a real fresh box** (mb-test or a scratch VM,
+      not prod) to confirm the new gunicorn+nginx auto-wiring actually works outside a hand
+      review — written and `bash -n`-checked, but never run for real. Confirm: apt install,
+      venv, `.env` generation with LAN IP detected, migrate/collectstatic, the gunicorn
+      systemd unit starts clean, the nginx site is written/enabled correctly (default site
+      removed, `nginx -t` passes), and the app is actually reachable at the printed LAN URL
+      with a login page. Also sanity-check `--skip-web` still leaves a working app-layer-only
+      state. See commit `8749b13` (INSTALL.md rewrite + setup.sh web-server automation).
+
 ## Deliberate expansion (Jul 10 2026 — Mike)
 
 > "We're getting to a point with MB where improving it means expanding it. This needs to be
