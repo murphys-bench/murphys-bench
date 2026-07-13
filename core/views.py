@@ -5945,14 +5945,14 @@ class UpdateTriggerView(LoginRequiredMixin, View):
 
 
 class BackupTestView(LoginRequiredMixin, View):
-    """Settings → Maintenance 'Test destination' — admin only. Probes the
-    configured offsite backup destination and reports back via a flash message."""
+    """Settings → Maintenance 'Test destination' — admin only. Probes the onsite
+    or offsite backup destination (`which`) and reports back via a flash message."""
 
-    def post(self, request):
+    def post(self, request, which):
         if not _is_admin(request.user):
             return HttpResponse('Forbidden', status=403)
         from . import backup_ops
-        ok, msg = backup_ops.test_destination(SiteSettings.get())
+        ok, msg = backup_ops.test_destination(SiteSettings.get(), which)
         (messages.success if ok else messages.error)(request, msg)
         return redirect('/settings/?tab=maintenance')
 

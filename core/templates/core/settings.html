@@ -2738,12 +2738,13 @@
 
         {% if active_tab == 'maintenance' %}
         <!-- ── Backups ─────────────────────────────────────────────── -->
-        <div class="bg-white rounded-lg shadow p-6" x-data="{ offsite: '{{ settings.backup_offsite_type }}' }">
+        <div class="bg-white rounded-lg shadow p-6"
+             x-data="{ onsite: {{ settings.backup_onsite_enabled|yesno:'true,false' }}, offsite: {{ settings.backup_offsite_enabled|yesno:'true,false' }} }">
             <h2 class="text-lg font-semibold text-gray-900 mb-1">Backups</h2>
             <p class="text-sm text-gray-500 mb-6">
-                Murphy's Bench always keeps recent backup archives <strong>on this server</strong>. Optionally,
-                it also sends a second copy <strong>off-box</strong> to the destination you choose below. Backups
-                run automatically on a nightly timer; you can also run one on demand.
+                Each backup is a consistent snapshot of the database, attachments and settings, shipped
+                <strong>off this server</strong> to the destination(s) below — the MB server itself is never a
+                backup location. Enable an onsite path, an offsite bucket, or both.
             </p>
 
             <div class="mb-6">
@@ -2753,21 +2754,54 @@
             <form method="post">
                 {% csrf_token %}
                 <input type="hidden" name="tab" value="backups">
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Off-site destination</label>
-                        {{ forms.backups.backup_offsite_type }}
-                    </div>
 
-                    <!-- Local / mounted drive -->
-                    <div x-show="offsite === 'local'" x-cloak>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Destination path</label>
-                        {{ forms.backups.backup_local_path }}
-                        <p class="text-xs text-gray-400 mt-1">A path on this server — e.g. a mounted USB drive or NAS share (<code>/mnt/nas/mb-backups</code>).</p>
-                    </div>
+                {% for err in forms.backups.non_field_errors %}
+                    <p class="text-sm text-red-600 mb-3">{{ err }}</p>
+                {% endfor %}
+                {% for field in forms.backups %}{% if field.errors %}
+                    <p class="text-sm text-red-600 mb-3">{{ field.label }}: {{ field.errors|join:", " }}</p>
+                {% endif %}{% endfor %}
 
-                    <!-- S3-compatible -->
-                    <div x-show="offsite === 's3'" x-cloak class="space-y-4">
+                <!-- Onsite destination -->
+                <div class="border border-gray-200 rounded-md p-4 mb-4">
+                    <label class="flex items-center gap-2">
+                        {{ forms.backups.backup_onsite_enabled }}
+                        <span class="text-sm font-medium text-gray-800">Onsite (off-box path)</span>
+                    </label>
+                    <div x-show="onsite" x-cloak class="mt-4 space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Destination path</label>
+                            {{ forms.backups.backup_onsite_path }}
+                            <p class="text-xs text-gray-400 mt-1">A path mounted on this server that lives on <em>other</em> hardware — a USB drive or NAS share (<code>/mnt/nas/mb-backups</code>).</p>
+                        </div>
+                        <div class="flex items-end gap-3">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Retention</label>
+                                {{ forms.backups.backup_onsite_retention_mode }}
+                            </div>
+                            <div class="w-28">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Value</label>
+                                {{ forms.backups.backup_onsite_retention_value }}
+                            </div>
+                            <p class="text-xs text-gray-400 pb-2">copies, or days</p>
+                        </div>
+                        <div>
+                            <button type="submit" formaction="{% url 'core:backup_test' 'onsite' %}"
+                                    class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-200">
+                                Test onsite
+                            </button>
+                            <span class="text-xs text-gray-400 ml-2">Save first, then test.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Offsite destination -->
+                <div class="border border-gray-200 rounded-md p-4 mb-4">
+                    <label class="flex items-center gap-2">
+                        {{ forms.backups.backup_offsite_enabled }}
+                        <span class="text-sm font-medium text-gray-800">Offsite (S3-compatible)</span>
+                    </label>
+                    <div x-show="offsite" x-cloak class="mt-4 space-y-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Endpoint</label>
                             {{ forms.backups.backup_s3_endpoint }}
@@ -2797,19 +2831,44 @@
                                 {{ forms.backups.backup_s3_secret_key }}
                             </div>
                         </div>
-                        <p class="text-xs text-gray-400">Keys are stored encrypted. Murphy's Bench writes them into an rclone config the backup script reads.</p>
-                    </div>
-
-                    <div class="max-w-xs">
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Local copies to keep</label>
-                        {{ forms.backups.backup_retention_local }}
-                        <p class="text-xs text-gray-400 mt-1">How many recent archives to retain on this server.</p>
+                        <div class="flex items-end gap-3">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Retention</label>
+                                {{ forms.backups.backup_offsite_retention_mode }}
+                            </div>
+                            <div class="w-28">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Value</label>
+                                {{ forms.backups.backup_offsite_retention_value }}
+                            </div>
+                            <p class="text-xs text-gray-400 pb-2">copies, or days</p>
+                        </div>
+                        <p class="text-xs text-gray-400">Keys are stored encrypted. MB writes them into an rclone config the backup script reads.</p>
+                        <div>
+                            <button type="submit" formaction="{% url 'core:backup_test' 'offsite' %}"
+                                    class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-200">
+                                Test offsite
+                            </button>
+                            <span class="text-xs text-gray-400 ml-2">Save first, then test.</span>
+                        </div>
                     </div>
                 </div>
 
-                {% for field in forms.backups %}{% if field.errors %}
-                    <p class="text-sm text-red-600 mt-2">{{ field.label }}: {{ field.errors|join:", " }}</p>
-                {% endif %}{% endfor %}
+                <!-- Schedule -->
+                <div class="border border-gray-200 rounded-md p-4">
+                    <div class="text-sm font-medium text-gray-800 mb-3">Schedule</div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Days</label>
+                            {{ forms.backups.backup_schedule_days }}
+                            <p class="text-xs text-gray-400 mt-1"><code>daily</code>, or weekdays like <code>mon,tue,wed,thu,fri</code>.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Times</label>
+                            {{ forms.backups.backup_schedule_times }}
+                            <p class="text-xs text-gray-400 mt-1">One or more <code>HH:MM</code> — e.g. <code>02:00</code> or <code>02:00,14:00</code>. Runs within ~5 min of each.</p>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="mt-6 pt-4 border-t border-gray-200 flex items-center gap-3">
                     <button type="submit"
@@ -2817,15 +2876,6 @@
                         Save Backup Settings
                     </button>
                 </div>
-            </form>
-
-            <form method="post" action="{% url 'core:backup_test' %}" class="mt-3" x-show="offsite" x-cloak>
-                {% csrf_token %}
-                <button type="submit"
-                        class="px-5 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-200">
-                    Test destination
-                </button>
-                <span class="text-xs text-gray-400 ml-2">Save first, then test. Checks the destination is reachable and writable.</span>
             </form>
         </div>
 
