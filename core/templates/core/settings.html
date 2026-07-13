@@ -2736,8 +2736,101 @@
         </div>
         {% endif %}
 
-        {% if active_tab == 'updates' %}
-        <div class="bg-white rounded-lg shadow p-6">
+        {% if active_tab == 'maintenance' %}
+        <!-- ── Backups ─────────────────────────────────────────────── -->
+        <div class="bg-white rounded-lg shadow p-6" x-data="{ offsite: '{{ settings.backup_offsite_type }}' }">
+            <h2 class="text-lg font-semibold text-gray-900 mb-1">Backups</h2>
+            <p class="text-sm text-gray-500 mb-6">
+                Murphy's Bench always keeps recent backup archives <strong>on this server</strong>. Optionally,
+                it also sends a second copy <strong>off-box</strong> to the destination you choose below. Backups
+                run automatically on a nightly timer; you can also run one on demand.
+            </p>
+
+            <div class="mb-6">
+                {% include 'core/partials/backup_status.html' %}
+            </div>
+
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="tab" value="backups">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Off-site destination</label>
+                        {{ forms.backups.backup_offsite_type }}
+                    </div>
+
+                    <!-- Local / mounted drive -->
+                    <div x-show="offsite === 'local'" x-cloak>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Destination path</label>
+                        {{ forms.backups.backup_local_path }}
+                        <p class="text-xs text-gray-400 mt-1">A path on this server — e.g. a mounted USB drive or NAS share (<code>/mnt/nas/mb-backups</code>).</p>
+                    </div>
+
+                    <!-- S3-compatible -->
+                    <div x-show="offsite === 's3'" x-cloak class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Endpoint</label>
+                            {{ forms.backups.backup_s3_endpoint }}
+                            <p class="text-xs text-gray-400 mt-1">S3 endpoint host — e.g. <code>s3.us-west-002.backblazeb2.com</code> (Backblaze B2), or your AWS/Wasabi/MinIO endpoint.</p>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Bucket</label>
+                                {{ forms.backups.backup_s3_bucket }}
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Region <span class="text-gray-400">(optional)</span></label>
+                                {{ forms.backups.backup_s3_region }}
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Folder / prefix <span class="text-gray-400">(optional)</span></label>
+                            {{ forms.backups.backup_s3_path }}
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Access key ID</label>
+                                {{ forms.backups.backup_s3_access_key }}
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Secret access key</label>
+                                {{ forms.backups.backup_s3_secret_key }}
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-400">Keys are stored encrypted. Murphy's Bench writes them into an rclone config the backup script reads.</p>
+                    </div>
+
+                    <div class="max-w-xs">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Local copies to keep</label>
+                        {{ forms.backups.backup_retention_local }}
+                        <p class="text-xs text-gray-400 mt-1">How many recent archives to retain on this server.</p>
+                    </div>
+                </div>
+
+                {% for field in forms.backups %}{% if field.errors %}
+                    <p class="text-sm text-red-600 mt-2">{{ field.label }}: {{ field.errors|join:", " }}</p>
+                {% endif %}{% endfor %}
+
+                <div class="mt-6 pt-4 border-t border-gray-200 flex items-center gap-3">
+                    <button type="submit"
+                            class="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+                        Save Backup Settings
+                    </button>
+                </div>
+            </form>
+
+            <form method="post" action="{% url 'core:backup_test' %}" class="mt-3" x-show="offsite" x-cloak>
+                {% csrf_token %}
+                <button type="submit"
+                        class="px-5 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-200">
+                    Test destination
+                </button>
+                <span class="text-xs text-gray-400 ml-2">Save first, then test. Checks the destination is reachable and writable.</span>
+            </form>
+        </div>
+
+        <!-- ── Software Updates ────────────────────────────────────── -->
+        <div class="bg-white rounded-lg shadow p-6 mt-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-1">Software Updates</h2>
             <p class="text-sm text-gray-500 mb-6">
                 Update Murphy's Bench to the latest release without using the command line. The update

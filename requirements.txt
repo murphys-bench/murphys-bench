@@ -41,7 +41,7 @@ boto3==1.42.97
 weasyprint==69.0
 
 # Utilities
-Pillow==12.2.0          # security: clears CVE-2023-50447/2024-28219/2026-42310 + PYSEC-2026-165
+Pillow==12.3.0          # security: clears CVE-2023-50447/2024-28219/2026-42310 + PYSEC-2026-165, PYSEC-2026-2253..2257
 requests==2.33.0        # security: clears CVE-2024-35195/2024-47081/2026-25645 (carries the IN API token)
 cryptography==48.0.1    # security: clears GHSA-537c-gmf6-5ccf; underpins field encryption
 markdown

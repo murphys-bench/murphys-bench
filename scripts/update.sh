@@ -124,6 +124,11 @@ log "code: $PREV_VER ($PREV) -> $NEW_VER ($NEW)"
 "$APP/scripts/build_css.sh" || rollback "CSS build failed"
 "$VENV/python" manage.py collectstatic --noinput >/dev/null || rollback "collectstatic failed"
 
+# 6b) Regenerate the backup destination files from SiteSettings, so a fresh box /
+# post-restore never silently loses its configured offsite target. Non-fatal —
+# an un-configured box just stays local-only.
+"$VENV/python" manage.py render_backup_config >/dev/null 2>&1 || log "render_backup_config skipped (non-fatal)"
+
 # 7) Restart the app.
 sudo systemctl restart murphys-bench || rollback "service restart failed"
 
