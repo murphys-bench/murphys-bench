@@ -4,7 +4,9 @@
 #    then the local staging copy is deleted (the MB VM is never a destination).
 #
 # Modes:
-#   mb_backup.sh                       full run: build → ship off-box → prune → delete staging
+#   mb_backup.sh                       full run: build → ship to all ENABLED dests → prune → delete
+#   mb_backup.sh --only onsite,offsite ship only to the listed enabled dest(s) (scheduler uses this
+#                                      to honour each destination's independent schedule)
 #   mb_backup.sh --staging-only OUT    build+verify a LOCAL tarball at OUT and stop.
 #                                      No ship/prune/delete, no destination required, no
 #                                      status/healthcheck. Used by update.sh as its
@@ -21,13 +23,19 @@ TS="$(date +%Y%m%d-%H%M%S)"
 SNAP="$STAGE/db-$TS.sqlite3"
 ARCHIVE="$STAGE/mb-backup-$TS.tar.gz"
 
-# --staging-only OUT: produce a local rollback tarball and exit (see header).
+# Arg parsing: --staging-only OUT (local rollback tarball) or --only CSV (dest subset).
 STAGING_ONLY=0
+ONLY=""   # empty = all enabled destinations
 if [ "${1:-}" = "--staging-only" ]; then
     STAGING_ONLY=1
     [ -n "${2:-}" ] || { echo "mb_backup.sh --staging-only requires an output path" >&2; exit 2; }
     ARCHIVE="$2"
+elif [ "${1:-}" = "--only" ]; then
+    [ -n "${2:-}" ] || { echo "mb_backup.sh --only requires a dest list (onsite,offsite)" >&2; exit 2; }
+    ONLY=",${2},"   # e.g. ",onsite,offsite,"
 fi
+# want DEST → true if this destination should ship this run (enabled + in --only if given)
+want(){ [ -z "$ONLY" ] || case "$ONLY" in *",$1,"*) return 0;; *) return 1;; esac; }
 
 # rclone binary + config. The rclone remote + offsite destination are configured
 # in the app (Settings → Maintenance → Backups), which renders backup-config.env
@@ -127,7 +135,7 @@ fi
 #    staged file and fails loud (never lose a run's data).
 DESTS=()
 
-if [ "${BACKUP_ONSITE_ENABLED:-0}" = "1" ]; then
+if [ "${BACKUP_ONSITE_ENABLED:-0}" = "1" ] && want onsite; then
     [ -n "$BACKUP_ONSITE_PATH" ] || fail "onsite enabled but no path configured"
     mkdir -p "$BACKUP_ONSITE_PATH" || fail "cannot create onsite path $BACKUP_ONSITE_PATH"
     cp "$ARCHIVE" "$BACKUP_ONSITE_PATH/" \
@@ -143,7 +151,7 @@ if [ "${BACKUP_ONSITE_ENABLED:-0}" = "1" ]; then
     DESTS+=("onsite:$BACKUP_ONSITE_PATH")
 fi
 
-if [ "${BACKUP_OFFSITE_ENABLED:-0}" = "1" ]; then
+if [ "${BACKUP_OFFSITE_ENABLED:-0}" = "1" ] && want offsite; then
     [ -n "$BACKUP_RCLONE_REMOTE" ] || fail "offsite enabled but no remote configured"
     [ -x "$RCLONE_BIN" ] || fail "offsite enabled but rclone not found at $RCLONE_BIN"
     [ -f "$RCLONE_CONF" ] || fail "offsite enabled but $RCLONE_CONF missing"

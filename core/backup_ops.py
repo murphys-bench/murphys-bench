@@ -120,12 +120,14 @@ def render_config(site) -> None:
         f'BACKUP_ONSITE_PATH="{onsite_path}"\n'
         f'BACKUP_ONSITE_RETENTION_MODE="{site.backup_onsite_retention_mode}"\n'
         f'BACKUP_ONSITE_RETENTION_VALUE="{int(site.backup_onsite_retention_value)}"\n'
+        f'BACKUP_ONSITE_SCHEDULE_DAYS="{site.backup_onsite_schedule_days or "daily"}"\n'
+        f'BACKUP_ONSITE_SCHEDULE_TIMES="{site.backup_onsite_schedule_times or "02:00"}"\n'
         f'BACKUP_OFFSITE_ENABLED="{1 if site.backup_offsite_enabled else 0}"\n'
         f'BACKUP_RCLONE_REMOTE="{remote_target}"\n'
         f'BACKUP_OFFSITE_RETENTION_MODE="{site.backup_offsite_retention_mode}"\n'
         f'BACKUP_OFFSITE_RETENTION_VALUE="{int(site.backup_offsite_retention_value)}"\n'
-        f'BACKUP_SCHEDULE_DAYS="{site.backup_schedule_days or "daily"}"\n'
-        f'BACKUP_SCHEDULE_TIMES="{site.backup_schedule_times or "02:00"}"\n'
+        f'BACKUP_OFFSITE_SCHEDULE_DAYS="{site.backup_offsite_schedule_days or "daily"}"\n'
+        f'BACKUP_OFFSITE_SCHEDULE_TIMES="{site.backup_offsite_schedule_times or "02:00"}"\n'
     )
     # The manifest itself carries no secrets, but keep it owner-only for consistency.
     _write_600(manifest_path(), manifest)

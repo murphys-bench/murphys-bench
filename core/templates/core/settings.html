@@ -2785,6 +2785,18 @@
                             </div>
                             <p class="text-xs text-gray-400 pb-2">copies, or days</p>
                         </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Schedule — days</label>
+                                {{ forms.backups.backup_onsite_schedule_days }}
+                                <p class="text-xs text-gray-400 mt-1"><code>daily</code>, or weekdays like <code>mon,tue,wed,thu,fri</code>.</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Schedule — times</label>
+                                {{ forms.backups.backup_onsite_schedule_times }}
+                                <p class="text-xs text-gray-400 mt-1">One or more <code>HH:MM</code> — e.g. <code>06:00,18:00</code>. Runs within ~5 min.</p>
+                            </div>
+                        </div>
                         <div>
                             <button type="submit" formaction="{% url 'core:backup_test' 'onsite' %}"
                                     class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-200">
@@ -2842,6 +2854,18 @@
                             </div>
                             <p class="text-xs text-gray-400 pb-2">copies, or days</p>
                         </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Schedule — days</label>
+                                {{ forms.backups.backup_offsite_schedule_days }}
+                                <p class="text-xs text-gray-400 mt-1"><code>daily</code>, or weekdays like <code>mon,wed,fri</code>.</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Schedule — times</label>
+                                {{ forms.backups.backup_offsite_schedule_times }}
+                                <p class="text-xs text-gray-400 mt-1">One or more <code>HH:MM</code> — e.g. <code>02:00</code>. Runs within ~5 min.</p>
+                            </div>
+                        </div>
                         <p class="text-xs text-gray-400">Keys are stored encrypted. MB writes them into an rclone config the backup script reads.</p>
                         <div>
                             <button type="submit" formaction="{% url 'core:backup_test' 'offsite' %}"
@@ -2849,23 +2873,6 @@
                                 Test offsite
                             </button>
                             <span class="text-xs text-gray-400 ml-2">Save first, then test.</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Schedule -->
-                <div class="border border-gray-200 rounded-md p-4">
-                    <div class="text-sm font-medium text-gray-800 mb-3">Schedule</div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Days</label>
-                            {{ forms.backups.backup_schedule_days }}
-                            <p class="text-xs text-gray-400 mt-1"><code>daily</code>, or weekdays like <code>mon,tue,wed,thu,fri</code>.</p>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Times</label>
-                            {{ forms.backups.backup_schedule_times }}
-                            <p class="text-xs text-gray-400 mt-1">One or more <code>HH:MM</code> — e.g. <code>02:00</code> or <code>02:00,14:00</code>. Runs within ~5 min of each.</p>
                         </div>
                     </div>
                 </div>
