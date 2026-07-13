@@ -17,6 +17,8 @@ from django.contrib.contenttypes.models import ContentType
 from django.http import FileResponse, Http404
 from django.utils import timezone
 from django.utils.html import escape
+from two_factor.views import SetupView as TwoFactorSetupView
+from .middleware import mfa_setup_is_mandatory
 from .models import (
     WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist, ChecklistItem,
     Ticket, TicketReply, TicketLock, TicketLink, Attachment, SiteSettings,
@@ -7016,3 +7018,42 @@ class TicketStatusUpdateView(LoginRequiredMixin, View):
                 send_ticket_email('ticket_resolved', ticket)
         messages.success(request, f'Status updated to {new_status.replace("_", " ").title()}.')
         return redirect('core:ticket_detail', pk=pk)
+
+
+class MFASetupView(TwoFactorSetupView):
+    """Hardens two_factor's SetupView against a real, reproducible enrollment
+    failure on this app.
+
+    THE BUG: formtools' ``WizardView.get()`` calls ``storage.reset()`` on every
+    GET to /account/two_factor/setup/. That wipes ``extra_data['keys']['generator']``
+    — the secret the on-screen QR was generated from — and the next render mints
+    a brand-new secret. So if ANY GET to the setup URL lands between the QR being
+    shown and the user submitting their code, the code they got from the QR they
+    scanned is now verified against a different secret and is rejected every time
+    ("Entered token is not valid"), with no explanation. On this app that GET is
+    easy to trigger: ``MFAEnforcementMiddleware`` redirects any authenticated-but-
+    unverified request (a favicon fetch, a reload, a background poll, a second
+    tab, or the old Cancel link) to this URL via GET. Server-side crypto is fine;
+    the key just gets rotated out from under the QR. Reproduced end-to-end.
+
+    THE FIX (get): resume an in-progress enrollment on GET instead of resetting
+    it, so a stray GET can't invalidate a QR the user already scanned. A genuinely
+    fresh visit (no wizard in progress) still starts clean.
+
+    Also (get_context_data): drop the Cancel link while MFA enrollment is
+    mandatory and the user has no device yet — landing on '/' just bounces back
+    here. See mfa_setup_is_mandatory."""
+
+    def get(self, request, *args, **kwargs):
+        current = self.storage.current_step
+        if current and current != self.steps.first:
+            # Mid-enrollment GET: render the current step from existing storage
+            # rather than letting WizardView.get() reset the generated secret.
+            return self.render(self.get_form())
+        return super().get(request, *args, **kwargs)
+
+    def get_context_data(self, form, **kwargs):
+        context = super().get_context_data(form, **kwargs)
+        if mfa_setup_is_mandatory(self.request.user):
+            context.pop('cancel_url', None)
+        return context

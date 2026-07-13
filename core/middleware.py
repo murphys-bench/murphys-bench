@@ -12,15 +12,29 @@ _EXEMPT_PREFIXES = (
 )
 
 
+def mfa_setup_is_mandatory(user):
+    """True when this user has nowhere safe to go but the setup wizard: MFA is
+    required site-wide and they have no confirmed device yet. Shared with
+    MFASetupView (core/views.py) so the "Cancel" link is hidden in exactly the
+    case where clicking it would just bounce them back into the wizard —
+    landing on `/` triggers this same middleware to redirect back to
+    /account/two_factor/setup/ via a GET, which silently resets the wizard's
+    stored secret (upstream two_factor/formtools behavior). Any code already
+    scanned into an authenticator app then fails forever, with no explanation."""
+    from django_otp import devices_for_user
+    from .models import SiteSettings
+    if not SiteSettings.get().require_mfa:
+        return False
+    return not bool(list(devices_for_user(user)))
+
+
 class MFAEnforcementMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
         if self._needs_mfa_redirect(request):
-            from django_otp import devices_for_user
-            has_device = bool(list(devices_for_user(request.user)))
-            if not has_device:
+            if mfa_setup_is_mandatory(request.user):
                 return redirect('/account/two_factor/setup/')
             # Has device but session not verified — send back through login
             return redirect('/account/login/')
