@@ -18,5 +18,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         site = SiteSettings.get()
         backup_ops.render_config(site)
-        dest = site.backup_offsite_type or 'disabled (local retention only)'
-        self.stdout.write(self.style.SUCCESS(f'Backup config rendered — offsite: {dest}'))
+        dests = []
+        if site.backup_onsite_enabled:
+            dests.append(f'onsite:{site.backup_onsite_path}')
+        if site.backup_offsite_enabled:
+            dests.append(f'offsite:{backup_ops.rclone_remote_target(site)}')
+        summary = ' + '.join(dests) if dests else 'no destination configured'
+        self.stdout.write(self.style.SUCCESS(f'Backup config rendered — destinations: {summary}'))
