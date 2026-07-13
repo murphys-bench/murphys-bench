@@ -1,8 +1,12 @@
 [Unit]
-Description=Run Murphy's Bench database backup nightly at 02:15
+Description=Murphy's Bench backup scheduler tick (every 5 min)
 
 [Timer]
-OnCalendar=*-*-* 02:15:00
+# Ticks every 5 minutes; scripts/backup_scheduler.sh decides whether a backup is
+# due per the in-app schedule (Settings → Maintenance → Backups). This replaced
+# the old fixed nightly OnCalendar so the schedule is app-configurable without
+# editing systemd. Re-copy this unit + the .service once when upgrading.
+OnCalendar=*:0/5
 Persistent=true
 
 [Install]

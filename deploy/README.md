@@ -3,28 +3,35 @@
 systemd units for scheduled Murphy's Bench jobs. This VM has no `cron`, so
 scheduling uses systemd timers. Installing them is a one-time `sudo` step.
 
-## Nightly database backup
+## Backups — scheduler tick
 
-Files: `murphys-bench-backup.service` (runs `scripts/backup_db.sh`) and
-`murphys-bench-backup.timer` (fires 02:15 nightly, `Persistent=true` so a
-missed run catches up after downtime).
+Backups are configured in the app (Settings → Maintenance → Backups): onsite path
+and/or offsite S3, retention, and the schedule (days + times). The MB VM is never a
+backup destination — a run stages the archive transiently, ships it off-box, then
+deletes the staged copy.
 
-Install on the VM:
+Files: `murphys-bench-backup.timer` (ticks every 5 min) and
+`murphys-bench-backup.service` (runs `scripts/backup_scheduler.sh`, which fires
+`scripts/mb_backup.sh` only when an in-app scheduled slot is due). This **replaced**
+the old fixed nightly `backup_db.sh` timer, so the schedule is app-configurable
+without editing systemd. **When upgrading an existing box, re-copy both unit files**
+(the `.service` now runs the scheduler, not `backup_db.sh`).
+
+Install / upgrade on the VM:
 
 ```bash
 sudo cp /opt/murphys-bench/deploy/murphys-bench-backup.service /etc/systemd/system/
 sudo cp /opt/murphys-bench/deploy/murphys-bench-backup.timer   /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now murphys-bench-backup.timer
-sudo systemctl list-timers murphys-bench-backup.timer   # confirm next run time
+sudo systemctl list-timers murphys-bench-backup.timer   # confirm it's ticking
 ```
 
-Verify a manual run and inspect output:
+Verify a manual run and inspect output (bypasses the schedule gate):
 
 ```bash
-sudo systemctl start murphys-bench-backup.service
-journalctl -u murphys-bench-backup.service --no-pager | tail
-ls -lh /opt/murphys-bench/backups/
+sudo -u scs-tech /opt/murphys-bench/scripts/mb_backup.sh
+tail /opt/murphys-bench/logs/backup.log
 ```
 
 ## Inbound email polling (every 2 min) + SLA overdue check (every 15 min)

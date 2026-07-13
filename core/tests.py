@@ -6530,82 +6530,117 @@ def test_tech_dashboard_shows_triage_pool_tile(client, client_obj):
     assert b'Triage pool' in resp.content
 
 
-# ── Backup destination config (Settings → Maintenance → Backups) ─────────────
-# The admin configures the offsite backup destination in the app; Django renders
-# backup-config.env + .rclone.conf (secret-bearing, 0600) that the out-of-band
-# scripts/mb_backup.sh reads. These tests point BASE_DIR at a tmp dir so the
-# rendered files land there, not in the repo.
+# ── Backup destinations + schedule (Settings → Maintenance → Backups) ─────────
+# The admin configures onsite/offsite destinations, retention and schedule in the
+# app; Django renders backup-config.env + .rclone.conf (secret-bearing, 0600) that
+# the out-of-band scripts read. The MB VM is never a destination. These tests point
+# BASE_DIR at a tmp dir so the rendered files land there, not in the repo.
+
+def _backup_post(onsite=False, offsite=False, **over):
+    data = {
+        'tab': 'backups',
+        'backups-backup_onsite_retention_mode': 'count',
+        'backups-backup_onsite_retention_value': '14',
+        'backups-backup_offsite_retention_mode': 'age',
+        'backups-backup_offsite_retention_value': '30',
+        'backups-backup_schedule_days': 'daily',
+        'backups-backup_schedule_times': '02:00',
+    }
+    if onsite:
+        data['backups-backup_onsite_enabled'] = 'on'
+        data.setdefault('backups-backup_onsite_path', '/mnt/nas/mb')
+    if offsite:
+        data['backups-backup_offsite_enabled'] = 'on'
+        data.setdefault('backups-backup_s3_endpoint', 's3.us-west-002.backblazeb2.com')
+        data.setdefault('backups-backup_s3_bucket', 'my-bucket')
+        data.setdefault('backups-backup_s3_path', 'mb')
+        data.setdefault('backups-backup_s3_access_key', 'AKIAtest')
+        data.setdefault('backups-backup_s3_secret_key', 'secret123')
+    data.update(over)
+    return data
+
 
 @pytest.mark.django_db
-def test_backup_settings_s3_save_renders_files(admin_user, client, settings, tmp_path):
+def test_backup_settings_both_destinations_render_files(admin_user, client, settings, tmp_path):
     settings.BASE_DIR = tmp_path
     from core import backup_ops
     client.force_login(admin_user)
-    resp = client.post(reverse('core:settings'), {
-        'tab': 'backups',
-        'backups-backup_offsite_type': 's3',
-        'backups-backup_s3_endpoint': 's3.us-west-002.backblazeb2.com',
-        'backups-backup_s3_region': 'us-west-002',
-        'backups-backup_s3_bucket': 'my-bucket',
-        'backups-backup_s3_path': 'mb',
-        'backups-backup_s3_access_key': 'AKIAtest',
-        'backups-backup_s3_secret_key': 'secret123',
-        'backups-backup_retention_local': '20',
-    })
+    resp = client.post(reverse('core:settings'), _backup_post(
+        onsite=True, offsite=True,
+        **{'backups-backup_onsite_retention_value': '7',
+           'backups-backup_offsite_retention_value': '45',
+           'backups-backup_schedule_days': 'mon,wed,fri',
+           'backups-backup_schedule_times': '02:00,14:30'}))
     assert resp.status_code == 302
     assert resp['Location'].endswith('tab=maintenance')
     site = SiteSettings.get()
-    assert site.backup_offsite_type == 's3'
-    assert site.backup_s3_bucket == 'my-bucket'
-    assert site.backup_retention_local == 20
+    assert site.backup_onsite_enabled and site.backup_offsite_enabled
     assert site.backup_s3_secret_key == 'secret123'  # encrypted at rest, decrypts here
 
     manifest = backup_ops.manifest_path().read_text()
-    assert 'BACKUP_OFFSITE_TYPE="s3"' in manifest
+    assert 'BACKUP_ONSITE_ENABLED="1"' in manifest
+    assert 'BACKUP_ONSITE_PATH="/mnt/nas/mb"' in manifest
+    assert 'BACKUP_ONSITE_RETENTION_MODE="count"' in manifest
+    assert 'BACKUP_ONSITE_RETENTION_VALUE="7"' in manifest
+    assert 'BACKUP_OFFSITE_ENABLED="1"' in manifest
     assert 'BACKUP_RCLONE_REMOTE="mbbackup:my-bucket/mb"' in manifest
-    assert 'BACKUP_RETENTION_LOCAL="20"' in manifest
+    assert 'BACKUP_OFFSITE_RETENTION_MODE="age"' in manifest
+    assert 'BACKUP_OFFSITE_RETENTION_VALUE="45"' in manifest
+    assert 'BACKUP_SCHEDULE_DAYS="mon,wed,fri"' in manifest
+    assert 'BACKUP_SCHEDULE_TIMES="02:00,14:30"' in manifest
 
     conf_path = backup_ops.rclone_conf_path()
     conf = conf_path.read_text()
-    assert '[mbbackup]' in conf
-    assert 'endpoint = s3.us-west-002.backblazeb2.com' in conf
-    assert 'secret_access_key = secret123' in conf
+    assert '[mbbackup]' in conf and 'secret_access_key = secret123' in conf
     import os, stat
     assert stat.S_IMODE(os.stat(conf_path).st_mode) == 0o600, 'secret file must be owner-only'
 
 
 @pytest.mark.django_db
-def test_backup_settings_disabled_clears_offsite(admin_user, client, settings, tmp_path):
+def test_backup_settings_offsite_only_clears_stale_when_disabled(admin_user, client, settings, tmp_path):
     settings.BASE_DIR = tmp_path
     from core import backup_ops
-    # A stale rclone.conf from a previous S3 config must be removed when offsite is off.
-    (tmp_path / '.rclone.conf').write_text('[mbbackup]\nsecret_access_key = old\n')
     client.force_login(admin_user)
-    resp = client.post(reverse('core:settings'), {
-        'tab': 'backups',
-        'backups-backup_offsite_type': '',
-        'backups-backup_retention_local': '14',
-    })
+    # First enable offsite → renders rclone.conf.
+    client.post(reverse('core:settings'), _backup_post(offsite=True))
+    assert backup_ops.rclone_conf_path().exists()
+    # Now switch to onsite-only → offsite disabled → stale secret file removed.
+    resp = client.post(reverse('core:settings'), _backup_post(onsite=True))
     assert resp.status_code == 302
     manifest = backup_ops.manifest_path().read_text()
-    assert 'BACKUP_OFFSITE_TYPE=""' in manifest
+    assert 'BACKUP_OFFSITE_ENABLED="0"' in manifest
     assert 'BACKUP_RCLONE_REMOTE=""' in manifest
     assert not backup_ops.rclone_conf_path().exists(), 'stale secret file must be cleared'
 
 
 @pytest.mark.django_db
-def test_backup_settings_local_requires_path(admin_user, client, settings, tmp_path):
+def test_backup_settings_requires_a_destination(admin_user, client, settings, tmp_path):
     settings.BASE_DIR = tmp_path
     client.force_login(admin_user)
-    resp = client.post(reverse('core:settings'), {
-        'tab': 'backups',
-        'backups-backup_offsite_type': 'local',
-        'backups-backup_local_path': '',
-        'backups-backup_retention_local': '14',
-    })
+    resp = client.post(reverse('core:settings'), _backup_post())  # neither enabled
     assert resp.status_code == 200  # invalid → re-render, not saved
-    assert SiteSettings.get().backup_offsite_type != 'local'
-    assert b'destination path is required' in resp.content.lower()
+    assert SiteSettings.get().backup_onsite_enabled is False
+    assert b'at least one destination' in resp.content.lower()
+
+
+@pytest.mark.django_db
+def test_backup_settings_onsite_requires_path(admin_user, client, settings, tmp_path):
+    settings.BASE_DIR = tmp_path
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:settings'),
+                       _backup_post(onsite=True, **{'backups-backup_onsite_path': ''}))
+    assert resp.status_code == 200
+    assert b'onsite path is required' in resp.content.lower()
+
+
+@pytest.mark.django_db
+def test_backup_settings_rejects_bad_time(admin_user, client, settings, tmp_path):
+    settings.BASE_DIR = tmp_path
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:settings'),
+                       _backup_post(onsite=True, **{'backups-backup_schedule_times': '25:00'}))
+    assert resp.status_code == 200
+    assert b'invalid time' in resp.content.lower()
 
 
 @pytest.mark.django_db
