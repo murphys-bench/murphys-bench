@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # Murphy's Bench backup: consistent SQLite snapshot + attachments/media + .env
-# -> dated tar.gz, fail-loud, local retention, optional offsite to B2 via rclone.
+# -> verified tar.gz, fail-loud, shipped off-box to the configured destination(s),
+#    then the local staging copy is deleted (the MB VM is never a destination).
+#
+# Modes:
+#   mb_backup.sh                       full run: build → ship off-box → prune → delete staging
+#   mb_backup.sh --staging-only OUT    build+verify a LOCAL tarball at OUT and stop.
+#                                      No ship/prune/delete, no destination required, no
+#                                      status/healthcheck. Used by update.sh as its
+#                                      pre-migrate rollback point (a same-box safety net,
+#                                      distinct from the off-box backup).
 set -euo pipefail
 
 APP=/opt/murphys-bench
@@ -11,6 +20,14 @@ STATUS="$APP/logs/backup-status.json"
 TS="$(date +%Y%m%d-%H%M%S)"
 SNAP="$STAGE/db-$TS.sqlite3"
 ARCHIVE="$STAGE/mb-backup-$TS.tar.gz"
+
+# --staging-only OUT: produce a local rollback tarball and exit (see header).
+STAGING_ONLY=0
+if [ "${1:-}" = "--staging-only" ]; then
+    STAGING_ONLY=1
+    [ -n "${2:-}" ] || { echo "mb_backup.sh --staging-only requires an output path" >&2; exit 2; }
+    ARCHIVE="$2"
+fi
 
 # rclone binary + config. The rclone remote + offsite destination are configured
 # in the app (Settings → Maintenance → Backups), which renders backup-config.env
@@ -96,6 +113,13 @@ ASZ=$(stat -c %s "$ARCHIVE")
 rm -f "$SNAP"
 ARCHIVE_SIZE="$(du -h "$ARCHIVE" | cut -f1)"
 log "archive ok: $ARCHIVE_SIZE ($ARCHIVE)"
+
+# --staging-only: hand the verified local tarball back to the caller and stop.
+# No off-box ship, no prune, no delete, no status/healthcheck.
+if [ "$STAGING_ONLY" = "1" ]; then
+    log "staging-only: kept local rollback tarball at $ARCHIVE"
+    exit 0
+fi
 
 # 3) Ship to the configured destination(s). The MB VM is not a destination:
 #    at least one of onsite/offsite must be enabled, and the staged archive is
