@@ -2079,6 +2079,14 @@ class SiteSettings(models.Model):
     backup_onsite_retention_value = models.PositiveIntegerField(
         default=14, help_text='Onsite retention: number of copies (count) or days (age).',
     )
+    backup_onsite_schedule_days = models.CharField(
+        max_length=64, default='daily',
+        help_text="Onsite schedule: 'daily' or CSV of weekday tokens (mon,tue,...).",
+    )
+    backup_onsite_schedule_times = models.CharField(
+        max_length=255, default='02:00',
+        help_text='Onsite run times: CSV of HH:MM (e.g. 06:00,18:00).',
+    )
 
     # Offsite: S3-compatible (Backblaze B2, AWS S3, Wasabi, MinIO) via rclone.
     backup_offsite_enabled = models.BooleanField(
@@ -2114,17 +2122,17 @@ class SiteSettings(models.Model):
     backup_offsite_retention_value = models.PositiveIntegerField(
         default=30, help_text='Offsite retention: number of copies (count) or days (age).',
     )
-
-    # Schedule: cadence ('daily' or CSV of weekday tokens mon..sun) + one or more
-    # HH:MM run times/day. Applied by scripts/backup_scheduler.sh (5-min tick).
-    backup_schedule_days = models.CharField(
+    backup_offsite_schedule_days = models.CharField(
         max_length=64, default='daily',
-        help_text="'daily' or a CSV of weekday tokens (mon,tue,wed,thu,fri,sat,sun).",
+        help_text="Offsite schedule: 'daily' or CSV of weekday tokens (mon,tue,...).",
     )
-    backup_schedule_times = models.CharField(
+    backup_offsite_schedule_times = models.CharField(
         max_length=255, default='02:00',
-        help_text='CSV of HH:MM run times per day (e.g. 02:00,14:00).',
+        help_text='Offsite run times: CSV of HH:MM (e.g. 02:00).',
     )
+    # Each destination has its OWN schedule (onsite typically frequent, offsite
+    # less so). scripts/backup_scheduler.sh (5-min tick) fires a backup to exactly
+    # the destinations due at that tick; if both are due it ships one snapshot to both.
 
     # Status badge colors — hex values rendered as CSS variables
     color_status_new         = models.CharField(max_length=7, default='#dbeafe', blank=True)  # blue-100
