@@ -2053,23 +2053,36 @@ class SiteSettings(models.Model):
     # push (same "link once, don't sync" philosophy as Client.invoice_ninja_id).
     invoice_ninja_walkin_client_id = models.CharField(max_length=100, blank=True, default='')
 
-    # ── Backup destination (Settings → Maintenance → Backups) ──────────────
+    # ── Backup destinations + schedule (Settings → Maintenance → Backups) ───
     # Config lives here; Django renders plain files (backup-config.env +
-    # .rclone.conf) that the out-of-band shell script scripts/mb_backup.sh
-    # reads. A local retention copy is ALWAYS kept on the box; these fields
-    # configure the single optional OFF-site destination. See core/backup_ops.py.
-    BACKUP_OFFSITE_CHOICES = [
-        ('', 'Disabled (local retention only)'),
-        ('local', 'Local / mounted drive'),
-        ('s3', 'S3-compatible (Backblaze B2, AWS S3, Wasabi, MinIO)'),
+    # .rclone.conf) that the out-of-band scripts read. The MB VM is NEVER a
+    # backup destination — a run stages the archive on the VM only transiently
+    # to build/verify it, ships to the enabled destination(s), then deletes the
+    # staged copy. Real destinations are onsite (off-box mounted path) and/or
+    # offsite (S3). See core/backup_ops.py + scripts/mb_backup.sh.
+    BACKUP_RETENTION_MODES = [
+        ('count', 'Keep N most recent'),
+        ('age',   'Keep N days'),
     ]
-    backup_offsite_type = models.CharField(
-        max_length=10, choices=BACKUP_OFFSITE_CHOICES, blank=True, default='',
-        help_text='Where to send a second, off-box copy of each backup. Blank = keep local copies only.',
+
+    # Onsite: off-box storage mounted on the VM (NAS / USB / other host).
+    backup_onsite_enabled = models.BooleanField(
+        default=False, help_text='Ship each backup to an onsite path (off-box: NAS/USB/other host).',
     )
-    backup_local_path = models.CharField(
+    backup_onsite_path = models.CharField(
         max_length=500, blank=True, default='',
-        help_text='For "Local / mounted drive": destination path on the server (e.g. /mnt/nas/mb-backups).',
+        help_text='Onsite destination path mounted on the server (e.g. /mnt/nas/mb-backups).',
+    )
+    backup_onsite_retention_mode = models.CharField(
+        max_length=5, choices=BACKUP_RETENTION_MODES, default='count',
+    )
+    backup_onsite_retention_value = models.PositiveIntegerField(
+        default=14, help_text='Onsite retention: number of copies (count) or days (age).',
+    )
+
+    # Offsite: S3-compatible (Backblaze B2, AWS S3, Wasabi, MinIO) via rclone.
+    backup_offsite_enabled = models.BooleanField(
+        default=False, help_text='Ship each backup offsite to an S3-compatible bucket.',
     )
     backup_s3_endpoint = models.CharField(
         max_length=255, blank=True, default='',
@@ -2095,9 +2108,22 @@ class SiteSettings(models.Model):
         max_length=255, blank=True,
         help_text='S3 secret access key. Stored encrypted.',
     )
-    backup_retention_local = models.PositiveIntegerField(
-        default=14,
-        help_text='How many recent backup archives to keep on the server.',
+    backup_offsite_retention_mode = models.CharField(
+        max_length=5, choices=BACKUP_RETENTION_MODES, default='age',
+    )
+    backup_offsite_retention_value = models.PositiveIntegerField(
+        default=30, help_text='Offsite retention: number of copies (count) or days (age).',
+    )
+
+    # Schedule: cadence ('daily' or CSV of weekday tokens mon..sun) + one or more
+    # HH:MM run times/day. Applied by scripts/backup_scheduler.sh (5-min tick).
+    backup_schedule_days = models.CharField(
+        max_length=64, default='daily',
+        help_text="'daily' or a CSV of weekday tokens (mon,tue,wed,thu,fri,sat,sun).",
+    )
+    backup_schedule_times = models.CharField(
+        max_length=255, default='02:00',
+        help_text='CSV of HH:MM run times per day (e.g. 02:00,14:00).',
     )
 
     # Status badge colors — hex values rendered as CSS variables
