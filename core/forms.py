@@ -701,17 +701,20 @@ class BackupSettingsForm(forms.ModelForm):
         fields = [
             'backup_onsite_enabled', 'backup_onsite_path',
             'backup_onsite_retention_mode', 'backup_onsite_retention_value',
+            'backup_onsite_schedule_days', 'backup_onsite_schedule_times',
             'backup_offsite_enabled',
             'backup_s3_endpoint', 'backup_s3_region', 'backup_s3_bucket', 'backup_s3_path',
             'backup_s3_access_key', 'backup_s3_secret_key',
             'backup_offsite_retention_mode', 'backup_offsite_retention_value',
-            'backup_schedule_days', 'backup_schedule_times',
+            'backup_offsite_schedule_days', 'backup_offsite_schedule_times',
         ]
         widgets = {
             'backup_onsite_enabled': forms.CheckboxInput(attrs={'class': _SS_CHECK, 'x-model': 'onsite'}),
             'backup_onsite_path': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': '/mnt/nas/mb-backups'}),
             'backup_onsite_retention_mode': forms.Select(attrs={'class': _SS_SELECT}),
             'backup_onsite_retention_value': forms.NumberInput(attrs={'class': _SS_INPUT, 'min': 1}),
+            'backup_onsite_schedule_days': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'daily  (or: mon,tue,wed,thu,fri)'}),
+            'backup_onsite_schedule_times': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': '06:00,18:00'}),
             'backup_offsite_enabled': forms.CheckboxInput(attrs={'class': _SS_CHECK, 'x-model': 'offsite'}),
             'backup_s3_endpoint': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 's3.us-west-002.backblazeb2.com'}),
             'backup_s3_region': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'us-west-002 (optional)'}),
@@ -721,9 +724,36 @@ class BackupSettingsForm(forms.ModelForm):
             'backup_s3_secret_key': forms.PasswordInput(attrs={'class': _SS_INPUT, 'placeholder': '••••••••'}, render_value=True),
             'backup_offsite_retention_mode': forms.Select(attrs={'class': _SS_SELECT}),
             'backup_offsite_retention_value': forms.NumberInput(attrs={'class': _SS_INPUT, 'min': 1}),
-            'backup_schedule_days': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'daily  (or: mon,tue,wed,thu,fri)'}),
-            'backup_schedule_times': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': '02:00  (or: 02:00,14:00)'}),
+            'backup_offsite_schedule_days': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'daily  (or: mon,wed,fri)'}),
+            'backup_offsite_schedule_times': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': '02:00'}),
         }
+
+    def _clean_schedule(self, cleaned, days_field, times_field):
+        days = (cleaned.get(days_field) or '').strip().lower()
+        if days and days != 'daily':
+            toks = [t.strip() for t in days.split(',') if t.strip()]
+            bad = [t for t in toks if t not in _WEEKDAY_TOKENS]
+            if bad or not toks:
+                self.add_error(days_field, "Use 'daily' or a comma list of mon,tue,wed,thu,fri,sat,sun.")
+            else:
+                cleaned[days_field] = ','.join(toks)
+
+        toks = [t.strip() for t in (cleaned.get(times_field) or '').split(',') if t.strip()]
+        if not toks:
+            self.add_error(times_field, 'Enter at least one run time as HH:MM.')
+            return
+        norm = []
+        for t in toks:
+            parts = t.split(':')
+            ok = len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit()
+            if ok:
+                h, m = int(parts[0]), int(parts[1])
+                ok = 0 <= h <= 23 and 0 <= m <= 59
+            if not ok:
+                self.add_error(times_field, f'Invalid time "{t}" — use HH:MM (00:00–23:59).')
+                return
+            norm.append(f'{h:02d}:{m:02d}')
+        cleaned[times_field] = ','.join(norm)
 
     def clean(self):
         cleaned = super().clean()
@@ -735,42 +765,15 @@ class BackupSettingsForm(forms.ModelForm):
                 'Enable at least one destination (onsite and/or offsite) — the MB server itself '
                 'is not a backup destination.'
             )
-        if onsite and not (cleaned.get('backup_onsite_path') or '').strip():
-            self.add_error('backup_onsite_path', 'An onsite path is required when onsite backup is enabled.')
+        if onsite:
+            if not (cleaned.get('backup_onsite_path') or '').strip():
+                self.add_error('backup_onsite_path', 'An onsite path is required when onsite backup is enabled.')
+            self._clean_schedule(cleaned, 'backup_onsite_schedule_days', 'backup_onsite_schedule_times')
         if offsite:
             for f, label in [('backup_s3_endpoint', 'endpoint'), ('backup_s3_bucket', 'bucket')]:
                 if not (cleaned.get(f) or '').strip():
                     self.add_error(f, f'An S3 {label} is required when offsite backup is enabled.')
-
-        # Schedule validation: 'daily' or CSV of weekday tokens; CSV of HH:MM times.
-        days = (cleaned.get('backup_schedule_days') or '').strip().lower()
-        if days and days != 'daily':
-            toks = [t.strip() for t in days.split(',') if t.strip()]
-            bad = [t for t in toks if t not in _WEEKDAY_TOKENS]
-            if bad or not toks:
-                self.add_error('backup_schedule_days',
-                               "Use 'daily' or a comma list of mon,tue,wed,thu,fri,sat,sun.")
-            else:
-                cleaned['backup_schedule_days'] = ','.join(toks)
-
-        times = (cleaned.get('backup_schedule_times') or '').strip()
-        toks = [t.strip() for t in times.split(',') if t.strip()]
-        if not toks:
-            self.add_error('backup_schedule_times', 'Enter at least one run time as HH:MM.')
-        else:
-            norm = []
-            for t in toks:
-                parts = t.split(':')
-                ok = len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit()
-                if ok:
-                    h, m = int(parts[0]), int(parts[1])
-                    ok = 0 <= h <= 23 and 0 <= m <= 59
-                if not ok:
-                    self.add_error('backup_schedule_times', f'Invalid time "{t}" — use HH:MM (00:00–23:59).')
-                    break
-                norm.append(f'{h:02d}:{m:02d}')
-            else:
-                cleaned['backup_schedule_times'] = ','.join(norm)
+            self._clean_schedule(cleaned, 'backup_offsite_schedule_days', 'backup_offsite_schedule_times')
         return cleaned
 
 

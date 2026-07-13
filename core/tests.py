@@ -6541,10 +6541,12 @@ def _backup_post(onsite=False, offsite=False, **over):
         'tab': 'backups',
         'backups-backup_onsite_retention_mode': 'count',
         'backups-backup_onsite_retention_value': '14',
+        'backups-backup_onsite_schedule_days': 'daily',
+        'backups-backup_onsite_schedule_times': '02:00',
         'backups-backup_offsite_retention_mode': 'age',
         'backups-backup_offsite_retention_value': '30',
-        'backups-backup_schedule_days': 'daily',
-        'backups-backup_schedule_times': '02:00',
+        'backups-backup_offsite_schedule_days': 'daily',
+        'backups-backup_offsite_schedule_times': '02:00',
     }
     if onsite:
         data['backups-backup_onsite_enabled'] = 'on'
@@ -6569,8 +6571,10 @@ def test_backup_settings_both_destinations_render_files(admin_user, client, sett
         onsite=True, offsite=True,
         **{'backups-backup_onsite_retention_value': '7',
            'backups-backup_offsite_retention_value': '45',
-           'backups-backup_schedule_days': 'mon,wed,fri',
-           'backups-backup_schedule_times': '02:00,14:30'}))
+           'backups-backup_onsite_schedule_days': 'daily',
+           'backups-backup_onsite_schedule_times': '06:00,18:00',
+           'backups-backup_offsite_schedule_days': 'mon,wed,fri',
+           'backups-backup_offsite_schedule_times': '02:00'}))
     assert resp.status_code == 302
     assert resp['Location'].endswith('tab=maintenance')
     site = SiteSettings.get()
@@ -6582,12 +6586,16 @@ def test_backup_settings_both_destinations_render_files(admin_user, client, sett
     assert 'BACKUP_ONSITE_PATH="/mnt/nas/mb"' in manifest
     assert 'BACKUP_ONSITE_RETENTION_MODE="count"' in manifest
     assert 'BACKUP_ONSITE_RETENTION_VALUE="7"' in manifest
+    assert 'BACKUP_ONSITE_SCHEDULE_TIMES="06:00,18:00"' in manifest
     assert 'BACKUP_OFFSITE_ENABLED="1"' in manifest
     assert 'BACKUP_RCLONE_REMOTE="mbbackup:my-bucket/mb"' in manifest
     assert 'BACKUP_OFFSITE_RETENTION_MODE="age"' in manifest
     assert 'BACKUP_OFFSITE_RETENTION_VALUE="45"' in manifest
-    assert 'BACKUP_SCHEDULE_DAYS="mon,wed,fri"' in manifest
-    assert 'BACKUP_SCHEDULE_TIMES="02:00,14:30"' in manifest
+    assert 'BACKUP_OFFSITE_SCHEDULE_DAYS="mon,wed,fri"' in manifest
+    assert 'BACKUP_OFFSITE_SCHEDULE_TIMES="02:00"' in manifest
+    # Independent schedules — onsite twice daily, offsite Mon/Wed/Fri once.
+    assert site.backup_onsite_schedule_times == '06:00,18:00'
+    assert site.backup_offsite_schedule_days == 'mon,wed,fri'
 
     conf_path = backup_ops.rclone_conf_path()
     conf = conf_path.read_text()
@@ -6638,7 +6646,7 @@ def test_backup_settings_rejects_bad_time(admin_user, client, settings, tmp_path
     settings.BASE_DIR = tmp_path
     client.force_login(admin_user)
     resp = client.post(reverse('core:settings'),
-                       _backup_post(onsite=True, **{'backups-backup_schedule_times': '25:00'}))
+                       _backup_post(onsite=True, **{'backups-backup_onsite_schedule_times': '25:00'}))
     assert resp.status_code == 200
     assert b'invalid time' in resp.content.lower()
 
