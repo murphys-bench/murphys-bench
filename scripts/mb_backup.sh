@@ -19,14 +19,19 @@ RCLONE_BIN="$APP/bin/rclone"
 RCLONE_CONF="$APP/.rclone.conf"
 
 # App-rendered config (Settings → Maintenance → Backups). Absent on an
-# un-configured box → sensible defaults (local retention only, no offsite).
-BACKUP_OFFSITE_TYPE=""
-BACKUP_LOCAL_PATH=""
+# un-configured box → sensible defaults (no destination → the run fails loud).
+# The MB VM is NEVER a destination — $STAGE is transient staging only, deleted
+# after a successful ship to the configured onsite/offsite destination(s).
+BACKUP_ONSITE_ENABLED=0
+BACKUP_ONSITE_PATH=""
+BACKUP_ONSITE_RETENTION_MODE="count"
+BACKUP_ONSITE_RETENTION_VALUE=14
+BACKUP_OFFSITE_ENABLED=0
 BACKUP_RCLONE_REMOTE=""
-BACKUP_RETENTION_LOCAL=14
+BACKUP_OFFSITE_RETENTION_MODE="age"
+BACKUP_OFFSITE_RETENTION_VALUE=30
 # shellcheck disable=SC1090
 [ -f "$APP/backup-config.env" ] && . "$APP/backup-config.env"
-KEEP_LOCAL="${BACKUP_RETENTION_LOCAL:-14}"
 
 # healthchecks.io dead-man's-switch (set HEALTHCHECKS_URL in .env to enable; unset = no-op)
 HC_URL="$(grep -E '^HEALTHCHECKS_URL=' "$APP/.env" 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
@@ -34,9 +39,11 @@ hc_ping(){ [ -n "${HC_URL:-}" ] && curl -fsS -m 10 --retry 3 "${HC_URL}${1:-}" >
 
 # Status panel data (read back by the app's Settings → Maintenance → Backups).
 # Written via the venv python for correct JSON escaping (mirrors run_update.sh).
-DEST_DESC="local only"
+DEST_DESC="(none)"
+ARCHIVE_SIZE=""
 emit_status(){  # $1=state
-    local size="" ; [ -f "$ARCHIVE" ] && size="$(du -h "$ARCHIVE" | cut -f1)"
+    local size="$ARCHIVE_SIZE"
+    [ -z "$size" ] && [ -f "$ARCHIVE" ] && size="$(du -h "$ARCHIVE" | cut -f1)"
     STATE="$1" SIZE="$size" DEST="$DEST_DESC" LOGFILE="$LOG" STATUS_OUT="$STATUS" \
     "$APP/venv/bin/python" - <<'PY' 2>/dev/null || true
 import json, os
@@ -87,34 +94,59 @@ tar -tzf "$ARCHIVE" >/dev/null 2>&1 || fail "archive verify (tar -t) failed"
 ASZ=$(stat -c %s "$ARCHIVE")
 [ "$ASZ" -gt 102400 ] || fail "archive suspiciously small: $ASZ bytes"
 rm -f "$SNAP"
-log "archive ok: $(du -h "$ARCHIVE" | cut -f1) ($ARCHIVE)"
+ARCHIVE_SIZE="$(du -h "$ARCHIVE" | cut -f1)"
+log "archive ok: $ARCHIVE_SIZE ($ARCHIVE)"
 
-# 3) Offsite copy (per Settings → Maintenance → Backups)
-case "${BACKUP_OFFSITE_TYPE:-}" in
-    s3)
-        DEST_DESC="S3: ${BACKUP_RCLONE_REMOTE}"
-        [ -n "$BACKUP_RCLONE_REMOTE" ] || fail "S3 offsite selected but no remote configured"
-        [ -x "$RCLONE_BIN" ] || fail "S3 offsite selected but rclone not found at $RCLONE_BIN"
-        [ -f "$RCLONE_CONF" ] || fail "S3 offsite selected but $RCLONE_CONF missing"
-        "$RCLONE_BIN" --config "$RCLONE_CONF" copy "$ARCHIVE" "$BACKUP_RCLONE_REMOTE" \
-            && log "offsite ok -> $BACKUP_RCLONE_REMOTE" || fail "offsite rclone copy failed"
-        ;;
-    local)
-        DEST_DESC="local drive: ${BACKUP_LOCAL_PATH}"
-        [ -n "$BACKUP_LOCAL_PATH" ] || fail "local offsite selected but no path configured"
-        mkdir -p "$BACKUP_LOCAL_PATH" || fail "cannot create local offsite path $BACKUP_LOCAL_PATH"
-        cp "$ARCHIVE" "$BACKUP_LOCAL_PATH/" \
-            && log "offsite ok -> $BACKUP_LOCAL_PATH" || fail "offsite copy to $BACKUP_LOCAL_PATH failed"
-        ;;
-    *)
-        DEST_DESC="local retention only"
-        log "offsite disabled (local retention only)"
-        ;;
-esac
+# 3) Ship to the configured destination(s). The MB VM is not a destination:
+#    at least one of onsite/offsite must be enabled, and the staged archive is
+#    deleted only after every enabled destination succeeds. A failure keeps the
+#    staged file and fails loud (never lose a run's data).
+DESTS=()
 
-# 4) Local retention
-ls -1t "$STAGE"/mb-backup-*.tar.gz 2>/dev/null | tail -n +$((KEEP_LOCAL+1)) | xargs -r rm -f
-log "=== backup done; local archives kept: $(ls -1 "$STAGE"/mb-backup-*.tar.gz 2>/dev/null | wc -l) ==="
+if [ "${BACKUP_ONSITE_ENABLED:-0}" = "1" ]; then
+    [ -n "$BACKUP_ONSITE_PATH" ] || fail "onsite enabled but no path configured"
+    mkdir -p "$BACKUP_ONSITE_PATH" || fail "cannot create onsite path $BACKUP_ONSITE_PATH"
+    cp "$ARCHIVE" "$BACKUP_ONSITE_PATH/" \
+        && log "onsite ok -> $BACKUP_ONSITE_PATH" || fail "onsite copy to $BACKUP_ONSITE_PATH failed"
+    # Prune onsite by mode.
+    if [ "$BACKUP_ONSITE_RETENTION_MODE" = "age" ]; then
+        find "$BACKUP_ONSITE_PATH" -maxdepth 1 -name 'mb-backup-*.tar.gz' -type f \
+            -mtime +"$BACKUP_ONSITE_RETENTION_VALUE" -delete 2>/dev/null || true
+    else
+        ls -1t "$BACKUP_ONSITE_PATH"/mb-backup-*.tar.gz 2>/dev/null \
+            | tail -n +$((BACKUP_ONSITE_RETENTION_VALUE+1)) | xargs -r rm -f
+    fi
+    DESTS+=("onsite:$BACKUP_ONSITE_PATH")
+fi
+
+if [ "${BACKUP_OFFSITE_ENABLED:-0}" = "1" ]; then
+    [ -n "$BACKUP_RCLONE_REMOTE" ] || fail "offsite enabled but no remote configured"
+    [ -x "$RCLONE_BIN" ] || fail "offsite enabled but rclone not found at $RCLONE_BIN"
+    [ -f "$RCLONE_CONF" ] || fail "offsite enabled but $RCLONE_CONF missing"
+    "$RCLONE_BIN" --config "$RCLONE_CONF" copy "$ARCHIVE" "$BACKUP_RCLONE_REMOTE" \
+        && log "offsite ok -> $BACKUP_RCLONE_REMOTE" || fail "offsite rclone copy failed"
+    # Prune offsite by mode.
+    if [ "$BACKUP_OFFSITE_RETENTION_MODE" = "age" ]; then
+        "$RCLONE_BIN" --config "$RCLONE_CONF" delete --min-age "${BACKUP_OFFSITE_RETENTION_VALUE}d" \
+            --include 'mb-backup-*.tar.gz' "$BACKUP_RCLONE_REMOTE" 2>/dev/null || true
+    else
+        # Keep newest N: list newest-first, delete the rest.
+        "$RCLONE_BIN" --config "$RCLONE_CONF" lsf --files-only --include 'mb-backup-*.tar.gz' \
+            "$BACKUP_RCLONE_REMOTE" 2>/dev/null | sort -r \
+            | tail -n +$((BACKUP_OFFSITE_RETENTION_VALUE+1)) \
+            | while read -r old; do
+                "$RCLONE_BIN" --config "$RCLONE_CONF" deletefile "$BACKUP_RCLONE_REMOTE/$old" 2>/dev/null || true
+              done
+    fi
+    DESTS+=("offsite:$BACKUP_RCLONE_REMOTE")
+fi
+
+[ "${#DESTS[@]}" -gt 0 ] || fail "no backup destination configured (enable onsite and/or offsite in Settings → Maintenance)"
+DEST_DESC="$(IFS=' + '; echo "${DESTS[*]}")"
+
+# 4) All enabled destinations succeeded — the VM keeps no copy.
+rm -f "$ARCHIVE"
+log "=== backup done; shipped to: $DEST_DESC (no local copy retained) ==="
 
 emit_status succeeded
 hc_ping   # signal success to the healthchecks.io dead-man's-switch
