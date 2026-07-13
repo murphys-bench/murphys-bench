@@ -1,0 +1,13 @@
+[Unit]
+Description=Murphy's Bench in-app on-demand backup (runs scripts/mb_backup.sh out-of-band)
+
+[Service]
+Type=oneshot
+User=scs-tech
+WorkingDirectory=/opt/murphys-bench
+# Launched by murphys-bench-backup-now.path when the admin UI drops the trigger
+# file. Runs mb_backup.sh via the wrapper that marks "running" for the UI and
+# clears the trigger afterward. Separate from gunicorn so a web request never runs
+# the long backup in-process. No sudo — only reads/writes the app dir + destination.
+ExecStart=/opt/murphys-bench/scripts/run_backup.sh
+TimeoutStartSec=1800

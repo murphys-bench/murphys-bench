@@ -692,6 +692,38 @@ class InvoiceNinjaSettingsForm(forms.ModelForm):
         }
 
 
+class BackupSettingsForm(forms.ModelForm):
+    class Meta:
+        model = SiteSettings
+        fields = [
+            'backup_offsite_type', 'backup_local_path',
+            'backup_s3_endpoint', 'backup_s3_region', 'backup_s3_bucket', 'backup_s3_path',
+            'backup_s3_access_key', 'backup_s3_secret_key', 'backup_retention_local',
+        ]
+        widgets = {
+            'backup_offsite_type': forms.Select(attrs={'class': _SS_SELECT, 'x-model': 'offsite'}),
+            'backup_local_path': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': '/mnt/nas/mb-backups'}),
+            'backup_s3_endpoint': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 's3.us-west-002.backblazeb2.com'}),
+            'backup_s3_region': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'us-west-002 (optional)'}),
+            'backup_s3_bucket': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'my-mb-backups'}),
+            'backup_s3_path': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'murphys-bench (optional)'}),
+            'backup_s3_access_key': forms.PasswordInput(attrs={'class': _SS_INPUT, 'placeholder': '••••••••'}, render_value=True),
+            'backup_s3_secret_key': forms.PasswordInput(attrs={'class': _SS_INPUT, 'placeholder': '••••••••'}, render_value=True),
+            'backup_retention_local': forms.NumberInput(attrs={'class': _SS_INPUT, 'min': 1}),
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        offsite = cleaned.get('backup_offsite_type')
+        if offsite == 'local' and not (cleaned.get('backup_local_path') or '').strip():
+            self.add_error('backup_local_path', 'A destination path is required for a local/mounted-drive backup.')
+        if offsite == 's3':
+            for f, label in [('backup_s3_endpoint', 'endpoint'), ('backup_s3_bucket', 'bucket')]:
+                if not (cleaned.get(f) or '').strip():
+                    self.add_error(f, f'An S3 {label} is required for an S3-compatible backup.')
+        return cleaned
+
+
 _HEX_INPUT = 'w-20 border border-gray-300 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500'
 
 

@@ -6528,3 +6528,120 @@ def test_tech_dashboard_shows_triage_pool_tile(client, client_obj):
     resp = client.get(reverse('core:dashboard'))
     assert resp.status_code == 200
     assert b'Triage pool' in resp.content
+
+
+# ── Backup destination config (Settings → Maintenance → Backups) ─────────────
+# The admin configures the offsite backup destination in the app; Django renders
+# backup-config.env + .rclone.conf (secret-bearing, 0600) that the out-of-band
+# scripts/mb_backup.sh reads. These tests point BASE_DIR at a tmp dir so the
+# rendered files land there, not in the repo.
+
+@pytest.mark.django_db
+def test_backup_settings_s3_save_renders_files(admin_user, client, settings, tmp_path):
+    settings.BASE_DIR = tmp_path
+    from core import backup_ops
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:settings'), {
+        'tab': 'backups',
+        'backups-backup_offsite_type': 's3',
+        'backups-backup_s3_endpoint': 's3.us-west-002.backblazeb2.com',
+        'backups-backup_s3_region': 'us-west-002',
+        'backups-backup_s3_bucket': 'my-bucket',
+        'backups-backup_s3_path': 'mb',
+        'backups-backup_s3_access_key': 'AKIAtest',
+        'backups-backup_s3_secret_key': 'secret123',
+        'backups-backup_retention_local': '20',
+    })
+    assert resp.status_code == 302
+    assert resp['Location'].endswith('tab=maintenance')
+    site = SiteSettings.get()
+    assert site.backup_offsite_type == 's3'
+    assert site.backup_s3_bucket == 'my-bucket'
+    assert site.backup_retention_local == 20
+    assert site.backup_s3_secret_key == 'secret123'  # encrypted at rest, decrypts here
+
+    manifest = backup_ops.manifest_path().read_text()
+    assert 'BACKUP_OFFSITE_TYPE="s3"' in manifest
+    assert 'BACKUP_RCLONE_REMOTE="mbbackup:my-bucket/mb"' in manifest
+    assert 'BACKUP_RETENTION_LOCAL="20"' in manifest
+
+    conf_path = backup_ops.rclone_conf_path()
+    conf = conf_path.read_text()
+    assert '[mbbackup]' in conf
+    assert 'endpoint = s3.us-west-002.backblazeb2.com' in conf
+    assert 'secret_access_key = secret123' in conf
+    import os, stat
+    assert stat.S_IMODE(os.stat(conf_path).st_mode) == 0o600, 'secret file must be owner-only'
+
+
+@pytest.mark.django_db
+def test_backup_settings_disabled_clears_offsite(admin_user, client, settings, tmp_path):
+    settings.BASE_DIR = tmp_path
+    from core import backup_ops
+    # A stale rclone.conf from a previous S3 config must be removed when offsite is off.
+    (tmp_path / '.rclone.conf').write_text('[mbbackup]\nsecret_access_key = old\n')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:settings'), {
+        'tab': 'backups',
+        'backups-backup_offsite_type': '',
+        'backups-backup_retention_local': '14',
+    })
+    assert resp.status_code == 302
+    manifest = backup_ops.manifest_path().read_text()
+    assert 'BACKUP_OFFSITE_TYPE=""' in manifest
+    assert 'BACKUP_RCLONE_REMOTE=""' in manifest
+    assert not backup_ops.rclone_conf_path().exists(), 'stale secret file must be cleared'
+
+
+@pytest.mark.django_db
+def test_backup_settings_local_requires_path(admin_user, client, settings, tmp_path):
+    settings.BASE_DIR = tmp_path
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:settings'), {
+        'tab': 'backups',
+        'backups-backup_offsite_type': 'local',
+        'backups-backup_local_path': '',
+        'backups-backup_retention_local': '14',
+    })
+    assert resp.status_code == 200  # invalid → re-render, not saved
+    assert SiteSettings.get().backup_offsite_type != 'local'
+    assert b'destination path is required' in resp.content.lower()
+
+
+@pytest.mark.django_db
+def test_maintenance_tab_shows_backup_status_and_updates(admin_user, client, settings, tmp_path):
+    settings.BASE_DIR = tmp_path
+    from core import backup_ops
+    backup_ops._logs_dir().mkdir(parents=True, exist_ok=True)
+    backup_ops.status_path().write_text(json.dumps({
+        'state': 'succeeded', 'finished_at': '2026-07-13T10:00:00+00:00',
+        'size': '4.2M', 'destination': 'S3: mbbackup:my-bucket/mb',
+    }))
+    client.force_login(admin_user)
+    resp = client.get('/settings/?tab=maintenance')
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    assert 'Last backup succeeded' in body
+    assert '4.2M' in body
+    assert 'Software Updates' in body  # Backups + Updates cards share the Maintenance tab
+
+
+def test_request_backup_now_writes_trigger_and_refuses_double(settings, tmp_path):
+    settings.BASE_DIR = tmp_path
+    from core import backup_ops
+    assert backup_ops.request_backup_now() is True
+    assert backup_ops.trigger_path().exists()
+    assert backup_ops.read_status()['state'] == 'queued'
+    # A second request while queued/running must be refused (no double run).
+    assert backup_ops.request_backup_now() is False
+
+
+@pytest.mark.django_db
+def test_backup_run_view_queues_out_of_band(admin_user, client, settings, tmp_path):
+    settings.BASE_DIR = tmp_path
+    from core import backup_ops
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:backup_run'))
+    assert resp.status_code == 200
+    assert b'Backing up' in resp.content  # in-progress fragment
+    assert backup_ops.trigger_path().exists()

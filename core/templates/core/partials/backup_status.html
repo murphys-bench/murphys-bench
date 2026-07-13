@@ -1,0 +1,63 @@
+{% comment %}
+Backup status fragment (Settings → Maintenance → Backups). Rendered on the
+settings page and re-rendered by BackupStatusView/BackupRunView. While a run is
+queued/running it polls itself every 3s; terminal states stop polling.
+{% endcomment %}
+<div id="backup-status"
+     {% if backup_status.state == 'queued' or backup_status.state == 'running' %}
+     hx-get="{% url 'core:backup_status' %}"
+     hx-trigger="every 3s"
+     hx-swap="outerHTML"
+     {% endif %}>
+
+  {% if backup_status.state == 'queued' or backup_status.state == 'running' %}
+    <div class="flex items-center gap-3 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-md p-4">
+      <svg class="animate-spin h-5 w-5 text-blue-600" viewBox="0 0 24 24" fill="none">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+      </svg>
+      <span>Backup in progress — snapshotting and sending to the destination. This page updates automatically.</span>
+    </div>
+  {% elif backup_status.state == 'succeeded' %}
+    <div class="text-sm text-green-800 bg-green-50 border border-green-200 rounded-md p-4">
+      ✓ Last backup succeeded{% if backup_status.finished_at %} ({{ backup_status.finished_at|slice:":19" }} UTC){% endif %}.
+      {% if backup_status.size %}Size <strong>{{ backup_status.size }}</strong>. {% endif %}
+      {% if backup_status.destination %}Offsite: <strong>{{ backup_status.destination }}</strong>.{% endif %}
+    </div>
+  {% elif backup_status.state == 'failed' %}
+    <div class="text-sm text-red-800 bg-red-50 border border-red-200 rounded-md p-4">
+      ✗ Last backup <strong>failed</strong>{% if backup_status.finished_at %} ({{ backup_status.finished_at|slice:":19" }} UTC){% endif %}.
+      See the log below.
+    </div>
+  {% else %}
+    <div class="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-md p-4">
+      No backup has run yet from this panel. Backups also run automatically on the nightly timer.
+    </div>
+  {% endif %}
+
+  {% if backup_status.log_tail %}
+    <details class="mt-3" {% if backup_status.state == 'failed' %}open{% endif %}>
+      <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Backup log (last lines)</summary>
+      <pre class="mt-2 text-xs bg-gray-900 text-gray-100 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">{{ backup_status.log_tail }}</pre>
+    </details>
+  {% endif %}
+
+  <div class="mt-4">
+    {% if backup_status.state == 'queued' or backup_status.state == 'running' %}
+      <button type="button" disabled
+              class="px-5 py-2 bg-blue-300 text-white text-sm font-medium rounded-md cursor-not-allowed">
+        Backing up…
+      </button>
+    {% else %}
+      <form method="post" action="{% url 'core:backup_run' %}"
+            hx-post="{% url 'core:backup_run' %}" hx-target="#backup-status" hx-swap="outerHTML"
+            hx-confirm="Run a backup now? It snapshots the database and files and sends a copy to the configured destination.">
+        {% csrf_token %}
+        <button type="submit"
+                class="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+          Run backup now
+        </button>
+      </form>
+    {% endif %}
+  </div>
+</div>

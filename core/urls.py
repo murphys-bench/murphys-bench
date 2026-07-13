@@ -189,6 +189,9 @@ urlpatterns = [
     path('settings/updates/status/', views.UpdateStatusView.as_view(), name='update_status'),
     path('settings/updates/check/', views.UpdateCheckView.as_view(), name='update_check'),
     path('settings/updates/start/', views.UpdateTriggerView.as_view(), name='update_start'),
+    path('settings/backups/test/', views.BackupTestView.as_view(), name='backup_test'),
+    path('settings/backups/status/', views.BackupStatusView.as_view(), name='backup_status'),
+    path('settings/backups/run/', views.BackupRunView.as_view(), name='backup_run'),
 
     # Settings — Repair Types CRUD
     path('settings/repair-type-categories/new/', views.RepairTypeCategoryCreateView.as_view(), name='rt_category_create'),
