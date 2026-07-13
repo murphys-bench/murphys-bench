@@ -6672,6 +6672,21 @@ def test_request_backup_now_writes_trigger_and_refuses_double(settings, tmp_path
 
 
 @pytest.mark.django_db
+def test_render_backup_config_command_runs(settings, tmp_path):
+    """The on-deploy render command must not crash and must write the manifest."""
+    settings.BASE_DIR = tmp_path
+    from django.core.management import call_command
+    from core import backup_ops
+    site = SiteSettings.get()
+    site.backup_offsite_enabled = True
+    site.backup_s3_bucket = 'b'
+    site.backup_s3_endpoint = 'e'
+    site.save()
+    call_command('render_backup_config')
+    assert 'BACKUP_OFFSITE_ENABLED="1"' in backup_ops.manifest_path().read_text()
+
+
+@pytest.mark.django_db
 def test_backup_run_view_queues_out_of_band(admin_user, client, settings, tmp_path):
     settings.BASE_DIR = tmp_path
     from core import backup_ops
