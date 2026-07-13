@@ -6384,3 +6384,32 @@ def test_mfa_setup_shows_cancel_when_adding_a_second_device(client, admin_user):
     assert resp.status_code == 200
     # Already has a confirmed device — Cancel is safe here, nothing to trap.
     assert b'>Cancel<' in resp.content
+
+
+@pytest.mark.django_db
+def test_mfa_setup_survives_intervening_get(client):
+    """A GET to /setup/ mid-enrollment (favicon 302, reload, background poll)
+    must NOT invalidate the QR the user already scanned. Reproduces the real
+    bug: without the resume-on-GET fix, the code from the shown QR is rejected."""
+    import base64
+    from core.models import SiteSettings
+    from django_otp.oath import totp
+    SiteSettings.get().__class__.objects.update(require_mfa=True)
+    u = User.objects.create_user(username='enrollee', password='x', is_staff=False)
+    client.force_login(u)
+    P = 'mfa_setup_view'
+    client.get('/account/two_factor/setup/')
+    client.post('/account/two_factor/setup/', {P + '-current_step': 'welcome'})
+    client.post('/account/two_factor/setup/', {P + '-current_step': 'method', 'method-method': 'generator'})
+    secret = client.session.get('django_two_factor-qr_secret_key')
+    assert secret, 'QR secret should be in session on the generator step'
+
+    # The QR is now on screen. Simulate a stray GET (the thing that used to break it).
+    client.get('/account/two_factor/setup/')
+
+    # User submits the code from the QR they scanned.
+    code = str(totp(base64.b32decode(secret))).zfill(6)
+    r = client.post('/account/two_factor/setup/', {P + '-current_step': 'generator', 'generator-token': code})
+    assert r.status_code == 302, 'Setup must complete despite the intervening GET (was 200/rejected before fix)'
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    assert TOTPDevice.objects.filter(user=u, confirmed=True).exists()

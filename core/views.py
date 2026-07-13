@@ -7021,14 +7021,36 @@ class TicketStatusUpdateView(LoginRequiredMixin, View):
 
 
 class MFASetupView(TwoFactorSetupView):
-    """two_factor's stock SetupView unconditionally offers a "Cancel" link back
-    to LOGIN_REDIRECT_URL ('/'). When MFA is mandatory and this user has no
-    confirmed device yet, that link is a trap: landing on '/' bounces them
-    straight back to this same URL via a GET (MFAEnforcementMiddleware), and a
-    GET on a wizard view silently resets its session-stored TOTP secret
-    (upstream SessionWizardView behavior) — minting a new QR code with no
-    warning, so any code already scanned into an authenticator app fails
-    forever. Drop the link in exactly that case; see mfa_setup_is_mandatory."""
+    """Hardens two_factor's SetupView against a real, reproducible enrollment
+    failure on this app.
+
+    THE BUG: formtools' ``WizardView.get()`` calls ``storage.reset()`` on every
+    GET to /account/two_factor/setup/. That wipes ``extra_data['keys']['generator']``
+    — the secret the on-screen QR was generated from — and the next render mints
+    a brand-new secret. So if ANY GET to the setup URL lands between the QR being
+    shown and the user submitting their code, the code they got from the QR they
+    scanned is now verified against a different secret and is rejected every time
+    ("Entered token is not valid"), with no explanation. On this app that GET is
+    easy to trigger: ``MFAEnforcementMiddleware`` redirects any authenticated-but-
+    unverified request (a favicon fetch, a reload, a background poll, a second
+    tab, or the old Cancel link) to this URL via GET. Server-side crypto is fine;
+    the key just gets rotated out from under the QR. Reproduced end-to-end.
+
+    THE FIX (get): resume an in-progress enrollment on GET instead of resetting
+    it, so a stray GET can't invalidate a QR the user already scanned. A genuinely
+    fresh visit (no wizard in progress) still starts clean.
+
+    Also (get_context_data): drop the Cancel link while MFA enrollment is
+    mandatory and the user has no device yet — landing on '/' just bounces back
+    here. See mfa_setup_is_mandatory."""
+
+    def get(self, request, *args, **kwargs):
+        current = self.storage.current_step
+        if current and current != self.steps.first:
+            # Mid-enrollment GET: render the current step from existing storage
+            # rather than letting WizardView.get() reset the generated secret.
+            return self.render(self.get_form())
+        return super().get(request, *args, **kwargs)
 
     def get_context_data(self, form, **kwargs):
         context = super().get_context_data(form, **kwargs)
