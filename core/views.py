@@ -40,8 +40,8 @@ from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, De
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
                     CompanySettingsForm, OutboundEmailSettingsForm, InboundEmailSettingsForm,
                     AttachmentSettingsForm, SecuritySettingsForm, MileageSettingsForm,
-                    ColorSettingsForm, InvoiceNinjaSettingsForm, ProspectForm, EstimateForm, SaleForm,
-                    SaleCheckoutForm)
+                    ColorSettingsForm, InvoiceNinjaSettingsForm, BackupSettingsForm,
+                    ProspectForm, EstimateForm, SaleForm, SaleCheckoutForm)
 
 logger = logging.getLogger('core')
 
@@ -5742,6 +5742,7 @@ SETTINGS_TABS = [
     ('security',     'Security',       SecuritySettingsForm),
     ('mileage',      'Mileage',        MileageSettingsForm),
     ('invoice_ninja', 'Invoice Ninja', InvoiceNinjaSettingsForm),
+    ('backups',       'Backups',        BackupSettingsForm),
     ('repair_types',     'Repair Types',     None),
     ('canned_responses', 'Canned Responses', None),
     ('checklist_items',  'Checklist Items',  None),
@@ -5759,10 +5760,13 @@ SETTINGS_TABS = [
     ('users',            'Users',            None),
     ('roles',            'Roles',            None),
     ('logs',             'Logs',             None),
-    ('updates',          'Updates',          None),
+    ('maintenance',      'Maintenance',      None),
 ]
 
-SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS]
+# 'backups' is rendered as a card INSIDE the Maintenance tab (alongside Updates),
+# not as its own nav entry — its SETTINGS_TABS row exists only so its form lands
+# in forms_map and the POST dispatch can find BackupSettingsForm.
+SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS if key != 'backups']
 
 
 def _repair_types_context():
@@ -5881,7 +5885,7 @@ class InvoiceNinjaTestView(LoginRequiredMixin, View):
 
 
 def _update_status_context():
-    """Shared context for the Settings → Updates section + status fragment."""
+    """Shared context for the Settings → Maintenance Updates card + status fragment."""
     from . import update_ops
     return {
         'update_current': update_ops.current_version(),
@@ -5889,6 +5893,18 @@ def _update_status_context():
         'update_is_available': update_ops.is_update_available(),
         'update_status': update_ops.read_status(),
     }
+
+
+def _backup_status_context():
+    """Shared context for the Settings → Maintenance Backups status panel."""
+    from . import backup_ops
+    return {'backup_status': backup_ops.read_status()}
+
+
+def _maintenance_context():
+    ctx = _update_status_context()
+    ctx.update(_backup_status_context())
+    return ctx
 
 
 class UpdateStatusView(LoginRequiredMixin, View):
@@ -5926,6 +5942,43 @@ class UpdateTriggerView(LoginRequiredMixin, View):
         if not update_ops.request_update():
             messages.warning(request, 'An update is already in progress.')
         return render(request, 'core/partials/update_status.html', _update_status_context())
+
+
+class BackupTestView(LoginRequiredMixin, View):
+    """Settings → Maintenance 'Test destination' — admin only. Probes the
+    configured offsite backup destination and reports back via a flash message."""
+
+    def post(self, request):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        from . import backup_ops
+        ok, msg = backup_ops.test_destination(SiteSettings.get())
+        (messages.success if ok else messages.error)(request, msg)
+        return redirect('/settings/?tab=maintenance')
+
+
+class BackupStatusView(LoginRequiredMixin, View):
+    """HTMX-polled fragment showing the last/in-progress backup run. Admin only.
+    Polled every few seconds while a run is queued/running."""
+
+    def get(self, request):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        return render(request, 'core/partials/backup_status.html', _backup_status_context())
+
+
+class BackupRunView(LoginRequiredMixin, View):
+    """Queue an out-of-band backup run (the actual backup runs via a systemd
+    .path unit — a web request must not run the long job in-process). Admin only;
+    refuses if a run is already going."""
+
+    def post(self, request):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        from . import backup_ops
+        if not backup_ops.request_backup_now():
+            messages.warning(request, 'A backup is already in progress.')
+        return render(request, 'core/partials/backup_status.html', _backup_status_context())
 
 
 class SettingsView(LoginRequiredMixin, View):
@@ -5990,8 +6043,8 @@ class SettingsView(LoginRequiredMixin, View):
             ctx['custom_fields'] = CustomField.objects.prefetch_related('choices').all()
             ctx['help_topics_all'] = HelpTopic.objects.filter(is_active=True)
             ctx['repair_types_all'] = RepairType.objects.filter(is_active=True)
-        if active_tab == 'updates':
-            ctx.update(_update_status_context())
+        if active_tab == 'maintenance':
+            ctx.update(_maintenance_context())
         if active_tab == 'logs':
             from .models import EmailSendLog, InboundEmailLog
             from auditlog.models import LogEntry
@@ -6030,6 +6083,12 @@ class SettingsView(LoginRequiredMixin, View):
         form = FormClass(request.POST, request.FILES, instance=site, prefix=tab)
         if form.is_valid():
             form.save()
+            if tab == 'backups':
+                # Regenerate the plain files the out-of-band backup script reads.
+                from . import backup_ops
+                backup_ops.render_config(SiteSettings.get())
+                messages.success(request, 'Backup settings saved.')
+                return redirect(f"{request.path}?tab=maintenance")
             messages.success(request, 'Settings saved.')
             return redirect(f"{request.path}?tab={tab}")
 
@@ -6038,9 +6097,11 @@ class SettingsView(LoginRequiredMixin, View):
             if not FC:
                 continue
             forms_map[key] = form if key == tab else FC(instance=site, prefix=key)
+        # The Backups form is a card inside the Maintenance tab — re-render there.
+        active_tab = 'maintenance' if tab == 'backups' else tab
         ctx = {
             'settings': site,
-            'active_tab': tab,
+            'active_tab': active_tab,
             'tabs': SETTINGS_NAV_TABS,
             'forms': forms_map,
         }
@@ -6054,6 +6115,8 @@ class SettingsView(LoginRequiredMixin, View):
             ctx.update(_colors_context(forms_map.get('colors') or form))
         if tab == 'display':
             ctx.update(_display_context())
+        if active_tab == 'maintenance':
+            ctx.update(_maintenance_context())
         return render(request, 'core/settings.html', ctx)
 
 # ---------------------------------------------------------------------------

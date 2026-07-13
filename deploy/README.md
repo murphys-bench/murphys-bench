@@ -161,3 +161,35 @@ Without these units installed the "Update to latest" button writes the trigger
 file but nothing acts on it (the run never starts). The button is admin-only;
 SCS still updates **staging-first** — this is mainly a convenience for
 single-instance adopters.
+
+## In-app "Run backup now" (Settings → Maintenance → Backups)
+
+The Backups card's **destination config** and **status panel** work with no extra
+units — Django renders `backup-config.env` (+ `.rclone.conf` for S3) that
+`scripts/mb_backup.sh` reads, and the panel reads `logs/backup-status.json` the
+script writes on each run (nightly timer included).
+
+The **"Run backup now"** button runs out-of-band, same pattern as the update
+button: the app drops `logs/backup-trigger`, a `.path` unit sees it and launches a
+one-shot that runs `scripts/run_backup.sh` (marks "running", runs `mb_backup.sh`,
+clears the trigger). No sudo — it only touches the app dir + the configured
+destination.
+
+Files: `murphys-bench-backup-now.path` (watches `logs/backup-trigger`),
+`murphys-bench-backup-now.service` (runs `scripts/run_backup.sh`). These are
+**distinct** from the nightly `murphys-bench-backup.timer`/`.service` — leave
+those in place.
+
+Install on the VM:
+
+```bash
+sudo cp /opt/murphys-bench/deploy/murphys-bench-backup-now.path    /etc/systemd/system/
+sudo cp /opt/murphys-bench/deploy/murphys-bench-backup-now.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now murphys-bench-backup-now.path
+sudo systemctl status murphys-bench-backup-now.path   # should be active (waiting)
+```
+
+Without these units the "Run backup now" button writes the trigger file but
+nothing acts on it. Destination config, the status panel, and the nightly timer
+all work regardless.

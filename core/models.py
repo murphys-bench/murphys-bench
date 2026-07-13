@@ -2053,6 +2053,53 @@ class SiteSettings(models.Model):
     # push (same "link once, don't sync" philosophy as Client.invoice_ninja_id).
     invoice_ninja_walkin_client_id = models.CharField(max_length=100, blank=True, default='')
 
+    # ── Backup destination (Settings → Maintenance → Backups) ──────────────
+    # Config lives here; Django renders plain files (backup-config.env +
+    # .rclone.conf) that the out-of-band shell script scripts/mb_backup.sh
+    # reads. A local retention copy is ALWAYS kept on the box; these fields
+    # configure the single optional OFF-site destination. See core/backup_ops.py.
+    BACKUP_OFFSITE_CHOICES = [
+        ('', 'Disabled (local retention only)'),
+        ('local', 'Local / mounted drive'),
+        ('s3', 'S3-compatible (Backblaze B2, AWS S3, Wasabi, MinIO)'),
+    ]
+    backup_offsite_type = models.CharField(
+        max_length=10, choices=BACKUP_OFFSITE_CHOICES, blank=True, default='',
+        help_text='Where to send a second, off-box copy of each backup. Blank = keep local copies only.',
+    )
+    backup_local_path = models.CharField(
+        max_length=500, blank=True, default='',
+        help_text='For "Local / mounted drive": destination path on the server (e.g. /mnt/nas/mb-backups).',
+    )
+    backup_s3_endpoint = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text='S3 endpoint host (e.g. s3.us-west-002.backblazeb2.com).',
+    )
+    backup_s3_region = models.CharField(
+        max_length=64, blank=True, default='',
+        help_text='S3 region (optional; some providers require it, e.g. us-west-002).',
+    )
+    backup_s3_bucket = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text='S3 bucket name for backups.',
+    )
+    backup_s3_path = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text='Optional folder/prefix inside the bucket (e.g. murphys-bench).',
+    )
+    backup_s3_access_key = EncryptedCharField(
+        max_length=255, blank=True,
+        help_text='S3 access key ID. Stored encrypted.',
+    )
+    backup_s3_secret_key = EncryptedCharField(
+        max_length=255, blank=True,
+        help_text='S3 secret access key. Stored encrypted.',
+    )
+    backup_retention_local = models.PositiveIntegerField(
+        default=14,
+        help_text='How many recent backup archives to keep on the server.',
+    )
+
     # Status badge colors — hex values rendered as CSS variables
     color_status_new         = models.CharField(max_length=7, default='#dbeafe', blank=True)  # blue-100
     color_status_assigned    = models.CharField(max_length=7, default='#ede9fe', blank=True)  # violet-100
