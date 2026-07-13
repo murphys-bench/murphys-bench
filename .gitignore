@@ -66,6 +66,10 @@ bin/
 scripts/*.retired-*
 inbound_fetch.lock
 
+# Backup destination manifest — rendered on deploy/save by the app from
+# SiteSettings (core/backup_ops.render_config); box-specific, never committed.
+backup-config.env
+
 # Tailwind standalone CLI cache + compiled output (built on deploy by scripts/build_css.sh)
 .tailwind/
 static/css/app.css
