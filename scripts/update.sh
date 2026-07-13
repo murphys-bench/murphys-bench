@@ -70,13 +70,19 @@ for a in "$@"; do
     esac
 done
 
-# 1) Back up FIRST (snapshot-before-migrate) and capture the exact tarball as the
-#    rollback point — BEFORE anything is touched. If this fails, nothing changed.
-log "backing up before update (snapshot-before-migrate)..."
-"$APP/scripts/mb_backup.sh" || fail "pre-update backup failed — aborting, nothing was changed"
-BACKUP_TARBALL="$(ls -1t "$APP/backups"/mb-backup-*.tar.gz 2>/dev/null | head -1)"
-[ -f "$BACKUP_TARBALL" ] || fail "could not locate the pre-update backup tarball — aborting before any change"
+# 1) Snapshot the current state to a LOCAL rollback tarball BEFORE anything is
+#    touched. This is a same-box safety net for auto-rollback and is independent
+#    of the off-box backup destinations (which mb_backup.sh ships to and then
+#    deletes the local copy). --staging-only builds a verified local tarball and
+#    keeps it, needing no configured destination. If this fails, nothing changed.
+log "snapshotting before update (rollback point)..."
+BACKUP_TARBALL="$APP/backups/preupdate-$(date +%Y%m%d-%H%M%S).tar.gz"
+"$APP/scripts/mb_backup.sh" --staging-only "$BACKUP_TARBALL" \
+    || fail "pre-update snapshot failed — aborting, nothing was changed"
+[ -f "$BACKUP_TARBALL" ] || fail "could not create the pre-update rollback tarball — aborting before any change"
 log "rollback point: $BACKUP_TARBALL"
+# Keep only the last 3 pre-update rollback tarballs (this is not the off-box backup).
+ls -1t "$APP/backups"/preupdate-*.tar.gz 2>/dev/null | tail -n +4 | xargs -r rm -f
 
 # 2) Remember where we are (commit + human version), for rollback + reporting.
 PREV="$(git rev-parse --short HEAD)"
