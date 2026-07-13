@@ -6356,3 +6356,60 @@ def test_s3_secret_key_and_maps_key_encrypted_at_rest():
     settings_obj.refresh_from_db()
     assert settings_obj.google_maps_api_key == 'AIzaRealLookingKey123'
     assert settings_obj.s3_secret_key == 'real-s3-secret-value'
+
+# ── MFA setup: no dead-end Cancel link while enrollment is mandatory ────────
+
+@pytest.mark.django_db
+def test_mfa_setup_hides_cancel_when_mandatory_and_no_device(client):
+    from core.models import SiteSettings
+    SiteSettings.get().__class__.objects.update(require_mfa=True)
+    tech = User.objects.create_user(username='newtech', password='x', is_staff=False)
+    client.force_login(tech)
+    resp = client.get(reverse('setup'))
+    assert resp.status_code == 200
+    # The stock two_factor Cancel link points at '/', which — while MFA is
+    # mandatory and this user has no device — bounces right back here via a
+    # GET and silently resets the wizard's secret. It must not be offered.
+    assert b'>Cancel<' not in resp.content
+
+
+@pytest.mark.django_db
+def test_mfa_setup_shows_cancel_when_adding_a_second_device(client, admin_user):
+    from core.models import SiteSettings
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    SiteSettings.get().__class__.objects.update(require_mfa=True)
+    TOTPDevice.objects.create(user=admin_user, name='existing', confirmed=True)
+    client.force_login(admin_user)
+    resp = client.get(reverse('setup'))
+    assert resp.status_code == 200
+    # Already has a confirmed device — Cancel is safe here, nothing to trap.
+    assert b'>Cancel<' in resp.content
+
+
+@pytest.mark.django_db
+def test_mfa_setup_survives_intervening_get(client):
+    """A GET to /setup/ mid-enrollment (favicon 302, reload, background poll)
+    must NOT invalidate the QR the user already scanned. Reproduces the real
+    bug: without the resume-on-GET fix, the code from the shown QR is rejected."""
+    import base64
+    from core.models import SiteSettings
+    from django_otp.oath import totp
+    SiteSettings.get().__class__.objects.update(require_mfa=True)
+    u = User.objects.create_user(username='enrollee', password='x', is_staff=False)
+    client.force_login(u)
+    P = 'mfa_setup_view'
+    client.get('/account/two_factor/setup/')
+    client.post('/account/two_factor/setup/', {P + '-current_step': 'welcome'})
+    client.post('/account/two_factor/setup/', {P + '-current_step': 'method', 'method-method': 'generator'})
+    secret = client.session.get('django_two_factor-qr_secret_key')
+    assert secret, 'QR secret should be in session on the generator step'
+
+    # The QR is now on screen. Simulate a stray GET (the thing that used to break it).
+    client.get('/account/two_factor/setup/')
+
+    # User submits the code from the QR they scanned.
+    code = str(totp(base64.b32decode(secret))).zfill(6)
+    r = client.post('/account/two_factor/setup/', {P + '-current_step': 'generator', 'generator-token': code})
+    assert r.status_code == 302, 'Setup must complete despite the intervening GET (was 200/rejected before fix)'
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    assert TOTPDevice.objects.filter(user=u, confirmed=True).exists()
