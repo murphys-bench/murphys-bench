@@ -2065,13 +2065,28 @@ class SiteSettings(models.Model):
         ('age',   'Keep N days'),
     ]
 
-    # Onsite: off-box storage mounted on the VM (NAS / USB / other host).
+    # Onsite: a NAS/network share reached over SMB — MB connects to it directly via
+    # rclone, exactly like the offsite S3 case. No OS-level mount, no sudo, no
+    # /etc/fstab, on any box, ever.
     backup_onsite_enabled = models.BooleanField(
-        default=False, help_text='Ship each backup to an onsite path (off-box: NAS/USB/other host).',
+        default=False, help_text='Ship each backup to an onsite NAS/network share (SMB).',
     )
-    backup_onsite_path = models.CharField(
-        max_length=500, blank=True, default='',
-        help_text='Onsite destination path mounted on the server (e.g. /mnt/nas/mb-backups).',
+    backup_onsite_host = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text='NAS IP address or hostname (e.g. 10.58.58.58).',
+    )
+    backup_onsite_share = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text='Share name on the NAS (e.g. VM).',
+    )
+    backup_onsite_username = models.CharField(max_length=255, blank=True, default='')
+    backup_onsite_password = EncryptedCharField(
+        max_length=255, blank=True,
+        help_text='Stored encrypted.',
+    )
+    backup_onsite_folder = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text='Optional subfolder within the share (e.g. mb-backups).',
     )
     backup_onsite_retention_mode = models.CharField(
         max_length=5, choices=BACKUP_RETENTION_MODES, default='count',

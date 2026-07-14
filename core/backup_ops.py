@@ -1,12 +1,13 @@
 """Backup destination configuration + status, for Settings → Maintenance → Backups.
 
-The nightly backup itself runs OUTSIDE Django (``scripts/mb_backup.sh`` on a
-systemd timer) so it survives even when the web app is down. This module is the
-seam between the admin UI and that shell script: on save, Django renders two
-plain files the *dumb* script reads —
+The backup itself runs OUTSIDE Django (``scripts/mb_backup.sh`` fired by
+``scripts/backup_scheduler.sh`` on a systemd tick) so it survives even when the
+web app is down. This module is the seam between the admin UI and those shell
+scripts: on save, Django renders two plain files the *dumb* scripts read —
 
-  * ``backup-config.env``  — sourced by the script (offsite type, paths, retention)
-  * ``.rclone.conf``       — the rclone remote for the S3-compatible case
+  * ``backup-config.env``  — sourced by the scripts (which destinations, retention, schedule)
+  * ``.rclone.conf``       — rclone remotes: ``[mbbackup]`` (S3, offsite) and/or
+                             ``[mbonsite]`` (SMB, a NAS/network share)
 
 — and reads back ``logs/backup-status.json`` (written by the script on each run)
 for the read-only status panel. Same "Django writes a file, a shell script reads
@@ -14,7 +15,12 @@ it" pattern as ``core/update_ops.py`` / ``HEALTHCHECKS_URL``. No sudo, no shell
 from the web process (the one exception is the admin-triggered ``test_destination``
 probe, a quick read mirroring the Invoice Ninja "Test Connection" button).
 
-Secret-bearing files (``.rclone.conf`` holds the S3 secret) are written 0600.
+Onsite is reached over SMB via rclone, exactly like offsite is reached via S3 —
+MB never mounts anything at the OS level, so there is no sudo/fstab step on any
+box, ever.
+
+Secret-bearing files (``.rclone.conf`` holds the S3 secret + the onsite password)
+are written 0600.
 """
 import json
 import os
@@ -24,9 +30,10 @@ from pathlib import Path
 
 from django.conf import settings
 
-# The rclone remote name we render into .rclone.conf and reference from the
-# manifest. Fixed — there is exactly one configurable offsite destination.
-RCLONE_REMOTE_NAME = 'mbbackup'
+# rclone remote names rendered into .rclone.conf and referenced from the
+# manifest. Fixed — there is exactly one configurable onsite + one offsite dest.
+RCLONE_REMOTE_NAME = 'mbbackup'          # S3 (offsite)
+RCLONE_ONSITE_REMOTE_NAME = 'mbonsite'   # SMB (onsite)
 
 # A run is "in progress" from the moment the UI queues it until the one-shot
 # service (or mb_backup.sh) writes a terminal state. Blocks a second trigger.
@@ -83,8 +90,38 @@ def rclone_remote_target(site) -> str:
     return target
 
 
+def onsite_remote_target(site) -> str:
+    """The ``remote:share/folder`` string for the SMB case ('' otherwise)."""
+    if not site.backup_onsite_enabled or not site.backup_onsite_share:
+        return ''
+    target = f'{RCLONE_ONSITE_REMOTE_NAME}:{site.backup_onsite_share}'
+    prefix = (site.backup_onsite_folder or '').strip('/')
+    if prefix:
+        target = f'{target}/{prefix}'
+    return target
+
+
+def _obscure(binary: Path, plaintext: str) -> str:
+    """rclone's SMB/FTP-family backends need the password in rclone's own
+    reversible obfuscation format in the config file (unlike S3's plain
+    secret_access_key). Shell out to the vendored binary to produce it."""
+    if not plaintext:
+        return ''
+    try:
+        out = subprocess.run(
+            [str(binary), 'obscure', plaintext],
+            capture_output=True, text=True, timeout=10,
+        )
+        if out.returncode == 0:
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return ''
+
+
 def render_config(site) -> None:
-    """Render backup-config.env (always) and .rclone.conf (S3 only) from settings.
+    """Render backup-config.env (always) and .rclone.conf (per enabled remote)
+    from settings.
 
     Called after the Backups settings form saves and on deploy. Safe to call
     repeatedly — it fully rewrites both files from the current SiteSettings state.
@@ -93,9 +130,9 @@ def render_config(site) -> None:
     """
     _logs_dir().mkdir(parents=True, exist_ok=True)
 
+    stanzas = []
     if site.backup_offsite_enabled:
-        remote_target = rclone_remote_target(site)
-        conf = (
+        stanzas.append(
             f'[{RCLONE_REMOTE_NAME}]\n'
             'type = s3\n'
             'provider = Other\n'
@@ -104,26 +141,38 @@ def render_config(site) -> None:
             f'endpoint = {site.backup_s3_endpoint}\n'
             f'region = {site.backup_s3_region}\n'
         )
-        _write_600(rclone_conf_path(), conf)
+    offsite_target = rclone_remote_target(site)
+
+    if site.backup_onsite_enabled:
+        obscured = _obscure(rclone_bin(), site.backup_onsite_password)
+        stanzas.append(
+            f'[{RCLONE_ONSITE_REMOTE_NAME}]\n'
+            'type = smb\n'
+            f'host = {site.backup_onsite_host}\n'
+            f'user = {site.backup_onsite_username}\n'
+            f'pass = {obscured}\n'
+        )
+    onsite_target = onsite_remote_target(site)
+
+    if stanzas:
+        _write_600(rclone_conf_path(), '\n'.join(stanzas))
     else:
-        remote_target = ''
-        # Don't leave a stale remote+secret lying around when S3 is switched off.
+        # Don't leave a stale remote+secret lying around when both are off.
         try:
             rclone_conf_path().unlink()
         except FileNotFoundError:
             pass
 
-    onsite_path = site.backup_onsite_path if site.backup_onsite_enabled else ''
     manifest = (
         '# Generated by Murphy\'s Bench (Settings → Maintenance → Backups). Do not edit by hand.\n'
         f'BACKUP_ONSITE_ENABLED="{1 if site.backup_onsite_enabled else 0}"\n'
-        f'BACKUP_ONSITE_PATH="{onsite_path}"\n'
+        f'BACKUP_ONSITE_RCLONE_REMOTE="{onsite_target}"\n'
         f'BACKUP_ONSITE_RETENTION_MODE="{site.backup_onsite_retention_mode}"\n'
         f'BACKUP_ONSITE_RETENTION_VALUE="{int(site.backup_onsite_retention_value)}"\n'
         f'BACKUP_ONSITE_SCHEDULE_DAYS="{site.backup_onsite_schedule_days or "daily"}"\n'
         f'BACKUP_ONSITE_SCHEDULE_TIMES="{site.backup_onsite_schedule_times or "02:00"}"\n'
         f'BACKUP_OFFSITE_ENABLED="{1 if site.backup_offsite_enabled else 0}"\n'
-        f'BACKUP_RCLONE_REMOTE="{remote_target}"\n'
+        f'BACKUP_RCLONE_REMOTE="{offsite_target}"\n'
         f'BACKUP_OFFSITE_RETENTION_MODE="{site.backup_offsite_retention_mode}"\n'
         f'BACKUP_OFFSITE_RETENTION_VALUE="{int(site.backup_offsite_retention_value)}"\n'
         f'BACKUP_OFFSITE_SCHEDULE_DAYS="{site.backup_offsite_schedule_days or "daily"}"\n'
@@ -164,49 +213,51 @@ def request_backup_now() -> bool:
     return True
 
 
+def _rclone_probe(remote: str, label: str):
+    """Shared rclone reachability probe (onsite SMB and offsite S3 are both
+    plain rclone remotes now). Returns (ok, message)."""
+    binary = rclone_bin()
+    if not binary.exists():
+        return False, (
+            'rclone is not installed on the server (expected at bin/rclone) — '
+            'the destination is saved but cannot be tested from here.'
+        )
+    try:
+        out = subprocess.run(
+            [str(binary), '--config', str(rclone_conf_path()), 'lsd', remote],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception as exc:  # subprocess failure, timeout, etc.
+        return False, f'Could not run rclone: {exc}'
+    if out.returncode == 0:
+        return True, f'{label} is reachable.'
+    detail = (out.stderr or out.stdout or '').strip().splitlines()
+    msg = detail[-1] if detail else f'exit code {out.returncode}'
+    return False, f'{label} test failed: {msg}'
+
+
 def test_destination(site, which):
     """Probe a configured destination. `which` in {'onsite','offsite'}.
     Returns (ok: bool, message: str). Mirrors the Invoice Ninja "Test Connection"
-    button — a quick read from the web process.
+    button — a quick read from the web process. Re-renders config first so the
+    probe uses exactly what a real run would.
     """
     if which == 'onsite':
         if not site.backup_onsite_enabled:
             return False, 'Onsite backup is not enabled.'
-        path = (site.backup_onsite_path or '').strip()
-        if not path:
-            return False, 'No onsite path is set.'
-        p = Path(path)
-        if not p.is_dir():
-            return False, f'Path does not exist or is not a directory: {path}'
-        if not os.access(path, os.W_OK):
-            return False, f'Path is not writable: {path}'
-        return True, f'Onsite destination is reachable and writable: {path}'
+        if not (site.backup_onsite_host and site.backup_onsite_share and site.backup_onsite_username):
+            return False, 'Host, share, and username are all required.'
+        render_config(site)
+        remote = onsite_remote_target(site)
+        return _rclone_probe(remote, f'Onsite share "{site.backup_onsite_share}" on {site.backup_onsite_host}')
 
     if which == 'offsite':
         if not site.backup_offsite_enabled:
             return False, 'Offsite backup is not enabled.'
         if not site.backup_s3_bucket:
             return False, 'No S3 bucket is set.'
-        # Re-render so the probe uses exactly what a real run would.
         render_config(site)
-        binary = rclone_bin()
-        if not binary.exists():
-            return False, (
-                'rclone is not installed on the server (expected at bin/rclone) — '
-                'the destination is saved but cannot be tested from here.'
-            )
         remote = f'{RCLONE_REMOTE_NAME}:{site.backup_s3_bucket}'
-        try:
-            out = subprocess.run(
-                [str(binary), '--config', str(rclone_conf_path()), 'lsd', remote],
-                capture_output=True, text=True, timeout=30,
-            )
-        except Exception as exc:  # subprocess failure, timeout, etc.
-            return False, f'Could not run rclone: {exc}'
-        if out.returncode == 0:
-            return True, f'S3 destination reachable: bucket "{site.backup_s3_bucket}".'
-        detail = (out.stderr or out.stdout or '').strip().splitlines()
-        msg = detail[-1] if detail else f'exit code {out.returncode}'
-        return False, f'S3 test failed: {msg}'
+        return _rclone_probe(remote, f'S3 bucket "{site.backup_s3_bucket}"')
 
     return False, f'Unknown destination: {which}'
