@@ -699,7 +699,8 @@ class BackupSettingsForm(forms.ModelForm):
     class Meta:
         model = SiteSettings
         fields = [
-            'backup_onsite_enabled', 'backup_onsite_path',
+            'backup_onsite_enabled', 'backup_onsite_host', 'backup_onsite_share',
+            'backup_onsite_username', 'backup_onsite_password', 'backup_onsite_folder',
             'backup_onsite_retention_mode', 'backup_onsite_retention_value',
             'backup_onsite_schedule_days', 'backup_onsite_schedule_times',
             'backup_offsite_enabled',
@@ -710,7 +711,11 @@ class BackupSettingsForm(forms.ModelForm):
         ]
         widgets = {
             'backup_onsite_enabled': forms.CheckboxInput(attrs={'class': _SS_CHECK, 'x-model': 'onsite'}),
-            'backup_onsite_path': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': '/mnt/nas/mb-backups'}),
+            'backup_onsite_host': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': '10.58.58.58'}),
+            'backup_onsite_share': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'VM'}),
+            'backup_onsite_username': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'mike'}),
+            'backup_onsite_password': forms.PasswordInput(attrs={'class': _SS_INPUT, 'placeholder': '••••••••'}, render_value=True),
+            'backup_onsite_folder': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'mb-backups (optional)'}),
             'backup_onsite_retention_mode': forms.Select(attrs={'class': _SS_SELECT}),
             'backup_onsite_retention_value': forms.NumberInput(attrs={'class': _SS_INPUT, 'min': 1}),
             'backup_onsite_schedule_days': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'daily  (or: mon,tue,wed,thu,fri)'}),
@@ -766,8 +771,10 @@ class BackupSettingsForm(forms.ModelForm):
                 'is not a backup destination.'
             )
         if onsite:
-            if not (cleaned.get('backup_onsite_path') or '').strip():
-                self.add_error('backup_onsite_path', 'An onsite path is required when onsite backup is enabled.')
+            for f, label in [('backup_onsite_host', 'host'), ('backup_onsite_share', 'share'),
+                              ('backup_onsite_username', 'username')]:
+                if not (cleaned.get(f) or '').strip():
+                    self.add_error(f, f'An onsite {label} is required when onsite backup is enabled.')
             self._clean_schedule(cleaned, 'backup_onsite_schedule_days', 'backup_onsite_schedule_times')
         if offsite:
             for f, label in [('backup_s3_endpoint', 'endpoint'), ('backup_s3_bucket', 'bucket')]:
