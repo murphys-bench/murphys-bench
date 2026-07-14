@@ -48,7 +48,7 @@ RCLONE_CONF="$APP/.rclone.conf"
 # The MB VM is NEVER a destination — $STAGE is transient staging only, deleted
 # after a successful ship to the configured onsite/offsite destination(s).
 BACKUP_ONSITE_ENABLED=0
-BACKUP_ONSITE_PATH=""
+BACKUP_ONSITE_RCLONE_REMOTE=""
 BACKUP_ONSITE_RETENTION_MODE="count"
 BACKUP_ONSITE_RETENTION_VALUE=14
 BACKUP_OFFSITE_ENABLED=0
@@ -129,47 +129,41 @@ if [ "$STAGING_ONLY" = "1" ]; then
     exit 0
 fi
 
-# 3) Ship to the configured destination(s). The MB VM is not a destination:
-#    at least one of onsite/offsite must be enabled, and the staged archive is
-#    deleted only after every enabled destination succeeds. A failure keeps the
-#    staged file and fails loud (never lose a run's data).
-DESTS=()
-
-if [ "${BACKUP_ONSITE_ENABLED:-0}" = "1" ] && want onsite; then
-    [ -n "$BACKUP_ONSITE_PATH" ] || fail "onsite enabled but no path configured"
-    mkdir -p "$BACKUP_ONSITE_PATH" || fail "cannot create onsite path $BACKUP_ONSITE_PATH"
-    cp "$ARCHIVE" "$BACKUP_ONSITE_PATH/" \
-        && log "onsite ok -> $BACKUP_ONSITE_PATH" || fail "onsite copy to $BACKUP_ONSITE_PATH failed"
-    # Prune onsite by mode.
-    if [ "$BACKUP_ONSITE_RETENTION_MODE" = "age" ]; then
-        find "$BACKUP_ONSITE_PATH" -maxdepth 1 -name 'mb-backup-*.tar.gz' -type f \
-            -mtime +"$BACKUP_ONSITE_RETENTION_VALUE" -delete 2>/dev/null || true
-    else
-        ls -1t "$BACKUP_ONSITE_PATH"/mb-backup-*.tar.gz 2>/dev/null \
-            | tail -n +$((BACKUP_ONSITE_RETENTION_VALUE+1)) | xargs -r rm -f
-    fi
-    DESTS+=("onsite:$BACKUP_ONSITE_PATH")
-fi
-
-if [ "${BACKUP_OFFSITE_ENABLED:-0}" = "1" ] && want offsite; then
-    [ -n "$BACKUP_RCLONE_REMOTE" ] || fail "offsite enabled but no remote configured"
-    [ -x "$RCLONE_BIN" ] || fail "offsite enabled but rclone not found at $RCLONE_BIN"
-    [ -f "$RCLONE_CONF" ] || fail "offsite enabled but $RCLONE_CONF missing"
-    "$RCLONE_BIN" --config "$RCLONE_CONF" copy "$ARCHIVE" "$BACKUP_RCLONE_REMOTE" \
-        && log "offsite ok -> $BACKUP_RCLONE_REMOTE" || fail "offsite rclone copy failed"
-    # Prune offsite by mode.
-    if [ "$BACKUP_OFFSITE_RETENTION_MODE" = "age" ]; then
-        "$RCLONE_BIN" --config "$RCLONE_CONF" delete --min-age "${BACKUP_OFFSITE_RETENTION_VALUE}d" \
-            --include 'mb-backup-*.tar.gz' "$BACKUP_RCLONE_REMOTE" 2>/dev/null || true
+# 3) Ship to the configured destination(s). Both onsite (SMB) and offsite (S3)
+#    are plain rclone remotes now — MB never mounts anything at the OS level.
+#    At least one must be enabled, and the staged archive is deleted only after
+#    every enabled destination succeeds. A failure keeps the staged file and
+#    fails loud (never lose a run's data).
+ship_and_prune(){  # $1=label $2=remote $3=mode $4=value
+    local label="$1" remote="$2" mode="$3" value="$4"
+    [ -n "$remote" ] || fail "$label enabled but no remote configured"
+    [ -x "$RCLONE_BIN" ] || fail "$label enabled but rclone not found at $RCLONE_BIN"
+    [ -f "$RCLONE_CONF" ] || fail "$label enabled but $RCLONE_CONF missing"
+    "$RCLONE_BIN" --config "$RCLONE_CONF" copy "$ARCHIVE" "$remote" \
+        && log "$label ok -> $remote" || fail "$label rclone copy failed"
+    if [ "$mode" = "age" ]; then
+        "$RCLONE_BIN" --config "$RCLONE_CONF" delete --min-age "${value}d" \
+            --include 'mb-backup-*.tar.gz' "$remote" 2>/dev/null || true
     else
         # Keep newest N: list newest-first, delete the rest.
         "$RCLONE_BIN" --config "$RCLONE_CONF" lsf --files-only --include 'mb-backup-*.tar.gz' \
-            "$BACKUP_RCLONE_REMOTE" 2>/dev/null | sort -r \
-            | tail -n +$((BACKUP_OFFSITE_RETENTION_VALUE+1)) \
+            "$remote" 2>/dev/null | sort -r \
+            | tail -n +$((value+1)) \
             | while read -r old; do
-                "$RCLONE_BIN" --config "$RCLONE_CONF" deletefile "$BACKUP_RCLONE_REMOTE/$old" 2>/dev/null || true
+                "$RCLONE_BIN" --config "$RCLONE_CONF" deletefile "$remote/$old" 2>/dev/null || true
               done
     fi
+}
+
+DESTS=()
+
+if [ "${BACKUP_ONSITE_ENABLED:-0}" = "1" ] && want onsite; then
+    ship_and_prune onsite "$BACKUP_ONSITE_RCLONE_REMOTE" "$BACKUP_ONSITE_RETENTION_MODE" "$BACKUP_ONSITE_RETENTION_VALUE"
+    DESTS+=("onsite:$BACKUP_ONSITE_RCLONE_REMOTE")
+fi
+
+if [ "${BACKUP_OFFSITE_ENABLED:-0}" = "1" ] && want offsite; then
+    ship_and_prune offsite "$BACKUP_RCLONE_REMOTE" "$BACKUP_OFFSITE_RETENTION_MODE" "$BACKUP_OFFSITE_RETENTION_VALUE"
     DESTS+=("offsite:$BACKUP_RCLONE_REMOTE")
 fi
 
