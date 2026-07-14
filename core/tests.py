@@ -6567,6 +6567,32 @@ def _backup_post(onsite=False, offsite=False, **over):
 
 
 @pytest.mark.django_db
+def test_onsite_test_destination_probes_share_root_not_folder(settings, tmp_path):
+    """The Test button probes the SHARE root, not share/folder — the folder
+    doesn't need to pre-exist (rclone creates it on the first real copy); an
+    `lsd` on a not-yet-existing subfolder would otherwise always fail."""
+    settings.BASE_DIR = tmp_path
+    from unittest.mock import patch, MagicMock
+    from core import backup_ops
+    site = SiteSettings.get()
+    site.backup_onsite_enabled = True
+    site.backup_onsite_host = '10.58.58.58'
+    site.backup_onsite_share = 'VM'
+    site.backup_onsite_username = 'mike'
+    site.backup_onsite_folder = 'mb-backups'  # does NOT exist yet on the NAS
+    site.save()
+    with patch.object(backup_ops, 'rclone_bin', return_value=tmp_path / 'fake-rclone'):
+        (tmp_path / 'fake-rclone').write_text('')  # just needs to exist
+        with patch('core.backup_ops.subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+            backup_ops.test_destination(site, 'onsite')
+    probed_remote = mock_run.call_args[0][0][-1]
+    assert probed_remote == 'mbonsite:VM', 'must probe the share root, not share/folder'
+    # But the actual backup ship target still includes the folder.
+    assert backup_ops.onsite_remote_target(site) == 'mbonsite:VM/mb-backups'
+
+
+@pytest.mark.django_db
 def test_backup_settings_both_destinations_render_files(admin_user, client, settings, tmp_path):
     settings.BASE_DIR = tmp_path
     from core import backup_ops
