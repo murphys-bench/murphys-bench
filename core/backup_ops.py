@@ -248,7 +248,9 @@ def test_destination(site, which):
         if not (site.backup_onsite_host and site.backup_onsite_share and site.backup_onsite_username):
             return False, 'Host, share, and username are all required.'
         render_config(site)
-        remote = onsite_remote_target(site)
+        # Probe the SHARE root, not the folder-inclusive target — the folder
+        # doesn't need to pre-exist (rclone creates it on the first real copy).
+        remote = f'{RCLONE_ONSITE_REMOTE_NAME}:{site.backup_onsite_share}'
         return _rclone_probe(remote, f'Onsite share "{site.backup_onsite_share}" on {site.backup_onsite_host}')
 
     if which == 'offsite':
