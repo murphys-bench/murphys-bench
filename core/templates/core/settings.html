@@ -17,31 +17,43 @@
 <div class="flex gap-6">
 
     <!-- Sidebar nav -->
-    <nav class="w-48 shrink-0">
-        <ul class="bg-white rounded-lg shadow overflow-hidden divide-y divide-gray-100">
-            {% for key, label in tabs %}
-            <li>
-                {% if key == 'users' %}
-                <a href="{% url 'core:user_list' %}"
-                   class="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50">
-                    {{ label }}
-                </a>
-                {% elif key == 'roles' %}
-                <a href="{% url 'core:role_list' %}"
-                   class="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50">
-                    {{ label }}
-                </a>
-                {% else %}
-                <a href="?tab={{ key }}"
-                   class="block px-4 py-3 text-sm font-medium
-                       {% if active_tab == key %}bg-blue-50 text-blue-700 border-l-4 border-blue-600
-                       {% else %}text-gray-700 hover:bg-gray-50{% endif %}">
-                    {{ label }}
-                </a>
-                {% endif %}
-            </li>
-            {% endfor %}
-        </ul>
+    <nav class="w-56 shrink-0 space-y-3">
+        {% for group_label, group_tabs, group_active in tab_groups %}
+        <div class="bg-white rounded-lg shadow overflow-hidden"
+             x-data="{ open: {% if group_active %}true{% else %}false{% endif %} }">
+            <button type="button" @click="open = !open"
+                    class="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hover:bg-gray-50">
+                <span>{{ group_label }}</span>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-transform" :class="open ? 'rotate-180' : ''" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                </svg>
+            </button>
+            <ul x-show="open" x-cloak class="divide-y divide-gray-100 border-t border-gray-100">
+                {% for key, label in group_tabs %}
+                <li>
+                    {% if key == 'users' %}
+                    <a href="{% url 'core:user_list' %}"
+                       class="block px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                        {{ label }}
+                    </a>
+                    {% elif key == 'roles' %}
+                    <a href="{% url 'core:role_list' %}"
+                       class="block px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                        {{ label }}
+                    </a>
+                    {% else %}
+                    <a href="?tab={{ key }}"
+                       class="block px-4 py-2.5 text-sm font-medium
+                           {% if active_tab == key %}bg-blue-50 text-blue-700 border-l-4 border-blue-600
+                           {% else %}text-gray-700 hover:bg-gray-50{% endif %}">
+                        {{ label }}
+                    </a>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endfor %}
     </nav>
 
     <!-- Tab content -->

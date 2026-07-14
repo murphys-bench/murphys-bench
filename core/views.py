@@ -5768,6 +5768,28 @@ SETTINGS_TABS = [
 # in forms_map and the POST dispatch can find BackupSettingsForm.
 SETTINGS_NAV_TABS = [(key, label) for key, label, _ in SETTINGS_TABS if key != 'backups']
 
+# Groups the flat tab list into labeled, collapsible sidebar sections.
+SETTINGS_TAB_GROUPS = [
+    ('Company & Branding', ['company', 'colors', 'display']),
+    ('Email', ['outbound', 'inbound', 'email_templates']),
+    ('Tickets & Work Orders', [
+        'repair_types', 'checklist_items', 'canned_responses', 'statuses',
+        'help_topics', 'sla_plans', 'tech_skills', 'custom_fields',
+        'dashboard_tiles', 'kb_categories',
+    ]),
+    ('Integrations', ['invoice_ninja', 'attachments', 'mileage']),
+    ('Access & Security', ['users', 'roles', 'credentials', 'security']),
+    ('System', ['logs', 'maintenance']),
+]
+
+
+def _grouped_settings_nav(active_tab):
+    labels = dict(SETTINGS_NAV_TABS)
+    return [
+        (group_label, [(key, labels[key]) for key in keys if key in labels], active_tab in keys)
+        for group_label, keys in SETTINGS_TAB_GROUPS
+    ]
+
 
 def _repair_types_context():
     categories = RepairTypeCategory.objects.prefetch_related(
@@ -6004,6 +6026,7 @@ class SettingsView(LoginRequiredMixin, View):
             'settings': site,
             'active_tab': active_tab,
             'tabs': SETTINGS_NAV_TABS,
+            'tab_groups': _grouped_settings_nav(active_tab),
             'forms': forms_map,
         }
         if active_tab == 'repair_types':
@@ -6103,6 +6126,7 @@ class SettingsView(LoginRequiredMixin, View):
             'settings': site,
             'active_tab': active_tab,
             'tabs': SETTINGS_NAV_TABS,
+            'tab_groups': _grouped_settings_nav(active_tab),
             'forms': forms_map,
         }
         if tab == 'repair_types':
