@@ -19,8 +19,8 @@
 
 ## The nightly backup
 
-- Script: `/opt/murphys-bench/scripts/mb_backup.sh`. (The old `backup_db.sh` now just delegates to it,
-  so the existing systemd timer keeps working unchanged.)
+- Script: `/opt/murphys-bench/scripts/mb_backup.sh`, fired by `scripts/backup_scheduler.sh` on the
+  5-minute `murphys-bench-backup.timer` tick per the in-app schedule (Settings → Maintenance → Backups).
 - What it does — **fail-loud** (exits non-zero rather than reporting a false "OK", which is exactly the
   trap the old pg_dump job fell into):
   1. Takes a **consistent SQLite snapshot** via the Python `sqlite3` online-backup API — safe while the
