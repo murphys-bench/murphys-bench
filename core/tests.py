@@ -6550,7 +6550,11 @@ def _backup_post(onsite=False, offsite=False, **over):
     }
     if onsite:
         data['backups-backup_onsite_enabled'] = 'on'
-        data.setdefault('backups-backup_onsite_path', '/mnt/nas/mb')
+        data.setdefault('backups-backup_onsite_host', 'REDACTED-IP')
+        data.setdefault('backups-backup_onsite_share', 'VM')
+        data.setdefault('backups-backup_onsite_username', 'mike')
+        data.setdefault('backups-backup_onsite_password', 'nassecret')
+        data.setdefault('backups-backup_onsite_folder', 'mb-backups')
     if offsite:
         data['backups-backup_offsite_enabled'] = 'on'
         data.setdefault('backups-backup_s3_endpoint', 's3.us-west-002.backblazeb2.com')
@@ -6583,7 +6587,7 @@ def test_backup_settings_both_destinations_render_files(admin_user, client, sett
 
     manifest = backup_ops.manifest_path().read_text()
     assert 'BACKUP_ONSITE_ENABLED="1"' in manifest
-    assert 'BACKUP_ONSITE_PATH="/mnt/nas/mb"' in manifest
+    assert 'BACKUP_ONSITE_RCLONE_REMOTE="mbonsite:VM/mb-backups"' in manifest
     assert 'BACKUP_ONSITE_RETENTION_MODE="count"' in manifest
     assert 'BACKUP_ONSITE_RETENTION_VALUE="7"' in manifest
     assert 'BACKUP_ONSITE_SCHEDULE_TIMES="06:00,18:00"' in manifest
@@ -6600,8 +6604,28 @@ def test_backup_settings_both_destinations_render_files(admin_user, client, sett
     conf_path = backup_ops.rclone_conf_path()
     conf = conf_path.read_text()
     assert '[mbbackup]' in conf and 'secret_access_key = secret123' in conf
+    assert '[mbonsite]' in conf and 'type = smb' in conf and 'host = REDACTED-IP' in conf
+    # The onsite password must be rclone-OBSCURED, never stored in plaintext.
+    assert 'nassecret' not in conf, 'onsite password must not appear in plaintext in .rclone.conf'
     import os, stat
     assert stat.S_IMODE(os.stat(conf_path).st_mode) == 0o600, 'secret file must be owner-only'
+
+
+def _rclone_ok():
+    from core import backup_ops
+    return backup_ops.rclone_bin().exists()
+
+
+rclone_skip = pytest.mark.skipif(not _rclone_ok(), reason='rclone binary not vendored on this runner')
+
+
+@rclone_skip
+def test_obscure_password_is_not_plaintext():
+    """rclone's SMB backend needs the password in rclone's own obfuscation
+    format, not plaintext, in .rclone.conf."""
+    from core import backup_ops
+    obscured = backup_ops._obscure(backup_ops.rclone_bin(), 'nassecret')
+    assert obscured and obscured != 'nassecret'
 
 
 @pytest.mark.django_db
@@ -6609,16 +6633,36 @@ def test_backup_settings_offsite_only_clears_stale_when_disabled(admin_user, cli
     settings.BASE_DIR = tmp_path
     from core import backup_ops
     client.force_login(admin_user)
-    # First enable offsite → renders rclone.conf.
+    # First enable offsite → renders rclone.conf with [mbbackup].
     client.post(reverse('core:settings'), _backup_post(offsite=True))
-    assert backup_ops.rclone_conf_path().exists()
-    # Now switch to onsite-only → offsite disabled → stale secret file removed.
+    assert '[mbbackup]' in backup_ops.rclone_conf_path().read_text()
+    # Now switch to onsite-only → offsite's stanza+secret must be gone, but the
+    # file persists (onsite is also an rclone remote now, via [mbonsite]).
     resp = client.post(reverse('core:settings'), _backup_post(onsite=True))
     assert resp.status_code == 302
     manifest = backup_ops.manifest_path().read_text()
     assert 'BACKUP_OFFSITE_ENABLED="0"' in manifest
     assert 'BACKUP_RCLONE_REMOTE=""' in manifest
-    assert not backup_ops.rclone_conf_path().exists(), 'stale secret file must be cleared'
+    conf = backup_ops.rclone_conf_path().read_text()
+    assert '[mbbackup]' not in conf, 'stale offsite stanza+secret must be cleared'
+    assert 'secret123' not in conf
+    assert '[mbonsite]' in conf
+
+
+@pytest.mark.django_db
+def test_render_config_removes_conf_when_no_destination_enabled(settings, tmp_path):
+    settings.BASE_DIR = tmp_path
+    from core import backup_ops
+    site = SiteSettings.get()
+    site.backup_offsite_enabled = True
+    site.backup_s3_bucket = 'b'
+    site.save()
+    backup_ops.render_config(site)
+    assert backup_ops.rclone_conf_path().exists()
+    site.backup_offsite_enabled = False
+    site.save()
+    backup_ops.render_config(site)
+    assert not backup_ops.rclone_conf_path().exists()
 
 
 @pytest.mark.django_db
@@ -6632,13 +6676,13 @@ def test_backup_settings_requires_a_destination(admin_user, client, settings, tm
 
 
 @pytest.mark.django_db
-def test_backup_settings_onsite_requires_path(admin_user, client, settings, tmp_path):
+def test_backup_settings_onsite_requires_host_share_username(admin_user, client, settings, tmp_path):
     settings.BASE_DIR = tmp_path
     client.force_login(admin_user)
     resp = client.post(reverse('core:settings'),
-                       _backup_post(onsite=True, **{'backups-backup_onsite_path': ''}))
+                       _backup_post(onsite=True, **{'backups-backup_onsite_host': ''}))
     assert resp.status_code == 200
-    assert b'onsite path is required' in resp.content.lower()
+    assert b'onsite host is required' in resp.content.lower()
 
 
 @pytest.mark.django_db

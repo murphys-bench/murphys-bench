@@ -5,8 +5,10 @@ scheduling uses systemd timers. Installing them is a one-time `sudo` step.
 
 ## Backups — scheduler tick
 
-Backups are configured in the app (Settings → Maintenance → Backups): onsite path
-and/or offsite S3, retention, and the schedule (days + times). The MB VM is never a
+Backups are configured entirely in the app (Settings → Maintenance → Backups):
+an onsite NAS/network share (SMB, connected to directly over the network — no
+mount, no sudo, no `/etc/fstab`, ever) and/or offsite S3, retention, and the
+schedule (days + times, independent per destination). The MB VM is never a
 backup destination — a run stages the archive transiently, ships it off-box, then
 deletes the staged copy.
 
