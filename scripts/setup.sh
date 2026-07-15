@@ -82,13 +82,38 @@ if [ "$SKIP_APT" = 0 ]; then
     # The libpango/cairo/ft2 stack + fonts are WeasyPrint's runtime deps (PDF
     # generation for repair reports and quotes); they pull cairo/glib/harfbuzz.
     sudo apt-get install -y -qq python3 python3-venv python3-pip nginx git logrotate curl \
-        libpango-1.0-0 libpangocairo-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core \
+        libpango-1.0-0 libpangocairo-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core rclone \
         || fail "apt install failed"
 else
     log "skipping apt (--skip-apt)"
 fi
 
-# 2) Python virtualenv + dependencies.
+# 2) Vendor the rclone binary into bin/rclone — backup destinations (onsite
+# SMB + offsite S3) both go through it (core/backup_ops.py: rclone_bin() ==
+# $APP/bin/rclone, deliberately a per-app copy, not whatever's on $PATH, so
+# an app-level backup/restore never depends on what else is installed
+# system-wide). apt just installed a system copy above; copy it in here so
+# a fresh box works with zero manual steps — this was previously a gap
+# (only ever done by hand on the boxes that already had it).
+mkdir -p bin
+if [ ! -x bin/rclone ]; then
+    SYS_RCLONE="$(command -v rclone || true)"
+    if [ -n "$SYS_RCLONE" ]; then
+        cp "$SYS_RCLONE" bin/rclone && chmod +x bin/rclone
+        log "vendored rclone ($("$APP/bin/rclone" version | head -1)) into bin/rclone"
+    elif [ "$SKIP_APT" = 1 ]; then
+        log "rclone not found and apt was skipped (--skip-apt) — backup destinations \
+(Settings -> Maintenance -> Backups) won't work until you install rclone and copy/symlink \
+it to $APP/bin/rclone yourself"
+    else
+        fail "rclone not found on PATH after apt install — install it manually and copy/symlink \
+it to $APP/bin/rclone"
+    fi
+else
+    log "bin/rclone already present — leaving it"
+fi
+
+# 3) Python virtualenv + dependencies.
 if [ ! -x "$VENV/python" ]; then
     log "creating virtualenv..."
     "$PYBIN" -m venv venv || fail "venv creation failed"
@@ -97,11 +122,11 @@ log "installing Python dependencies..."
 "$VENV/pip" install --upgrade -q pip || fail "pip self-upgrade failed"
 "$VENV/pip" install -q -r requirements.txt || fail "pip install -r requirements.txt failed"
 
-# 3) Runtime directories the app writes to (logs/ is required at startup).
+# 4) Runtime directories the app writes to (logs/ is required at startup).
 mkdir -p logs media protected backups
 log "runtime dirs ready (logs media protected backups)"
 
-# 4) .env — create with generated keys if absent; NEVER clobber an existing one.
+# 5) .env — create with generated keys if absent; NEVER clobber an existing one.
 if [ -f .env ]; then
     log ".env already exists — leaving it untouched"
 else
@@ -147,17 +172,17 @@ ENVEOF
     log ".env created (chmod 600)"
 fi
 
-# 5) Build the self-hosted Tailwind stylesheet BEFORE collectstatic (no Node).
+# 6) Build the self-hosted Tailwind stylesheet BEFORE collectstatic (no Node).
 log "building CSS (self-hosted Tailwind)..."
 "$APP/scripts/build_css.sh" || fail "CSS build failed"
 
-# 6) Initialize Django.
+# 7) Initialize Django.
 log "running migrations..."
 "$VENV/python" manage.py migrate --noinput || fail "migrate failed"
 log "collecting static files..."
 "$VENV/python" manage.py collectstatic --noinput >/dev/null || fail "collectstatic failed"
 
-# 7) Superuser (interactive, only if none exists yet).
+# 8) Superuser (interactive, only if none exists yet).
 HAS_SU="$("$VENV/python" manage.py shell -c \
     'from django.contrib.auth import get_user_model as g; print(g().objects.filter(is_superuser=True).exists())' \
     2>/dev/null | tail -1 || echo True)"
@@ -172,7 +197,7 @@ else
     log "superuser already exists — skipping createsuperuser"
 fi
 
-# 8) Smoke checks.
+# 9) Smoke checks.
 log "running deploy check (HTTPS warnings are expected on a plain-HTTP box)..."
 "$VENV/python" manage.py check || fail "manage.py check failed"
 if [ "$SKIP_TESTS" = 0 ]; then
@@ -182,7 +207,7 @@ else
     log "skipping tests (--skip-tests)"
 fi
 
-# 9) Web server — gunicorn (systemd) + nginx, so the app is actually reachable
+# 10) Web server — gunicorn (systemd) + nginx, so the app is actually reachable
 # in a browser without hand-editing config files. Plain HTTP, LAN-only by
 # default (same posture as Murphy's Bench's own production instance) — see
 # INSTALL.md "Going public" for a domain/TLS/Cloudflare Tunnel, which is a
@@ -251,7 +276,7 @@ else
     log "skipping web server setup (--skip-web) — app layer only"
 fi
 
-# 10) Done.
+# 11) Done.
 cat <<DONE
 
 $(date '+%F %T') setup: DONE

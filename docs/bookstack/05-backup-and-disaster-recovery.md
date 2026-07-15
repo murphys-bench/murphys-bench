@@ -60,12 +60,12 @@ The onsite password is rclone-*obscured* (SMB needs rclone's own reversible obfu
 in the config file) via the vendored `bin/rclone obscure`; the plaintext only ever lives
 encrypted in `SiteSettings` or briefly in memory, never in cleartext on disk.
 
-> ⚠ **Fresh-box gap (open, not yet fixed):** `bin/rclone` has so far only ever been manually
-> placed on each box (copied in ad hoc, never a documented setup step like the WeasyPrint system
-> libs are). A fresh install or full rebuild needs this binary present before backups can run or
-> be tested — `manage.py render_backup_config` will render the config files fine, but
-> `mb_backup.sh` will fail at the ship step without the binary. Track this as a setup-step gap to
-> close (add to `scripts/setup.sh` / INSTALL.md), not yet done as of this writing.
+> ✅ **Fresh-box gap CLOSED:** `bin/rclone` used to only ever get placed on a box manually (copied
+> in ad hoc, never a documented step). `scripts/setup.sh` now installs `rclone` via apt and vendors
+> a copy into `bin/rclone` automatically (step 2, right after system packages); the manual-install
+> path in `INSTALL.md` § 3 covers the same two commands for anyone not using `setup.sh`. A box
+> with `--skip-apt` or a non-apt distro still needs to place the binary by hand — `setup.sh` warns
+> rather than silently leaving backups broken in that case.
 
 ### Offsite immutability (when using Backblaze B2 with Object Lock)
 
@@ -168,9 +168,10 @@ sudo systemctl start murphys-bench
 3. Recreate `.env` — **including the original `FIELD_ENCRYPTION_KEY` and `SECRET_KEY`** from Bitwarden.
 4. Restore the database + files (procedure B).
 5. Install the systemd units from `deploy/` (service + the timers, incl. `murphys-bench-backup.timer`).
-6. **Place the `bin/rclone` binary** (not currently automated — see the fresh-box gap noted above)
-   before backups can run; re-enter onsite/offsite destination config in Settings → Maintenance →
-   Backups (or restore `.rclone.conf` + run `manage.py render_backup_config` if you have the original).
+6. **`bin/rclone`** — run via `scripts/setup.sh` (which vendors it automatically) or `sudo apt
+   install rclone && cp "$(command -v rclone)" bin/rclone` by hand (INSTALL.md § 3); re-enter
+   onsite/offsite destination config in Settings → Maintenance → Backups (or restore
+   `.rclone.conf` + run `manage.py render_backup_config` if you have the original).
 7. Point inbound email at the correct mailbox in Settings → Inbound Email.
 8. `manage.py check` and smoke-test in the browser.
 
@@ -200,5 +201,4 @@ A backup you have never restored is a hypothesis, not a backup.
 - Inbound mail is **POP3 delete-from-server**, so MB is the *only* copy of inbound email — a working
   backup is also the mail backup.
 - Code is always recoverable from GitHub; only the database, attachments, and `.env` carry irreplaceable state.
-- **Open gap:** `bin/rclone` provisioning on a fresh box isn't yet an automated setup step — see the
-  callout above.
+- `bin/rclone` provisioning is now automated by `scripts/setup.sh` on a fresh box (see the callout above).

@@ -121,7 +121,24 @@ Run this as whichever normal login user should own and run the app (it does
 not need to be `root`, and doesn't need a dedicated system account — running
 as your own login user, so it can hold an SSH key for deploys, is fine).
 
-### 3. Python environment
+### 3. Backup destinations (rclone)
+
+Onsite (SMB/NAS) and offsite (S3-compatible) backup destinations, configured later in
+Settings → Maintenance → Backups, both go through a **vendored copy** of rclone at
+`bin/rclone` — deliberately a per-app copy, not whatever's on `$PATH`, so a backup/restore
+never depends on what else happens to be installed system-wide.
+
+```bash
+sudo apt install -y rclone
+mkdir -p bin
+cp "$(command -v rclone)" bin/rclone
+chmod +x bin/rclone
+```
+
+Skip this if you don't plan to configure any backup destination — the app runs fine
+without it, backups just won't be available until `bin/rclone` exists.
+
+### 4. Python environment
 
 ```bash
 python3 -m venv venv
@@ -129,12 +146,12 @@ venv/bin/pip install --upgrade pip
 venv/bin/pip install -r requirements.txt
 ```
 
-### 4. Database
+### 5. Database
 
 Nothing to install or configure — Murphy's Bench uses **SQLite**, a single
 file (`db.sqlite3`) created automatically when you run migrations (step 6).
 
-### 5. Environment file (`.env`)
+### 6. Environment file (`.env`)
 
 ```bash
 cp .env.example .env
@@ -179,7 +196,7 @@ SECURE_HSTS_SECONDS=0
 > data permanently unrecoverable. Store it somewhere safe (e.g. a password
 > manager) the moment you generate it.
 
-### 6. Initialize Django
+### 7. Initialize Django
 
 ```bash
 mkdir -p logs media protected backups
@@ -199,7 +216,7 @@ venv/bin/python manage.py check --deploy   # HTTPS warnings are expected on a pl
 venv/bin/python -m pytest                   # spine test suite should pass
 ```
 
-### 7. Gunicorn + nginx
+### 8. Gunicorn + nginx
 
 **Gunicorn unit** — `/etc/systemd/system/murphys-bench.service`:
 
