@@ -14,7 +14,10 @@
 #                                      distinct from the off-box backup).
 set -euo pipefail
 
-APP=/opt/murphys-bench
+# APP is overridable (MB_BACKUP_APP) only so the test suite can point this
+# script at a scratch directory; every real deploy always runs it unset and
+# gets the real path.
+APP="${MB_BACKUP_APP:-/opt/murphys-bench}"
 DB="$APP/db.sqlite3"
 STAGE="$APP/backups"
 LOG="$APP/logs/backup.log"
@@ -116,8 +119,14 @@ tar -czf "$ARCHIVE" \
     -C "$APP" .env protected media \
     -C "$STAGE" "db-$TS.sqlite3" || fail "tar failed"
 tar -tzf "$ARCHIVE" >/dev/null 2>&1 || fail "archive verify (tar -t) failed"
-ASZ=$(stat -c %s "$ARCHIVE")
-[ "$ASZ" -gt 102400 ] || fail "archive suspiciously small: $ASZ bytes"
+# Confirm the DB snapshot actually landed in the archive by name, rather than
+# guessing from total byte size -- a fixed size floor either false-positives
+# on a legitimately small/fresh install (near-empty DB compresses to a few
+# KB) or, at the other end, would wave through a large DB silently truncated
+# to well under the floor. The non-empty/integrity/table-count checks above
+# already prove the snapshot itself is sound; this proves it made it into
+# the tarball.
+tar -tzf "$ARCHIVE" | grep -qx "db-$TS.sqlite3" || fail "archive missing DB snapshot member"
 rm -f "$SNAP"
 ARCHIVE_SIZE="$(du -h "$ARCHIVE" | cut -f1)"
 log "archive ok: $ARCHIVE_SIZE ($ARCHIVE)"

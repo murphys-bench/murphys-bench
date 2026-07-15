@@ -6812,6 +6812,59 @@ def test_request_backup_now_writes_trigger_and_refuses_double(settings, tmp_path
     assert backup_ops.request_backup_now() is False
 
 
+def test_mb_backup_sh_staging_only_succeeds_on_near_empty_db(tmp_path):
+    """Regression: scripts/mb_backup.sh used to reject the finished archive if
+    it was under a fixed 100KB floor -- which a genuinely fresh/near-empty
+    install's DB (a handful of tables, no real data yet) can easily be under,
+    failing every backup a brand-new self-hoster tries to run. The check was
+    replaced with confirming the DB snapshot is actually present in the
+    archive by name, which doesn't care how much data the DB holds. Runs the
+    real script (via MB_BACKUP_APP, a test-only override -- every real deploy
+    runs with it unset) against a scratch app dir with a structurally valid
+    but empty-of-data SQLite file."""
+    import os
+    import shutil
+    import sqlite3
+    import subprocess
+    import tarfile
+    from pathlib import Path
+
+    app_dir = tmp_path / "app"
+    (app_dir / "protected").mkdir(parents=True)
+    (app_dir / "media").mkdir(parents=True)
+    (app_dir / "logs").mkdir(parents=True)
+    (app_dir / "backups").mkdir(parents=True)
+    (app_dir / ".env").write_text("FIELD_ENCRYPTION_KEY=test\n")
+
+    # A minimal but structurally valid DB: >=50 tables (the script's own
+    # sanity floor), no real rows -- mirrors a fresh install before any
+    # client/ticket data exists.
+    db_path = app_dir / "db.sqlite3"
+    conn = sqlite3.connect(db_path)
+    for i in range(55):
+        conn.execute(f"CREATE TABLE t{i} (id INTEGER PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+
+    repo_root = Path(__file__).resolve().parent.parent
+    venv_python = repo_root / "venv" / "bin" / "python"
+    if not venv_python.exists():
+        pytest.skip("no local venv to point the script's snapshot step at")
+    (app_dir / "venv").symlink_to(repo_root / "venv")
+
+    out = tmp_path / "proof.tar.gz"
+    env = {**os.environ, "MB_BACKUP_APP": str(app_dir)}
+    result = subprocess.run(
+        ["bash", str(repo_root / "scripts" / "mb_backup.sh"), "--staging-only", str(out)],
+        env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
+    assert out.exists()
+    with tarfile.open(out) as tf:
+        names = tf.getnames()
+    assert any(n.startswith("db-") and n.endswith(".sqlite3") for n in names), names
+
+
 @pytest.mark.django_db
 def test_render_backup_config_command_runs(settings, tmp_path):
     """The on-deploy render command must not crash and must write the manifest."""
