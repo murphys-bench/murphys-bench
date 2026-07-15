@@ -10,7 +10,7 @@ This VM has **no cron**. All recurring work runs as systemd timers, installed fr
 |---|---|---|
 | inbound email fetch (`fetch_inbound_email`) | every 2 min | Polls the support mailbox; new mail becomes tickets, replies thread into existing tickets |
 | SLA check (`check_sla_overdue`) | every 15 min | Flags tickets that have blown their SLA deadline (in-app alerts) |
-| backup (`murphys-bench-backup`) | nightly 02:15 | SQLite snapshot + files → Backblaze B2 (immutable) |
+| backup (`murphys-bench-backup`) | 5-min tick, fires per-destination schedule | SQLite snapshot + files → onsite (SMB) and/or offsite (S3), per Settings → Maintenance → Backups |
 
 Check status / next run:
 
