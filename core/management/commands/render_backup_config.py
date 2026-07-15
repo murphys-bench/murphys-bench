@@ -20,7 +20,7 @@ class Command(BaseCommand):
         backup_ops.render_config(site)
         dests = []
         if site.backup_onsite_enabled:
-            dests.append(f'onsite:{site.backup_onsite_path}')
+            dests.append(f'onsite:{backup_ops.onsite_remote_target(site)}')
         if site.backup_offsite_enabled:
             dests.append(f'offsite:{backup_ops.rclone_remote_target(site)}')
         summary = ' + '.join(dests) if dests else 'no destination configured'
