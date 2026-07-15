@@ -1,6 +1,6 @@
 [Unit]
 Description=Murphy's Bench — fetch inbound email (IMAP/POP3 -> tickets)
-After=network-online.target postgresql.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]

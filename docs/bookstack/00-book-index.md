@@ -13,7 +13,7 @@ Each numbered `.md` file = one BookStack page. Create the book "Murphy's Bench" 
 2. **Deployment & Infrastructure** — the VM, services, paths, SSH, HTTPS-deferral. *Start here when something's down.*
 3. **Development & Deploy Workflow** — Mac → git → SSH → pull → migrate → restart.
 4. **Operations & Maintenance** — systemd timers, the inbound mailbox, logs, admin, data-wipe command.
-5. **Backup & Disaster Recovery** — the nightly dump, the encryption-key dependency, restore procedures.
+5. **Backup & Disaster Recovery** — the per-destination onsite/offsite backup, the encryption-key dependency, restore procedures.
 6. **Email System** — inbound (POP3) + outbound (branded HTML), threading, the gotchas.
 7. **Data Model & Settings Reference** — the data models and what native Settings covers.
 8. **Conventions, Gotchas & Locked Decisions** — the "don't relearn this the hard way" page.

@@ -58,7 +58,7 @@ This VM has **no cron** — all scheduled work runs as systemd timers. Unit file
 
 | Timer | Cadence | Purpose |
 |---|---|---|
-| `murphys-bench-backup.timer` | nightly 02:15 | SQLite snapshot + files → Backblaze B2 (immutable) |
+| `murphys-bench-backup.timer` | 5-min tick, fires per-destination schedule | SQLite snapshot + files → onsite (SMB) and/or offsite (S3) per Settings → Maintenance → Backups |
 | inbound email fetch | every 2 min | poll mailbox → tickets/replies |
 | SLA check | every 15 min | flag overdue tickets |
 
@@ -104,4 +104,4 @@ SECURE_HSTS_SECONDS=31536000      # only once HTTPS is confirmed everywhere — 
 | Code | GitHub private repo + local Mac at `~/Documents/Claude/murphys-bench` |
 | Full developer notes | `CLAUDE.md` in the repo |
 | Roadmap | `TODO.md` in the repo |
-| Backups | `/opt/murphys-bench/backups/` (gitignored, 14-day rotation) + Proxmox VM snapshots |
+| Backups | `/opt/murphys-bench/backups/` (transient staging — shipped off-box then deleted, per-destination retention set in Settings) + Proxmox VM snapshots |

@@ -26,6 +26,16 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq libpango-1.0-0 libpangocairo-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
 
+      - name: Vendor rclone
+        # Onsite/offsite backup destinations shell out to bin/rclone (see
+        # scripts/setup.sh, same mechanism). Vendoring it here lets the real
+        # (non-mocked) rclone test actually run in CI instead of skipping.
+        run: |
+          sudo apt-get install -y -qq rclone
+          mkdir -p bin
+          cp "$(command -v rclone)" bin/rclone
+          chmod +x bin/rclone
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v6
         with:

@@ -59,7 +59,7 @@ Background work is driven by **systemd timers**, not cron (this VM has no cron):
 
 - `fetch_inbound_email` — every 2 min, turns inbound mail into tickets/replies
 - `check_sla_overdue` — every 15 min, flags overdue tickets
-- nightly backup (SQLite snapshot + files → Backblaze B2, immutable) — 02:15
+- backup — 5-min tick fires each enabled destination (onsite SMB, offsite S3) on its own schedule
 
 ## Operating principles (why the system is shaped this way)
 

@@ -101,10 +101,20 @@ def onsite_remote_target(site) -> str:
     return target
 
 
+class BackupConfigError(Exception):
+    """Raised when a destination's config can't be safely rendered — e.g. a
+    password was supplied but rclone couldn't obscure it. Callers must not
+    write a config file in this state (a blank password would silently
+    replace a real one, turning a setup problem into a later auth failure)."""
+
+
 def _obscure(binary: Path, plaintext: str) -> str:
     """rclone's SMB/FTP-family backends need the password in rclone's own
     reversible obfuscation format in the config file (unlike S3's plain
-    secret_access_key). Shell out to the vendored binary to produce it."""
+    secret_access_key). Shell out to the vendored binary to produce it.
+
+    Fails loud (raises) rather than returning '' on failure — a password was
+    supplied, so silently writing a blank one is never correct."""
     if not plaintext:
         return ''
     try:
@@ -112,11 +122,13 @@ def _obscure(binary: Path, plaintext: str) -> str:
             [str(binary), 'obscure', plaintext],
             capture_output=True, text=True, timeout=10,
         )
-        if out.returncode == 0:
-            return out.stdout.strip()
-    except Exception:
-        pass
-    return ''
+    except Exception as exc:
+        raise BackupConfigError(f'rclone obscure failed to run ({binary}): {exc}') from exc
+    if out.returncode != 0:
+        raise BackupConfigError(
+            f'rclone obscure exited {out.returncode}: {out.stderr.strip() or "no error output"}'
+        )
+    return out.stdout.strip()
 
 
 def render_config(site) -> None:

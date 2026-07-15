@@ -139,7 +139,7 @@ One command (`scripts/setup.sh`) takes a fresh Ubuntu 24.04 box to a working log
 
 ## Backup And Restore
 
-Murphy's Bench includes a backup script at `scripts/mb_backup.sh`. It takes a consistent SQLite snapshot, includes attachments and `.env`, and can push the bundle to S3/B2-compatible storage.
+Murphy's Bench includes a backup script at `scripts/mb_backup.sh`. It takes a consistent SQLite snapshot, includes attachments and `.env`, and ships the bundle to one or both admin-configured destinations — an onsite NAS/network share (SMB) and/or an S3/B2-compatible bucket — each on its own schedule and retention (Settings → Maintenance → Backups). The VM itself is never a backup destination; the local copy is transient staging, deleted once it ships.
 
 Restore is intentionally plain: put the database and files back where they belong. The important warning is the encryption key. If you lose `FIELD_ENCRYPTION_KEY`, encrypted credentials cannot be recovered from backup. Keep that key somewhere safe.
 
