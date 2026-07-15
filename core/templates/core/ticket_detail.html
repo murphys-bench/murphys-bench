@@ -382,6 +382,17 @@ window.addEventListener('beforeunload', function() {
                     <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Updated</dt>
                     <dd class="text-sm text-gray-900 mt-1">{{ ticket.updated_at|date:"M d, Y g:i A" }}</dd>
                 </div>
+                <div x-data="{ manageLinks: false }">
+                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide flex items-center justify-between">
+                        Linked Tickets
+                        <button @click="manageLinks = !manageLinks" class="text-xs text-blue-500 hover:text-blue-400 underline" x-text="manageLinks ? 'Done' : 'Manage'"></button>
+                    </dt>
+                    <dd class="text-sm text-gray-900 mt-1">
+                        <div id="linked-tickets-section">
+                            {% include "core/partials/ticket_linked_list.html" with linked_tickets=linked_tickets link_error=None %}
+                        </div>
+                    </dd>
+                </div>
             </dl>
         </div>
 
@@ -432,13 +443,16 @@ window.addEventListener('beforeunload', function() {
         {% endif %}
         {% endif %}
 
-        <!-- Linked Tickets -->
+        <!-- Device Notes -->
+        {% if ticket.device and ticket.device.notes %}
         <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-3">Linked Tickets</h2>
-            <div id="linked-tickets-section">
-                {% include "core/partials/ticket_linked_list.html" with linked_tickets=linked_tickets link_error=None %}
-            </div>
+            <h2 class="text-lg font-semibold text-gray-900 mb-3">Device Notes</h2>
+            <p class="text-sm text-gray-700 whitespace-pre-line">{{ ticket.device.notes }}</p>
+            <p class="mt-3 text-xs text-gray-400">
+                From <a href="{% url 'core:device_detail' ticket.device.pk %}" class="text-blue-600 hover:underline">{{ ticket.device.name }}</a>
+            </p>
         </div>
+        {% endif %}
 
         <!-- Quick Actions -->
         <div class="bg-white rounded-lg shadow p-6">
