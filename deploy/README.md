@@ -174,7 +174,8 @@ single-instance adopters.
 ## In-app "Run backup now" (Settings → Maintenance → Backups)
 
 The Backups card's **destination config** and **status panel** work with no extra
-units — Django renders `backup-config.env` (+ `.rclone.conf` for S3) that
+units — Django renders `backup-config.env` (+ `.rclone.conf` for S3/offsite and
+SMB/onsite) that
 `scripts/mb_backup.sh` reads, and the panel reads `logs/backup-status.json` the
 script writes on each run (nightly timer included).
 
