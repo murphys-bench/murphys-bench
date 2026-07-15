@@ -6765,6 +6765,23 @@ def test_render_backup_config_command_runs(settings, tmp_path):
 
 
 @pytest.mark.django_db
+def test_render_backup_config_command_runs_with_onsite_enabled(settings, tmp_path):
+    """Onsite-enabled must not crash the command (regression: stale backup_onsite_path ref)."""
+    settings.BASE_DIR = tmp_path
+    from django.core.management import call_command
+    from core import backup_ops
+    site = SiteSettings.get()
+    site.backup_onsite_enabled = True
+    site.backup_onsite_host = 'nas.local'
+    site.backup_onsite_share = 'VM'
+    site.backup_onsite_username = 'u'
+    site.backup_onsite_password = 'p'
+    site.save()
+    call_command('render_backup_config')
+    assert 'BACKUP_ONSITE_ENABLED="1"' in backup_ops.manifest_path().read_text()
+
+
+@pytest.mark.django_db
 def test_backup_run_view_queues_out_of_band(admin_user, client, settings, tmp_path):
     settings.BASE_DIR = tmp_path
     from core import backup_ops
