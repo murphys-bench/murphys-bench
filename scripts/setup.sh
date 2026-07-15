@@ -152,8 +152,8 @@ ALLOWED_HOSTS=${ENV_HOSTS}
 COMPANY_NAME=${ENV_COMPANY}
 TIMEZONE=America/Los_Angeles
 
-# Database: SQLite by default (a file at db.sqlite3 — no DB server needed).
-# To use PostgreSQL instead, see INSTALL.md step 5 and set DB_ENGINE=... here.
+# Database: SQLite (a file at db.sqlite3 — no DB server needed). This is the
+# only supported database; there is no DB_ENGINE switch.
 
 # HTTPS hardening — explicitly OFF for this plain-HTTP LAN install.
 # SESSION_COOKIE_SECURE and CSRF_COOKIE_SECURE default to "not DEBUG" in

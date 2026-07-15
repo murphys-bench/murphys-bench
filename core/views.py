@@ -6109,8 +6109,18 @@ class SettingsView(LoginRequiredMixin, View):
             if tab == 'backups':
                 # Regenerate the plain files the out-of-band backup script reads.
                 from . import backup_ops
-                backup_ops.render_config(SiteSettings.get())
-                messages.success(request, 'Backup settings saved.')
+                try:
+                    backup_ops.render_config(SiteSettings.get())
+                    messages.success(request, 'Backup settings saved.')
+                except backup_ops.BackupConfigError as exc:
+                    # Settings themselves saved fine — only the rendered config
+                    # failed. Never silently leave a blank onsite password.
+                    messages.error(
+                        request,
+                        f'Backup settings saved, but the destination config could not be '
+                        f'regenerated: {exc}. Onsite/offsite backups will use the last good '
+                        f'config until this is fixed and settings are saved again.',
+                    )
                 return redirect(f"{request.path}?tab=maintenance")
             messages.success(request, 'Settings saved.')
             return redirect(f"{request.path}?tab={tab}")

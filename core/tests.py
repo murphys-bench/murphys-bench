@@ -6593,9 +6593,10 @@ def test_onsite_test_destination_probes_share_root_not_folder(settings, tmp_path
 
 
 @pytest.mark.django_db
-def test_backup_settings_both_destinations_render_files(admin_user, client, settings, tmp_path):
+def test_backup_settings_both_destinations_render_files(admin_user, client, settings, tmp_path, monkeypatch):
     settings.BASE_DIR = tmp_path
     from core import backup_ops
+    monkeypatch.setattr(backup_ops, '_obscure', lambda binary, plaintext: 'obscured-placeholder')
     client.force_login(admin_user)
     resp = client.post(reverse('core:settings'), _backup_post(
         onsite=True, offsite=True,
@@ -6654,10 +6655,72 @@ def test_obscure_password_is_not_plaintext():
     assert obscured and obscured != 'nassecret'
 
 
+def test_obscure_raises_on_rclone_failure(monkeypatch):
+    """A supplied password that rclone can't obscure must fail loud, never
+    silently return '' (which render_config would then write as a blank
+    password in .rclone.conf)."""
+    from core import backup_ops
+
+    class _FakeResult:
+        returncode = 1
+        stdout = ''
+        stderr = 'exit status 1'
+
+    monkeypatch.setattr(backup_ops.subprocess, 'run', lambda *a, **k: _FakeResult())
+    with pytest.raises(backup_ops.BackupConfigError):
+        backup_ops._obscure(backup_ops.rclone_bin(), 'nassecret')
+
+
 @pytest.mark.django_db
-def test_backup_settings_offsite_only_clears_stale_when_disabled(admin_user, client, settings, tmp_path):
+def test_render_config_writes_nothing_when_obscure_fails(settings, tmp_path, monkeypatch):
+    """render_config must not write a blank-password .rclone.conf (or touch
+    the manifest at all) when rclone obscure fails — last-good config stays
+    in place until the failure is fixed."""
     settings.BASE_DIR = tmp_path
     from core import backup_ops
+
+    def _boom(*a, **k):
+        raise backup_ops.BackupConfigError('rclone obscure exited 1: boom')
+
+    monkeypatch.setattr(backup_ops, '_obscure', _boom)
+    site = SiteSettings.get()
+    site.backup_onsite_enabled = True
+    site.backup_onsite_host = 'REDACTED-IP'
+    site.backup_onsite_share = 'VM'
+    site.backup_onsite_username = 'mike'
+    site.backup_onsite_password = 'nassecret'
+    site.save()
+    with pytest.raises(backup_ops.BackupConfigError):
+        backup_ops.render_config(site)
+    assert not backup_ops.rclone_conf_path().exists()
+    assert not backup_ops.manifest_path().exists()
+
+
+@pytest.mark.django_db
+def test_backup_settings_view_shows_error_when_obscure_fails(admin_user, client, settings, tmp_path, monkeypatch):
+    """The settings form save must surface the failure to the admin instead
+    of silently reporting success with a broken config underneath."""
+    settings.BASE_DIR = tmp_path
+    from core import backup_ops
+
+    def _boom(*a, **k):
+        raise backup_ops.BackupConfigError('rclone obscure exited 1: boom')
+
+    monkeypatch.setattr(backup_ops, '_obscure', _boom)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:settings'), _backup_post(onsite=True), follow=True)
+    assert resp.status_code == 200
+    assert b'could not be' in resp.content.lower()
+    assert not backup_ops.rclone_conf_path().exists()
+
+
+@pytest.mark.django_db
+def test_backup_settings_offsite_only_clears_stale_when_disabled(admin_user, client, settings, tmp_path, monkeypatch):
+    settings.BASE_DIR = tmp_path
+    from core import backup_ops
+    # This test is about stale-stanza clearing, not rclone availability —
+    # mock obscure so it doesn't need a real vendored binary.
+    monkeypatch.setattr(backup_ops, '_obscure', lambda binary, plaintext: 'obscured-placeholder')
     client.force_login(admin_user)
     # First enable offsite → renders rclone.conf with [mbbackup].
     client.post(reverse('core:settings'), _backup_post(offsite=True))
@@ -6765,11 +6828,15 @@ def test_render_backup_config_command_runs(settings, tmp_path):
 
 
 @pytest.mark.django_db
-def test_render_backup_config_command_runs_with_onsite_enabled(settings, tmp_path):
-    """Onsite-enabled must not crash the command (regression: stale backup_onsite_path ref)."""
+def test_render_backup_config_command_runs_with_onsite_enabled(settings, tmp_path, monkeypatch):
+    """Onsite-enabled must not crash the command (regression: stale backup_onsite_path ref).
+    Mocks rclone obscure — this test is about the command's onsite_remote_target
+    reference, not rclone availability (see test_obscure_raises_on_rclone_failure
+    for the fail-closed-on-missing-rclone behavior)."""
     settings.BASE_DIR = tmp_path
     from django.core.management import call_command
     from core import backup_ops
+    monkeypatch.setattr(backup_ops, '_obscure', lambda binary, plaintext: 'obscured-placeholder')
     site = SiteSettings.get()
     site.backup_onsite_enabled = True
     site.backup_onsite_host = 'nas.local'
