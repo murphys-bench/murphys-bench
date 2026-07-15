@@ -15,7 +15,8 @@
             {% status_badge item.ticket.status 'ticket' %}
             <span class="ml-1 text-xs text-gray-400">({{ item.link_type }})</span>
         </div>
-        <form hx-post="{% url 'core:ticket_link_remove' ticket.pk %}"
+        <form x-show="manageLinks" x-cloak
+              hx-post="{% url 'core:ticket_link_remove' ticket.pk %}"
               hx-target="#linked-tickets-section"
               hx-swap="innerHTML">
             {% csrf_token %}
@@ -30,7 +31,8 @@
 {% endif %}
 
 <!-- Link Ticket Form -->
-<form hx-post="{% url 'core:ticket_link_add' ticket.pk %}"
+<form x-show="manageLinks" x-cloak
+      hx-post="{% url 'core:ticket_link_add' ticket.pk %}"
       hx-target="#linked-tickets-section"
       hx-swap="innerHTML"
       hx-on:htmx:after-request="this.reset()"
