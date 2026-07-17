@@ -7050,3 +7050,107 @@ def test_contract_detail_and_list_render(client, client_obj, admin_user):
     listing = client.get(reverse('core:contract_list'))
     assert listing.status_code == 200
     assert b'Managed Services' in listing.content
+
+
+# ── Contract billing run (Slice 4) ──────────────────────────────────────
+
+from datetime import date as _date
+
+
+@pytest.mark.django_db
+def test_contract_prepare_clones_lines_and_is_idempotent(client, client_obj, admin_user):
+    contract = Contract.objects.create(client=client_obj, title='MSP', status='active')
+    contract.line_items.create(kind='labor', description='Monitoring', quantity=2, unit_price=15)
+    client.force_login(admin_user)
+    r1 = client.post(reverse('core:contract_billing_prepare', args=[contract.pk]))
+    assert r1.status_code == 302
+    from core.models import Sale
+    sales = Sale.objects.filter(contract=contract)
+    assert sales.count() == 1
+    sale = sales.first()
+    assert sale.is_recurring and sale.client_id == client_obj.pk
+    assert sale.line_items.count() == 1
+    from decimal import Decimal
+    assert sale.line_items_total == Decimal('30')
+    # Second prepare in the same period is idempotent — no duplicate draft.
+    client.post(reverse('core:contract_billing_prepare', args=[contract.pk]))
+    assert Sale.objects.filter(contract=contract).count() == 1
+
+
+@pytest.mark.django_db
+def test_contract_billing_lane_isolated_from_lane_c(client_obj, admin_user):
+    """A contract-generated recurring sale must not be picked up by the Lane C
+    (Client-level) worklist, and vice versa."""
+    from core.views import _recurring_sale_this_month, _contract_sale_for_period
+    contract = Contract.objects.create(client=client_obj, title='MSP', status='active')
+    from core.views import _prepare_contract_sale
+    csale, _ = _prepare_contract_sale(contract, admin_user)
+    # Lane C sees no sale for this client (the contract sale is excluded).
+    assert _recurring_sale_this_month(client_obj) is None
+    # Contract lane finds its own sale.
+    assert _contract_sale_for_period(contract) == csale
+
+
+@pytest.mark.django_db
+def test_contract_cadence_due_logic():
+    from core.models import Client as C, Contract as Ct
+    c = C.objects.create(name='Cadence Co')
+    # Monthly: due every month once billing_day passes.
+    m = Ct.objects.create(client=c, title='M', status='active', billing_cadence='monthly', billing_day=1)
+    assert m.is_billing_due(_date(2026, 3, 15)) is True
+    # Annual anchored to start month (July): due in July, not March.
+    a = Ct.objects.create(client=c, title='A', status='active', billing_cadence='annual',
+                          billing_day=1, start_date=_date(2026, 7, 1))
+    assert a.is_billing_month(_date(2026, 7, 10)) is True
+    assert a.is_billing_month(_date(2026, 3, 10)) is False
+    assert a.is_billing_due(_date(2026, 7, 10)) is True
+    assert a.is_billing_due(_date(2026, 3, 10)) is False
+    # Quarterly anchored to July: billing months Jan/Apr/Jul/Oct.
+    q = Ct.objects.create(client=c, title='Q', status='active', billing_cadence='quarterly',
+                          billing_day=1, start_date=_date(2026, 7, 1))
+    assert q.is_billing_month(_date(2026, 10, 5)) is True
+    assert q.is_billing_month(_date(2026, 8, 5)) is False
+    # Draft/expired contracts are never due.
+    d = Ct.objects.create(client=c, title='D', status='draft', billing_cadence='monthly', billing_day=1)
+    assert d.is_billing_due(_date(2026, 3, 15)) is False
+
+
+@pytest.mark.django_db
+def test_contract_period_key_by_cadence():
+    from core.models import Client as C, Contract as Ct
+    c = C.objects.create(name='PK Co')
+    m = Ct.objects.create(client=c, title='M', billing_cadence='monthly')
+    q = Ct.objects.create(client=c, title='Q', billing_cadence='quarterly')
+    a = Ct.objects.create(client=c, title='A', billing_cadence='annual')
+    assert m.period_key(_date(2026, 7, 9)) == '2026-07'
+    assert q.period_key(_date(2026, 7, 9)) == '2026-Q3'
+    assert a.period_key(_date(2026, 7, 9)) == '2026'
+
+
+@pytest.mark.django_db
+def test_contract_batch_prepare_only_due(client, client_obj, admin_user):
+    from core.models import Sale
+    due = Contract.objects.create(client=client_obj, title='Due', status='active',
+                                  billing_cadence='monthly', billing_day=1)
+    due.line_items.create(kind='labor', description='X', quantity=1, unit_price=10)
+    # An annual contract anchored to a different month is not due most months.
+    not_due = Contract.objects.create(client=client_obj, title='Annual', status='active',
+                                      billing_cadence='annual', billing_day=1,
+                                      start_date=_date(2000, 1, 1))
+    client.force_login(admin_user)
+    client.post(reverse('core:contract_billing_prepare_all'))
+    prepared_contracts = set(Sale.objects.filter(contract__isnull=False).values_list('contract_id', flat=True))
+    assert due.pk in prepared_contracts
+    # not_due only prepares if today is January; assert it's absent unless January.
+    import datetime as _dt
+    if _dt.date.today().month != 1:
+        assert not_due.pk not in prepared_contracts
+
+
+@pytest.mark.django_db
+def test_contract_billing_list_renders(client, client_obj, admin_user):
+    Contract.objects.create(client=client_obj, title='Managed', status='active')
+    client.force_login(admin_user)
+    r = client.get(reverse('core:contract_billing_list'))
+    assert r.status_code == 200
+    assert b'Contract Billing' in r.content
