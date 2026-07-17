@@ -573,6 +573,57 @@ class Device(models.Model):
         super().save(*args, **kwargs)
 
 
+class Asset(models.Model):
+    """A managed inventory item at a client (managed-services layer).
+
+    DELIBERATELY separate from Device: a Device is repair-intake-shaped (walk-in
+    nullable, condition_at_intake, repair history), whereas an Asset is owned/managed
+    equipment that belongs to a managed client and whose count can drive contract
+    billing later. The two overlap by design — different lifecycles. An Asset always
+    belongs to a Client (no walk-in assets); a WorkOrder may reference one for managed
+    work history in a later slice.
+
+    Slice 1 (this): the model + client-detail CRUD. The `contract` "covered by" FK
+    and any asset-count-driven pricing land in later slices."""
+
+    ASSET_TYPE_CHOICES = [
+        ('workstation', 'Workstation'),
+        ('server', 'Server'),
+        ('network', 'Network Device'),
+        ('mobile', 'Mobile Device'),
+        ('printer', 'Printer'),
+        ('other', 'Other'),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='assets')
+    name = models.CharField(max_length=255, help_text="e.g. 'Reception PC' or 'DC01'")
+    asset_type = models.CharField(max_length=50, choices=ASSET_TYPE_CHOICES, default='workstation')
+    # Free text — an asset tag, hostname, or serial; values vary too widely to constrain.
+    identifier = models.CharField(
+        max_length=255, blank=True,
+        help_text='Asset tag, hostname, or serial number.',
+    )
+    manufacturer = models.CharField(max_length=100, blank=True)
+    model = models.CharField(max_length=100, blank=True)
+    notes = models.TextField(blank=True)
+    # Drives future count-based contract billing; informational for now.
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'assets'
+        ordering = ['client', 'name']
+        indexes = [
+            models.Index(fields=['client', 'is_active']),
+            models.Index(fields=['asset_type']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.client.name})"
+
+
 class SLAPlan(models.Model):
     """Service Level Agreement — defines response/resolution deadline."""
 

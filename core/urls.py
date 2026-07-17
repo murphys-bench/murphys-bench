@@ -21,6 +21,10 @@ urlpatterns = [
     path('devices/<int:pk>/', views.DeviceDetailView.as_view(), name='device_detail'),
     path('devices/<int:pk>/edit/', views.DeviceUpdateView.as_view(), name='device_edit'),
     path('devices/<int:pk>/delete/', views.DeviceDeleteView.as_view(), name='device_delete'),
+    # Assets (managed inventory — client-scoped)
+    path('clients/<int:client_pk>/assets/new/', views.AssetCreateView.as_view(), name='asset_create'),
+    path('assets/<int:pk>/edit/', views.AssetUpdateView.as_view(), name='asset_edit'),
+    path('assets/<int:pk>/delete/', views.AssetDeleteView.as_view(), name='asset_delete'),
     path('mileage/', views.MileageListView.as_view(), name='mileage_list'),
     path('mileage/new/', views.MileageCreateView.as_view(), name='mileage_create'),
     path('mileage/<int:pk>/edit/', views.MileageUpdateView.as_view(), name='mileage_edit'),
