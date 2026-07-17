@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import (
-    User, Client, Contact, Device, Asset, Ticket, TicketReply, WorkOrder, WorkOrderNote,
+    User, Client, Contact, Device, Asset, Contract, Ticket, TicketReply, WorkOrder, WorkOrderNote,
     WorkOrderItem, Mileage, RepairType, Checklist, ChecklistItem, CannedResponse, CannedResponseCategory,
     SiteSettings, Attachment, EmailTemplate, SuppressedAddress, EmailSendLog,
     Role, TechSkill, SLAPlan, HelpTopic, KBCategory, KBArticle,
@@ -138,6 +138,15 @@ class AssetAdmin(admin.ModelAdmin):
         ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
     )
     readonly_fields = ['created_at', 'updated_at']
+
+
+# Contract Admin
+@admin.register(Contract)
+class ContractAdmin(admin.ModelAdmin):
+    list_display = ['contract_number', 'client', 'title', 'billing_cadence', 'status']
+    list_filter = ['status', 'billing_cadence', 'client']
+    search_fields = ['contract_number', 'title', 'client__name']
+    readonly_fields = ['contract_number', 'created_at', 'updated_at']
 
 
 # Repair Type Admin

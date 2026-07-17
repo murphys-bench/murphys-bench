@@ -1,7 +1,7 @@
 from django import forms
 from django.core.files.uploadedfile import UploadedFile
 from django.urls import reverse
-from .models import WorkOrder, Client, Contact, ContactPhone, Device, Ticket, RepairType, HelpTopic, SLAPlan, KBCategory, KBArticle, Mileage, SiteSettings, Prospect, Estimate, Asset
+from .models import WorkOrder, Client, Contact, ContactPhone, Device, Ticket, RepairType, HelpTopic, SLAPlan, KBCategory, KBArticle, Mileage, SiteSettings, Prospect, Estimate, Asset, Contract
 
 
 MAX_LOGO_DIMENSION = 2000  # px on either side — generous; we display-fit anything under this
@@ -376,23 +376,58 @@ class DeviceQuickAddForm(forms.ModelForm):
 
 class AssetForm(forms.ModelForm):
     """Create/edit a managed Asset. Always belongs to a Client (no walk-in assets).
-    The client is set from the URL context, not exposed as an editable field."""
+    The client is set from the URL context, not exposed as an editable field. The
+    contract dropdown ("covered by") is scoped to that same client's contracts."""
     class Meta:
         model = Asset
-        fields = ['name', 'asset_type', 'identifier', 'manufacturer', 'model', 'notes', 'is_active']
+        fields = ['name', 'asset_type', 'identifier', 'manufacturer', 'model', 'contract', 'notes', 'is_active']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': "e.g. Reception PC"}),
             'asset_type': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'identifier': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'Asset tag, hostname, or serial'}),
             'manufacturer': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'model': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
+            'contract': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'notes': forms.Textarea(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'rows': 3}),
             'is_active': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, client=None, **kwargs):
         super().__init__(*args, **kwargs)
         for field_name in ('identifier', 'manufacturer', 'model', 'notes'):
+            self.fields[field_name].required = False
+        self.fields['contract'].required = False
+        self.fields['contract'].empty_label = '— Not covered —'
+        # Scope "covered by" to this client's own contracts.
+        owner = client or (self.instance.client if self.instance and self.instance.pk else None)
+        if owner is not None:
+            self.fields['contract'].queryset = Contract.objects.filter(client=owner).order_by('-created_at')
+        else:
+            self.fields['contract'].queryset = Contract.objects.none()
+
+
+class ContractForm(forms.ModelForm):
+    """Create/edit a recurring service Contract. Client is set from URL context on
+    create and is not an editable field (a contract belongs to one client for life)."""
+    class Meta:
+        model = Contract
+        fields = ['title', 'status', 'billing_cadence', 'billing_day',
+                  'start_date', 'end_date', 'auto_renew', 'renewal_date', 'notes']
+        widgets = {
+            'title': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'e.g. Managed Services — Monthly'}),
+            'status': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
+            'billing_cadence': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
+            'billing_day': forms.NumberInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'min': 1, 'max': 31}),
+            'start_date': forms.DateInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'type': 'date'}),
+            'end_date': forms.DateInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'type': 'date'}),
+            'auto_renew': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
+            'renewal_date': forms.DateInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'type': 'date'}),
+            'notes': forms.Textarea(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'rows': 3}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field_name in ('start_date', 'end_date', 'renewal_date', 'notes'):
             self.fields[field_name].required = False
 
 
