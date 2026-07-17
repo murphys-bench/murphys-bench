@@ -354,6 +354,50 @@
         {% endwith %}
     </div>
 
+    <!-- ── CONTRACTS (managed-client layer) ────────────────────────── -->
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+            <h2 class="text-lg font-semibold text-gray-900">Contracts</h2>
+            <a href="{% url 'core:contract_create' client.pk %}"
+               class="text-sm text-blue-600 hover:underline">+ New Contract</a>
+        </div>
+        {% with contracts=client.contracts.all %}
+        {% if contracts %}
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contract</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cadence</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Recurring</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    {% for contract in contracts %}
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-3">
+                                <a href="{% url 'core:contract_detail' contract.pk %}" class="text-sm font-medium text-blue-600 hover:underline">{{ contract.contract_number }}</a>
+                                <p class="text-xs text-gray-500">{{ contract.title }}</p>
+                            </td>
+                            <td class="px-6 py-3 text-sm text-gray-600">{{ contract.get_billing_cadence_display }}</td>
+                            <td class="px-6 py-3 text-sm text-gray-700">${{ contract.line_items_total|floatformat:2 }}</td>
+                            <td class="px-6 py-3 text-sm">
+                                <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium
+                                    {% if contract.status == 'active' %}bg-green-100 text-green-800
+                                    {% elif contract.status == 'draft' %}bg-gray-100 text-gray-600
+                                    {% elif contract.status == 'expired' %}bg-yellow-100 text-yellow-800
+                                    {% else %}bg-red-100 text-red-700{% endif %}">{{ contract.get_status_display }}</span>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="px-6 py-6 text-center text-gray-400 text-sm">No contracts — this is a retail customer. Add a contract to make it a managed client.</div>
+        {% endif %}
+        {% endwith %}
+    </div>
+
     <!-- ── ASSETS (managed inventory) ──────────────────────────────── -->
     <div class="bg-white rounded-lg shadow overflow-hidden">
         <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
