@@ -2265,7 +2265,7 @@ def _recurring_sale_this_month(client, today=None):
     key for the whole lane — one recurring charge per client per month."""
     today = today or timezone.localdate()
     return Sale.objects.filter(
-        client=client, is_recurring=True,
+        client=client, is_recurring=True, contract__isnull=True,
         created_at__year=today.year, created_at__month=today.month,
     ).first()
 
@@ -2332,7 +2332,7 @@ class MonthlyClientsListView(SaleAccessMixin, ListView):
         sales_this_month = {
             sale.client_id: sale
             for sale in Sale.objects.filter(
-                client__in=ctx['clients'], is_recurring=True,
+                client__in=ctx['clients'], is_recurring=True, contract__isnull=True,
                 created_at__year=today.year, created_at__month=today.month,
             )
         }
@@ -3089,6 +3089,181 @@ class ContractCustomLogView(LoginRequiredMixin, View):
                 logged_by=request.user,
             )
         return _render_line_items(request, contract)
+
+
+# ── Contract billing run (Slice 4) ───────────────────────────────────────
+# Mirrors the Client-level Lane C run but keyed on the Contract + its billing
+# period, so the two lanes never cross-pick. Produces a DRAFT recurring Sale
+# (contract lines cloned in) — nothing is charged; the operator pushes the draft
+# to Invoice Ninja and settles it, exactly like Lane C.
+
+def _contract_sale_for_period(contract, today=None):
+    """This billing period's recurring Sale for a contract, or None. Idempotency
+    key for the contract lane — one draft per contract per period, cadence-aware."""
+    today = today or timezone.localdate()
+    return Sale.objects.filter(
+        contract=contract, is_recurring=True, billing_period=contract.period_key(today),
+    ).first()
+
+
+def _prepare_contract_sale(contract, user, today=None):
+    """Create this period's recurring draft Sale by CLONING the contract's lines
+    into it. Idempotent per period. Nothing touches Invoice Ninja here."""
+    today = today or timezone.localdate()
+    sale = _contract_sale_for_period(contract, today)
+    if sale is not None:
+        return sale, False
+    sale = Sale.objects.create(
+        client=contract.client, is_recurring=True, contract=contract,
+        billing_period=contract.period_key(today), created_by=user,
+    )
+    for tl in contract.line_items.all():
+        LineItem.objects.create(
+            content_object=sale, kind=tl.kind, description=tl.description,
+            quantity=tl.quantity, unit_price=tl.unit_price,
+            catalog_item=tl.catalog_item, notes=tl.notes, logged_by=user,
+        )
+    return sale, True
+
+
+class ContractBillingListView(SaleAccessMixin, ListView):
+    """The contract billing worklist — every active Contract with this period's
+    recurring Sale resolved to a state (Not prepared / Prepared / Draft in IN /
+    Paid), its cadence, billing day, and whether it's due yet."""
+
+    model = Contract
+    template_name = 'core/contract_billing_list.html'
+    context_object_name = 'contracts'
+
+    def get_queryset(self):
+        return Contract.objects.filter(
+            status='active', client__is_active=True,
+        ).select_related('client').order_by('client__name', 'contract_number')
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        today = timezone.localdate()
+        contracts = list(ctx['contracts'])
+        sales = {}
+        for c in contracts:
+            sales[c.id] = _contract_sale_for_period(c, today)
+        rows = []
+        due_unprepared = 0
+        prepared_unsent = 0
+        for c in contracts:
+            sale = sales.get(c.id)
+            state = _monthly_row_state(sale)
+            is_due = c.is_billing_due(today)
+            rows.append({
+                'contract': c,
+                'sale': sale,
+                'state': state,
+                'is_due': is_due,
+                'is_billing_month': c.is_billing_month(today),
+                'period': c.period_key(today),
+            })
+            if is_due and state == 'not_prepared':
+                due_unprepared += 1
+            if state == 'prepared':
+                prepared_unsent += 1
+        ctx['rows'] = rows
+        ctx['due_unprepared_count'] = due_unprepared
+        ctx['prepared_unsent_count'] = prepared_unsent
+        ctx['invoice_ninja_enabled'] = SiteSettings.get().invoice_ninja_enabled
+        ctx['today'] = today
+        return ctx
+
+
+class ContractBillingPrepareView(SaleAccessMixin, View):
+    """Single 'Prepare draft' on the contract worklist — creates this period's
+    editable recurring Sale for one contract and lands on it. Idempotent per
+    period. Nothing is sent to Invoice Ninja."""
+
+    def post(self, request, pk):
+        contract = get_object_or_404(Contract, pk=pk)
+        sale, _created = _prepare_contract_sale(contract, request.user)
+        return redirect('core:sale_detail', pk=sale.pk)
+
+
+class ContractBatchPrepareView(SaleAccessMixin, View):
+    """Batch 'Prepare all due' — create this period's draft Sale for every active
+    contract whose billing day has arrived and that has no draft yet."""
+
+    def post(self, request):
+        today = timezone.localdate()
+        prepared = 0
+        for contract in Contract.objects.filter(status='active', client__is_active=True):
+            if not contract.is_billing_due(today):
+                continue
+            _sale, created = _prepare_contract_sale(contract, request.user, today)
+            if created:
+                prepared += 1
+        if prepared:
+            messages.success(request, f'Prepared {prepared} draft{"s" if prepared != 1 else ""}. Review amounts, then send to Invoice Ninja.')
+        else:
+            messages.info(request, 'No new drafts to prepare — every due contract already has one.')
+        return redirect('core:contract_billing_list')
+
+
+class ContractBatchSendView(SaleAccessMixin, View):
+    """Batch 'Send prepared drafts to Invoice Ninja' — the safety catch. GET shows a
+    confirmation listing each contract, amount, and grand total; POST (confirmed)
+    pushes each as a DRAFT. Only prepared-but-not-pushed drafts are eligible."""
+
+    def _prepared_sales(self, today):
+        periods = {}  # contract_id -> period key for this run
+        eligible = []
+        for sale in Sale.objects.filter(
+            is_recurring=True, invoice_ninja_id='', contract__isnull=False,
+            contract__status='active', client__is_active=True,
+        ).select_related('client', 'contract').order_by('client__name'):
+            key = periods.setdefault(sale.contract_id, sale.contract.period_key(today))
+            if sale.billing_period == key:
+                eligible.append(sale)
+        return eligible
+
+    def get(self, request):
+        from decimal import Decimal
+        if not SiteSettings.get().invoice_ninja_enabled:
+            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
+            return redirect('core:contract_billing_list')
+        today = timezone.localdate()
+        sales = self._prepared_sales(today)
+        rows = [{
+            'sale': s,
+            'client': s.client,
+            'contract': s.contract,
+            'amount': s.line_items_total,
+        } for s in sales]
+        total = sum((r['amount'] for r in rows), Decimal('0'))
+        return render(request, 'core/contract_batch_send_confirm.html', {
+            'rows': rows, 'total': total, 'count': len(rows),
+        })
+
+    def post(self, request):
+        from . import invoice_ninja
+        if not SiteSettings.get().invoice_ninja_enabled:
+            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
+            return redirect('core:contract_billing_list')
+        today = timezone.localdate()
+        sales = self._prepared_sales(today)
+        sent, failed = 0, []
+        for sale in sales:
+            if sale.line_items_total <= 0:
+                failed.append(f'{sale.contract.contract_number} (no priced line)')
+                continue
+            try:
+                invoice_ninja.push_sale(sale, draft=True)
+                sent += 1
+            except invoice_ninja.InvoiceNinjaError as e:
+                failed.append(f'{sale.contract.contract_number} ({e})')
+        if sent:
+            messages.success(request, f'Sent {sent} draft{"s" if sent != 1 else ""} to Invoice Ninja.')
+        if failed:
+            messages.warning(request, 'Some drafts were not sent: ' + '; '.join(failed))
+        if not sent and not failed:
+            messages.info(request, 'No prepared drafts to send.')
+        return redirect('core:contract_billing_list')
 
 
 # --- Ticket Views ---
