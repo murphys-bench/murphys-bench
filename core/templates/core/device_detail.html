@@ -26,6 +26,21 @@
                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
                 Edit
             </a>
+            {% if device.is_promoted %}
+            <a href="{% url 'core:asset_detail' device.promoted_to_asset_id %}"
+               class="px-4 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md hover:bg-indigo-100 text-sm font-medium">
+                Managed asset →
+            </a>
+            {% elif device.client %}
+            <form method="post" action="{% url 'core:device_promote_asset' device.pk %}" class="inline"
+                  onsubmit="return confirm('Promote &quot;{{ device.name|escapejs }}&quot; to a managed asset? Its repair history moves with it and this device record is retired. This is one-directional.');">
+                {% csrf_token %}
+                <button type="submit"
+                        class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium">
+                    Promote to Asset
+                </button>
+            </form>
+            {% endif %}
             {% if is_admin %}
             {% with wo_count=device.work_orders.count %}
             <form method="post" action="{% url 'core:device_delete' device.pk %}" class="inline"
