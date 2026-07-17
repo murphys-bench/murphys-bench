@@ -1,0 +1,70 @@
+{% comment %}
+HTMX partial — a contract's recurring billing lines. Edit/delete reuse the
+host-agnostic WorkPerformedUpdateView/DeleteView (via LineItem.content_object);
+the swap target is #contract-line-items-section.
+{% endcomment %}
+{% if entries %}
+<div class="space-y-1">
+    {% for entry in entries %}
+    <div class="rounded border border-gray-100 bg-gray-50" x-data="{ editing: false }" id="contract-line-entry-{{ entry.pk }}">
+        <div class="flex items-start gap-2 px-3 py-2" x-show="!editing">
+            <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold text-gray-800 leading-snug">
+                    {% if entry.kind == 'part' %}<span class="text-xs font-medium text-emerald-600 mr-1">[Part]</span>{% endif %}{{ entry.description }}
+                    {% if entry.quantity != 1 %}<span class="text-xs font-normal text-gray-400">× {{ entry.quantity|floatformat:"-2" }}</span>{% endif %}
+                </p>
+                {% if entry.notes %}<p class="text-xs text-gray-500 mt-0.5 leading-snug">{{ entry.notes }}</p>{% endif %}
+            </div>
+            <div class="text-sm text-gray-700 shrink-0 mt-0.5 text-right min-w-[64px]">
+                {% if entry.line_total != None %}${{ entry.line_total|floatformat:2 }}{% else %}<span class="text-xs text-gray-300 italic">no price</span>{% endif %}
+            </div>
+            <div class="flex gap-2 shrink-0 mt-0.5">
+                <button type="button" @click="editing = true" title="Edit" class="text-gray-400 hover:text-blue-500 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                    </svg>
+                </button>
+                <form method="post" action="{% url 'core:work_performed_delete' entry.pk %}"
+                      hx-post="{% url 'core:work_performed_delete' entry.pk %}" hx-target="#contract-line-items-section" hx-swap="innerHTML" class="inline">
+                    {% csrf_token %}
+                    <button type="submit" title="Remove" class="text-gray-400 hover:text-red-500 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                        </svg>
+                    </button>
+                </form>
+            </div>
+        </div>
+        <div x-show="editing" x-cloak class="px-3 py-2">
+            <form method="post" action="{% url 'core:work_performed_update' entry.pk %}"
+                  hx-post="{% url 'core:work_performed_update' entry.pk %}" hx-target="#contract-line-items-section" hx-swap="innerHTML" class="space-y-2">
+                {% csrf_token %}
+                <input type="text" name="custom_label" value="{{ entry.description }}" placeholder="Service" required
+                       class="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                <textarea name="notes" rows="2" placeholder="Details (optional)"
+                          class="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none">{{ entry.notes }}</textarea>
+                <div class="flex gap-2">
+                    <label class="flex-1"><span class="block text-xs text-gray-400 mb-0.5">Qty</span>
+                        <input type="number" name="quantity" value="{{ entry.quantity|floatformat:'-2' }}" min="0" step="0.01"
+                               class="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"></label>
+                    <label class="flex-1"><span class="block text-xs text-gray-400 mb-0.5">Unit price ($)</span>
+                        <input type="number" name="unit_price" value="{% if entry.unit_price != None %}{{ entry.unit_price|floatformat:2 }}{% endif %}" min="0" step="0.01" placeholder="—"
+                               class="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"></label>
+                </div>
+                <div class="flex gap-2">
+                    <button type="submit" class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">Save</button>
+                    <button type="button" @click="editing = false" class="px-3 py-1 bg-gray-100 text-gray-600 text-xs rounded hover:bg-gray-200">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+<div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-200 text-sm">
+    <span class="text-gray-500">Recurring total</span>
+    <span class="font-semibold text-gray-800">${{ contract.line_items_total|floatformat:2 }}</span>
+</div>
+{% else %}
+<p class="text-sm text-gray-400 italic">No recurring lines yet — add a service below.</p>
+{% endif %}

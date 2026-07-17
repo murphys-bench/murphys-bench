@@ -597,6 +597,9 @@ class Asset(models.Model):
 
     id = models.AutoField(primary_key=True)
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='assets')
+    # "Covered by" — which recurring Contract this asset falls under. Nullable: a
+    # managed client may have assets not yet attached to a specific contract.
+    contract = models.ForeignKey('Contract', on_delete=models.SET_NULL, null=True, blank=True, related_name='assets')
     name = models.CharField(max_length=255, help_text="e.g. 'Reception PC' or 'DC01'")
     asset_type = models.CharField(max_length=50, choices=ASSET_TYPE_CHOICES, default='workstation')
     # Free text — an asset tag, hostname, or serial; values vary too widely to constrain.
@@ -1497,6 +1500,110 @@ class Sale(models.Model):
         nums = [int(n[5:]) for n in existing if re.match(r'^SALE-\d{5}$', n)]
         next_num = (max(nums) + 1) if nums else 1
         return f"SALE-{next_num:05d}"
+
+
+class Contract(models.Model):
+    """A recurring service agreement — the thing that MAKES a client a managed client.
+
+    Rule (Mike): there is no managed client without a Contract. A Contract designates
+    a record as managed; absent one, the record is a retail customer on the event-driven
+    (WorkOrder/Sale → Invoice Ninja) lane, which is untouched by this model. The two
+    lanes stay separate.
+
+    Contract is the 6th LineItem host (after WorkOrder/Estimate/Sale/EstimateOption/
+    Client) — its recurring charges reuse the exact catalog-picker + custom-line UI.
+    Lines are flat/manual for now; asset-count-driven pricing is a later, hooked slice.
+    The monthly billing run (later slice) CLONES these lines into a draft Sale/invoice —
+    it never auto-charges; the first real recurring auto-charge is gated separately on
+    signed authorizations."""
+
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('active', 'Active'),
+        ('expired', 'Expired'),
+        ('cancelled', 'Cancelled'),
+    ]
+    CADENCE_CHOICES = [
+        ('monthly', 'Monthly'),
+        ('quarterly', 'Quarterly'),
+        ('annual', 'Annual'),
+    ]
+
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='contracts')
+    contract_number = models.CharField(max_length=20, unique=True)
+    title = models.CharField(max_length=200, help_text='e.g. "Managed Services — Monthly"')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', db_index=True)
+    billing_cadence = models.CharField(max_length=20, choices=CADENCE_CHOICES, default='monthly')
+    billing_day = models.PositiveSmallIntegerField(
+        default=1,
+        validators=[MinValueValidator(1), MaxValueValidator(31)],
+        help_text='Day of the month this contract bills (1–31). A day past the month end '
+                  'bills on the last day (31 → Feb 28/29).',
+    )
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True, help_text='Blank = open-ended.')
+    auto_renew = models.BooleanField(default=False)
+    renewal_date = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='contracts_created')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    line_items = GenericRelation('LineItem')
+
+    class Meta:
+        db_table = 'contracts'
+        ordering = ['client', '-created_at']
+        indexes = [
+            models.Index(fields=['status']),
+            models.Index(fields=['client', 'status']),
+        ]
+
+    def __str__(self):
+        return f'{self.contract_number} — {self.title}'
+
+    @property
+    def is_active(self):
+        return self.status == 'active'
+
+    @property
+    def line_items_total(self):
+        """Sum of priced recurring lines — same vocabulary as the other LineItem hosts."""
+        from decimal import Decimal
+        total = Decimal('0')
+        for li in self.line_items.all():
+            lt = li.line_total
+            if lt is not None:
+                total += lt
+        return total
+
+    def effective_billing_date(self, year, month):
+        """This contract's billing date for the given month, month-end-clamped
+        (mirrors Client.effective_billing_date)."""
+        import calendar
+        from datetime import date
+        last_day = calendar.monthrange(year, month)[1]
+        return date(year, month, min(self.billing_day, last_day))
+
+    def save(self, *args, **kwargs):
+        if self._state.adding:
+            return _save_with_unique_number(
+                self, 'contract_number', self.generate_contract_number,
+                lambda: super(Contract, self).save(*args, **kwargs),
+            )
+        return super().save(*args, **kwargs)
+
+    @classmethod
+    def generate_contract_number(cls):
+        """Generate sequential contract number like AGR-00001."""
+        import re
+        existing = cls.objects.filter(
+            contract_number__regex=r'^AGR-\d{5}$'
+        ).values_list('contract_number', flat=True)
+        nums = [int(n[4:]) for n in existing if re.match(r'^AGR-\d{5}$', n)]
+        next_num = (max(nums) + 1) if nums else 1
+        return f"AGR-{next_num:05d}"
 
 
 class PaymentChargeAttempt(models.Model):

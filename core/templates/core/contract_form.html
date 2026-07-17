@@ -33,39 +33,45 @@
         {% endif %}
 
         <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-base font-semibold text-gray-900 mb-4">Asset Info</h2>
+            <h2 class="text-base font-semibold text-gray-900 mb-4">Contract</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Name <span class="text-red-500">*</span></label>
-                    {{ form.name }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                    {{ form.asset_type }}
-                </div>
                 <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Identifier <span class="text-gray-400 font-normal">(asset tag, hostname, or serial)</span></label>
-                    {{ form.identifier }}
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Title <span class="text-red-500">*</span></label>
+                    {{ form.title }}
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Manufacturer</label>
-                    {{ form.manufacturer }}
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                    {{ form.status }}
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                    {{ form.model }}
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Billing Cadence</label>
+                    {{ form.billing_cadence }}
                 </div>
-                <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Covered by <span class="text-gray-400 font-normal">(contract)</span></label>
-                    {{ form.contract }}
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Billing Day <span class="text-gray-400 font-normal">(1–31)</span></label>
+                    {{ form.billing_day }}
+                </div>
+                <div class="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                        {{ form.start_date }}
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">End Date <span class="text-gray-400 font-normal">(blank = open-ended)</span></label>
+                        {{ form.end_date }}
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    {{ form.auto_renew }}
+                    <label class="text-sm font-medium text-gray-700">Auto-renew</label>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Renewal Date</label>
+                    {{ form.renewal_date }}
                 </div>
                 <div class="md:col-span-2">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
                     {{ form.notes }}
-                </div>
-                <div class="flex items-center gap-2 md:col-span-2">
-                    {{ form.is_active }}
-                    <label class="text-sm font-medium text-gray-700">Active asset</label>
                 </div>
             </div>
         </div>
@@ -73,7 +79,7 @@
         <div class="flex flex-wrap gap-3">
             <button type="submit"
                     class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium">
-                Save Asset
+                Save Contract
             </button>
             <a href="{{ cancel_url }}"
                class="px-6 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">
