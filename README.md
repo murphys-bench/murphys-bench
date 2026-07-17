@@ -24,7 +24,7 @@ Murphy's Bench handles the repair workflow I actually needed:
 - estimates and quotes, including prospects that do not become clients until the work is accepted
 - a small Register for settling completed work orders and walk-in counter sales
 - Invoice Ninja handoff for invoices and payments
-- recurring managed-client billing
+- managed clients: service contracts, managed assets, and cadence-based recurring billing
 - encrypted device and organization credentials
 - a Markdown knowledge base
 - reports with CSV/PDF export
@@ -44,7 +44,7 @@ Murphy's Bench is not trying to be:
 - a complete inventory system
 - a replacement for QuickBooks, Square, or Invoice Ninja
 
-There is a Register, but there is no cash drawer, barcode scanner, split tender, or retail inventory workflow. Parts can be billed on work orders today, but stock tracking and ordering are not built yet.
+There is a Register, but there is no cash drawer, barcode scanner, split tender, or retail inventory workflow. Parts can be billed on work orders today, but stock tracking and ordering are not built yet. Managed clients' machines can be tracked as assets, but that is device tracking, not parts/stock inventory.
 
 That may change later. Parts and inventory probably need to exist if the project is going to fit more shops. But the priority today is still the ticket -> work order -> invoice -> paid path.
 
