@@ -549,6 +549,10 @@ class Device(models.Model):
     device_password = EncryptedCharField(max_length=255, blank=True)
     credential_notes = EncryptedTextField(blank=True)
     is_active = models.BooleanField(default=True)
+    # One-directional Device → Asset promotion (managed-client layer). When a device
+    # you start managing is promoted, an Asset is created, this device's repair history
+    # follows onto it, and the device is retired (is_active=False) and linked here.
+    promoted_to_asset = models.ForeignKey('Asset', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -571,6 +575,42 @@ class Device(models.Model):
         if not self.serial_number:
             self.serial_number = None
         super().save(*args, **kwargs)
+
+    @property
+    def is_promoted(self):
+        return self.promoted_to_asset_id is not None
+
+    def promote_to_asset(self, user=None):
+        """Promote this (client-owned) Device into a managed Asset — the same machine
+        becoming managed. Copies the identifying fields into a new Asset, moves this
+        device's repair history onto it (each WorkOrder gains the asset link), then
+        retires the device (is_active=False) and links it to the asset. One-directional
+        and idempotent: an already-promoted device returns its existing Asset. A
+        walk-in (client-less) device cannot be promoted (an asset must belong to a
+        client). The device row is retained as retired history (it may hold encrypted
+        credentials); it just leaves the active roster."""
+        from django.db import transaction
+
+        if self.promoted_to_asset_id:
+            return self.promoted_to_asset
+        if self.client_id is None:
+            raise ValueError('A walk-in device has no client and cannot become an asset.')
+
+        with transaction.atomic():
+            asset = Asset.objects.create(
+                client=self.client,
+                name=self.name,
+                identifier=self.serial_number or '',
+                manufacturer=self.manufacturer,
+                model=self.model,
+                notes=self.notes,
+            )
+            # History follows the machine: re-point this device's work orders.
+            self.work_orders.update(asset=asset)
+            self.is_active = False
+            self.promoted_to_asset = asset
+            self.save(update_fields=['is_active', 'promoted_to_asset', 'updated_at'])
+        return asset
 
 
 class Asset(models.Model):
@@ -1004,6 +1044,10 @@ class WorkOrder(models.Model):
     # (never a shared placeholder that would accumulate every one-off repair).
     client = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
     device = models.ForeignKey(Device, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
+    # Managed-asset link (managed-client layer). Set when a Device is promoted to an
+    # Asset — the machine's repair history follows it onto the Asset. A WorkOrder can
+    # carry a device link, an asset link, or neither (walk-in).
+    asset = models.ForeignKey('Asset', on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
     contact = models.ForeignKey('Contact', on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
     repair_type = models.ForeignKey(RepairType, on_delete=models.SET_NULL, null=True, related_name='work_orders')
     # Free-text presenting problem + any ad-hoc work the client requested. Not every

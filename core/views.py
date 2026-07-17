@@ -2950,6 +2950,41 @@ class AssetDeleteView(LoginRequiredMixin, View):
         return redirect('core:client_detail', pk=client_pk)
 
 
+class AssetDetailView(LoginRequiredMixin, DetailView):
+    model = Asset
+    template_name = 'core/asset_detail.html'
+    context_object_name = 'asset'
+
+    def get_queryset(self):
+        return Asset.objects.select_related('client', 'contract')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['work_orders'] = self.object.work_orders.select_related('assigned_to').order_by('-created_at')
+        return context
+
+
+class DevicePromoteToAssetView(LoginRequiredMixin, View):
+    """Promote a client-owned Device into a managed Asset (one-directional). The
+    machine's repair history follows onto the Asset and the device retires."""
+
+    def post(self, request, pk):
+        device = get_object_or_404(Device, pk=pk)
+        if device.client_id is None:
+            messages.error(request, 'A walk-in device has no client and cannot become an asset.')
+            return redirect('core:device_detail', pk=pk)
+        if device.is_promoted:
+            messages.info(request, f'"{device.name}" is already a managed asset.')
+            return redirect('core:asset_detail', pk=device.promoted_to_asset_id)
+        asset = device.promote_to_asset(request.user)
+        messages.success(
+            request,
+            f'"{device.name}" is now a managed asset. Its repair history moved with it; '
+            'the old device record was retired.',
+        )
+        return redirect('core:asset_detail', pk=asset.pk)
+
+
 # ── Contracts (managed-client layer) ─────────────────────────────────────
 # A Contract is what designates a client as managed. Creating one is the
 # explicit act; there is no managed client without a Contract. Recurring lines
