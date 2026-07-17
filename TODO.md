@@ -697,7 +697,8 @@ shops ask for — not by guessing.
 - **Point of sale (POS)** — counter checkout / accessory sales.
 - **Additional invoicing/accounting targets** — QuickBooks Online & others (IN is wired first because SCS uses it; explicitly NOT IN-only forever).
 - **Deeper documentation** — beyond the current KB + credential vaults (pairs with BookStack today).
-- **Customer self-service portal**, **RMM integration**, **SSL/domain expiry alerts**, **recurring-contract (MRR) billing**.
+- **Customer self-service portal**, **RMM integration**, **SSL/domain expiry alerts**.
+- ✅ **Recurring-contract (MRR) billing — BUILT (Jul 17 2026, migs 0091–0094).** The managed-client layer: `Contract` (the managed designation, `AGR-NNNNN`, monthly/quarterly/annual cadence, recurring lines, covered assets), `Asset` (managed inventory, separate from Device, one-way Device→Asset promotion carrying repair history), and a cadence-aware billing worklist that produces drafts (no auto-charge — gated on signed authorizations). See memory `project_mb_contracts_assets_design`.
 - **Multi-shop capability** — PCRT supported it; open question, not foreclosed.
 
 ---

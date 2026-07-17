@@ -82,6 +82,21 @@ Everything is organized around the **client**, the way a shop actually thinks:
 - From a client's page you see their whole history and can start a new work
   order for a specific person and device in a couple of clicks.
 
+**Managed clients vs. retail customers.** The same record can be a managed
+client or a one-off retail customer — the difference is whether it has a
+**service contract**. A record with an active contract is a managed client; a
+record without one is a retail customer who just gets work orders and counter
+sales as they come. Either can be business or residential, either can generate
+work, and either can convert to the other. Both lanes stay fully separate — the
+event-driven repair path is never disturbed by the managed path.
+
+**Managed assets.** A managed client's equipment can be tracked as **assets** —
+owned/managed machines, distinct from the walk-in-style device records the bench
+uses. A device you start managing can be **promoted to an asset** in one step,
+and its repair history follows it, so the machine keeps one continuous record.
+Assets can be attached to a contract ("covered by") and show their own recent
+work. This is managed-device tracking, not a stock/parts inventory.
+
 ---
 
 ## Knowing where things stand
@@ -140,12 +155,21 @@ not a payment processor and not an accounting package.
 
 ## Recurring / managed billing
 
-- Mark a client **managed** and give them a **monthly billing day**.
-- Each client carries a reusable set of **recurring line items** (their monthly
-  services, at negotiated prices).
-- A **Monthly Clients worklist** prepares each due client's invoice, with a
-  batch review-and-confirm step before anything is sent — so a month's billing
-  is one reviewed action, not manual re-entry.
+- **Service contracts** are the managed-client mechanism. A contract carries a
+  reusable set of **recurring line items** (the client's services, at negotiated
+  prices), a **cadence** (monthly, quarterly, or annual), its own **billing day**,
+  a term and renewal, and any **covered assets**. Creating a contract is what
+  makes a record a managed client.
+- A **contract billing worklist** prepares each due contract's invoice for the
+  current period, with a batch review-and-confirm step before anything is sent —
+  so a period's billing is one reviewed action, not manual re-entry. It knows
+  which contracts are actually due this period based on their cadence.
+- Everything MB produces here is a **draft** invoice. MB never auto-charges — you
+  review, send the drafts to Invoice Ninja, and settle them there. Nothing is
+  charged without a deliberate step.
+
+*(A simpler per-client monthly-billing mode also exists for shops that don't want
+full contracts.)*
 
 ## Billing state and export
 
@@ -211,9 +235,11 @@ Murphy's Bench is in **active daily production use** at the shop that builds it,
 and it's being hardened for use by others. It's deliberately scoped: it does
 ticketing, work orders, devices, mileage, email, credentials, quoting, a light
 sales register, and reporting **well**, rather than trying to be everything. It
-is not a full retail POS (no inventory, cash drawer, or barcodes), a payment
-processor, a customer self-service portal, a full accounting system, or a
-multi-tenant SaaS — those are out of scope by choice.
+is not a full retail POS (no stock/parts inventory, cash drawer, or barcodes), a
+payment processor, a customer self-service portal, a full accounting system, or a
+multi-tenant SaaS — those are out of scope by choice. (It does track *managed
+assets* — a client's managed machines — but that is device tracking, not stock
+inventory.)
 
 If you run a small shop and want repair-tracking software you fully control,
 this is built for exactly that.
