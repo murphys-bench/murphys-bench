@@ -1,0 +1,119 @@
+{% extends "core/base.html" %}
+
+{% block title %}Contract Billing - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow page-title-bar">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-4">
+        <div>
+            <a href="{% url 'core:contract_list' %}" class="text-sm text-gray-400 hover:text-gray-600">← Contracts</a>
+            <h1 class="text-2xl font-bold text-gray-900">Contract Billing</h1>
+            <p class="text-xs text-gray-500 mt-0.5">Murphy's Bench sends <strong>draft</strong> invoices to Invoice Ninja. Nothing is charged here — charge each card by hand in Invoice Ninja, then Check IN to record payment.</p>
+        </div>
+        {% include "core/partials/header_bell.html" %}
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto">
+
+    {% if rows %}
+    <!-- Batch actions -->
+    <div class="flex flex-wrap items-center gap-3 mb-4">
+        <form method="post" action="{% url 'core:contract_billing_prepare_all' %}">
+            {% csrf_token %}
+            <button type="submit" {% if not due_unprepared_count %}disabled{% endif %}
+                    class="px-4 py-2 rounded text-sm font-medium {% if due_unprepared_count %}bg-blue-600 text-white hover:bg-blue-700{% else %}bg-gray-100 text-gray-400 cursor-not-allowed{% endif %}">
+                Prepare all due{% if due_unprepared_count %} ({{ due_unprepared_count }}){% endif %}
+            </button>
+        </form>
+        {% if invoice_ninja_enabled %}
+        <a href="{% if prepared_unsent_count %}{% url 'core:contract_billing_send_drafts' %}{% else %}#{% endif %}"
+           class="px-4 py-2 rounded text-sm font-medium {% if prepared_unsent_count %}bg-green-600 text-white hover:bg-green-700{% else %}bg-gray-100 text-gray-400 cursor-not-allowed pointer-events-none{% endif %}">
+            Send prepared drafts to Invoice Ninja{% if prepared_unsent_count %} ({{ prepared_unsent_count }}){% endif %}
+        </a>
+        {% else %}
+        <span class="text-xs text-gray-400">Enable Invoice Ninja in Settings to send drafts.</span>
+        {% endif %}
+    </div>
+
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contract</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cadence</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{{ today|date:"M Y" }}</th>
+                    <th class="px-4 py-3"></th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                {% for row in rows %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium">
+                        <a href="{% url 'core:contract_detail' row.contract.pk %}" class="text-blue-600 hover:underline">{{ row.contract.contract_number }}</a>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{{ row.contract.client.name }}</td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
+                        {{ row.contract.get_billing_cadence_display }}
+                        {% if not row.is_billing_month %}<span class="ml-1 text-xs text-gray-400">(not this month)</span>{% elif not row.is_due %}<span class="ml-1 text-xs text-gray-400">(not due yet)</span>{% endif %}
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700">${{ row.contract.line_items_total|floatformat:2 }}</td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                        {% if row.state == 'not_prepared' %}
+                            <span class="px-2 py-1 text-xs font-semibold rounded bg-gray-100 text-gray-600">Not prepared</span>
+                        {% elif row.state == 'prepared' %}
+                            <span class="px-2 py-1 text-xs font-semibold rounded bg-yellow-100 text-yellow-700">Prepared</span>
+                        {% elif row.state == 'draft_in_in' %}
+                            <span class="px-2 py-1 text-xs font-semibold rounded bg-blue-100 text-blue-700">Draft in IN{% if row.sale.invoice_ninja_ref %} · #{{ row.sale.invoice_ninja_ref }}{% endif %}</span>
+                        {% elif row.state == 'paid' %}
+                            <span class="px-2 py-1 text-xs font-semibold rounded bg-green-100 text-green-700">Paid</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap text-right">
+                        <div class="flex items-center gap-2 justify-end">
+                        {% if row.state == 'not_prepared' %}
+                            {% if row.is_due %}
+                            <form method="post" action="{% url 'core:contract_billing_prepare' row.contract.pk %}">
+                                {% csrf_token %}
+                                <button type="submit" class="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Prepare draft</button>
+                            </form>
+                            {% endif %}
+                        {% elif row.state == 'prepared' %}
+                            <a href="{% url 'core:sale_detail' row.sale.pk %}" class="px-3 py-1 border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50">Review</a>
+                            {% if invoice_ninja_enabled %}
+                            <form method="post" action="{% url 'core:sale_send_draft' row.sale.pk %}">
+                                {% csrf_token %}
+                                <button type="submit" class="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">Send draft</button>
+                            </form>
+                            {% endif %}
+                        {% elif row.state == 'draft_in_in' %}
+                            {% if invoice_ninja_enabled %}
+                            <form method="post" action="{% url 'core:sale_check_in' row.sale.pk %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="next" value="{% url 'core:contract_billing_list' %}">
+                                <button type="submit" class="px-3 py-1 border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50">Check IN</button>
+                            </form>
+                            {% endif %}
+                            <a href="{% url 'core:sale_detail' row.sale.pk %}" class="px-3 py-1 border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50">View</a>
+                        {% else %}
+                            <a href="{% url 'core:sale_detail' row.sale.pk %}" class="px-3 py-1 border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50">View</a>
+                        {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="bg-white rounded-lg shadow px-6 py-16 text-center">
+        <p class="text-gray-400 text-lg mb-2">No active contracts.</p>
+        <p class="text-gray-400 text-sm">Create a contract on a client and set its status to Active to bill it here.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
