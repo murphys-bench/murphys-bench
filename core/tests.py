@@ -7215,3 +7215,77 @@ def test_asset_detail_shows_recent_work(client, client_obj, admin_user):
     assert resp.status_code == 200
     assert b'DC01' in resp.content
     assert b'Recent work' in resp.content
+
+
+# ── Contract billing hardening (P2-1/2/3) ───────────────────────────────
+
+from django.db import IntegrityError as _IntegrityError
+
+
+@pytest.mark.django_db
+def test_contract_past_end_date_not_due_even_if_active(client_obj):
+    from datetime import date
+    c = Contract.objects.create(
+        client=client_obj, title='Ending', status='active',
+        billing_cadence='monthly', billing_day=1,
+        end_date=date(2026, 6, 30),
+    )
+    # On/before the end date it still bills; after, it does not — even though the
+    # status was never manually flipped to expired.
+    assert c.is_billing_due(date(2026, 6, 15)) is True
+    assert c.is_billing_due(date(2026, 6, 30)) is True
+    assert c.is_billing_due(date(2026, 7, 1)) is False
+
+
+@pytest.mark.django_db
+def test_duplicate_contract_period_sale_blocked_by_db(client_obj):
+    from core.models import Sale
+    contract = Contract.objects.create(client=client_obj, title='MSP', status='active')
+    Sale.objects.create(client=client_obj, is_recurring=True, contract=contract, billing_period='2026-07')
+    with pytest.raises(_IntegrityError):
+        Sale.objects.create(client=client_obj, is_recurring=True, contract=contract, billing_period='2026-07')
+
+
+@pytest.mark.django_db
+def test_non_contract_sales_not_constrained(client_obj):
+    from core.models import Sale
+    # Two counter sales (no contract, blank billing_period) must coexist fine.
+    Sale.objects.create(client=client_obj)
+    Sale.objects.create(client=client_obj)
+    assert Sale.objects.filter(contract__isnull=True).count() == 2
+
+
+@pytest.mark.django_db
+def test_contract_views_require_sales_gate(client, client_obj, tech_user):
+    # tech_user has no role → not a sales viewer → blocked from contract surfaces.
+    client.force_login(tech_user)
+    assert client.post(reverse('core:contract_create', args=[client_obj.pk]),
+                       {'title': 'X', 'status': 'active', 'billing_cadence': 'monthly',
+                        'billing_day': 1}).status_code == 403
+    contract = Contract.objects.create(client=client_obj, title='MSP')
+    assert client.post(reverse('core:contract_line_custom', args=[contract.pk]),
+                       {'custom_label': 'Y', 'kind': 'labor'}).status_code == 403
+
+
+@pytest.mark.django_db
+def test_line_edit_gate_is_host_aware(client, client_obj, tech_user):
+    """A plain tech may edit Work Order lines (login-only) but NOT Contract lines
+    (billing-gated), through the shared line-edit endpoint."""
+    from core.models import LineItem
+    # WorkOrder line — editable by a tech.
+    wo = WorkOrder.objects.create(client=client_obj)
+    wo_line = wo.line_items.create(kind='labor', description='Fix', quantity=1, unit_price=50)
+    # Contract line — gated.
+    contract = Contract.objects.create(client=client_obj, title='MSP')
+    c_line = contract.line_items.create(kind='labor', description='MSP', quantity=1, unit_price=100)
+
+    client.force_login(tech_user)
+    ok = client.post(reverse('core:work_performed_update', args=[wo_line.pk]),
+                     {'custom_label': 'Fix', 'quantity': '1', 'unit_price': '55'})
+    assert ok.status_code == 200
+    blocked = client.post(reverse('core:work_performed_update', args=[c_line.pk]),
+                          {'custom_label': 'MSP', 'quantity': '1', 'unit_price': '1'})
+    assert blocked.status_code == 403
+    # The contract line price was NOT changed by the blocked request.
+    c_line.refresh_from_db()
+    assert c_line.unit_price == 100
