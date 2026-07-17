@@ -354,6 +354,66 @@
         {% endwith %}
     </div>
 
+    <!-- ── ASSETS (managed inventory) ──────────────────────────────── -->
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+            <h2 class="text-lg font-semibold text-gray-900">Assets</h2>
+            <a href="{% url 'core:asset_create' client.pk %}"
+               class="text-sm text-blue-600 hover:underline">+ Add Asset</a>
+        </div>
+        {% with assets=client.assets.all %}
+        {% if assets %}
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Asset</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Identifier</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    {% for asset in assets %}
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-3">
+                                <p class="text-sm font-medium text-gray-900">{{ asset.name }}</p>
+                                {% if asset.manufacturer or asset.model %}
+                                    <p class="text-xs text-gray-500">{{ asset.manufacturer }} {{ asset.model }}</p>
+                                {% endif %}
+                            </td>
+                            <td class="px-6 py-3 text-sm text-gray-600">{{ asset.get_asset_type_display }}</td>
+                            <td class="px-6 py-3 text-sm text-gray-600">{{ asset.identifier|default:"—" }}</td>
+                            <td class="px-6 py-3 text-sm">
+                                {% if asset.is_active %}
+                                    <span class="px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded">Active</span>
+                                {% else %}
+                                    <span class="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">Inactive</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-6 py-3">
+                                <div class="flex gap-2">
+                                    <a href="{% url 'core:asset_edit' asset.pk %}"
+                                       class="text-xs text-blue-600 hover:underline">Edit</a>
+                                    {% if is_admin %}
+                                    <form method="post" action="{% url 'core:asset_delete' asset.pk %}" class="inline"
+                                          onsubmit="return confirm('Delete asset &quot;{{ asset.name|escapejs }}&quot;? This cannot be undone.');">
+                                        {% csrf_token %}
+                                        <button type="submit" class="text-xs text-red-600 hover:underline">Remove</button>
+                                    </form>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="px-6 py-6 text-center text-gray-400 text-sm">No assets on file.</div>
+        {% endif %}
+        {% endwith %}
+    </div>
+
     <!-- ── RECURRING MONTHLY CHARGES (managed clients) ─────────────── -->
     {% if client.is_managed %}
     <div class="bg-white rounded-lg shadow p-6" x-data="{ logOpen: false, customOpen: false }">

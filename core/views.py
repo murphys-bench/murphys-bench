@@ -35,13 +35,14 @@ from .models import (
     BlockedSender,
     SLAPlan, HelpTopic, TechSkill,
     Notification, Prospect, Estimate, Sale, EstimateOption, PaymentChargeAttempt,
+    Asset,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm, DeviceQuickAddForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
                     CompanySettingsForm, OutboundEmailSettingsForm, InboundEmailSettingsForm,
                     AttachmentSettingsForm, SecuritySettingsForm, MileageSettingsForm,
                     ColorSettingsForm, InvoiceNinjaSettingsForm, BackupSettingsForm,
-                    ProspectForm, EstimateForm, SaleForm, SaleCheckoutForm)
+                    ProspectForm, EstimateForm, SaleForm, SaleCheckoutForm, AssetForm)
 
 logger = logging.getLogger('core')
 
@@ -2871,6 +2872,70 @@ class DeviceDeleteView(LoginRequiredMixin, View):
             msg += (f' {wo_count} work order(s) kept their as-serviced record '
                     f'but no longer link to a device.')
         messages.success(request, msg)
+        return redirect('core:client_detail', pk=client_pk)
+
+
+# ── Assets (managed inventory) ───────────────────────────────────────────
+# An Asset always belongs to a Client, so CRUD is client-scoped: the client
+# comes from the URL, never an editable form field. All three views redirect
+# back to the owning client detail (the managed-client hub).
+
+class AssetCreateView(LoginRequiredMixin, CreateView):
+    model = Asset
+    form_class = AssetForm
+    template_name = 'core/asset_form.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        self.client = get_object_or_404(Client, pk=kwargs['client_pk'])
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        form.instance.client = self.client
+        self.object = form.save()
+        messages.success(self.request, f'Asset "{self.object.name}" added.')
+        return redirect('core:client_detail', pk=self.client.pk)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'New Asset'
+        context['client'] = self.client
+        context['cancel_url'] = reverse_lazy('core:client_detail', kwargs={'pk': self.client.pk})
+        return context
+
+
+class AssetUpdateView(LoginRequiredMixin, UpdateView):
+    model = Asset
+    form_class = AssetForm
+    template_name = 'core/asset_form.html'
+
+    def form_valid(self, form):
+        self.object = form.save()
+        messages.success(self.request, f'Asset "{self.object.name}" updated.')
+        return redirect('core:client_detail', pk=self.object.client_id)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = f'Edit {self.object.name}'
+        context['client'] = self.object.client
+        context['cancel_url'] = reverse_lazy('core:client_detail', kwargs={'pk': self.object.client_id})
+        return context
+
+
+class AssetDeleteView(LoginRequiredMixin, View):
+    """Hard-delete a managed asset. Admin only.
+
+    An asset carries no dependent records in Slice 1 (no WorkOrder link yet), so
+    this is a plain delete. Redirects back to the owning client.
+    """
+
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        asset = get_object_or_404(Asset, pk=pk)
+        client_pk = asset.client_id
+        name = asset.name
+        asset.delete()
+        messages.success(request, f'Asset "{name}" deleted.')
         return redirect('core:client_detail', pk=client_pk)
 
 
