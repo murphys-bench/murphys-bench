@@ -178,6 +178,12 @@
                     {% else %}
                     <p class="text-sm text-gray-400 italic">No device assigned.</p>
                     {% endif %}
+                    {% if work_order.asset %}
+                    <p class="mt-2 text-xs">
+                        <span class="text-gray-400">Managed asset:</span>
+                        <a href="{% url 'core:asset_detail' work_order.asset.pk %}" class="text-indigo-600 hover:underline font-medium">{{ work_order.asset.name }}</a>
+                    </p>
+                    {% endif %}
                 </div>
                 <!-- Edit mode: assign device -->
                 <div x-show="editing" x-cloak>

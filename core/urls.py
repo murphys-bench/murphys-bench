@@ -23,8 +23,10 @@ urlpatterns = [
     path('devices/<int:pk>/delete/', views.DeviceDeleteView.as_view(), name='device_delete'),
     # Assets (managed inventory — client-scoped)
     path('clients/<int:client_pk>/assets/new/', views.AssetCreateView.as_view(), name='asset_create'),
+    path('assets/<int:pk>/', views.AssetDetailView.as_view(), name='asset_detail'),
     path('assets/<int:pk>/edit/', views.AssetUpdateView.as_view(), name='asset_edit'),
     path('assets/<int:pk>/delete/', views.AssetDeleteView.as_view(), name='asset_delete'),
+    path('devices/<int:pk>/promote-to-asset/', views.DevicePromoteToAssetView.as_view(), name='device_promote_asset'),
     # Contracts (managed-client layer)
     path('contracts/', views.ContractListView.as_view(), name='contract_list'),
     path('clients/<int:client_pk>/contracts/new/', views.ContractCreateView.as_view(), name='contract_create'),

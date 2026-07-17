@@ -1,0 +1,95 @@
+{% extends "core/base.html" %}
+{% load mb_icons %}
+
+{% block title %}{{ asset.name }} - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow page-title-bar">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        <a href="{% url 'core:client_detail' asset.client.pk %}" class="text-gray-400 hover:text-gray-600 text-sm">← {{ asset.client.name }}</a>
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <h1 class="text-2xl font-bold text-gray-900">{{ asset.name }}</h1>
+                {% if asset.is_active %}
+                    <span class="px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full">Active</span>
+                {% else %}
+                    <span class="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded-full">Retired</span>
+                {% endif %}
+            </div>
+            <a href="{% url 'core:asset_edit' asset.pk %}"
+               class="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200">Edit</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl space-y-6">
+
+    <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Details</h2>
+        <dl class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+            <div class="flex justify-between border-b border-gray-100 pb-2">
+                <dt class="text-gray-500">Type</dt><dd class="text-gray-900">{{ asset.get_asset_type_display }}</dd>
+            </div>
+            <div class="flex justify-between border-b border-gray-100 pb-2">
+                <dt class="text-gray-500">Identifier</dt><dd class="text-gray-900">{{ asset.identifier|default:"—" }}</dd>
+            </div>
+            <div class="flex justify-between border-b border-gray-100 pb-2">
+                <dt class="text-gray-500">Manufacturer</dt><dd class="text-gray-900">{{ asset.manufacturer|default:"—" }}</dd>
+            </div>
+            <div class="flex justify-between border-b border-gray-100 pb-2">
+                <dt class="text-gray-500">Model</dt><dd class="text-gray-900">{{ asset.model|default:"—" }}</dd>
+            </div>
+            <div class="flex justify-between border-b border-gray-100 pb-2">
+                <dt class="text-gray-500">Covered by</dt>
+                <dd class="text-gray-900">
+                    {% if asset.contract %}
+                        <a href="{% url 'core:contract_detail' asset.contract.pk %}" class="text-blue-600 hover:underline">{{ asset.contract.contract_number }}</a>
+                    {% else %}—{% endif %}
+                </dd>
+            </div>
+        </dl>
+        {% if asset.notes %}
+        <div class="mt-4 text-sm text-gray-600">
+            <p class="text-gray-500 mb-1">Notes</p>
+            <p class="whitespace-pre-line">{{ asset.notes }}</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- ── RECENT WORK ─────────────────────────────────────────────── -->
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-900">Recent work</h2>
+        </div>
+        {% if work_orders %}
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">WO #</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Opened</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    {% for wo in work_orders %}
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-3">
+                                <a href="{% url 'core:work_order_detail' wo.pk %}" class="text-sm font-medium text-blue-600 hover:underline">{{ wo.work_order_number }}</a>
+                            </td>
+                            <td class="px-6 py-3">{% status_badge wo.status 'workorder' %}</td>
+                            <td class="px-6 py-3 text-sm text-gray-600">{% if wo.assigned_to %}{{ wo.assigned_to.get_full_name|default:wo.assigned_to.username }}{% else %}—{% endif %}</td>
+                            <td class="px-6 py-3 text-sm text-gray-500">{{ wo.created_at|date:"M j, Y" }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="px-6 py-6 text-center text-gray-400 text-sm">No work orders on this asset yet.</div>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}

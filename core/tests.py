@@ -7154,3 +7154,64 @@ def test_contract_billing_list_renders(client, client_obj, admin_user):
     r = client.get(reverse('core:contract_billing_list'))
     assert r.status_code == 200
     assert b'Contract Billing' in r.content
+
+
+# ── Device → Asset promotion (Slice 5) ──────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_device_promote_to_asset_moves_history_and_retires(client, client_obj, admin_user):
+    device = Device.objects.create(client=client_obj, name='Reception PC',
+                                   serial_number='SN123', manufacturer='Dell', model='7090')
+    wo = WorkOrder.objects.create(client=client_obj, device=device)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:device_promote_asset', args=[device.pk]))
+    assert resp.status_code == 302
+    device.refresh_from_db()
+    asset = device.promoted_to_asset
+    assert asset is not None
+    assert asset.client_id == client_obj.pk
+    assert asset.name == 'Reception PC'
+    assert asset.identifier == 'SN123'
+    assert asset.manufacturer == 'Dell'
+    # History followed the machine onto the asset.
+    wo.refresh_from_db()
+    assert wo.asset_id == asset.pk
+    assert list(asset.work_orders.all()) == [wo]
+    # Device retired, not deleted.
+    assert device.is_active is False
+    assert Device.objects.filter(pk=device.pk).exists()
+
+
+@pytest.mark.django_db
+def test_device_promote_is_idempotent(client_obj):
+    device = Device.objects.create(client=client_obj, name='PC')
+    a1 = device.promote_to_asset()
+    a2 = device.promote_to_asset()
+    assert a1.pk == a2.pk
+    from core.models import Asset
+    assert Asset.objects.filter(client=client_obj).count() == 1
+
+
+@pytest.mark.django_db
+def test_walkin_device_cannot_be_promoted(client, admin_user):
+    device = Device.objects.create(client=None, name='Walk-in laptop')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:device_promote_asset', args=[device.pk]))
+    assert resp.status_code == 302  # redirected with an error message
+    device.refresh_from_db()
+    assert device.promoted_to_asset_id is None
+    with pytest.raises(ValueError):
+        device.promote_to_asset()
+
+
+@pytest.mark.django_db
+def test_asset_detail_shows_recent_work(client, client_obj, admin_user):
+    from core.models import Asset
+    asset = Asset.objects.create(client=client_obj, name='DC01')
+    WorkOrder.objects.create(client=client_obj, asset=asset)
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:asset_detail', args=[asset.pk]))
+    assert resp.status_code == 200
+    assert b'DC01' in resp.content
+    assert b'Recent work' in resp.content
