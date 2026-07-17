@@ -1507,6 +1507,18 @@ class Sale(models.Model):
         indexes = [
             models.Index(fields=['status']),
         ]
+        constraints = [
+            # One recurring draft per contract per billing period — a DB-level guard
+            # behind the app-level idempotency check, so a race (double-clicked Prepare,
+            # or a single Prepare against the batch run) can't create duplicate drafts.
+            # Conditional on contract set: non-contract sales all share (null, '') and
+            # must not collide.
+            models.UniqueConstraint(
+                fields=['contract', 'billing_period'],
+                condition=models.Q(contract__isnull=False),
+                name='uniq_contract_billing_period',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.sale_number} — {self.display_name}'
@@ -1672,6 +1684,10 @@ class Contract(models.Model):
         from django.utils import timezone
         as_of = as_of or timezone.localdate()
         if self.status != 'active':
+            return False
+        # A contract past its end date stops billing even if nobody has flipped the
+        # status to expired yet — end_date is authoritative when set.
+        if self.end_date and as_of > self.end_date:
             return False
         if not self.is_billing_month(as_of):
             return False
