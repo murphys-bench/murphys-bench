@@ -6910,3 +6910,65 @@ def test_backup_run_view_queues_out_of_band(admin_user, client, settings, tmp_pa
     assert resp.status_code == 200
     assert b'Backing up' in resp.content  # in-progress fragment
     assert backup_ops.trigger_path().exists()
+
+
+# ── Assets (managed inventory — Slice 1) ────────────────────────────────
+
+from core.models import Asset
+
+
+@pytest.mark.django_db
+def test_asset_create_attaches_to_client(client, client_obj, admin_user):
+    client.force_login(admin_user)
+    resp = client.post(
+        reverse('core:asset_create', args=[client_obj.pk]),
+        {'name': 'Reception PC', 'asset_type': 'workstation',
+         'identifier': 'RCP-01', 'is_active': 'on'},
+    )
+    assert resp.status_code == 302
+    asset = Asset.objects.get(name='Reception PC')
+    assert asset.client_id == client_obj.pk
+    assert asset.asset_type == 'workstation'
+    assert asset.identifier == 'RCP-01'
+    assert asset.is_active is True
+
+
+@pytest.mark.django_db
+def test_asset_edit_updates_fields(client, client_obj, admin_user):
+    asset = Asset.objects.create(client=client_obj, name='DC01', asset_type='server')
+    client.force_login(admin_user)
+    resp = client.post(
+        reverse('core:asset_edit', args=[asset.pk]),
+        {'name': 'DC01', 'asset_type': 'server', 'identifier': 'srv-dc01',
+         'is_active': 'on'},
+    )
+    assert resp.status_code == 302
+    asset.refresh_from_db()
+    assert asset.identifier == 'srv-dc01'
+
+
+@pytest.mark.django_db
+def test_asset_delete_requires_admin(client, client_obj, admin_user, tech_user):
+    asset = Asset.objects.create(client=client_obj, name='Old Printer')
+
+    # A non-admin tech is forbidden and the asset survives.
+    client.force_login(tech_user)
+    resp = client.post(reverse('core:asset_delete', args=[asset.pk]))
+    assert resp.status_code == 403
+    assert Asset.objects.filter(pk=asset.pk).exists()
+
+    # An admin can delete it.
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:asset_delete', args=[asset.pk]))
+    assert resp.status_code == 302
+    assert not Asset.objects.filter(pk=asset.pk).exists()
+
+
+@pytest.mark.django_db
+def test_asset_card_renders_on_client_detail(client, client_obj, admin_user):
+    Asset.objects.create(client=client_obj, name='Reception PC', identifier='RCP-01')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:client_detail', args=[client_obj.pk]))
+    assert resp.status_code == 200
+    assert b'Reception PC' in resp.content
+    assert b'RCP-01' in resp.content

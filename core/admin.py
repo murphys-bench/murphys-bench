@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import (
-    User, Client, Contact, Device, Ticket, TicketReply, WorkOrder, WorkOrderNote,
+    User, Client, Contact, Device, Asset, Ticket, TicketReply, WorkOrder, WorkOrderNote,
     WorkOrderItem, Mileage, RepairType, Checklist, ChecklistItem, CannedResponse, CannedResponseCategory,
     SiteSettings, Attachment, EmailTemplate, SuppressedAddress, EmailSendLog,
     Role, TechSkill, SLAPlan, HelpTopic, KBCategory, KBArticle,
@@ -117,6 +117,22 @@ class DeviceAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Device Info', {'fields': ('client', 'name', 'device_type', 'repair_type')}),
         ('Details', {'fields': ('manufacturer', 'model', 'serial_number')}),
+        ('Status', {'fields': ('is_active',)}),
+        ('Notes', {'fields': ('notes',), 'classes': ('collapse',)}),
+        ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
+    )
+    readonly_fields = ['created_at', 'updated_at']
+
+
+# Asset Admin
+@admin.register(Asset)
+class AssetAdmin(admin.ModelAdmin):
+    list_display = ['name', 'client', 'asset_type', 'identifier', 'is_active']
+    list_filter = ['asset_type', 'is_active', 'client']
+    search_fields = ['name', 'identifier', 'model', 'manufacturer', 'client__name']
+    fieldsets = (
+        ('Asset Info', {'fields': ('client', 'name', 'asset_type', 'identifier')}),
+        ('Details', {'fields': ('manufacturer', 'model')}),
         ('Status', {'fields': ('is_active',)}),
         ('Notes', {'fields': ('notes',), 'classes': ('collapse',)}),
         ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
