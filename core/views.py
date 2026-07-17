@@ -2990,7 +2990,7 @@ class DevicePromoteToAssetView(LoginRequiredMixin, View):
 # explicit act; there is no managed client without a Contract. Recurring lines
 # reuse the shared catalog/custom-line UI (Contract is the 6th LineItem host).
 
-class ContractListView(LoginRequiredMixin, ListView):
+class ContractListView(SaleAccessMixin, ListView):
     model = Contract
     template_name = 'core/contract_list.html'
     context_object_name = 'contracts'
@@ -3016,7 +3016,7 @@ class ContractListView(LoginRequiredMixin, ListView):
         return context
 
 
-class ContractDetailView(LoginRequiredMixin, DetailView):
+class ContractDetailView(SaleAccessMixin, DetailView):
     model = Contract
     template_name = 'core/contract_detail.html'
     context_object_name = 'contract'
@@ -3032,7 +3032,7 @@ class ContractDetailView(LoginRequiredMixin, DetailView):
         return context
 
 
-class ContractCreateView(LoginRequiredMixin, CreateView):
+class ContractCreateView(SaleAccessMixin, CreateView):
     model = Contract
     form_class = ContractForm
     template_name = 'core/contract_form.html'
@@ -3059,7 +3059,7 @@ class ContractCreateView(LoginRequiredMixin, CreateView):
         return context
 
 
-class ContractUpdateView(LoginRequiredMixin, UpdateView):
+class ContractUpdateView(SaleAccessMixin, UpdateView):
     model = Contract
     form_class = ContractForm
     template_name = 'core/contract_form.html'
@@ -3093,7 +3093,7 @@ class ContractDeleteView(LoginRequiredMixin, View):
         return redirect('core:client_detail', pk=client_pk)
 
 
-class ContractLineLogView(LoginRequiredMixin, View):
+class ContractLineLogView(SaleAccessMixin, View):
     """HTMX: add a catalog item to a contract's recurring lines."""
 
     def post(self, request, contract_pk, item_pk):
@@ -3103,7 +3103,7 @@ class ContractLineLogView(LoginRequiredMixin, View):
         return _render_line_items(request, contract)
 
 
-class ContractCustomLogView(LoginRequiredMixin, View):
+class ContractCustomLogView(SaleAccessMixin, View):
     """HTMX: add a fully custom line to a contract's recurring lines."""
 
     def post(self, request, contract_pk):
@@ -3144,20 +3144,30 @@ def _contract_sale_for_period(contract, today=None):
 def _prepare_contract_sale(contract, user, today=None):
     """Create this period's recurring draft Sale by CLONING the contract's lines
     into it. Idempotent per period. Nothing touches Invoice Ninja here."""
+    from django.db import IntegrityError, transaction
     today = today or timezone.localdate()
     sale = _contract_sale_for_period(contract, today)
     if sale is not None:
         return sale, False
-    sale = Sale.objects.create(
-        client=contract.client, is_recurring=True, contract=contract,
-        billing_period=contract.period_key(today), created_by=user,
-    )
-    for tl in contract.line_items.all():
-        LineItem.objects.create(
-            content_object=sale, kind=tl.kind, description=tl.description,
-            quantity=tl.quantity, unit_price=tl.unit_price,
-            catalog_item=tl.catalog_item, notes=tl.notes, logged_by=user,
-        )
+    try:
+        with transaction.atomic():
+            sale = Sale.objects.create(
+                client=contract.client, is_recurring=True, contract=contract,
+                billing_period=contract.period_key(today), created_by=user,
+            )
+            for tl in contract.line_items.all():
+                LineItem.objects.create(
+                    content_object=sale, kind=tl.kind, description=tl.description,
+                    quantity=tl.quantity, unit_price=tl.unit_price,
+                    catalog_item=tl.catalog_item, notes=tl.notes, logged_by=user,
+                )
+    except IntegrityError:
+        # A concurrent prepare won the race and created this period's draft — the
+        # uniq_contract_billing_period constraint bounced ours. Return the existing.
+        existing = _contract_sale_for_period(contract, today)
+        if existing is not None:
+            return existing, False
+        raise
     return sale, True
 
 
@@ -5197,12 +5207,23 @@ class WorkPerformedLogView(LoginRequiredMixin, View):
         return _render_line_items(request, work_order)
 
 
+def _guard_line_host(request, host):
+    """The line-edit views (delete/update) are host-agnostic — shared by WorkOrder,
+    Estimate, and EstimateOption (login-only, techs edit those) as well as the
+    billing hosts Sale, Client-recurring, and Contract. For the billing hosts the
+    same role gate that protects the sales/contract views applies here too, so
+    editing managed-client pricing isn't a login-only backdoor around it."""
+    if isinstance(host, (Sale, Client, Contract)) and not _can_view_sales(request.user):
+        raise PermissionDenied
+
+
 class WorkPerformedDeleteView(LoginRequiredMixin, View):
     """HTMX: remove a logged line item."""
 
     def post(self, request, pk):
         entry = get_object_or_404(LineItem, pk=pk)
         host = entry.content_object
+        _guard_line_host(request, host)
         entry.delete()
         return _render_line_items(request, host)
 
@@ -5212,6 +5233,7 @@ class WorkPerformedUpdateView(LoginRequiredMixin, View):
 
     def post(self, request, pk):
         entry = get_object_or_404(LineItem, pk=pk)
+        _guard_line_host(request, entry.content_object)
         label = request.POST.get('custom_label', '').strip()
         if label:
             entry.description = label[:255]
