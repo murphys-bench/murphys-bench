@@ -35,14 +35,15 @@ from .models import (
     BlockedSender,
     SLAPlan, HelpTopic, TechSkill,
     Notification, Prospect, Estimate, Sale, EstimateOption, PaymentChargeAttempt,
-    Asset,
+    Asset, Contract,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm, DeviceQuickAddForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
                     CompanySettingsForm, OutboundEmailSettingsForm, InboundEmailSettingsForm,
                     AttachmentSettingsForm, SecuritySettingsForm, MileageSettingsForm,
                     ColorSettingsForm, InvoiceNinjaSettingsForm, BackupSettingsForm,
-                    ProspectForm, EstimateForm, SaleForm, SaleCheckoutForm, AssetForm)
+                    ProspectForm, EstimateForm, SaleForm, SaleCheckoutForm, AssetForm,
+                    ContractForm)
 
 logger = logging.getLogger('core')
 
@@ -2889,6 +2890,11 @@ class AssetCreateView(LoginRequiredMixin, CreateView):
         self.client = get_object_or_404(Client, pk=kwargs['client_pk'])
         return super().dispatch(request, *args, **kwargs)
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['client'] = self.client
+        return kwargs
+
     def form_valid(self, form):
         form.instance.client = self.client
         self.object = form.save()
@@ -2907,6 +2913,11 @@ class AssetUpdateView(LoginRequiredMixin, UpdateView):
     model = Asset
     form_class = AssetForm
     template_name = 'core/asset_form.html'
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['client'] = self.object.client
+        return kwargs
 
     def form_valid(self, form):
         self.object = form.save()
@@ -2937,6 +2948,147 @@ class AssetDeleteView(LoginRequiredMixin, View):
         asset.delete()
         messages.success(request, f'Asset "{name}" deleted.')
         return redirect('core:client_detail', pk=client_pk)
+
+
+# ── Contracts (managed-client layer) ─────────────────────────────────────
+# A Contract is what designates a client as managed. Creating one is the
+# explicit act; there is no managed client without a Contract. Recurring lines
+# reuse the shared catalog/custom-line UI (Contract is the 6th LineItem host).
+
+class ContractListView(LoginRequiredMixin, ListView):
+    model = Contract
+    template_name = 'core/contract_list.html'
+    context_object_name = 'contracts'
+    paginate_by = 25
+
+    def get_queryset(self):
+        qs = Contract.objects.select_related('client')
+        search = self.request.GET.get('search')
+        if search:
+            qs = qs.filter(
+                Q(contract_number__icontains=search) |
+                Q(title__icontains=search) |
+                Q(client__name__icontains=search)
+            )
+        status = self.request.GET.get('status')
+        if status:
+            qs = qs.filter(status=status)
+        return qs.order_by('client__name', '-created_at')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['status_choices'] = Contract.STATUS_CHOICES
+        return context
+
+
+class ContractDetailView(LoginRequiredMixin, DetailView):
+    model = Contract
+    template_name = 'core/contract_detail.html'
+    context_object_name = 'contract'
+
+    def get_queryset(self):
+        return Contract.objects.select_related('client').prefetch_related('assets', 'line_items')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['catalog_by_category'] = _catalog_by_category()
+        context['entries'] = _line_items_for(self.object)
+        context['covered_assets'] = self.object.assets.all()
+        return context
+
+
+class ContractCreateView(LoginRequiredMixin, CreateView):
+    model = Contract
+    form_class = ContractForm
+    template_name = 'core/contract_form.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        self.client = get_object_or_404(Client, pk=kwargs['client_pk'])
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        form.instance.client = self.client
+        form.instance.created_by = self.request.user
+        self.object = form.save()
+        messages.success(
+            self.request,
+            f'Contract {self.object.contract_number} created — {self.client.name} is now a managed client.',
+        )
+        return redirect('core:contract_detail', pk=self.object.pk)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'New Contract'
+        context['client'] = self.client
+        context['cancel_url'] = reverse_lazy('core:client_detail', kwargs={'pk': self.client.pk})
+        return context
+
+
+class ContractUpdateView(LoginRequiredMixin, UpdateView):
+    model = Contract
+    form_class = ContractForm
+    template_name = 'core/contract_form.html'
+
+    def form_valid(self, form):
+        self.object = form.save()
+        messages.success(self.request, f'Contract {self.object.contract_number} updated.')
+        return redirect('core:contract_detail', pk=self.object.pk)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = f'Edit {self.object.contract_number}'
+        context['client'] = self.object.client
+        context['cancel_url'] = reverse_lazy('core:contract_detail', kwargs={'pk': self.object.pk})
+        return context
+
+
+class ContractDeleteView(LoginRequiredMixin, View):
+    """Hard-delete a Contract. Admin only. Its recurring line items cascade (the
+    GenericRelation); any Assets pointing at it keep existing but lose the coverage
+    link (contract FK is SET_NULL). Redirects back to the owning client."""
+
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        contract = get_object_or_404(Contract, pk=pk)
+        client_pk = contract.client_id
+        number = contract.contract_number
+        contract.delete()
+        messages.success(request, f'Contract {number} deleted.')
+        return redirect('core:client_detail', pk=client_pk)
+
+
+class ContractLineLogView(LoginRequiredMixin, View):
+    """HTMX: add a catalog item to a contract's recurring lines."""
+
+    def post(self, request, contract_pk, item_pk):
+        contract = get_object_or_404(Contract, pk=contract_pk)
+        item = get_object_or_404(CatalogItem, pk=item_pk, is_active=True)
+        _log_catalog_item(contract, item, request.user)
+        return _render_line_items(request, contract)
+
+
+class ContractCustomLogView(LoginRequiredMixin, View):
+    """HTMX: add a fully custom line to a contract's recurring lines."""
+
+    def post(self, request, contract_pk):
+        contract = get_object_or_404(Contract, pk=contract_pk)
+        label = request.POST.get('custom_label', '').strip()
+        notes = request.POST.get('notes', '').strip()
+        kind = request.POST.get('kind', 'labor')
+        if kind not in ('labor', 'part'):
+            kind = 'labor'
+        qty = _parse_qty(request.POST.get('quantity'))
+        if label:
+            contract.line_items.create(
+                kind=kind,
+                description=label[:255],
+                quantity=qty if qty is not None else 1,
+                unit_price=_parse_price(request.POST.get('unit_price')),
+                notes=notes,
+                logged_by=request.user,
+            )
+        return _render_line_items(request, contract)
 
 
 # --- Ticket Views ---
@@ -4788,6 +4940,13 @@ def _render_line_items(request, host):
         # line UI as everywhere else, its own swap target.
         return render(request, 'core/partials/client_recurring_lines.html', {
             'client': host,
+            'entries': _line_items_for(host),
+        })
+    if isinstance(host, Contract):
+        # Contract hosts recurring billing lines (managed-client layer) — same
+        # editable line UI, its own swap target #contract-line-items-section.
+        return render(request, 'core/partials/contract_line_items.html', {
+            'contract': host,
             'entries': _line_items_for(host),
         })
     if isinstance(host, Estimate):

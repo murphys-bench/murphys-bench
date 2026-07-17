@@ -6972,3 +6972,81 @@ def test_asset_card_renders_on_client_detail(client, client_obj, admin_user):
     assert resp.status_code == 200
     assert b'Reception PC' in resp.content
     assert b'RCP-01' in resp.content
+
+
+# ── Contracts (managed-client layer — Slice 2) ──────────────────────────
+
+from core.models import Contract, CatalogItem as _CatalogItem, LineItem as _LineItem
+
+
+@pytest.mark.django_db
+def test_contract_create_designates_managed_and_numbers(client, client_obj, admin_user):
+    client.force_login(admin_user)
+    resp = client.post(
+        reverse('core:contract_create', args=[client_obj.pk]),
+        {'title': 'Managed Services', 'status': 'active', 'billing_cadence': 'monthly',
+         'billing_day': 1},
+    )
+    assert resp.status_code == 302
+    contract = Contract.objects.get(client=client_obj)
+    assert contract.contract_number.startswith('AGR-')
+    assert contract.status == 'active'
+    assert client_obj.contracts.count() == 1
+
+
+@pytest.mark.django_db
+def test_contract_numbers_are_sequential(client_obj):
+    a = Contract.objects.create(client=client_obj, title='A')
+    b = Contract.objects.create(client=client_obj, title='B')
+    assert a.contract_number == 'AGR-00001'
+    assert b.contract_number == 'AGR-00002'
+
+
+@pytest.mark.django_db
+def test_contract_recurring_line_and_total(client, client_obj, admin_user):
+    contract = Contract.objects.create(client=client_obj, title='MSP')
+    client.force_login(admin_user)
+    resp = client.post(
+        reverse('core:contract_line_custom', args=[contract.pk]),
+        {'custom_label': 'Monitoring', 'kind': 'labor', 'quantity': '3', 'unit_price': '10'},
+    )
+    assert resp.status_code == 200
+    assert contract.line_items.count() == 1
+    from decimal import Decimal
+    assert contract.line_items_total == Decimal('30')
+
+
+@pytest.mark.django_db
+def test_contract_covers_asset_and_delete_unlinks(client, client_obj, admin_user):
+    contract = Contract.objects.create(client=client_obj, title='MSP')
+    asset = Asset.objects.create(client=client_obj, name='PC1', contract=contract)
+    assert list(contract.assets.all()) == [asset]
+
+    # Deleting the contract nulls the asset's coverage link (SET_NULL), asset survives.
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:contract_delete', args=[contract.pk]))
+    assert resp.status_code == 302
+    asset.refresh_from_db()
+    assert asset.contract_id is None
+    assert not Contract.objects.filter(pk=contract.pk).exists()
+
+
+@pytest.mark.django_db
+def test_contract_delete_requires_admin(client, client_obj, admin_user, tech_user):
+    contract = Contract.objects.create(client=client_obj, title='MSP')
+    client.force_login(tech_user)
+    resp = client.post(reverse('core:contract_delete', args=[contract.pk]))
+    assert resp.status_code == 403
+    assert Contract.objects.filter(pk=contract.pk).exists()
+
+
+@pytest.mark.django_db
+def test_contract_detail_and_list_render(client, client_obj, admin_user):
+    contract = Contract.objects.create(client=client_obj, title='Managed Services')
+    client.force_login(admin_user)
+    detail = client.get(reverse('core:contract_detail', args=[contract.pk]))
+    assert detail.status_code == 200
+    assert contract.contract_number.encode() in detail.content
+    listing = client.get(reverse('core:contract_list'))
+    assert listing.status_code == 200
+    assert b'Managed Services' in listing.content

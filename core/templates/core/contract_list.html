@@ -1,0 +1,82 @@
+{% extends "core/base.html" %}
+{% load mb_icons %}
+
+{% block title %}Contracts - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow page-title-bar">
+    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex flex-wrap items-center gap-4">
+        <h1 class="text-2xl font-bold text-gray-900 shrink-0">Contracts</h1>
+        <div class="flex-1"></div>
+        {% include "core/partials/header_bell.html" %}
+    </div>
+</div>
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
+    <div class="bg-white rounded-lg shadow p-3">
+        <form method="get" class="flex flex-wrap items-center gap-2">
+            <input type="text" name="search" value="{{ request.GET.search }}" placeholder="Search contracts…"
+                   class="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+            <select name="status" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                <option value="">All statuses</option>
+                {% for value, label in status_choices %}
+                <option value="{{ value }}" {% if request.GET.status == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">Search</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cadence</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Recurring</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+                {% for contract in contracts %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-3">
+                        <a href="{% url 'core:contract_detail' contract.pk %}" class="text-blue-600 hover:underline font-medium">{{ contract.contract_number }}</a>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-600">
+                        <a href="{% url 'core:client_detail' contract.client.pk %}" class="hover:underline">{{ contract.client.name }}</a>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-600">{{ contract.title }}</td>
+                    <td class="px-4 py-3 text-sm text-gray-600">{{ contract.get_billing_cadence_display }}</td>
+                    <td class="px-4 py-3 text-sm text-gray-700">${{ contract.line_items_total|floatformat:2 }}</td>
+                    <td class="px-4 py-3 text-sm">
+                        <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium
+                            {% if contract.status == 'active' %}bg-green-100 text-green-800
+                            {% elif contract.status == 'draft' %}bg-gray-100 text-gray-600
+                            {% elif contract.status == 'expired' %}bg-yellow-100 text-yellow-800
+                            {% else %}bg-red-100 text-red-700{% endif %}">
+                            {{ contract.get_status_display }}
+                        </span>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="px-4 py-10 text-center text-gray-500">No contracts found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if is_paginated %}
+    <div class="mt-4 flex justify-center gap-2 text-sm">
+        {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}" class="px-3 py-1 border rounded">Prev</a>{% endif %}
+        <span class="px-3 py-1">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}" class="px-3 py-1 border rounded">Next</a>{% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
