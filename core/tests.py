@@ -6550,7 +6550,7 @@ def _backup_post(onsite=False, offsite=False, **over):
     }
     if onsite:
         data['backups-backup_onsite_enabled'] = 'on'
-        data.setdefault('backups-backup_onsite_host', 'REDACTED-IP')
+        data.setdefault('backups-backup_onsite_host', '192.0.2.50')
         data.setdefault('backups-backup_onsite_share', 'VM')
         data.setdefault('backups-backup_onsite_username', 'mike')
         data.setdefault('backups-backup_onsite_password', 'nassecret')
@@ -6576,7 +6576,7 @@ def test_onsite_test_destination_probes_share_root_not_folder(settings, tmp_path
     from core import backup_ops
     site = SiteSettings.get()
     site.backup_onsite_enabled = True
-    site.backup_onsite_host = 'REDACTED-IP'
+    site.backup_onsite_host = '192.0.2.50'
     site.backup_onsite_share = 'VM'
     site.backup_onsite_username = 'mike'
     site.backup_onsite_folder = 'mb-backups'  # does NOT exist yet on the NAS
@@ -6631,7 +6631,7 @@ def test_backup_settings_both_destinations_render_files(admin_user, client, sett
     conf_path = backup_ops.rclone_conf_path()
     conf = conf_path.read_text()
     assert '[mbbackup]' in conf and 'secret_access_key = secret123' in conf
-    assert '[mbonsite]' in conf and 'type = smb' in conf and 'host = REDACTED-IP' in conf
+    assert '[mbonsite]' in conf and 'type = smb' in conf and 'host = 192.0.2.50' in conf
     # The onsite password must be rclone-OBSCURED, never stored in plaintext.
     assert 'nassecret' not in conf, 'onsite password must not appear in plaintext in .rclone.conf'
     import os, stat
@@ -6685,7 +6685,7 @@ def test_render_config_writes_nothing_when_obscure_fails(settings, tmp_path, mon
     monkeypatch.setattr(backup_ops, '_obscure', _boom)
     site = SiteSettings.get()
     site.backup_onsite_enabled = True
-    site.backup_onsite_host = 'REDACTED-IP'
+    site.backup_onsite_host = '192.0.2.50'
     site.backup_onsite_share = 'VM'
     site.backup_onsite_username = 'mike'
     site.backup_onsite_password = 'nassecret'

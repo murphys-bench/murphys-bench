@@ -354,5 +354,4 @@ WorkOrder 1 → N WorkOrderItem (checklist, parts, time)
 
 **Related Files:**
 - `database-schema.md` - Detailed field definitions
-- `CLAUDE.md` - Project overview
 - `core/models.py` - Ticket and WorkOrder models

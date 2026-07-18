@@ -57,6 +57,18 @@ Thumbs.db
 # Project-specific
 .claude/
 
+# Internal working docs (session log, roadmap, wiki export) — full of real
+# infra IPs/hostnames from daily SCS operation; not meant for the public repo.
+# Kept locally for continuity, never tracked.
+CLAUDE.md
+TODO.md
+docs/next-session-prompt.md
+docs/batch-11-plan.md
+docs/phase3-publish-checklist.md
+docs/design-criteria.md
+docs/bookstack/
+deploy/demo/
+
 # Database backup dumps (local + server, never committed)
 backups/
 

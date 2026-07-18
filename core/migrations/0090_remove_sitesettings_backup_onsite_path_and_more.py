@@ -31,7 +31,7 @@ class Migration(migrations.Migration):
             field=models.CharField(
                 blank=True,
                 default="",
-                help_text="NAS IP address or hostname (e.g. REDACTED-IP).",
+                help_text="NAS IP address or hostname (e.g. 192.0.2.50).",
                 max_length=255,
             ),
         ),

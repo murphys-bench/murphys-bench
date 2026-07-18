@@ -114,7 +114,7 @@ WSGI_APPLICATION = 'murphys_bench.wsgi.application'
 
 # Database Configuration
 # Murphy's Bench runs on SQLite (WAL mode) in dev and production — a deliberate
-# decision for a single-node, small-shop deployment (see CLAUDE.md "Key Decisions").
+# decision for a single-node, small-shop deployment.
 # The off-site backup is a consistent SQLite snapshot (scripts/mb_backup.sh).
 DATABASES = {
     'default': {

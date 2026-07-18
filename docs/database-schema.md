@@ -5,9 +5,8 @@
 **Database**: SQLite (production and dev — a single file, no DB server)  
 **Migrations**: through 0095  
 
-> This reference is **generated from `core/models.py`** (the live models). It is the
-> field-level companion to `docs/bookstack/07-data-model-and-settings-reference.md`
-> (the conceptual map). Regenerate after model changes with
+> This reference is **generated from `core/models.py`** (the live models).
+> Regenerate after model changes with
 > `manage.py dump_schema > docs/database-schema.md` — don't hand-edit field rows.
 
 🔒 = encrypted at rest (AES-256 via django-encrypted-model-fields).

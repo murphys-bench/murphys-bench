@@ -768,7 +768,7 @@ class BackupSettingsForm(forms.ModelForm):
         ]
         widgets = {
             'backup_onsite_enabled': forms.CheckboxInput(attrs={'class': _SS_CHECK, 'x-model': 'onsite'}),
-            'backup_onsite_host': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'REDACTED-IP'}),
+            'backup_onsite_host': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': '192.0.2.50'}),
             'backup_onsite_share': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'VM'}),
             'backup_onsite_username': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'mike'}),
             'backup_onsite_password': forms.PasswordInput(attrs={'class': _SS_INPUT, 'placeholder': '••••••••'}, render_value=True),

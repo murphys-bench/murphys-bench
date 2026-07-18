@@ -2338,7 +2338,7 @@ class SiteSettings(models.Model):
     )
     backup_onsite_host = models.CharField(
         max_length=255, blank=True, default='',
-        help_text='NAS IP address or hostname (e.g. REDACTED-IP).',
+        help_text='NAS IP address or hostname (e.g. 192.0.2.50).',
     )
     backup_onsite_share = models.CharField(
         max_length=255, blank=True, default='',
