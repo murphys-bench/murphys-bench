@@ -1,152 +1,238 @@
-# Murphy's Bench — Setup & Admin Guide
+# Murphy's Bench — Setup and Administration
 
-You've installed Murphy's Bench (see `INSTALL.md`) and you can log in as the
-superuser. This guide walks an administrator through configuring a fresh
-instance and getting it ready for techs to use. For *what the app does* from a
-user's point of view, see `FEATURES.md`.
+You have installed Murphy's Bench, can reach the login page, and have signed in with the superuser account created during installation.
 
-Everything below lives under **Settings** (admin only — the gear/Admin link in
-the sidebar footer). Settings is organized into tabs; you do **not** need the
-Django admin for any of this.
+This guide covers the initial configuration needed before technicians begin using the system. See `INSTALL.md` for installation and `FEATURES.md` for an overview of the application itself.
 
----
+Routine configuration is handled under Settings, available to administrators from the gear icon in the sidebar footer. You should not need Django admin for normal setup or operation.
 
-## Suggested order
+## Suggested Setup Order
 
-You can do these in any order, but this sequence avoids backtracking:
+The tabs can be completed in any order, but this sequence avoids unnecessary backtracking:
 
-1. **Company** — your shop's identity
-2. **Colors** — branding
-3. **Outbound Email** — so the app can send mail
-4. **Inbound Email** — so emails become tickets
-5. **Roles** then **Users** — who can do what, then the people
-6. **Workflow config** — statuses, help topics, SLA plans, repair types,
-   checklists, canned responses, quick labor
-7. **Security** — MFA policy
-8. **Seed data** — a few clients/devices/tickets to work with
+1. Company — business identity and contact information
+2. Colors — application and email branding
+3. Outbound Email — sending customer mail
+4. Inbound Email — creating and updating tickets from email
+5. Roles and Users — permissions and technician accounts
+6. Workflow — statuses, topics, SLAs, repair types, and common entries
+7. Security — MFA requirements
+8. Billing and Integrations — Invoice Ninja and payment behavior
+9. Backups and Scheduled Jobs
+10. Test Data — enough sample records to verify the workflow
 
----
+You do not need to configure every optional feature before beginning. Company information, working email, user accounts, and the default workflow settings are enough for initial testing.
 
 ## 1. Company
 
-Settings → **Company**. Your business name, address (split into line 1/2, city,
-state, zip), phone, and logo. This information appears on **printed repair
-reports** and in **outbound email**, so fill it in before sending anything to a
-customer.
+Go to Settings → Company.
 
-## 2. Colors
+Enter the business information that should appear on customer-facing material:
 
-Settings → **Colors**. Set your title-bar, sidebar, and accent colors and upload
-a logo. There's a live preview. Header text color on emails is computed
-automatically for readability — you don't set it manually.
+- business name
+- address
+- phone number
+- logo
 
-> **Display** (separate tab) controls per-browser preferences like font size and
-> card density. Those are stored in the browser, per user — not shop-wide.
+This information is used on repair reports and outbound email, so complete it before sending mail or printing customer documents.
 
-## 3. Outbound Email (SMTP)
+## 2. Colors and Display
 
-Settings → **Outbound Email**. Enter your SMTP host, port, username, and
-password (stored encrypted). There's a **"send test email"** button — use it and
-confirm the message arrives before relying on it. Outbound email powers reply
-sending, auto-responders, and notifications.
+Go to Settings → Colors.
 
-- **Email Templates** tab: edit the wording of the automated emails (e.g.
-  auto-responder), with a reference panel of the variables you can use.
-- The **Suppressed Addresses** list (under Outbound) holds addresses that should
-  never receive automated mail.
+Set the title-bar, sidebar, and accent colors. A live preview shows how the application will look. Email header text is selected automatically to remain readable against the chosen color.
 
-## 4. Inbound Email (email → tickets)
+The separate Display tab controls browser-specific preferences such as font size and card density. These settings are stored per browser and user, not across the entire shop.
 
-Settings → **Inbound Email**. Point this at the mailbox your support address
-delivers to. Supports **IMAP or POP3**.
+## 3. Outbound Email
 
-> **Important operational note:** with **IMAP**, make sure the mailbox is
-> configured so processed messages are marked read or removed — otherwise the
-> poller can re-read the same message. The simplest reliable setup is **POP3
-> with delete-from-server**, which pulls each message exactly once. (Tradeoff:
-> the mail server then keeps no copy — Murphy's Bench becomes the system of
-> record for inbound mail.)
+Go to Settings → Outbound Email.
 
-The app polls this mailbox on a schedule (see `deploy/README.md` for the timer).
-New mail becomes a ticket; replies that carry a `[TKT-…]` token in the subject
-thread back into their existing ticket automatically.
+Enter the SMTP settings for the address Murphy's Bench will use to send mail:
 
-> **Tip for a test instance:** point inbound at a *test* mailbox first, confirm
-> tickets and threading behave, then switch to your real support address.
+- SMTP server
+- port
+- username
+- password
 
-## 5. Roles, then Users
+The password is stored encrypted.
 
-Settings → **Roles**. Roles are sets of permissions (a grid of capability
-toggles — who can manage settings, view stored credentials, manage the KB,
-etc.). Two roles ship by default: **Administrator** and **Technician**. Adjust
-or add roles before you create people, so you can assign the right role as you
-go.
+Use Send Test Email and confirm that the message arrives before relying on outbound email for customer communication.
 
-Settings → **Users**. Create an account per tech. Assign each a role and an
-**escalation level (1–3)** — higher levels are your senior techs. You can set
-passwords and reset MFA here. (Superuser / staff status is intentionally *not*
-editable in this UI — that stays a deliberate, separate action.)
+Outbound email is used for functions such as:
 
-## 6. Workflow configuration
+- ticket replies
+- acknowledgements and auto-responders
+- emailed reports and quotes
+- email-based notifications
 
-These tabs shape how tickets and work orders behave. Sensible defaults are
-seeded; tune them to your shop:
+The Email Templates tab controls the wording of automated messages and shows the variables available to each template.
 
-- **Statuses** — the ticket and work-order statuses and their colors. Core ones
-  are built in; you can add custom statuses.
-- **Help Topics** — how incoming tickets are classified; each can carry a
-  default SLA.
-- **SLA Plans** — response-deadline targets and overdue behavior.
-- **Repair Types** (with categories) — the kinds of jobs you do; used on work
-  orders and to drive checklists.
-- **Checklist Items** — pre/post task lists, organized by device type.
-- **Canned Responses** — reusable note text (separate customer-facing and
-  internal-tech streams) you can drop into a work order.
-- **Quick Labor** — common labor lines for fast time entry.
-- **Custom Fields** — extra fields on tickets or work orders, scoped to a help
-  topic or repair type, if your shop needs data the standard fields don't cover.
-- **Dashboard Tiles** — which status tiles appear on the dashboard.
-- **KB Categories** — categories for knowledge-base articles.
+The Suppressed Addresses list contains addresses that must not receive automated mail.
 
-> Don't feel you must fill every tab on day one. Company + Email + Users + a
-> couple of statuses is enough to start; refine the rest as real work flows
-> through.
+## 4. Inbound Email
 
-## 7. Security / MFA
+Go to Settings → Inbound Email.
 
-Settings → **Security**. The key control is the **require MFA** toggle. With it
-on, every user must enroll an authenticator app on next login. Admins get backup
-codes and can reset a user's MFA if they lose their device.
+Configure the mailbox used by your support address. Murphy's Bench supports IMAP and POP3.
 
-For a shared **demo/test** box you may leave MFA optional to lower friction for
-testers — but turning it on at least once is worth doing, since it's a feature
-worth evaluating.
+The mailbox is checked by a scheduled polling job. New messages become tickets. Replies containing a `[TKT-…]` token in the subject are attached to the existing ticket.
 
-## 8. Seed some data
+Before using a live support mailbox, test the process with a separate mailbox and confirm that:
 
-Create a handful of records so the app isn't empty:
+- new messages create tickets
+- replies attach to the correct ticket
+- processed messages are not imported again
+- failed imports remain available for another attempt
 
-1. A couple of **Clients** (one residential, one business).
-2. A **Contact** and a **Device** on each.
-3. A **Ticket** or two, and convert one to a **Work Order** to see the full flow.
+Choose the mailbox protocol and post-processing behavior that matches how you want mail retained.
 
-> On a test/demo instance, use **fake** data only — never load real client data
-> onto a box other people can access.
+With POP3, deleting successfully processed messages from the server provides a simple one-time intake workflow, but Murphy's Bench then becomes the primary record of those messages.
 
----
+With IMAP, confirm how the mailbox and poller identify messages that have already been processed so the same message is not imported repeatedly.
 
-## Day-2 admin tasks
+See `deploy/README.md` for the inbound-email timer.
 
-- **Logs** tab — audit trail of email sends, inbound fetches, and credential
-  access.
-- **Reset a demo box** to a clean slate (keeps config, wipes operational data):
+## 5. Roles and Users
 
-  ```bash
-  venv/bin/python manage.py reset_operational_data            # dry-run
-  venv/bin/python manage.py reset_operational_data --confirm "DELETE ALL OPERATIONAL DATA"
-  ```
+Configure roles before creating technician accounts.
 
-  Never use `manage.py flush` — it destroys your configuration too.
+### Roles
 
-- **Break-glass:** the Django admin (`/admin/`) still exists for emergencies
-  (e.g. fixing a record stuck in a bad state), but routine work never needs it.
+Go to Settings → Roles.
+
+A role is a collection of permissions controlling access to functions such as:
+
+- application settings
+- stored credentials
+- the knowledge base
+- billing
+- reports
+- administrative actions
+
+Murphy's Bench includes Administrator and Technician roles by default. You can adjust them or create additional roles.
+
+### Users
+
+Go to Settings → Users.
+
+Create a separate account for each technician and assign the appropriate role.
+
+Each user can also be assigned an escalation level from 1 through 3. Higher levels are intended for technicians who receive escalated work.
+
+Administrators can set passwords and reset MFA enrollment from this screen.
+
+Django superuser and staff status are intentionally not editable through the Murphy's Bench user interface.
+
+## 6. Workflow Configuration
+
+The workflow tabs control how tickets and work orders are classified and processed. Useful defaults are installed automatically, so begin with them and adjust the system as real work exposes a need.
+
+Available configuration includes:
+
+- Statuses — ticket and work-order statuses and their display colors
+- Help Topics — categories for incoming tickets, including an optional default SLA
+- SLA Plans — response deadlines and overdue behavior
+- Repair Types and Categories — classifications used by work orders and checklists
+- Checklist Items — pre-repair and post-repair tasks, grouped by device type
+- Canned Responses — reusable customer-facing or internal text
+- Quick Labor — common labor entries
+- Custom Fields — additional ticket or work-order fields tied to a help topic or repair type
+- Dashboard Tiles — status groups shown on the dashboard
+- KB Categories — categories used by knowledge-base articles
+
+Do not add configuration simply because a tab exists. Start with the defaults and add fields, statuses, and categories when the existing workflow no longer describes the work accurately.
+
+## 7. Security and MFA
+
+Go to Settings → Security.
+
+The main setting is Require MFA. When enabled, users who have not enrolled are prompted to configure an authenticator application at their next login.
+
+Administrators can reset a user's MFA enrollment if the device is lost or replaced.
+
+For a shared test system, MFA may be left optional to reduce setup friction. It should still be tested before the system is considered ready for production use.
+
+## 8. Billing and Integrations
+
+Configure Invoice Ninja before testing invoicing, recurring billing, saved payment methods, or the Register.
+
+Confirm:
+
+- the Invoice Ninja connection succeeds
+- clients can be matched or created correctly
+- draft invoices appear as expected
+- payment status is returned correctly
+- no live card or customer data is used during testing
+
+Contract billing should first be tested with a small number of fake contracts covering different billing schedules.
+
+Murphy's Bench prepares billing for review. Confirm the resulting drafts before introducing real client billing.
+
+## 9. Backups and Scheduled Jobs
+
+Go to Settings → Maintenance → Backups to configure the available backup destinations.
+
+Murphy's Bench can send backups to:
+
+- an SMB or NAS destination
+- an S3-compatible destination
+- both
+
+Store a separate secure copy of `FIELD_ENCRYPTION_KEY`. A database backup without the matching encryption key cannot recover stored credentials.
+
+Several functions depend on scheduled systemd timers, including:
+
+- backups
+- inbound-email polling
+- SLA overdue checks
+
+See `deploy/README.md` for timer installation and verification.
+
+## 10. Create Test Data
+
+Before entering real client information, create enough fake data to test the main workflows:
+
+1. Create one residential client and one business client.
+2. Add at least one contact and device to each.
+3. Create a ticket and reply to it by email.
+4. Convert a ticket into a work order.
+5. Add labor, notes, checklist entries, and a test credential.
+6. Complete the work order and generate a repair report.
+7. Create a managed contract and run a test billing cycle.
+8. Test the Register and Invoice Ninja handoff without using a live payment method.
+
+Use fake information on any test or demonstration system accessible to people outside your shop.
+
+## Ongoing Administration
+
+### Logs
+
+Review the available logs for activity such as:
+
+- outbound email
+- inbound-email processing
+- credential access
+- administrative and audit events
+
+Logs help confirm that scheduled jobs are running and provide a record of security-sensitive activity.
+
+### Resetting a Test System
+
+To remove operational records while preserving configuration:
+
+```bash
+venv/bin/python manage.py reset_operational_data
+venv/bin/python manage.py reset_operational_data \
+    --confirm "DELETE ALL OPERATIONAL DATA"
+```
+
+The first command is a dry run.
+
+Do not use `manage.py flush`; it also removes application configuration.
+
+### Emergency Access
+
+Django admin remains available at `/admin/` for exceptional cases, such as correcting a record that cannot be repaired through the normal interface.
+
+Routine configuration and daily work should be performed through Murphy's Bench itself.
