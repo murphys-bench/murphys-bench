@@ -106,6 +106,18 @@ It is probably the wrong fit if you need a polished hosted product, enterprise M
 
 ![Work order detail](screenshots/work-order-detail.png)
 
+**Clients** - accounts, contact info, and device/work-order counts at a glance.
+
+![Clients](screenshots/clients.png)
+
+**Client detail** - contacts, devices, contracts/assets for managed clients, and work order history.
+
+![Client detail](screenshots/client-detail.png)
+
+**Register** - settle a completed work order or start a new counter sale.
+
+![Register](screenshots/register.png)
+
 **Reports** - billing summary, ticket volume, ticket-to-work-order conversion, and export options.
 
 ![Reports & analytics](screenshots/reports.png)
@@ -114,7 +126,7 @@ It is probably the wrong fit if you need a polished hosted product, enterprise M
 
 ![Settings](screenshots/settings.png)
 
-**Dark mode** - every page has a light and dark theme.
+**Dark mode** - every page has a light and dark theme, toggled per-user.
 
 ![Dashboard in dark mode](screenshots/dashboard-dark.png)
 ![Ticket detail in dark mode](screenshots/ticket-detail-dark.png)
