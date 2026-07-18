@@ -168,7 +168,7 @@ You can use it, self-host it, and modify it. If you distribute a modified versio
 
 No warranty. Use it at your own risk.
 
-Copyright (c) 2026 Mike McCall
+Copyright (c) 2026 Shamrock Computer Services LLC
 
 ---
 
