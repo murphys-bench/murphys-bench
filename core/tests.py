@@ -1212,7 +1212,7 @@ def test_blocked_sender_creates_no_ticket():
 # with the real sender in a forwarded-message header in the body. MB must
 # attribute to that real contact (so replies route to them), not the relay.
 
-def _raw_t2_email(real_name='Mike McCall', real_email='redacted@example.com',
+def _raw_t2_email(real_name='Jane Doe', real_email='jane.doe@example.com',
                   subject='Fwd: E.2YVLMWK Test-2', message_id='<t2-1@tier2tickets.com>',
                   include_from=True):
     import email.message
@@ -1237,8 +1237,8 @@ def _raw_t2_email(real_name='Mike McCall', real_email='redacted@example.com',
 
 def test_extract_forwarded_sender_parses_and_handles_missing():
     from core.management.commands.fetch_inbound_email import _extract_forwarded_sender
-    body = '--- Forwarded message ---\nFrom: "Mike McCall" <redacted@example.com>\nDate: x\n'
-    assert _extract_forwarded_sender(body) == ('Mike McCall', 'redacted@example.com')
+    body = '--- Forwarded message ---\nFrom: "Jane Doe" <jane.doe@example.com>\nDate: x\n'
+    assert _extract_forwarded_sender(body) == ('Jane Doe', 'jane.doe@example.com')
     assert _extract_forwarded_sender('no headers here') == (None, None)
     assert _extract_forwarded_sender('') == (None, None)
 
@@ -1249,8 +1249,8 @@ def test_t2_email_maps_to_existing_contact_not_relay(client_obj):
     contact's client — never under the tier2tickets relay."""
     from core.management.commands.fetch_inbound_email import _process_message
     contact = Contact.objects.create(
-        client=client_obj, first_name='Mike', last_name='McCall',
-        email='redacted@example.com', is_primary=True,
+        client=client_obj, first_name='Jane', last_name='Doe',
+        email='jane.doe@example.com', is_primary=True,
     )
     site = SiteSettings.get()
 
@@ -1273,7 +1273,7 @@ def test_t2_email_unknown_sender_lands_in_unsorted_bucket():
     status, _, ticket = _process_message(_raw_t2_email(), site, verbosity=0)
 
     assert status == 'new_ticket'
-    assert ticket.contact.email == 'redacted@example.com'
+    assert ticket.contact.email == 'jane.doe@example.com'
     assert ticket.client.is_unsorted is True
     assert not Client.objects.filter(name__icontains='tier2tickets').exists()
 
@@ -1523,8 +1523,8 @@ def test_cli_reset_clears_devices_and_logs_shell_identity(monkeypatch):
     target = User.objects.create_user(username='soleadmin', password='x')
     _enroll_totp(target)
 
-    monkeypatch.setattr('getpass.getuser', lambda: 'scs-tech')
-    monkeypatch.setenv('SSH_CONNECTION', 'REDACTED-IP 51234 REDACTED-IP 22')
+    monkeypatch.setattr('getpass.getuser', lambda: 'admin-user')
+    monkeypatch.setenv('SSH_CONNECTION', '192.0.2.5 51234 192.0.2.82 22')
 
     call_command('reset_mfa', 'soleadmin', '--note', 'lost authenticator')
 
@@ -1533,8 +1533,8 @@ def test_cli_reset_clears_devices_and_logs_shell_identity(monkeypatch):
     assert log.actor is None            # no authenticated web user on the CLI path
     assert log.source == 'cli'
     # Highest-risk path stays traceable: stamp who/where, not an anonymous null.
-    assert 'scs-tech' in log.note
-    assert 'REDACTED-IP' in log.note
+    assert 'admin-user' in log.note
+    assert '192.0.2.5' in log.note
     assert 'lost authenticator' in log.note
 
 

@@ -32,6 +32,8 @@ Murphy's Bench handles the repair workflow I actually needed:
 
 The Register is there because a finished job has to get paid. It can record cash, check, a card you ran somewhere else, or trigger a client's saved card in Invoice Ninja. Murphy's Bench does not store cards and does not process payments itself. Invoice Ninja remains the billing record.
 
+Invoice Ninja is the billing backend today because it's what my shop runs. The integration sits behind a deliberate seam — MB records every transaction itself regardless of backend — so other billing/payment backends can be added without rebuilding the app around them. That's planned, not built yet: right now Invoice Ninja is the one that works.
+
 ## What It Is Not
 
 Murphy's Bench is not trying to be:
@@ -64,16 +66,17 @@ It runs in production for my shop. It has tests, backups, restore tooling, secur
 
 If you self-host it, expect to read the docs, manage your own server, and make judgment calls. Issues and pull requests are welcome, but support is best-effort. I am one technician building this around real shop work.
 
-Things I already know are not done:
+Things I plan to build but haven't yet:
 
-- stock levels, reorder points, and parts purchasing
+- stock levels, reorder points, and parts purchasing (parts can be billed on a work order today, but there's no stock tracking behind them)
+- billing/payment backends other than Invoice Ninja — the seam for them exists; the other implementations don't
+- a management "dig-in" reporting layer (the dashboard is the glance; deeper reporting is coming)
 - SMS
-- a customer portal
-- invoicing systems other than Invoice Ninja
+- a customer self-service portal
 - deeper user-facing documentation
-- broader testing outside my own shop workflow
+- broader testing outside my own shop's workflow
 
-If one of those is the thing that would make Murphy's Bench useful to your shop, say so. That is how the project will grow.
+These are direction, not promises with dates — I build this around real shop work, in the time I have. If one of them is the thing that would make Murphy's Bench useful to your shop, say so. That is how the project will grow.
 
 ## Who It Might Fit
 

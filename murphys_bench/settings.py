@@ -365,9 +365,6 @@ LOGOUT_REDIRECT_URL = '/account/login/'
 # Two-factor auth
 TWO_FACTOR_REMEMBER_COOKIE_AGE = None  # Don't remember — always ask on new session
 
-# Application Settings
-COMPANY_NAME = config('COMPANY_NAME', default='Shamrock Computer Services')
-
 # Pagination
 ITEMS_PER_PAGE = 25
 

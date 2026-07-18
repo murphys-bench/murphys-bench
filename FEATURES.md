@@ -182,6 +182,11 @@ Murphy's Bench tracks billing **state** — it is not a full accounting package.
 - **[Invoice Ninja](https://invoiceninja.com/) stays the system of record** — it
   assigns invoice numbers, owns assembly, and holds the payment ledger; MB feeds
   it and reads status back.
+- **Invoice Ninja is the backend because it's what the building shop runs.** The
+  integration sits behind a deliberate seam, and MB records every transaction
+  itself no matter what's behind it — so support for other billing/payment
+  backends can be added later without rebuilding the app. That's planned, not
+  built: today Invoice Ninja is the one that works.
 
 ---
 
@@ -240,6 +245,14 @@ payment processor, a customer self-service portal, a full accounting system, or 
 multi-tenant SaaS — those are out of scope by choice. (It does track *managed
 assets* — a client's managed machines — but that is device tracking, not stock
 inventory.)
+
+**Planned, but not built yet.** A few things are on the roadmap and honestly
+called out so you're not surprised: parts **stock/inventory** (levels, reorder
+points, purchasing — parts can be billed on a work order today, but there's no
+stock behind them); **billing/payment backends other than Invoice Ninja** (the
+seam is there, the other implementations aren't); a deeper management
+**reporting** layer beyond today's built-in reports; **SMS**; and a **customer
+self-service portal**. These are direction, not dated commitments.
 
 If you run a small shop and want repair-tracking software you fully control,
 this is built for exactly that.
