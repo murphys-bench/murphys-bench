@@ -7324,3 +7324,10 @@ def test_dump_schema_reflects_live_models():
     assert "## Contract" in out
     assert "\U0001f512 encrypted" in out
     assert "choices:" in out
+
+    # Output is a pure function of the models + migrations — regenerating with no
+    # schema change is a true no-op (the "Last Updated" date comes from the latest
+    # migration's header, not today(), so it can't churn the diff day-to-day).
+    buf2 = StringIO()
+    call_command('dump_schema', stdout=buf2)
+    assert buf2.getvalue() == out
