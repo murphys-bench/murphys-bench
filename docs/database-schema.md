@@ -1,21 +1,39 @@
 # Murphy's Bench Database Schema
 
-**Version**: 2.0  
-**Last Updated**: June 26, 2026  
+**Version**: 2.1  
+**Last Updated**: July 17, 2026  
 **Database**: SQLite (production and dev — a single file, no DB server)  
-**Migrations**: through 0065  
+**Migrations**: through 0095  
 
-> This reference is **generated from `core/models.py`** (the live models, as of
-> migration 0065). It is the field-level companion to
-> `docs/bookstack/07-data-model-and-settings-reference.md` (the conceptual map).
-> To regenerate after model changes, re-run the introspection helper used to
-> produce this file (see the doc-sweep notes) — don't hand-edit field rows.
+> This reference is **generated from `core/models.py`** (the live models). It is the
+> field-level companion to `docs/bookstack/07-data-model-and-settings-reference.md`
+> (the conceptual map). Regenerate after model changes with
+> `manage.py dump_schema > docs/database-schema.md` — don't hand-edit field rows.
 
 🔒 = encrypted at rest (AES-256 via django-encrypted-model-fields).
 
-**47 models.** Alphabetical.
+**54 models.** Alphabetical.
 
 ---
+
+## Asset
+_A managed inventory item at a client (managed-services layer). DELIBERATELY separate from Device: a Device is repair-intake-shaped (walk-in nullable, condition_at_intake, repair history), whereas an Asset is owned/managed equipment that belongs to a managed client and whose count can drive contract billing later. The two overlap by design — different lifecycles. An Asset always belongs to a Client (no walk-in assets); a WorkOrder may reference one for managed work history in a later slice. Slice 1 (this): the model + client-detail CRUD. The `contract` "covered by" FK and any asset-count-driven pricing land in later slices._
+`db_table = assets`
+
+| Field | Type | Notes |
+|---|---|---|
+| id | AutoField | PK, blank |
+| client | ForeignKey | → Client |
+| contract | ForeignKey | → Contract, null, blank |
+| name | CharField |  |
+| asset_type | CharField | choices: workstation/server/network/mobile/printer/other |
+| identifier | CharField | blank |
+| manufacturer | CharField | blank |
+| model | CharField | blank |
+| notes | TextField | blank |
+| is_active | BooleanField |  |
+| created_at | DateTimeField | blank |
+| updated_at | DateTimeField | blank |
 
 ## Attachment
 _File attachment linked to any model via GenericForeignKey._
@@ -68,6 +86,21 @@ _Inbound email senders that are silently dropped — no ticket or reply created.
 | name | CharField |  |
 | sort_order | PositiveIntegerField |  |
 
+## CatalogItem
+_A reusable Product or Service in MB's own catalog. Services lead (MB is built for services companies); the Product type exists for shops that sell/stock goods but never leads the design. Clicking one logs a LineItem — labor for a service, part for a product — prefilled from this item's name + price. MB OWNS this catalog; it is NOT synced from a billing backend, so it works regardless of backend. (Was QuickLaborItem — labor-only — before the Products & Services catalog.)_
+`db_table = catalog_items`
+
+| Field | Type | Notes |
+|---|---|---|
+| id | BigAutoField | PK, blank |
+| name | CharField |  |
+| item_type | CharField | choices: service/product |
+| category | CharField |  |
+| print_description | TextField | blank |
+| default_price | DecimalField | null, blank |
+| is_active | BooleanField |  |
+| sort_order | IntegerField |  |
+
 ## Checklist
 _Templates of standard tasks for repair types_
 `db_table = checklists`
@@ -117,8 +150,12 @@ _Companies/customers requesting service_
 | suppress_emails | BooleanField |  |
 | is_unsorted | BooleanField |  |
 | invoice_ninja_id | CharField | blank |
+| is_managed | BooleanField |  |
+| monthly_amount | DecimalField | null, blank |
+| billing_day | PositiveSmallIntegerField |  |
 | created_at | DateTimeField | blank |
 | updated_at | DateTimeField | blank |
+| line_items | ManyToManyField | → LineItem, null, blank |
 
 ## Contact
 _Individual people at client companies_
@@ -151,6 +188,29 @@ _Additional phone numbers for a contact (beyond the primary phone field)._
 | number | CharField |  |
 | phone_type | CharField | choices: cell/home/work/other |
 | label | CharField | blank |
+
+## Contract
+_A recurring service agreement — the thing that MAKES a client a managed client. Rule (Mike): there is no managed client without a Contract. A Contract designates a record as managed; absent one, the record is a retail customer on the event-driven (WorkOrder/Sale → Invoice Ninja) lane, which is untouched by this model. The two lanes stay separate. Contract is the 6th LineItem host (after WorkOrder/Estimate/Sale/EstimateOption/ Client) — its recurring charges reuse the exact catalog-picker + custom-line UI. Lines are flat/manual for now; asset-count-driven pricing is a later, hooked slice. The monthly billing run (later slice) CLONES these lines into a draft Sale/invoice — it never auto-charges; the first real recurring auto-charge is gated separately on signed authorizations._
+`db_table = contracts`
+
+| Field | Type | Notes |
+|---|---|---|
+| id | BigAutoField | PK, blank |
+| client | ForeignKey | → Client |
+| contract_number | CharField | unique |
+| title | CharField |  |
+| status | CharField | choices: draft/active/expired/cancelled |
+| billing_cadence | CharField | choices: monthly/quarterly/annual |
+| billing_day | PositiveSmallIntegerField |  |
+| start_date | DateField | null, blank |
+| end_date | DateField | null, blank |
+| auto_renew | BooleanField |  |
+| renewal_date | DateField | null, blank |
+| notes | TextField | blank |
+| created_by | ForeignKey | → User, null, blank |
+| created_at | DateTimeField | blank |
+| updated_at | DateTimeField | blank |
+| line_items | ManyToManyField | → LineItem, null, blank |
 
 ## CredentialAccessLog
 _Audit log — every reveal, copy, edit, or delete of an OrgCredential._
@@ -228,7 +288,7 @@ _Equipment being serviced_
 | Field | Type | Notes |
 |---|---|---|
 | id | AutoField | PK, blank |
-| client | ForeignKey | → Client |
+| client | ForeignKey | → Client, null, blank |
 | repair_type | ForeignKey | → RepairType, null |
 | assigned_contact | ForeignKey | → Contact, null, blank |
 | name | CharField |  |
@@ -247,6 +307,7 @@ _Equipment being serviced_
 | device_password | TextField | blank, 🔒 encrypted |
 | credential_notes | TextField | blank, 🔒 encrypted |
 | is_active | BooleanField |  |
+| promoted_to_asset | ForeignKey | → Asset, null, blank |
 | created_at | DateTimeField | blank |
 | updated_at | DateTimeField | blank |
 
@@ -306,6 +367,47 @@ _Trigger-based email templates sent to clients on ticket events._
 | created_at | DateTimeField | blank |
 | updated_at | DateTimeField | blank |
 
+## Estimate
+_A priced quote built for a Prospect or Client, ahead of any Work Order. MB owns the quote end-to-end (including the customer document) — Invoice Ninja is never touched at quote time, so dead/declined quotes never clutter IN. Anchors to exactly one of client/prospect (opportunity-shaped, not problem-shaped); a ticket is one optional origin, not the anchor._
+`db_table = estimates`
+
+| Field | Type | Notes |
+|---|---|---|
+| id | BigAutoField | PK, blank |
+| client | ForeignKey | → Client, null, blank |
+| prospect | ForeignKey | → Prospect, null, blank |
+| ticket | ForeignKey | → Ticket, null, blank |
+| contact | ForeignKey | → Contact, null, blank |
+| device | ForeignKey | → Device, null, blank |
+| estimate_number | CharField | unique |
+| scope | TextField | blank |
+| status | CharField | choices: draft/sent/accepted/declined/expired |
+| expires_on | DateField | null, blank |
+| general_label | CharField |  |
+| decline_reason | TextField | blank |
+| revision_of | ForeignKey | → Estimate, null, blank |
+| accepted_at | DateTimeField | null, blank |
+| work_order | ForeignKey | → WorkOrder, null, blank |
+| created_by | ForeignKey | → User, null, blank |
+| created_at | DateTimeField | blank |
+| updated_at | DateTimeField | blank |
+| line_items | ManyToManyField | → LineItem, null, blank |
+
+## EstimateOption
+_A named, self-contained pricing option on an Estimate — lets a tech quote several comparable choices (e.g. budget/standard/premium device replacement) on one document instead of three separate estimates. Each option totals its own LineItems independently; rejected options stay on record for history (Mike's call — nothing is deleted when the client picks one)._
+`db_table = estimate_options`
+
+| Field | Type | Notes |
+|---|---|---|
+| id | BigAutoField | PK, blank |
+| estimate | ForeignKey | → Estimate |
+| label | CharField |  |
+| description | TextField | blank |
+| sort_order | PositiveIntegerField |  |
+| is_selected | BooleanField |  |
+| created_at | DateTimeField | blank |
+| line_items | ManyToManyField | → LineItem, null, blank |
+
 ## HelpTopic
 _Ticket classification topic with optional default SLA._
 `db_table = help_topics`
@@ -347,7 +449,12 @@ _Billing state tracker for a WorkOrder. Tracks status only — not an accounting
 | invoiced_date | DateField | null, blank |
 | paid_date | DateField | null, blank |
 | payment_method | CharField | blank, choices: cash/check/card/transfer/other |
+| reference | CharField | blank |
+| paid_at | DateTimeField | null, blank |
 | notes | TextField | blank |
+| invoice_ninja_id | CharField | blank |
+| in_status | CharField | blank |
+| in_status_checked_at | DateTimeField | null, blank |
 | created_at | DateTimeField | blank |
 | updated_at | DateTimeField | blank |
 
@@ -392,7 +499,7 @@ _A priced line on a work order (and, in a future phase, a quote). Deliberately G
 | description | CharField |  |
 | quantity | DecimalField |  |
 | unit_price | DecimalField | null, blank |
-| source_labor_item | ForeignKey | → QuickLaborItem, null, blank |
+| catalog_item | ForeignKey | → CatalogItem, null, blank |
 | notes | TextField | blank |
 | logged_by | ForeignKey | → User, null |
 | logged_at | DateTimeField | blank |
@@ -465,19 +572,43 @@ _Shared organizational credential vault entry. Encrypted at rest._
 | created_at | DateTimeField | blank |
 | updated_at | DateTimeField | blank |
 
-## QuickLaborItem
-_Admin-managed labor buttons shown on WO detail. Clicking one logs a labor LineItem._
-`db_table = quick_labor_items`
+## PaymentChargeAttempt
+_Immutable audit record of every MB-initiated charge-on-file attempt (Slice 5d, extended in Slice 6 to cover WorkOrder settlements at the Register). One row per attempt, written on both success and failure — never updated afterward. `result` reflects whether the trigger call to Invoice Ninja succeeded, NOT whether the card was actually charged: IN's auto_bill action queues an async job, so payment truth only comes from the follow-up check_sale_status()/check_invoice_status() read-back (`in_status_after`). Exactly one of `sale`/`work_order` is set per row — a plain second nullable FK rather than a GenericForeignKey, since this only ever has these two hosts (mirrors how `Invoice` already splits payment storage by host rather than generalizing)._
+`db_table = payment_charge_attempts`
 
 | Field | Type | Notes |
 |---|---|---|
 | id | BigAutoField | PK, blank |
-| label | CharField |  |
-| category | CharField |  |
-| print_description | TextField | blank |
-| default_price | DecimalField | null, blank |
-| is_active | BooleanField |  |
-| sort_order | IntegerField |  |
+| sale | ForeignKey | → Sale, null, blank |
+| work_order | ForeignKey | → WorkOrder, null, blank |
+| invoice_ninja_id | CharField | blank |
+| amount | DecimalField |  |
+| initiated_by | ForeignKey | → User, null, blank |
+| initiated_at | DateTimeField | blank |
+| result | CharField | choices: success/failed |
+| in_status_after | CharField | blank |
+| error_message | TextField | blank |
+
+## Prospect
+_A prospective customer (sales lead), captured contact-first before they become a paying Client. Promoted to a Client (+ a primary Contact) when the work is accepted. Thin by design — the financial layer's customer spine._
+`db_table = prospects`
+
+| Field | Type | Notes |
+|---|---|---|
+| id | BigAutoField | PK, blank |
+| contact_first_name | CharField |  |
+| contact_last_name | CharField | blank |
+| company | CharField | blank |
+| client_type | CharField | choices: residential/business |
+| email | CharField | blank |
+| phone | CharField | blank |
+| notes | TextField | blank |
+| status | CharField | choices: new/contacted/quoted/won/lost |
+| promoted_to | ForeignKey | → Client, null, blank |
+| promoted_at | DateTimeField | null, blank |
+| created_by | ForeignKey | → User, null, blank |
+| created_at | DateTimeField | blank |
+| updated_at | DateTimeField | blank |
 
 ## RepairType
 _Categories of repairs (e.g., Laptop Repair, Desktop Repair)_
@@ -528,10 +659,15 @@ _Permission role assigned to users._
 | can_reply_internal | BooleanField |  |
 | can_reply_customer | BooleanField |  |
 | can_view_device_credentials | BooleanField |  |
+| can_view_org_credentials | BooleanField |  |
 | can_reset_user_mfa | BooleanField |  |
 | can_create_workorder | BooleanField |  |
 | can_edit_workorder | BooleanField |  |
 | can_close_workorder | BooleanField |  |
+| can_view_prospects | BooleanField |  |
+| can_view_estimates | BooleanField |  |
+| can_view_sales | BooleanField |  |
+| can_process_payments | BooleanField |  |
 
 ## SLAPlan
 _Service Level Agreement — defines response/resolution deadline._
@@ -546,6 +682,33 @@ _Service Level Agreement — defines response/resolution deadline._
 | is_transient | BooleanField |  |
 | disable_overdue_alerts | BooleanField |  |
 
+## Sale
+_A counter/walk-in sale — Lane B (Counter). Client is optional (nullable): a cash walk-in with no client stays MB-only and is never pushed to Invoice Ninja (IN needs a client). Reuses the LineItem GenericRelation exactly like WorkOrder/Estimate — same edit/delete UI, same vocabulary. Payment/checkout fields are defined now but wired up in Slice 3b (checkout + Send-to-IN); this slice (3a) only builds the record + line items._
+`db_table = sales`
+
+| Field | Type | Notes |
+|---|---|---|
+| id | BigAutoField | PK, blank |
+| client | ForeignKey | → Client, null, blank |
+| contract | ForeignKey | → Contract, null, blank |
+| billing_period | CharField | blank |
+| sale_number | CharField | unique |
+| status | CharField | choices: draft/completed/void |
+| is_recurring | BooleanField |  |
+| notes | TextField | blank |
+| payment_method | CharField | blank, choices: cash/check/card/other |
+| amount | DecimalField | null, blank |
+| paid_at | DateTimeField | null, blank |
+| reference | CharField | blank |
+| invoice_ninja_id | CharField | blank |
+| invoice_ninja_ref | CharField | blank |
+| in_status | CharField | blank |
+| in_status_checked_at | DateTimeField | null, blank |
+| created_by | ForeignKey | → User, null, blank |
+| created_at | DateTimeField | blank |
+| updated_at | DateTimeField | blank |
+| line_items | ManyToManyField | → LineItem, null, blank |
+
 ## SiteSettings
 _Singleton — site-wide configuration editable from admin._
 `db_table = site_settings`
@@ -559,7 +722,7 @@ _Singleton — site-wide configuration editable from admin._
 | local_storage_path | CharField | blank |
 | s3_bucket_name | CharField | blank |
 | s3_access_key | CharField | blank |
-| s3_secret_key | CharField | blank |
+| s3_secret_key | TextField | blank, 🔒 encrypted |
 | s3_endpoint_url | CharField | blank |
 | s3_region | CharField | blank |
 | email_enabled | BooleanField |  |
@@ -569,6 +732,7 @@ _Singleton — site-wide configuration editable from admin._
 | email_username | CharField | blank |
 | email_password | TextField | blank, 🔒 encrypted |
 | email_from | CharField | blank |
+| email_sales_from | CharField | blank |
 | email_suppression_patterns | TextField |  |
 | inbound_email_enabled | BooleanField |  |
 | inbound_protocol | CharField | choices: imap/pop3 |
@@ -580,8 +744,11 @@ _Singleton — site-wide configuration editable from admin._
 | inbound_folder | CharField |  |
 | inbound_delete_after_fetch | BooleanField |  |
 | strip_quoted_replies | BooleanField |  |
+| ticket_reopen_window_days | PositiveIntegerField |  |
 | require_mfa | BooleanField |  |
 | inbound_default_client_name | CharField | blank |
+| default_business_sla | ForeignKey | → SLAPlan, null, blank |
+| default_residential_sla | ForeignKey | → SLAPlan, null, blank |
 | company_name | CharField | blank |
 | company_address_line1 | CharField | blank |
 | company_address_line2 | CharField | blank |
@@ -590,11 +757,33 @@ _Singleton — site-wide configuration editable from admin._
 | company_logo | FileField | null, blank |
 | email_logo | FileField | null, blank |
 | email_header_color | CharField | blank |
-| google_maps_api_key | CharField | blank |
+| google_maps_api_key | TextField | blank, 🔒 encrypted |
 | shop_address | CharField | blank |
 | invoice_ninja_enabled | BooleanField |  |
 | invoice_ninja_url | CharField | blank |
 | invoice_ninja_token | TextField | blank, 🔒 encrypted |
+| invoice_ninja_walkin_client_id | CharField | blank |
+| backup_onsite_enabled | BooleanField |  |
+| backup_onsite_host | CharField | blank |
+| backup_onsite_share | CharField | blank |
+| backup_onsite_username | CharField | blank |
+| backup_onsite_password | TextField | blank, 🔒 encrypted |
+| backup_onsite_folder | CharField | blank |
+| backup_onsite_retention_mode | CharField | choices: count/age |
+| backup_onsite_retention_value | PositiveIntegerField |  |
+| backup_onsite_schedule_days | CharField |  |
+| backup_onsite_schedule_times | CharField |  |
+| backup_offsite_enabled | BooleanField |  |
+| backup_s3_endpoint | CharField | blank |
+| backup_s3_region | CharField | blank |
+| backup_s3_bucket | CharField | blank |
+| backup_s3_path | CharField | blank |
+| backup_s3_access_key | TextField | blank, 🔒 encrypted |
+| backup_s3_secret_key | TextField | blank, 🔒 encrypted |
+| backup_offsite_retention_mode | CharField | choices: count/age |
+| backup_offsite_retention_value | PositiveIntegerField |  |
+| backup_offsite_schedule_days | CharField |  |
+| backup_offsite_schedule_times | CharField |  |
 | color_status_new | CharField | blank |
 | color_status_assigned | CharField | blank |
 | color_status_in_progress | CharField | blank |
@@ -613,6 +802,22 @@ _Singleton — site-wide configuration editable from admin._
 | color_title_bar | CharField | blank |
 | color_section_header | CharField | blank |
 | color_section_header_text | CharField | blank |
+| color_dash_tickets_bg | CharField | blank |
+| color_dash_tickets_text | CharField | blank |
+| color_dash_workorders_bg | CharField | blank |
+| color_dash_workorders_text | CharField | blank |
+| color_dash_ready_bg | CharField | blank |
+| color_dash_ready_text | CharField | blank |
+| color_dash_outstanding_bg | CharField | blank |
+| color_dash_outstanding_text | CharField | blank |
+| color_dash_backlog1_bg | CharField | blank |
+| color_dash_backlog1_text | CharField | blank |
+| color_dash_backlog2_bg | CharField | blank |
+| color_dash_backlog2_text | CharField | blank |
+| color_dash_backlog3_bg | CharField | blank |
+| color_dash_backlog3_text | CharField | blank |
+| color_dash_backlog4_bg | CharField | blank |
+| color_dash_backlog4_text | CharField | blank |
 
 ## StatusDefinition
 _Configurable status labels and colors for tickets and work orders._
@@ -670,6 +875,7 @@ _Initial service request (starts workflow)_
 | description | TextField |  |
 | source | CharField | choices: email/phone/web/rmm/system |
 | status | CharField |  |
+| closed_at | DateTimeField | null, blank |
 | contact | ForeignKey | → Contact, null, blank |
 | assigned_to | ForeignKey | → User, null, blank |
 | created_by | ForeignKey | → User, null |
@@ -769,8 +975,9 @@ _Repair job (main entity)_
 | id | AutoField | PK, blank |
 | work_order_number | CharField | unique |
 | ticket | OneToOneField | → Ticket, null, blank, unique |
-| client | ForeignKey | → Client |
+| client | ForeignKey | → Client, null, blank |
 | device | ForeignKey | → Device, null, blank |
+| asset | ForeignKey | → Asset, null, blank |
 | contact | ForeignKey | → Contact, null, blank |
 | repair_type | ForeignKey | → RepairType, null |
 | reported_problem | TextField | blank |

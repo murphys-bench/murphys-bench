@@ -7289,3 +7289,38 @@ def test_line_edit_gate_is_host_aware(client, client_obj, tech_user):
     # The contract line price was NOT changed by the blocked request.
     c_line.refresh_from_db()
     assert c_line.unit_price == 100
+
+
+# ── dump_schema: regenerates the schema doc from the live models ──
+
+@pytest.mark.django_db
+def test_dump_schema_reflects_live_models():
+    """dump_schema emits a Markdown schema doc covering every core model, with
+    the current migration number, encryption markers, and per-model field tables."""
+    from io import StringIO
+    from django.apps import apps
+    from django.core.management import call_command
+
+    buf = StringIO()
+    call_command('dump_schema', stdout=buf)
+    out = buf.getvalue()
+
+    core_models = list(apps.get_app_config('core').get_models())
+
+    # Header reports the true model count and a real migration number (not the ????
+    # fallback), so a stale count/migration can't silently ship.
+    assert f"**{len(core_models)} models.**" in out
+    import re
+    m = re.search(r"\*\*Migrations\*\*: through (\d{4})", out)
+    assert m and m.group(1) != "0000"
+
+    # Every core model has its own section and db_table line.
+    for model in core_models:
+        assert f"## {model.__name__}\n" in out
+        assert f"`db_table = {model._meta.db_table}`" in out
+
+    # Spot-check content that must survive regeneration: a recently-added model,
+    # an encrypted field marker, and a choices row.
+    assert "## Contract" in out
+    assert "\U0001f512 encrypted" in out
+    assert "choices:" in out
