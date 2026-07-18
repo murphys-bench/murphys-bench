@@ -1,258 +1,297 @@
 # Murphy's Bench — What It Does
 
-Murphy's Bench is self-hosted repair-shop software for small field-service
-businesses and MSPs. It runs on your own server, on your own network. You own
-the data, there's no per-seat SaaS bill, and nothing about your clients leaves
-your control.
+Murphy's Bench is self-hosted service-management software for small MSPs and repair shops.
 
-This document is for a technician or shop owner sizing it up: **what can it
-actually do for you day to day.** It doesn't cover how it's built or how to
-install it — see `INSTALL.md` for that.
+It runs on your own server, and the main application and database stay under your control. It can connect to outside services such as email, Invoice Ninja, payment gateways, Cloudflare, and offsite backup, but only where you choose to use them.
+
+This is the practical overview: what Murphy's Bench does in the course of a normal day. Installation and deployment are covered in `INSTALL.md`.
 
 ---
 
-## The core idea: Ticket → Work Order
+## The Two Main Workflows
 
-Most repair work follows one shape, and Murphy's Bench is built around it:
+Murphy's Bench handles two kinds of work:
 
-> A request comes in (a **Ticket**) → you talk to the customer → it becomes
-> actual repair work (a **Work Order**) → you do the work and track it → it's
-> done and ready to bill.
+1. managed clients with contracts, covered assets, and recurring billing
+2. support and repair work that moves from ticket to work order to billing
 
-The two halves are deliberately separate:
+Those two sides share the same client records, contacts, devices, and history, but they are not forced into the same workflow.
 
-- A **Ticket** is the conversation — the customer-facing thread.
-- A **Work Order** is the job — the bench/onsite work, parts, time, and checklist.
+The managed side handles the work that repeats. The ticket and work-order side handles the work that comes in as it happens.
 
-A ticket can become a work order with one click, and the two stay linked so you
-can always jump between "what the customer was told" and "what was actually done."
-Crucially, **closing a work order never auto-closes the ticket** — a human
-decides the customer interaction is finished. No job quietly falls off the radar.
+## Tickets and Work Orders
 
----
+A ticket is the customer conversation.
 
-## Tickets — the customer conversation
+A work order is the actual job.
 
-- **Email in, ticket out.** Emails sent to your support address automatically
-  become tickets. Customer replies thread back into the same ticket instead of
-  piling up as new ones.
-- **Threaded replies**, like an email client — staff-to-customer messages,
-  internal notes only your team sees, and inbound customer replies are visually
-  distinct so you always know who said what.
-- **One voice to the customer.** The ticket is the single channel the customer
-  sees. A bench tech who needs the customer contacted messages the ticket owner
-  internally rather than emailing the customer directly — so the customer never
-  gets two people talking at them.
-- **HTML email with your branding** — your logo and colors on outbound mail,
-  with signatures.
-- **Auto-responder** so a customer knows their email was received.
-- **Quoted history folds away** — long email chains collapse so the new message
-  is what you actually read.
-- **Status tracking** (New → Open → In Progress → Waiting on Customer → Resolved
-  → Closed) with colors, and you can define your own custom statuses.
-- **Collision avoidance** — if a teammate already has a ticket open, you're
-  warned before you both step on it.
-- **Link related tickets** together (duplicates, related issues).
+A phone call or email can become a ticket. Once it turns into real work, the ticket can be converted to a work order with one click. The two stay linked, so it is easy to move between what the customer reported and what was actually done.
 
----
+Closing the work order does not automatically close the ticket. Finishing the repair and finishing the customer conversation are not always the same thing.
 
-## Work Orders — the actual job
+### Tickets
 
-- **In-shop, onsite, or remote** — each work order knows which, and onsite jobs
-  get mileage tracking.
-- **Built-in stopwatch** to log time as you work, plus quick-entry labor lines.
-- **Checklists** — pre- and post-repair task lists, scoped by device type, so
-  nothing gets skipped.
-- **Work Performed log** — a running, timestamped record of what you did, which
-  becomes the customer's repair report.
-- **Printable Repair Report** — a clean, professional printout with your company
-  info, the device, the work done, and signature lines.
-- **Device credentials, encrypted** — store the login/password/PIN for the
-  machine you're working on, masked by default, with every reveal logged.
+Tickets include:
 
----
+- email-to-ticket creation
+- threaded customer replies
+- internal notes
+- outbound HTML email with company branding and signatures
+- automatic acknowledgements
+- collapsed quoted email history
+- standard and custom statuses
+- related-ticket links
+- saved queues and filters
+- warnings when another user already has the ticket open
 
-## Clients, contacts, and devices
+Customer communication stays in the ticket. Staff can coordinate internally without creating multiple conversations with the customer.
 
-Everything is organized around the **client**, the way a shop actually thinks:
+### Work Orders
 
-- A client has multiple **contacts** (people), each with multiple phone numbers.
-- A client has multiple **devices**, each with its own repair history.
-- Residential vs. business clients are handled differently where it matters.
-- From a client's page you see their whole history and can start a new work
-  order for a specific person and device in a couple of clicks.
+Work orders can be used for in-shop, onsite, or remote work.
 
-**Managed clients vs. retail customers.** The same record can be a managed
-client or a one-off retail customer — the difference is whether it has a
-**service contract**. A record with an active contract is a managed client; a
-record without one is a retail customer who just gets work orders and counter
-sales as they come. Either can be business or residential, either can generate
-work, and either can convert to the other. Both lanes stay fully separate — the
-event-driven repair path is never disturbed by the managed path.
+They include:
 
-**Managed assets.** A managed client's equipment can be tracked as **assets** —
-owned/managed machines, distinct from the walk-in-style device records the bench
-uses. A device you start managing can be **promoted to an asset** in one step,
-and its repair history follows it, so the machine keeps one continuous record.
-Assets can be attached to a contract ("covered by") and show their own recent
-work. This is managed-device tracking, not a stock/parts inventory.
+- client, contact, and device information
+- the reported issue
+- internal notes
+- labor and parts
+- built-in time tracking
+- manual time entries
+- mileage for onsite work
+- pre-repair and post-repair checklists
+- timestamped work-performed notes
+- repair reports
+- encrypted device credentials
 
----
+The work-performed log becomes the basis of the customer-facing repair report, so the record written during the job is also the record handed back to the client.
 
-## Knowing where things stand
+Stored credentials are hidden by default. Access can be limited by role, and each reveal is logged.
 
-- **Dashboard** with color-coded tiles — what's active, what's waiting, what's
-  overdue, what's done — at a glance.
-- **Per-technician views** — techs see their own work plus the unclaimed pool;
-  admins see everything. Techs **claim, transfer, and escalate**; dispatchers
-  **assign**.
-- **Escalation levels** — push a ticket up to a more senior tech without losing
-  the current owner, so nothing disappears into a black hole.
-- **In-app notifications** — a sidebar bell tells a tech when a teammate needs
-  something from them.
-- **Saved queues** — build your own filtered views of tickets and reuse them.
+## Clients, Contacts, Devices, and Assets
 
----
+Murphy's Bench is organized around the client.
 
-## Deadlines and accountability (SLAs)
+A client can have:
 
-- **SLA plans** set response deadlines per type of work.
-- Overdue tickets are flagged, and acknowledging one **requires a note** — so
-  there's an audit trail of why something slipped, not just that it did.
+- multiple contacts
+- multiple phone numbers
+- multiple devices
+- tickets
+- work orders
+- estimates
+- contracts
+- managed assets
+- billing history
 
----
+Business and residential clients use the same basic records, with differences only where they are useful.
 
-## Quotes and sales leads
+### Managed and Non-Managed Clients
 
-- **Prospects** — capture a sales lead (contact-first) before they're a client,
-  track it through a simple pipeline, and **promote it to a full client** in one
-  step when they say yes.
-- **Estimates / quotes** — build a priced quote from your catalog of services and
-  parts, offer **side-by-side comparative options** (e.g. good / better / best),
-  email it to the customer as a **PDF**, and **accept it straight into a work
-  order** when they approve.
+A client becomes managed when it has an active service contract.
 
-## Getting paid — the Register
+A client without a contract can still have tickets, work orders, estimates, counter sales, and billing. The same client can move into or out of managed status without creating a new record or splitting its history.
 
-Murphy's Bench has a **light point-of-sale register** for taking payment without
-leaving the app. It settles two kinds of sale:
+### Devices and Managed Assets
 
-- a **finished work order** (the tech closes it; the cashier rings it up), or
-- an **ad-hoc counter sale** (a walk-in retail/product sale, no work order).
+Devices are used for normal repair and support history.
 
-At the register you:
+Managed assets are equipment being tracked as part of an ongoing client relationship. A device can be promoted to a managed asset without losing the work already attached to it.
 
-- **Record the payment** — cash, check, or a card you ran in Square — or trigger
-  a **charge against a client's stored card on file**, and MB records the
-  transaction reference.
-- **Print an MB receipt** for the customer, with that reference on it.
-- The sale is pushed to **[Invoice Ninja](https://invoiceninja.com/)** as a paid
-  invoice (or a draft, to bill later).
+Assets can be covered by a contract and show their own recent work.
 
-**MB never stores or processes card data itself.** Card payments happen in Square
-or through Invoice Ninja's gateway; MB only *triggers* and *records* them. It is
-not a payment processor and not an accounting package.
+This is managed-device tracking, not inventory. Murphy's Bench does not currently track parts stock, purchasing, receiving, or reordering.
 
-## Recurring / managed billing
+## Contracts and Recurring Billing
 
-- **Service contracts** are the managed-client mechanism. A contract carries a
-  reusable set of **recurring line items** (the client's services, at negotiated
-  prices), a **cadence** (monthly, quarterly, or annual), its own **billing day**,
-  a term and renewal, and any **covered assets**. Creating a contract is what
-  makes a record a managed client.
-- A **contract billing worklist** prepares each due contract's invoice for the
-  current period, with a batch review-and-confirm step before anything is sent —
-  so a period's billing is one reviewed action, not manual re-entry. It knows
-  which contracts are actually due this period based on their cadence.
-- Everything MB produces here is a **draft** invoice. MB never auto-charges — you
-  review, send the drafts to Invoice Ninja, and settle them there. Nothing is
-  charged without a deliberate step.
+Service contracts are what make the managed side work.
 
-*(A simpler per-client monthly-billing mode also exists for shops that don't want
-full contracts.)*
+A contract can include:
 
-## Billing state and export
+- recurring services and agreed pricing
+- monthly, quarterly, or annual billing
+- its own billing day
+- term and renewal dates
+- covered assets
 
-Murphy's Bench tracks billing **state** — it is not a full accounting package.
+When contracts come due, Murphy's Bench prepares them in a billing worklist. The user reviews the batch before anything is sent to Invoice Ninja.
 
-- Each work order has a billing status: uninvoiced, invoiced, paid, paid-direct
-  (cash/walk-in), or disputed. **Outstanding balances** roll up per client.
-- **CSV export** of invoices and billing so it drops into whatever accounting
-  system you already use.
-- **[Invoice Ninja](https://invoiceninja.com/) stays the system of record** — it
-  assigns invoice numbers, owns assembly, and holds the payment ledger; MB feeds
-  it and reads status back.
-- **Invoice Ninja is the backend because it's what the building shop runs.** The
-  integration sits behind a deliberate seam, and MB records every transaction
-  itself no matter what's behind it — so support for other billing/payment
-  backends can be added later without rebuilding the app. That's planned, not
-  built: today Invoice Ninja is the one that works.
+Nothing is charged automatically. Murphy's Bench creates draft invoices, and the billing step remains deliberate.
 
----
+There is also a simpler client-level monthly billing mode for shops that do not need full contracts.
+
+## Estimates, Quotes, and Prospects
+
+Prospects can be entered before they become clients and moved through a simple sales process.
+
+When the work is accepted, the prospect can be promoted to a client.
+
+Estimates can include:
+
+- services
+- parts
+- pricing
+- notes
+- comparative options
+- PDF output
+
+An accepted estimate can be turned into a work order without re-entering the job.
+
+## Register and Payments
+
+Murphy's Bench includes a small Register for:
+
+- settling completed work orders
+- recording counter sales
+
+The Register can record:
+
+- cash
+- check
+- a card payment processed elsewhere
+- a charge triggered through Invoice Ninja using a client's stored payment method
+
+Murphy's Bench records the payment reference and can print a receipt.
+
+It does not store card data or process cards itself. Card handling stays with Square, Invoice Ninja, or the configured payment gateway.
+
+Completed sales can be sent to Invoice Ninja as paid invoices or as drafts for later billing.
+
+The Register is not intended to replace a retail POS. It is there because a completed job still has to be closed out and paid.
+
+## Billing State
+
+Murphy's Bench tracks the operational side of billing, including:
+
+- uninvoiced
+- invoiced
+- paid
+- paid directly
+- disputed
+
+Outstanding balances are shown by client.
+
+Invoice Ninja remains the billing system of record. It assigns invoice numbers and maintains the payment ledger. Murphy's Bench sends billing data to it and reads status information back.
+
+Invoice Ninja is the only billing backend currently implemented. The integration is kept separate from the rest of the billing logic so another backend can be added later without rebuilding the application around it.
+
+Billing and invoice data can also be exported to CSV.
+
+## Queues, Assignments, and Escalation
+
+The dashboard shows current ticket and work-order activity, including work that is active, waiting, overdue, or completed.
+
+Technicians can see:
+
+- their assigned work
+- unclaimed work
+- saved queues
+
+Depending on permissions, users can:
+
+- claim work
+- assign it
+- transfer it
+- escalate it
+
+Escalation brings a more senior technician into the ticket without removing the current owner.
+
+In-app notifications let users know when another staff member needs their attention.
+
+## SLA Tracking
+
+SLA plans can define response deadlines for different kinds of work.
+
+Overdue tickets are flagged. Acknowledging one requires a note, so there is a record of why it slipped rather than just a changed status.
 
 ## Reporting
 
-- A reports page with several built-in reports — workload, technician
-  performance (completion rate, average resolution time), billing summaries,
-  mileage, and more — with charts.
-- **Every report exports** to CSV, print, or PDF.
+Murphy's Bench includes reports for areas such as:
 
----
+- workload
+- ticket volume
+- technician activity
+- completion rates
+- resolution time
+- billing
+- mileage
+- ticket-to-work-order conversion
 
-## Knowledge base
+Reports can be viewed in the application and exported to CSV, print, or PDF where supported.
 
-- A built-in **KB** for troubleshooting guides, how-tos, vendor notes, and
-  internal-only articles.
-- Articles are written in Markdown and render with proper formatting.
-- Some articles can be marked internal/restricted.
+The dashboard is meant for a quick look at the day. The reports are where the underlying work can be reviewed in more detail.
 
----
+## Knowledge Base
 
-## Security and access control
+The built-in knowledge base can store:
 
-- **Multi-factor authentication (TOTP)** with authenticator apps, backup codes
-  for admins, and admin-driven MFA reset for a lost device.
-- **Roles and permissions** — fine-grained control over who can see and do what
-  (including who may reveal stored credentials).
-- **Encrypted credential storage** for both device and organization-level
-  secrets (Wi-Fi, portal logins, etc.), with a full **access log** — every view
-  of a secret is recorded.
-- **Login lockout** protection against password guessing.
-- The whole app is login-only and built to sit behind HTTPS.
+- troubleshooting notes
+- internal procedures
+- vendor information
+- how-to articles
 
----
+Articles are written in Markdown and can be marked as restricted for internal use.
 
-## Why self-hosted
+## Security and Access
 
-- **Your data stays yours** — on your hardware, on your network. Sensitive
-  customer and credential data never sits on someone else's cloud.
-- **No per-seat subscription.** Add techs without adding to a monthly bill.
-- **You control updates and uptime.** Nothing changes under you on a vendor's
-  schedule.
-- Accessible securely from anywhere via a **Cloudflare Tunnel** when you want
-  remote access, without exposing your network.
+Murphy's Bench includes:
 
----
+- login-required access
+- role-based permissions
+- TOTP multi-factor authentication
+- administrator backup codes
+- administrator-driven MFA reset
+- login lockout
+- encrypted device credentials
+- encrypted organization credentials
+- credential access logs
+- audit logging
+- HTTPS deployment support
 
-## Honest about where it is
+The application is intended to run behind a TLS-enabled reverse proxy.
 
-Murphy's Bench is in **active daily production use** at the shop that builds it,
-and it's being hardened for use by others. It's deliberately scoped: it does
-ticketing, work orders, devices, mileage, email, credentials, quoting, a light
-sales register, and reporting **well**, rather than trying to be everything. It
-is not a full retail POS (no stock/parts inventory, cash drawer, or barcodes), a
-payment processor, a customer self-service portal, a full accounting system, or a
-multi-tenant SaaS — those are out of scope by choice. (It does track *managed
-assets* — a client's managed machines — but that is device tracking, not stock
-inventory.)
+Remote access can be provided through Cloudflare Tunnel, Caddy, Nginx, or another suitable reverse-proxy setup.
 
-**Planned, but not built yet.** A few things are on the roadmap and honestly
-called out so you're not surprised: parts **stock/inventory** (levels, reorder
-points, purchasing — parts can be billed on a work order today, but there's no
-stock behind them); **billing/payment backends other than Invoice Ninja** (the
-seam is there, the other implementations aren't); a deeper management
-**reporting** layer beyond today's built-in reports; **SMS**; and a **customer
-self-service portal**. These are direction, not dated commitments.
+## Current Limitations
 
-If you run a small shop and want repair-tracking software you fully control,
-this is built for exactly that.
+Murphy's Bench is not currently:
+
+- a full retail POS
+- a payment processor
+- an accounting package
+- a customer portal
+- a hosted SaaS service
+- a full inventory system
+- a multi-tenant platform
+
+The Register does not include:
+
+- cash-drawer control
+- barcode scanning
+- split tender
+- retail inventory workflows
+
+Parts can be billed on work orders, but stock levels, reorder points, purchasing, and receiving are not yet implemented.
+
+Other planned areas include:
+
+- billing backends other than Invoice Ninja
+- deeper management reporting
+- SMS
+- customer self-service
+- broader user documentation
+- testing across more shops and workflows
+
+These are directions, not promised features with dates.
+
+## Current Status
+
+Murphy's Bench is used in daily production at the shop where it is developed.
+
+It is working software, but it is still young. It has automated tests, CI checks, backup and restore tools, access controls, and the safeguards needed for production use in one shop. It has not yet been proven across a wide range of businesses and workflows.
+
+A self-hosted installation still needs someone who can maintain the server, manage backups, read the documentation, and troubleshoot when necessary.
+
+Murphy's Bench may fit a solo technician or small shop that handles both managed clients and repair work and wants to keep control of the system it depends on.
+
+It is probably the wrong fit for a shop that needs a polished hosted service, full retail inventory, enterprise MSP automation, or guaranteed vendor support.
