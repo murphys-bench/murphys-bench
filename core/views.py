@@ -5658,9 +5658,8 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
         if wo.invoice.billing_status == 'paid':
             messages.info(request, f'{wo.work_order_number} is already marked Paid.')
             return redirect('core:pos_wo_settle', pk=pk)
-        if not SiteSettings.get().invoice_ninja_enabled:
-            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
-            return redirect('core:pos_wo_settle', pk=pk)
+
+        in_enabled = SiteSettings.get().invoice_ninja_enabled
 
         amount = wo.line_items_total  # server-computed — never trust the request
         if amount <= 0:
@@ -5675,9 +5674,28 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
         if action == 'pay' and method not in valid_methods:
             messages.error(request, 'Choose a valid payment method.')
             return redirect('core:pos_wo_settle', pk=pk)
+        # 'draft' (Bill Later) only means "push an unpaid draft to Invoice Ninja";
+        # it has no standalone local meaning yet, so it's unavailable with IN off.
+        if action == 'draft' and not in_enabled:
+            messages.error(request, 'Bill Later needs Invoice Ninja; with it off, mark the work order paid instead.')
+            return redirect('core:pos_wo_settle', pk=pk)
         if action not in ('draft', 'pay'):
             messages.error(request, 'Choose how to settle this work order.')
             return redirect('core:pos_wo_settle', pk=pk)
+
+        # IN off: MB stands alone — record the payment on MB's own Invoice, no push,
+        # no nag. (Only the 'pay' action reaches here; 'draft' was blocked above.)
+        if not in_enabled:
+            invoice = wo.invoice
+            invoice.billing_status = 'paid'
+            invoice.amount = amount
+            invoice.payment_method = method
+            invoice.reference = reference
+            invoice.paid_date = timezone.localdate()
+            invoice.paid_at = timezone.now()
+            invoice.save()
+            messages.success(request, f'{wo.work_order_number} settled — ${amount} paid.')
+            return redirect('core:pos_wo_receipt', pk=pk)
 
         try:
             # State-aware: create the IN invoice only if this WO has never been

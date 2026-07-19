@@ -2762,21 +2762,25 @@ def test_csp_report_endpoint_tolerates_garbage(client):
 
 @pytest.mark.django_db
 def test_redirect_flow_renders_message_in_base(client, client_obj, admin_user):
-    """The reported bug: an Invoice Ninja action gave no visible feedback.
+    """The reported bug: a POST→redirect action gave no visible feedback.
 
-    With IN disabled (the default) the POS work-order settle view adds an
-    error message and redirects back to the settle screen. That page must
-    render the message (proving base.html renders the messages framework),
-    not swallow it until logout. (Originally reproduced via the now-retired
-    WorkOrderSendToINView; the POS settle view is its replacement.)
+    With IN disabled (the default), asking the POS settle view to 'Bill Later'
+    (draft) is refused — it needs IN — so the view adds an error message and
+    redirects back to the settle screen. That page must render the message
+    (proving base.html renders the messages framework), not swallow it until
+    logout. (Originally reproduced via the now-retired WorkOrderSendToINView.)
     """
+    from decimal import Decimal
+    from core.models import LineItem
     wo = WorkOrder.objects.create(client=client_obj, status='closed')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('40.00'))
     client.force_login(admin_user)
 
     resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'draft'}, follow=True)
 
     assert resp.status_code == 200
-    assert b'Invoice Ninja is not enabled' in resp.content, \
+    assert b'Bill Later needs Invoice Ninja' in resp.content, \
         'Error feedback must be visible on the page the user lands on.'
 
 
@@ -5791,6 +5795,59 @@ def test_pos_wo_settle_draft_does_not_mark_paid(client, admin_user, client_obj, 
     assert ('POST', '/payments') not in calls
     wo.refresh_from_db()
     assert wo.invoice_ninja_id == '601'
+    assert wo.invoice.billing_status != 'paid'
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_cash_without_in_records_locally(client, admin_user, client_obj, monkeypatch):
+    """MB stands alone: with Invoice Ninja OFF, settling a WO in cash records the
+    payment on MB's own Invoice, generates MB's receipt, and never calls IN — no
+    hard block, no 'Invoice Ninja is not enabled' nag (the reviewer's bug)."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    # IN is off by default (no _enable_in()). Make any IN call an outright failure.
+    def no_in(*a, **k):
+        raise AssertionError('IN must not be called when Invoice Ninja is disabled')
+    monkeypatch.setattr(invoice_ninja, '_request', no_in)
+
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('40.00'))
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {
+        'action': 'pay', 'payment_method': 'cash', 'reference': 'CASH-1',
+    })
+    assert resp.status_code == 302
+    assert resp.url == reverse('core:pos_wo_receipt', args=[wo.pk])
+
+    invoice = wo.invoice
+    invoice.refresh_from_db()
+    assert invoice.billing_status == 'paid'
+    assert invoice.amount == Decimal('40.00')
+    assert invoice.payment_method == 'cash'
+    assert invoice.reference == 'CASH-1'
+    assert invoice.paid_at is not None
+    wo.refresh_from_db()
+    assert not wo.invoice_ninja_id  # never pushed
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_bill_later_blocked_without_in(client, admin_user, client_obj):
+    """'Bill Later (Draft)' only means 'push an unpaid draft to IN' — with IN off
+    it has no local equivalent yet, so it's refused rather than silently no-op."""
+    from decimal import Decimal
+    from core.models import LineItem
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('40.00'))
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'draft'})
+    assert resp.status_code == 302
+    assert resp.url == reverse('core:pos_wo_settle', args=[wo.pk])
+    wo.refresh_from_db()
     assert wo.invoice.billing_status != 'paid'
 
 

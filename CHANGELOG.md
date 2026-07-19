@@ -4,6 +4,19 @@ All notable changes to Murphy's Bench are recorded here, newest first.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions are the
 tags cut by `scripts/release.sh` and deployed by `scripts/update.sh`.
 
+## v0.4.44 — 2026-07-19
+
+### Fixed
+- **Settle a work order in cash without Invoice Ninja.** The register's work-order
+  settle screen hard-blocked with "Invoice Ninja is not enabled in Settings" if IN was
+  off — a shop not running IN couldn't take payment on a work order at all. It now
+  records the payment on Murphy's Bench's own record (amount, method, reference, paid
+  date) and prints MB's receipt, with no IN push and no warning. When IN *is* enabled,
+  nothing changes — it still pushes to and reconciles with Invoice Ninja exactly as
+  before. Part of making MB stand on its own financially without any external app.
+  - The "Bill Later (Draft)" button is hidden when IN is off, since that action only
+    means "push an unpaid draft to Invoice Ninja" and has no standalone equivalent yet.
+
 ## v0.4.43 — 2026-07-19
 
 ### Fixed

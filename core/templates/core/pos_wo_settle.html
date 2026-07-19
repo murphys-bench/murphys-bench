@@ -88,10 +88,14 @@
                         class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">
                     Mark Paid — ${{ amount|floatformat:2 }}
                 </button>
+                {% if invoice_ninja_enabled %}
+                {# Bill Later == push an unpaid draft to Invoice Ninja; no local #}
+                {# standalone-invoice equivalent yet, so hidden when IN is off. #}
                 <button type="submit" name="action" value="draft"
                         class="px-5 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-200 font-medium">
                     Bill Later (Draft)
                 </button>
+                {% endif %}
             </div>
         </form>
 
