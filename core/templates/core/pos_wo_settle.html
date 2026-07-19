@@ -1,4 +1,5 @@
 {% extends "core/base.html" %}
+{% load mb_icons %}
 
 {% block title %}Settle {{ wo.work_order_number }} - Murphy's Bench{% endblock %}
 
@@ -16,8 +17,13 @@
 <div class="max-w-2xl mx-auto space-y-6">
 
     <!-- Line items -->
-    <div class="bg-white rounded-lg shadow p-6">
-        <h2 class="text-base font-semibold text-gray-900 mb-3">Line Items</h2>
+    <div class="bg-white rounded-lg shadow-md border-l-4 border-amber-500 p-6">
+        <div class="flex items-center gap-3 mb-3">
+            <div class="shrink-0 w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center text-amber-600">
+                {% icon "tag" 5 %}
+            </div>
+            <h2 class="text-base font-semibold text-gray-900">Line Items</h2>
+        </div>
         <table class="w-full text-sm">
             <tbody class="divide-y divide-gray-100">
                 {% for li in wo.line_items.all %}
@@ -51,8 +57,13 @@
     {% endif %}
 
     <!-- Settle -->
-    <div class="bg-white rounded-lg shadow p-6">
-        <h2 class="text-base font-semibold text-gray-900 mb-4">Settle</h2>
+    <div class="bg-white rounded-lg shadow-md border-l-4 border-green-500 p-6">
+        <div class="flex items-center gap-3 mb-4">
+            <div class="shrink-0 w-9 h-9 rounded-full bg-green-100 flex items-center justify-center text-green-600">
+                {% icon "cash" 5 %}
+            </div>
+            <h2 class="text-base font-semibold text-gray-900">Settle</h2>
+        </div>
         <form method="post" action="{% url 'core:pos_wo_settle' wo.pk %}" class="space-y-4">
             {% csrf_token %}
             <div>
