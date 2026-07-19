@@ -4,6 +4,14 @@ All notable changes to Murphy's Bench are recorded here, newest first.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions are the
 tags cut by `scripts/release.sh` and deployed by `scripts/update.sh`.
 
+New work accumulates under **Unreleased** as it lands on `main` (each fix its own commit,
+verified on mb-test). When a batch is ready for production, it's cut as one version tag —
+the Unreleased entries move under that version and prod gets a single update.
+
+## Unreleased
+
+_Nothing yet._
+
 ## v0.4.46 — 2026-07-19
 
 ### Fixed
