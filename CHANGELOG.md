@@ -4,6 +4,14 @@ All notable changes to Murphy's Bench are recorded here, newest first.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions are the
 tags cut by `scripts/release.sh` and deployed by `scripts/update.sh`.
 
+## v0.4.43 — 2026-07-19
+
+### Fixed
+- **Sales nav link restored.** `/sales/` (counter/walk-in sale history) had no sidebar
+  entry — reachable only by clicking a "Register →" button on another page — and the
+  Reports section that was meant to surface it instead was never built. A reviewer
+  couldn't find the page at all. Sales now has its own sidebar link.
+
 ## v0.4.42 — 2026-07-19
 
 ### Fixed

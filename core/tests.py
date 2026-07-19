@@ -6147,6 +6147,17 @@ def test_reports_counter_sales_csv_export(client, admin_user, client_obj):
 
 
 @pytest.mark.django_db
+def test_sidebar_has_sales_nav_link(client, admin_user):
+    """/sales/ was reachable only via a button on the Register/Sale pages, with
+    no direct nav entry (deliberately removed session 73) and no Reports
+    section to find it through either (that follow-up was never built) — a
+    real reviewer couldn't find it. Sales now gets its own sidebar link."""
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:dashboard'))
+    assert reverse('core:sale_list').encode() in resp.content
+
+
+@pytest.mark.django_db
 def test_reports_page_no_longer_shows_sales_nav_link_but_has_receipt_link(client, admin_user, client_obj):
     """Sanity check that the report's receipt links resolve to the correct
     (still-live) sale_receipt_print URL."""

@@ -348,10 +348,12 @@
                   {% if u and 'pos' in u %}bg-white/15{% endif %}">
             {% icon 'cash' 5 %}<span class="nav-label">Register</span>
         </a>
+        <a href="{% url 'core:sale_list' %}" title="Sales"
+           class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
+                  {% if u and 'sale' in u %}bg-white/15{% endif %}">
+            {% icon 'list' 5 %}<span class="nav-label">Sales</span>
+        </a>
         {% endif %}
-        {# Sales list is intentionally NOT a nav tab: the Register is the place to #}
-        {# create/settle counter sales, and sales *history* is a reporting concern #}
-        {# (available via Reports, not a prominent tab). The /sales/ URL stays live. #}
 
         <a href="{% url 'core:catalog_list' %}" title="Products & Services"
            class="nav-item flex items-center gap-3 px-2 py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-white/10
