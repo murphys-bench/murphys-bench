@@ -6297,14 +6297,16 @@ def test_reports_counter_sales_csv_export(client, admin_user, client_obj):
 
 
 @pytest.mark.django_db
-def test_sidebar_has_sales_nav_link(client, admin_user):
-    """/sales/ was reachable only via a button on the Register/Sale pages, with
-    no direct nav entry (deliberately removed session 73) and no Reports
-    section to find it through either (that follow-up was never built) — a
-    real reviewer couldn't find it. Sales now gets its own sidebar link."""
+def test_sales_list_reached_from_reports_not_sidebar(client, admin_user):
+    """Sales history is a management concern, so it lives under Reports (a
+    management surface), not its own sidebar tab: the sidebar must NOT link
+    /sales/, and the Reports page MUST (via the Counter Sales section)."""
     client.force_login(admin_user)
-    resp = client.get(reverse('core:dashboard'))
-    assert reverse('core:sale_list').encode() in resp.content
+    dash = client.get(reverse('core:dashboard'))
+    assert reverse('core:sale_list').encode() not in dash.content
+
+    reports = client.get(reverse('core:reports'))
+    assert reverse('core:sale_list').encode() in reports.content
 
 
 @pytest.mark.django_db

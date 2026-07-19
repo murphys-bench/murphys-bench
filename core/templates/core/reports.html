@@ -164,7 +164,10 @@
 
 <!-- Counter Sales -->
 <div class="bg-white rounded-lg shadow p-5" id="section-countersales">
-    <h2 class="text-base font-semibold text-gray-900 mb-4">Counter Sales</h2>
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-gray-900">Counter Sales</h2>
+        <a href="{% url 'core:sale_list' %}" class="text-sm text-blue-600 hover:underline print:hidden">View all sales →</a>
+    </div>
     <div class="grid grid-cols-2 gap-4 mb-6">
         <div class="rounded-lg border-l-4 border-green-400 bg-green-50 p-4">
             <p class="text-xs text-green-600 font-medium uppercase tracking-wide mb-1">Collected (period)</p>

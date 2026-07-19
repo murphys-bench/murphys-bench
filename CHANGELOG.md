@@ -10,7 +10,11 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
-_Nothing yet._
+### Changed
+- **Sales history moved into Reports.** The Sales list is no longer a sidebar tab; it's
+  reached from the **Counter Sales** section of the Reports page ("View all sales →").
+  Sales history is a management/reporting concern, so it lives on the management surface
+  rather than a top-level nav item. (The Register stays in the sidebar for taking sales.)
 
 ## v0.4.46 — 2026-07-19
 
