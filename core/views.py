@@ -3529,7 +3529,9 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
         ).values_list('client_id', 'client__is_unsorted', 'status').first()
         client_changed = bool(new_client) and old_client_id != new_client.pk
         if client_changed:
-            form.instance.device = None
+            new_device = form.cleaned_data.get('device')
+            if not (new_device and new_device.client_id == new_client.pk):
+                form.instance.device = None
         # Triage: an Unsorted ticket picks up its real client's type-default SLA
         # the moment it's reassigned off the bucket — unless this same edit also
         # picked an SLA plan by hand, which always wins.

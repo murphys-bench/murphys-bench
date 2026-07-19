@@ -2293,6 +2293,48 @@ def test_editing_ticket_does_not_resnapshot_sla_on_ordinary_client_change(admin_
 
 
 @pytest.mark.django_db
+def test_editing_ticket_client_and_device_together_keeps_new_device(admin_user, client):
+    """Regression: changing a ticket's client AND selecting a device belonging to
+    that new client in the SAME submit must keep the device — it used to be
+    unconditionally nulled out just because the client changed, forcing a second
+    edit to make the device stick."""
+    old_client = Client.objects.create(name='Old Co')
+    new_client = Client.objects.create(name='New Co')
+    new_device = Device.objects.create(client=new_client, name='New Co Laptop')
+    ticket = Ticket.objects.create(client=old_client, subject='S', description='D')
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:ticket_edit', args=[ticket.pk]), {
+        'client': new_client.pk, 'device': new_device.pk, 'subject': 'S', 'description': 'D',
+        'source': 'phone', 'status': 'new',
+    })
+    assert resp.status_code == 302
+    ticket.refresh_from_db()
+    assert ticket.client_id == new_client.pk
+    assert ticket.device_id == new_device.pk, 'A device belonging to the new client must survive the same-submit client change.'
+
+
+@pytest.mark.django_db
+def test_editing_ticket_client_without_device_still_nulls_device(admin_user, client):
+    """Existing behavior preserved: changing the client with no device reselected
+    (or a stale device from the old client) still nulls the device out."""
+    old_client = Client.objects.create(name='Old Co 2')
+    new_client = Client.objects.create(name='New Co 2')
+    old_device = Device.objects.create(client=old_client, name='Old Co Laptop')
+    ticket = Ticket.objects.create(client=old_client, device=old_device, subject='S', description='D')
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:ticket_edit', args=[ticket.pk]), {
+        'client': new_client.pk, 'subject': 'S', 'description': 'D',
+        'source': 'phone', 'status': 'new',
+    })
+    assert resp.status_code == 302
+    ticket.refresh_from_db()
+    assert ticket.client_id == new_client.pk
+    assert ticket.device_id is None, 'No device (or a stale one from the old client) must still null the device on client change.'
+
+
+@pytest.mark.django_db
 def test_triage_off_unsorted_resnapshots_client_type_default(admin_user, client):
     """Reassigning an Unsorted ticket to a real business client at triage picks
     up the business default — the residential placeholder clock was provisional."""
