@@ -15,6 +15,13 @@ the Unreleased entries move under that version and prod gets a single update.
   reached from the **Counter Sales** section of the Reports page ("View all sales →").
   Sales history is a management/reporting concern, so it lives on the management surface
   rather than a top-level nav item. (The Register stays in the sidebar for taking sales.)
+- **Reports page reorganized into a side-menu (Slice 1 of the Reports restructure.)**
+  The ~11 report sections used to be one long flat scroll — cluttered and hard to scan.
+  They're now grouped into three domains (**Financial**, **Tickets**, **Work Orders**)
+  behind a left side-menu, matching the same navigation pattern as Settings/Admin. Only
+  the selected domain's sections render at a time; Export CSV/Print/PDF menus are scoped
+  to the visible domain too. The date-range filter still applies across all domains.
+  Financial gains room to grow into deeper sales/P&L reporting in a later slice.
 
 ## v0.4.46 — 2026-07-19
 

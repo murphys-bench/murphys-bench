@@ -19,9 +19,14 @@
             <div x-show="open" x-cloak
                  class="absolute right-0 mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
                 <p class="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">Select Report</p>
+                {% if domain == 'financial' %}
                 <a href="#" @click.prevent="downloadCSV('billing')"    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Billing Summary</a>
                 <a href="#" @click.prevent="downloadCSV('counter_sales')" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Counter Sales</a>
+                {% endif %}
+                {% if domain == 'workorders' %}
                 <a href="#" @click.prevent="downloadCSV('tech_perf')"  class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Technician Performance</a>
+                {% endif %}
+                {% if domain == 'tickets' %}
                 <a href="#" @click.prevent="downloadCSV('volume')"     class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Ticket Volume</a>
                 <a href="#" @click.prevent="downloadCSV('status')"     class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Status</a>
                 <a href="#" @click.prevent="downloadCSV('by_client')"  class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Client</a>
@@ -31,7 +36,10 @@
                 <a href="#" @click.prevent="downloadCSV('sla_breakdown')" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">SLA by Tech/Client</a>
                 <a href="#" @click.prevent="downloadCSV('backlog')"    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Backlog Health</a>
                 <a href="#" @click.prevent="downloadCSV('conversion')" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Conversion Rate</a>
+                {% endif %}
+                {% if domain == 'workorders' %}
                 <a href="#" @click.prevent="downloadCSV('mileage')"    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Mileage</a>
+                {% endif %}
             </div>
         </div>
 
@@ -44,9 +52,14 @@
             <div x-show="open" x-cloak
                  class="absolute right-0 mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
                 <p class="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">Select Section</p>
+                {% if domain == 'financial' %}
                 <a href="#" @click.prevent="printSection('billing');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Billing Summary</a>
                 <a href="#" @click.prevent="printSection('countersales'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Counter Sales</a>
+                {% endif %}
+                {% if domain == 'workorders' %}
                 <a href="#" @click.prevent="printSection('techperf');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Technician Performance</a>
+                {% endif %}
+                {% if domain == 'tickets' %}
                 <a href="#" @click.prevent="printSection('volume');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Ticket Volume</a>
                 <a href="#" @click.prevent="printSection('status');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Status</a>
                 <a href="#" @click.prevent="printSection('byclient');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Client</a>
@@ -55,9 +68,12 @@
                 <a href="#" @click.prevent="printSection('sla');        open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">SLA Compliance</a>
                 <a href="#" @click.prevent="printSection('backlog');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Backlog Health</a>
                 <a href="#" @click.prevent="printSection('conversion'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Conversion Rate</a>
+                {% endif %}
+                {% if domain == 'workorders' %}
                 <a href="#" @click.prevent="printSection('mileage');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Mileage</a>
+                {% endif %}
                 <hr class="my-1 border-gray-100">
-                <a href="#" @click.prevent="printSection('all');        open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium">All Sections</a>
+                <a href="#" @click.prevent="printSection('all');        open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium">All Sections (this page)</a>
             </div>
         </div>
 
@@ -70,9 +86,14 @@
             <div x-show="open" x-cloak
                  class="absolute right-0 mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
                 <p class="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">Select Section</p>
+                {% if domain == 'financial' %}
                 <a href="#" @click.prevent="downloadPDF('billing');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Billing Summary</a>
                 <a href="#" @click.prevent="downloadPDF('countersales'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Counter Sales</a>
+                {% endif %}
+                {% if domain == 'workorders' %}
                 <a href="#" @click.prevent="downloadPDF('techperf');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Technician Performance</a>
+                {% endif %}
+                {% if domain == 'tickets' %}
                 <a href="#" @click.prevent="downloadPDF('volume');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Ticket Volume</a>
                 <a href="#" @click.prevent="downloadPDF('status');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Status</a>
                 <a href="#" @click.prevent="downloadPDF('byclient');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Client</a>
@@ -81,15 +102,19 @@
                 <a href="#" @click.prevent="downloadPDF('sla');        open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">SLA Compliance</a>
                 <a href="#" @click.prevent="downloadPDF('backlog');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Backlog Health</a>
                 <a href="#" @click.prevent="downloadPDF('conversion'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Conversion Rate</a>
+                {% endif %}
+                {% if domain == 'workorders' %}
                 <a href="#" @click.prevent="downloadPDF('mileage');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Mileage</a>
+                {% endif %}
                 <hr class="my-1 border-gray-100">
-                <a href="#" @click.prevent="downloadPDF('all');        open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium">All Sections</a>
+                <a href="#" @click.prevent="downloadPDF('all');        open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium">All Sections (this page)</a>
             </div>
         </div>
     </div>
 </div>
 <div class="max-w-7xl mx-auto px-4 pt-4 sm:px-6 lg:px-8 print:hidden">
     <form method="get" id="reports-date-form" class="w-fit max-w-full mx-auto bg-white rounded-lg shadow px-4 py-3 flex items-center gap-2">
+        <input type="hidden" name="domain" value="{{ domain }}">
         <label class="text-sm text-gray-600 shrink-0">From</label>
         <input type="date" name="start_date" id="rpt-start" value="{{ start_date|date:'Y-m-d' }}"
                class="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -105,8 +130,26 @@
 
 {% with qs="start_date="|add:start_date|date:"Y-m-d"|add:"&end_date="|add:end_date|date:"Y-m-d" %}
 
-<div class="space-y-8" id="reports-content">
+<div class="flex gap-6">
 
+    <!-- Domain side-menu -->
+    <nav class="w-56 shrink-0">
+        <div class="bg-white rounded-lg shadow overflow-hidden divide-y divide-gray-100">
+            {% for key, info in domains.items %}
+            <a href="?domain={{ key }}&{{ qs }}"
+               class="block px-4 py-2.5 text-sm font-medium
+                   {% if domain == key %}bg-blue-50 text-blue-700 border-l-4 border-blue-600
+                   {% else %}text-gray-700 hover:bg-gray-50{% endif %}">
+                {{ info.label }}
+            </a>
+            {% endfor %}
+        </div>
+    </nav>
+
+    <!-- Domain content -->
+    <div class="flex-1 min-w-0 space-y-8" id="reports-content">
+
+{% if domain == 'financial' %}
 <!-- Billing Summary -->
 <div class="bg-white rounded-lg shadow p-5" id="section-billing">
     <h2 class="text-base font-semibold text-gray-900 mb-4">Billing Summary</h2>
@@ -211,7 +254,9 @@
     <p class="text-sm text-gray-400">No counter sales in this period.</p>
     {% endif %}
 </div>
+{% endif %}{# end financial #}
 
+{% if domain == 'workorders' %}
 <!-- Technician Performance -->
 {% if tech_perf %}
 <div class="bg-white rounded-lg shadow p-5" id="section-techperf">
@@ -255,7 +300,9 @@
     </table>
 </div>
 {% endif %}
+{% endif %}{# end workorders (techperf half) #}
 
+{% if domain == 'tickets' %}
 <!-- 1. Ticket Volume Over Time -->
 <div class="bg-white rounded-lg shadow p-5" id="section-volume">
     <h2 class="text-base font-semibold text-gray-900 mb-4">1. Ticket Volume Over Time</h2>
@@ -475,7 +522,9 @@
     <p class="text-sm text-gray-400 italic">No tickets in this period.</p>
     {% endif %}
 </div>
+{% endif %}{# end tickets #}
 
+{% if domain == 'workorders' %}
 <!-- 8. Mileage by Tech and Month -->
 <div class="bg-white rounded-lg shadow p-5" id="section-mileage">
     <h2 class="text-base font-semibold text-gray-900 mb-4">8. Mileage by Technician &amp; Month</h2>
@@ -500,8 +549,10 @@
     <p class="text-sm text-gray-400 italic">No mileage logged in this period.</p>
     {% endif %}
 </div>
+{% endif %}{# end workorders (mileage half) #}
 
-</div><!-- end space-y-8 -->
+    </div><!-- end domain content / space-y-8 -->
+</div><!-- end flex -->
 {% endwith %}
 
 {% endblock %}

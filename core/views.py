@@ -4291,6 +4291,28 @@ def _sla_breakdown_by(tickets_with_sla, key_func, label_func):
     return rows
 
 
+# Reports restructure Slice 1: group the flat pile of sections into domains,
+# navigated via a left side-menu (mirrors the Settings/Admin nav pattern).
+# Keys match each section's existing id="section-<key>" in reports.html.
+REPORTS_DOMAINS = {
+    'financial': {
+        'label': 'Financial',
+        'sections': ['billing', 'countersales'],
+    },
+    'tickets': {
+        'label': 'Tickets',
+        'sections': [
+            'volume', 'status', 'byclient', 'bytech', 'resolution',
+            'sla', 'backlog', 'conversion',
+        ],
+    },
+    'workorders': {
+        'label': 'Work Orders',
+        'sections': ['techperf', 'mileage'],
+    },
+}
+
+
 class ReportsView(LoginRequiredMixin, View):
     def get(self, request):
         if not (_is_admin(request.user) or request.user.has_perm_flag('can_view_reports')):
@@ -4545,7 +4567,16 @@ class ReportsView(LoginRequiredMixin, View):
                     'open_wos': open_wos,
                 })
 
+        # Domain side-menu (Slice 1 of the Reports restructure): sections stay
+        # computed together (admin-only, infrequent — no need to split the view
+        # yet), but only one domain's sections render at a time.
+        domain = request.GET.get('domain', 'financial')
+        if domain not in REPORTS_DOMAINS:
+            domain = 'financial'
+
         context = {
+            'domain': domain,
+            'domains': REPORTS_DOMAINS,
             'start_date': start_date,
             'end_date': end_date,
             # 1

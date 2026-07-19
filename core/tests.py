@@ -6309,6 +6309,62 @@ def test_sales_list_reached_from_reports_not_sidebar(client, admin_user):
     assert reverse('core:sale_list').encode() in reports.content
 
 
+# ---------------------------------------------------------------------------
+# Reports restructure Slice 1 — domain side-menu (Financial/Tickets/Work
+# Orders) replacing the single flat scroll of ~11 report sections.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_reports_default_domain_is_financial(client, admin_user):
+    """No ?domain= given -> Financial, showing only its own sections."""
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'))
+    assert resp.status_code == 200
+    assert resp.context['domain'] == 'financial'
+    assert b'id="section-billing"' in resp.content
+    assert b'id="section-countersales"' in resp.content
+    assert b'id="section-volume"' not in resp.content   # Tickets domain
+    assert b'id="section-mileage"' not in resp.content  # Work Orders domain
+
+
+@pytest.mark.django_db
+def test_reports_tickets_domain_shows_only_ticket_sections(client, admin_user):
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'), {'domain': 'tickets'})
+    assert resp.status_code == 200
+    assert b'id="section-volume"' in resp.content
+    assert b'id="section-sla"' in resp.content
+    assert b'id="section-backlog"' in resp.content
+    assert b'id="section-billing"' not in resp.content     # Financial domain
+    assert b'id="section-mileage"' not in resp.content     # Work Orders domain
+
+
+@pytest.mark.django_db
+def test_reports_workorders_domain_shows_techperf_and_mileage(client, admin_user, client_obj):
+    """Technician Performance and Mileage sit far apart in the template (the
+    old flat scroll) but must both land in the Work Orders domain."""
+    from datetime import date
+    from core.models import Mileage
+    WorkOrder.objects.create(client=client_obj, status='completed', assigned_to=admin_user)
+    Mileage.objects.create(technician=admin_user, trip_date=date.today(), miles=10, trip_type='one_way')
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'), {'domain': 'workorders'})
+    assert resp.status_code == 200
+    assert b'id="section-techperf"' in resp.content
+    assert b'id="section-mileage"' in resp.content
+    assert b'id="section-billing"' not in resp.content  # Financial domain
+    assert b'id="section-volume"' not in resp.content   # Tickets domain
+
+
+@pytest.mark.django_db
+def test_reports_invalid_domain_falls_back_to_financial(client, admin_user):
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'), {'domain': 'nonsense'})
+    assert resp.status_code == 200
+    assert resp.context['domain'] == 'financial'
+
+
 @pytest.mark.django_db
 def test_reports_page_no_longer_shows_sales_nav_link_but_has_receipt_link(client, admin_user, client_obj):
     """Sanity check that the report's receipt links resolve to the correct
