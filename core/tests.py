@@ -5697,6 +5697,24 @@ def test_pos_home_no_query_browses_recent_finished_wos(client, admin_user, clien
 
 
 @pytest.mark.django_db
+def test_pos_home_browse_sorts_null_completed_date_by_created_at(client, admin_user, client_obj):
+    """completed_date is only stamped by WorkOrder.mark_completed() — a WO whose
+    status was set to 'completed' by any other path (e.g. a quick status update)
+    has it NULL. That must not sort it out of order against dated WOs (a real bug
+    caught live: the newest WO landed at the bottom of the list instead of top)."""
+    older = WorkOrder.objects.create(client=client_obj, status='in_progress')
+    older.mark_completed()  # stamps a real completed_date
+
+    newer = WorkOrder.objects.create(client=client_obj, status='completed')  # no mark_completed() -> completed_date NULL
+    assert newer.completed_date is None
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:pos_home'))
+    numbers = [w.work_order_number for w in resp.context['results']]
+    assert numbers.index(newer.work_order_number) < numbers.index(older.work_order_number)
+
+
+@pytest.mark.django_db
 def test_pos_wo_settle_get_blocked_if_not_closed(client, admin_user, client_obj):
     wo = WorkOrder.objects.create(client=client_obj, status='in_progress')
     client.force_login(admin_user)

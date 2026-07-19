@@ -11,6 +11,7 @@ from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
 from django.urls import reverse, reverse_lazy
 from django.db.models import Q, F as models_F, Max as models_Max, Count
+from django.db.models.functions import Coalesce
 from django.db import IntegrityError
 from django.core.exceptions import PermissionDenied
 from django.contrib.contenttypes.models import ContentType
@@ -5582,7 +5583,11 @@ class POSHomeView(POSAccessMixin, View):
         qs = (
             WorkOrder.objects.filter(status__in=POS_SETTLE_STATUSES)
             .select_related('client', 'invoice')
-            .order_by('-completed_date', '-created_at')
+            # completed_date is only stamped by mark_completed(); a WO whose status
+            # was flipped via a quick status update instead has it NULL. Coalesce to
+            # created_at so those don't sort unpredictably against dated ones.
+            .annotate(_settle_sort_date=Coalesce('completed_date', 'created_at'))
+            .order_by('-_settle_sort_date')
         )
         if q:
             qs = qs.filter(Q(work_order_number__icontains=q) | Q(client__name__icontains=q))
