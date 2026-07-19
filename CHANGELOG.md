@@ -4,6 +4,16 @@ All notable changes to Murphy's Bench are recorded here, newest first.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions are the
 tags cut by `scripts/release.sh` and deployed by `scripts/update.sh`.
 
+## v0.4.45 — 2026-07-19
+
+### Added
+- **No-charge receipts.** Both the counter Sale and the work-order settle screen now have
+  a **No Charge** option that completes the transaction at $0.00 (warranty, goodwill, a
+  handout) and prints a Murphy's Bench receipt reading "No charge." It records a real $0
+  completed transaction so the no-charge work shows up in history and reporting rather
+  than vanishing. Available even with no priced line items, and it never touches Invoice
+  Ninja (there's no money to reconcile). New `No charge` payment method (migration 0096).
+
 ## v0.4.44 — 2026-07-19
 
 ### Fixed

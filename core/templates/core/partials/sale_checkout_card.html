@@ -77,7 +77,19 @@ payment + Invoice Ninja status with a retry / re-send path.
                 {% endif %}
             </form>
         {% else %}
-            <p class="text-sm text-gray-500">Add at least one priced line item above before checkout.</p>
+            <p class="text-sm text-gray-500">Add a priced line item above to take payment, or record this as no charge below.</p>
         {% endif %}
+
+        {# No Charge: complete at $0 (goodwill/handout) and print a receipt — #}
+        {# available with or without priced lines, never touches Invoice Ninja. #}
+        <form method="post" action="{% url 'core:sale_checkout' sale.pk %}"
+              class="mt-4 pt-4 border-t border-gray-100"
+              onsubmit="return confirm('Complete this sale as No Charge — $0.00?');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="no_charge">
+            <button type="submit" class="px-5 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-200 font-medium">
+                Complete as No Charge
+            </button>
+        </form>
     {% endif %}
 </div>

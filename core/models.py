@@ -1265,6 +1265,7 @@ class Invoice(models.Model):
         ('card', 'Card'),
         ('transfer', 'Transfer'),
         ('other', 'Other'),
+        ('no_charge', 'No charge'),
     ]
 
     work_order = models.OneToOneField(WorkOrder, on_delete=models.CASCADE, related_name='invoice')
@@ -1463,6 +1464,7 @@ class Sale(models.Model):
         ('check', 'Check'),
         ('card', 'Card'),
         ('other', 'Other'),
+        ('no_charge', 'No charge'),
     ]
 
     client = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True, blank=True, related_name='sales')

@@ -204,6 +204,12 @@
     <div class="section">
         <div class="section-title">Payment</div>
         <div class="payment-grid">
+            {% if invoice.payment_method == 'no_charge' %}
+            <div>
+                <div class="field-label">Payment</div>
+                <div class="field-value">No charge</div>
+            </div>
+            {% else %}
             <div>
                 <div class="field-label">Method</div>
                 <div class="field-value">{{ invoice.get_payment_method_display|default:"—" }}</div>
@@ -212,6 +218,7 @@
                 <div class="field-label">Amount Paid</div>
                 <div class="field-value">${{ invoice.amount|floatformat:2 }}</div>
             </div>
+            {% endif %}
             {% if invoice.reference %}
             <div>
                 <div class="field-label">Reference</div>

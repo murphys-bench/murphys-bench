@@ -96,6 +96,12 @@
                     Bill Later (Draft)
                 </button>
                 {% endif %}
+                {# No Charge: settle at $0 (warranty/goodwill) and print a receipt. #}
+                <button type="submit" name="action" value="no_charge"
+                        onclick="return confirm('Settle this work order as No Charge — $0.00?');"
+                        class="px-5 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-200 font-medium">
+                    No Charge
+                </button>
             </div>
         </form>
 

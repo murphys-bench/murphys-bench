@@ -2674,6 +2674,20 @@ class SaleCheckoutView(SaleAccessMixin, View):
         if sale.is_locked:
             messages.error(request, f'{sale.sale_number} is already {sale.get_status_display().lower()}.')
             return redirect('core:sale_detail', pk=pk)
+
+        # No Charge: complete the sale at $0 as a documented no-charge/goodwill
+        # transaction. Recorded in MB regardless of IN (no money to reconcile, so
+        # no push). Allowed with no priced lines — the receipt documents it either way.
+        if request.POST.get('action') == 'no_charge':
+            sale.status = 'completed'
+            sale.amount = 0
+            sale.payment_method = 'no_charge'
+            sale.reference = (request.POST.get('reference') or '').strip()
+            sale.paid_at = timezone.now()
+            sale.save()
+            messages.success(request, f'{sale.sale_number} completed as no charge.')
+            return redirect('core:sale_detail', pk=pk)
+
         if sale.line_items_total <= 0:
             messages.error(request, 'Add at least one priced line item before checkout.')
             return redirect('core:sale_detail', pk=pk)
@@ -5661,15 +5675,31 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
 
         in_enabled = SiteSettings.get().invoice_ninja_enabled
 
+        action = request.POST.get('action')  # 'pay', 'draft', or 'no_charge'
+        method = (request.POST.get('payment_method') or '').strip()
+        reference = (request.POST.get('reference') or '').strip()
+        valid_methods = {c[0] for c in Invoice.PAYMENT_METHOD_CHOICES}
+
+        # No Charge: settle the WO at $0 as a documented no-charge job (warranty,
+        # goodwill). Recorded on MB's own Invoice regardless of IN — there's no
+        # money to reconcile, so it never touches Invoice Ninja. Allowed even with
+        # no priced lines; the receipt documents the work either way.
+        if action == 'no_charge':
+            invoice = wo.invoice
+            invoice.billing_status = 'paid'
+            invoice.amount = 0
+            invoice.payment_method = 'no_charge'
+            invoice.reference = reference
+            invoice.paid_date = timezone.localdate()
+            invoice.paid_at = timezone.now()
+            invoice.save()
+            messages.success(request, f'{wo.work_order_number} settled as no charge.')
+            return redirect('core:pos_wo_receipt', pk=pk)
+
         amount = wo.line_items_total  # server-computed — never trust the request
         if amount <= 0:
             messages.error(request, 'This work order has no priced line items — nothing to settle.')
             return redirect('core:pos_wo_settle', pk=pk)
-
-        action = request.POST.get('action')  # 'draft' or 'pay'
-        method = (request.POST.get('payment_method') or '').strip()
-        reference = (request.POST.get('reference') or '').strip()
-        valid_methods = {c[0] for c in Invoice.PAYMENT_METHOD_CHOICES}
 
         if action == 'pay' and method not in valid_methods:
             messages.error(request, 'Choose a valid payment method.')

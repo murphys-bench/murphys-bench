@@ -5852,6 +5852,87 @@ def test_pos_wo_settle_bill_later_blocked_without_in(client, admin_user, client_
 
 
 @pytest.mark.django_db
+def test_pos_wo_settle_no_charge_records_zero_and_receipts(client, admin_user, client_obj, monkeypatch):
+    """No Charge settles a WO at $0 as a documented no-charge job — recorded on
+    MB's own Invoice, never touching IN, and yields a printable receipt. Works
+    even with priced lines present (they're waived to $0)."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    monkeypatch.setattr(invoice_ninja, '_request',
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError('IN must not be called for No Charge')))
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Warranty fix',
+                            quantity=1, unit_price=Decimal('40.00'))
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'no_charge'})
+    assert resp.status_code == 302
+    assert resp.url == reverse('core:pos_wo_receipt', args=[wo.pk])
+
+    invoice = wo.invoice
+    invoice.refresh_from_db()
+    assert invoice.billing_status == 'paid'
+    assert invoice.amount == 0
+    assert invoice.payment_method == 'no_charge'
+    assert invoice.paid_at is not None
+    wo.refresh_from_db()
+    assert not wo.invoice_ninja_id
+
+    # Receipt prints and reads "No charge"
+    receipt = client.get(reverse('core:pos_wo_receipt', args=[wo.pk]))
+    assert receipt.status_code == 200
+    assert b'No charge' in receipt.content
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_no_charge_never_pushes_even_with_in_on(client, admin_user, client_obj, monkeypatch):
+    """A no-charge event has no money to reconcile, so it stays local even when
+    Invoice Ninja is enabled — no invoice/payment is pushed."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    _enable_in()
+    monkeypatch.setattr(invoice_ninja, '_request',
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError('IN must not be called for No Charge')))
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Goodwill',
+                            quantity=1, unit_price=Decimal('25.00'))
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'no_charge'})
+    assert resp.status_code == 302
+    wo.refresh_from_db()
+    assert wo.invoice.billing_status == 'paid'
+    assert wo.invoice.payment_method == 'no_charge'
+    assert not wo.invoice_ninja_id
+
+
+@pytest.mark.django_db
+def test_sale_no_charge_completes_at_zero_without_priced_lines(client, admin_user, client_obj, monkeypatch):
+    """A counter Sale can be completed as No Charge with no priced lines at all
+    (a goodwill handout), recorded at $0, never pushed to IN, receipt printable."""
+    from core import invoice_ninja
+    monkeypatch.setattr(invoice_ninja, '_request',
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError('IN must not be called for No Charge')))
+    sale = Sale.objects.create(client=client_obj, status='draft')
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_checkout', args=[sale.pk]), {'action': 'no_charge'})
+    assert resp.status_code == 302
+    sale.refresh_from_db()
+    assert sale.status == 'completed'
+    assert sale.amount == 0
+    assert sale.payment_method == 'no_charge'
+    assert sale.paid_at is not None
+    assert not sale.invoice_ninja_id
+
+    receipt = client.get(reverse('core:sale_receipt_print', args=[sale.pk]))
+    assert receipt.status_code == 200
+    assert b'No charge' in receipt.content
+
+
+@pytest.mark.django_db
 def test_pos_wo_settle_reuses_existing_invoice_never_double_pushes(client, admin_user, client_obj, monkeypatch):
     """State-aware settlement: a WO that already has an invoice_ninja_id (e.g.
     a draft sent earlier) must NOT push a second invoice when later settled
