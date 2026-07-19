@@ -4,6 +4,15 @@ All notable changes to Murphy's Bench are recorded here, newest first.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions are the
 tags cut by `scripts/release.sh` and deployed by `scripts/update.sh`.
 
+## v0.4.46 — 2026-07-19
+
+### Fixed
+- **No-charge polish on the work-order settle screen.** When a work order had no priced
+  line items, the settle screen still showed "Mark Paid — $0.00", which could only fail
+  with "nothing to settle." Now, with a $0 total, the payment fields and Mark Paid are
+  hidden and **No Charge** becomes the primary action. Also kept the new "No charge"
+  method out of the payment-method radios/dropdown, where it isn't a way to *pay*.
+
 ## v0.4.45 — 2026-07-19
 
 ### Added

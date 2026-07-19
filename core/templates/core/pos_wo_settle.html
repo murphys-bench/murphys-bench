@@ -66,14 +66,18 @@
         </div>
         <form method="post" action="{% url 'core:pos_wo_settle' wo.pk %}" class="space-y-4">
             {% csrf_token %}
+            {% if amount %}
+            {# Payment inputs only make sense when there's an amount to collect. #}
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-2">Payment method</label>
                 <div class="flex flex-wrap gap-3">
                     {% for value, label in payment_methods %}
+                    {% if value != 'no_charge' %}
                     <label class="flex items-center gap-1.5 text-sm">
                         <input type="radio" name="payment_method" value="{{ value }}">
                         {{ label }}
                     </label>
+                    {% endif %}
                     {% endfor %}
                 </div>
                 <p class="text-xs text-gray-400 mt-1">For a card, run it in Square first, then enter the confirmation as the reference below.</p>
@@ -83,7 +87,11 @@
                 <input type="text" name="reference" placeholder="Check # or Square confirmation (optional for cash)"
                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
+            {% else %}
+            <p class="text-sm text-gray-500">No priced line items — settle this work order as No Charge, or add priced items on the work order first.</p>
+            {% endif %}
             <div class="flex flex-wrap gap-3 pt-2">
+                {% if amount %}
                 <button type="submit" name="action" value="pay"
                         class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">
                     Mark Paid — ${{ amount|floatformat:2 }}
@@ -96,10 +104,12 @@
                     Bill Later (Draft)
                 </button>
                 {% endif %}
+                {% endif %}
                 {# No Charge: settle at $0 (warranty/goodwill) and print a receipt. #}
+                {# Primary (green) when there's nothing to charge, secondary otherwise. #}
                 <button type="submit" name="action" value="no_charge"
                         onclick="return confirm('Settle this work order as No Charge — $0.00?');"
-                        class="px-5 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-200 font-medium">
+                        class="px-5 py-2 font-medium rounded-md {% if amount %}bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200{% else %}bg-green-600 text-white hover:bg-green-700{% endif %}">
                     No Charge
                 </button>
             </div>

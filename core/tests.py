@@ -5886,6 +5886,18 @@ def test_pos_wo_settle_no_charge_records_zero_and_receipts(client, admin_user, c
 
 
 @pytest.mark.django_db
+def test_pos_wo_settle_zero_total_offers_only_no_charge(client, admin_user, client_obj):
+    """A WO with no priced lines ($0) can't be 'Mark Paid' (that just errors) —
+    the settle screen must hide the pay action and offer only No Charge."""
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')  # no line items -> $0
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:pos_wo_settle', args=[wo.pk]))
+    assert resp.status_code == 200
+    assert b'value="no_charge"' in resp.content
+    assert b'value="pay"' not in resp.content
+
+
+@pytest.mark.django_db
 def test_pos_wo_settle_no_charge_never_pushes_even_with_in_on(client, admin_user, client_obj, monkeypatch):
     """A no-charge event has no money to reconcile, so it stays local even when
     Invoice Ninja is enabled — no invoice/payment is pushed."""

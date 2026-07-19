@@ -274,7 +274,11 @@ class SaleCheckoutForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['payment_method'].required = True
-        self.fields['payment_method'].choices = self._meta.model.PAYMENT_METHOD_CHOICES  # no blank option
+        # 'no_charge' is a settlement action with its own button, not a way to pay a
+        # priced sale — keep it out of the paid-checkout dropdown (no blank option).
+        self.fields['payment_method'].choices = [
+            c for c in self._meta.model.PAYMENT_METHOD_CHOICES if c[0] != 'no_charge'
+        ]
         self.fields['amount'].required = True
         self.fields['reference'].required = False
 
