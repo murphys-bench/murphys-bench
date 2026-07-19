@@ -51,8 +51,10 @@
             <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Search</button>
         </form>
 
-        {% if query %}
         <div class="mt-4">
+            {% if browsing and results %}
+            <p class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Recently completed</p>
+            {% endif %}
             {% if results %}
             <div class="divide-y divide-gray-100 border-t border-gray-100">
                 {% for wo in results %}
@@ -69,11 +71,12 @@
                 </div>
                 {% endfor %}
             </div>
-            {% else %}
+            {% elif query %}
             <p class="text-sm text-gray-400 mt-3">No closed work orders match "{{ query }}".</p>
+            {% else %}
+            <p class="text-sm text-gray-400 mt-3">No completed work orders waiting to be settled.</p>
             {% endif %}
         </div>
-        {% endif %}
     </div>
 </div>
 {% endblock %}

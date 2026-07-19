@@ -212,6 +212,13 @@ venv/bin/python manage.py migrate
 venv/bin/python manage.py collectstatic --noinput
 venv/bin/python manage.py createsuperuser
 venv/bin/python manage.py check
+```
+
+**Optional — verify the install** by running the test suite. This is not part of
+initializing the application; it's a smoke test you can run if you want confirmation
+the code is healthy on this box (it's also run automatically by CI on every change):
+
+```bash
 venv/bin/python -m pytest
 ```
 

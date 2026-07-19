@@ -5572,19 +5572,22 @@ POS_SETTLE_STATUSES = ('completed', 'closed')
 
 class POSHomeView(POSAccessMixin, View):
     """The register's landing screen: search finished (completed/closed) work
-    orders by number or customer name, or start a new counter Sale."""
+    orders by number or customer name, or start a new counter Sale. With no
+    search entered, lists the most recently completed WOs so a walk-in or
+    unnamed-client job can be found by browsing instead of having to guess
+    its exact client name."""
 
     def get(self, request):
         q = (request.GET.get('q') or '').strip()
-        results = []
+        qs = (
+            WorkOrder.objects.filter(status__in=POS_SETTLE_STATUSES)
+            .select_related('client', 'invoice')
+            .order_by('-completed_date', '-created_at')
+        )
         if q:
-            results = list(
-                WorkOrder.objects.filter(status__in=POS_SETTLE_STATUSES)
-                .filter(Q(work_order_number__icontains=q) | Q(client__name__icontains=q))
-                .select_related('client', 'invoice')
-                .order_by('-completed_date', '-created_at')[:25]
-            )
-        return render(request, 'core/pos_home.html', {'query': q, 'results': results})
+            qs = qs.filter(Q(work_order_number__icontains=q) | Q(client__name__icontains=q))
+        results = list(qs[:25])
+        return render(request, 'core/pos_home.html', {'query': q, 'results': results, 'browsing': not q})
 
 
 class POSSaleStartView(POSAccessMixin, View):

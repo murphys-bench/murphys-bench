@@ -5679,6 +5679,24 @@ def test_pos_home_search_finds_finished_wo_by_number_and_client(client, admin_us
 
 
 @pytest.mark.django_db
+def test_pos_home_no_query_browses_recent_finished_wos(client, admin_user, client_obj):
+    """With no search entered, the register lists recently completed WOs so a
+    walk-in or unnamed-client job can be found by browsing, not by having to
+    guess its exact client name."""
+    completed = WorkOrder.objects.create(client=client_obj, status='completed')
+    walkin = WorkOrder.objects.create(client=None, status='completed')
+    open_wo = WorkOrder.objects.create(client=client_obj, status='in_progress')
+    client.force_login(admin_user)
+
+    resp = client.get(reverse('core:pos_home'))
+    numbers = [w.work_order_number for w in resp.context['results']]
+    assert completed.work_order_number in numbers
+    assert walkin.work_order_number in numbers
+    assert open_wo.work_order_number not in numbers
+    assert resp.context['browsing'] is True
+
+
+@pytest.mark.django_db
 def test_pos_wo_settle_get_blocked_if_not_closed(client, admin_user, client_obj):
     wo = WorkOrder.objects.create(client=client_obj, status='in_progress')
     client.force_login(admin_user)
