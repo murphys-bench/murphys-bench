@@ -10,6 +10,10 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+_Nothing yet._
+
+## v0.4.48 — 2026-07-20
+
 ### Added
 - **Ticket time tracking (lightweight, non-billable).** A Timer card on ticket detail (same
   stopwatch as Work Orders) logs blocks of time directly against a ticket via a new
