@@ -10,6 +10,10 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+_Nothing yet._
+
+## v0.4.47 — 2026-07-20
+
 ### Added
 - **"View changelog" link on the Software Updates card.** Settings → Maintenance now links
   from the "Latest available" version straight to that release's CHANGELOG.md section,
