@@ -4722,7 +4722,10 @@ class ReportsView(LoginRequiredMixin, View):
         ticket_time_total = 0
         ticket_time_count = 0
         ticket_time_by_tech = []
+        ticket_time_by_ticket = []
         if domain == 'metrics':
+            from collections import defaultdict
+
             logs_in_range = TicketWorkLog.objects.filter(logged_at__range=(start_dt, end_dt))
             agg = logs_in_range.aggregate(total=Sum('minutes'), count=Count('id'))
             ticket_time_total = agg['total'] or 0
@@ -4733,6 +4736,31 @@ class ReportsView(LoginRequiredMixin, View):
                 .annotate(minutes=Sum('minutes'), entries=Count('id'))
                 .order_by('-minutes')
             )
+
+            # Per-ticket breakdown: total time on each ticket + every tech who
+            # worked on it (with their split) — so an admin can see it all in
+            # Reports without opening each ticket. Built in Python from a single
+            # pass so the tech list per ticket comes out in one query.
+            per_ticket = {}
+            for log in logs_in_range.select_related('ticket', 'ticket__client', 'logged_by'):
+                if log.ticket_id not in per_ticket:
+                    per_ticket[log.ticket_id] = {
+                        'ticket': log.ticket,
+                        'minutes': 0,
+                        'entries': 0,
+                        '_techs': defaultdict(int),
+                    }
+                row = per_ticket[log.ticket_id]
+                row['minutes'] += log.minutes
+                row['entries'] += 1
+                if log.logged_by:
+                    who = log.logged_by.get_full_name() or log.logged_by.username
+                else:
+                    who = 'Unknown'
+                row['_techs'][who] += log.minutes
+            ticket_time_by_ticket = sorted(per_ticket.values(), key=lambda r: -r['minutes'])
+            for row in ticket_time_by_ticket:
+                row['techs'] = sorted(row.pop('_techs').items(), key=lambda kv: -kv[1])
 
         context = {
             'domain': domain,
@@ -4796,6 +4824,7 @@ class ReportsView(LoginRequiredMixin, View):
             'ticket_time_total': ticket_time_total,
             'ticket_time_count': ticket_time_count,
             'ticket_time_by_tech': ticket_time_by_tech,
+            'ticket_time_by_ticket': ticket_time_by_ticket,
         }
         return render(request, 'core/reports.html', context)
 

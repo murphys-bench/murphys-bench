@@ -17,7 +17,9 @@ the Unreleased entries move under that version and prod gets a single update.
   never touches Invoice Ninja. Captures work that never becomes a work order (a quick account
   unlock, checking an alert and resolving it) so the time is still visible. A new **Ticket
   Time Logged** section under the Reports → Business Metrics domain totals minutes/entries by
-  period and technician.
+  period and technician, plus a **By ticket** table showing the total time on each ticket and
+  every technician who worked on it — so an admin sees it all in Reports without opening each
+  ticket.
 
 ### Changed
 - **Work Order Timer moved** below the Update Work Order card; **Update Work Order** and the

@@ -646,7 +646,46 @@
             <p>Entries logged: <strong>{{ ticket_time_count }}</strong></p>
         </div>
     </div>
+    <!-- Per-ticket: time on each ticket + everyone who worked on it -->
+    {% if ticket_time_by_ticket %}
+    <h3 class="text-sm font-semibold text-gray-700 mb-2">By ticket</h3>
+    <div class="overflow-x-auto mb-6">
+    <table class="min-w-full text-sm">
+        <thead>
+            <tr class="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-200">
+                <th class="pb-2 pr-4">Ticket</th>
+                <th class="pb-2 pr-4">Client</th>
+                <th class="pb-2 pr-4">Worked on by</th>
+                <th class="pb-2 text-right pr-4">Time</th>
+                <th class="pb-2 text-right">Entries</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+            {% for row in ticket_time_by_ticket %}
+            <tr class="align-top">
+                <td class="py-2 pr-4 font-medium">
+                    <a href="{% url 'core:ticket_detail' row.ticket.pk %}" class="text-blue-600 hover:underline">{{ row.ticket.ticket_number }}</a>
+                    <div class="text-xs text-gray-400 font-normal">{{ row.ticket.subject|truncatechars:40 }}</div>
+                </td>
+                <td class="py-2 pr-4 text-gray-700">{{ row.ticket.client.name|default:"—" }}</td>
+                <td class="py-2 pr-4 text-gray-700">
+                    {% for name, mins in row.techs %}
+                    <span class="inline-block whitespace-nowrap">{{ name }} <span class="text-gray-400">({{ mins }}m)</span>{% if not forloop.last %}, {% endif %}</span>
+                    {% endfor %}
+                </td>
+                <td class="py-2 pr-4 text-right font-semibold text-gray-900">{{ row.minutes }} min</td>
+                <td class="py-2 text-right text-gray-700">{{ row.entries }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
+
+    <!-- Per-tech: total across all tickets -->
     {% if ticket_time_by_tech %}
+    <h3 class="text-sm font-semibold text-gray-700 mb-2">By technician <span class="text-xs font-normal text-gray-400">(total across all tickets)</span></h3>
+    <div class="overflow-x-auto">
     <table class="min-w-full text-sm">
         <thead>
             <tr class="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-200">
@@ -665,6 +704,7 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
     {% endif %}
     {% else %}
     <p class="text-sm text-gray-400 italic">No ticket time logged in this period.</p>

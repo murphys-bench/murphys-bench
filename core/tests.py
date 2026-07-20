@@ -6515,6 +6515,32 @@ def test_reports_metrics_domain_shows_all_performance_sections(client, admin_use
 
 
 @pytest.mark.django_db
+def test_reports_ticket_time_per_ticket_breakdown(client, admin_user, client_obj, django_user_model):
+    """Admin should see, in Reports, the time on each ticket and everyone who
+    worked on it — without opening each ticket."""
+    other = django_user_model.objects.create_user(username='tech2', password='x', first_name='Tess', last_name='Two')
+    ticket = Ticket.objects.create(client=client_obj, subject='Terminal logout', description='D')
+    TicketWorkLog.objects.create(ticket=ticket, minutes=10, logged_by=admin_user)
+    TicketWorkLog.objects.create(ticket=ticket, minutes=5, logged_by=other)
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'), {'domain': 'metrics'})
+    assert resp.status_code == 200
+    assert b'id="section-tickettime"' in resp.content
+
+    by_ticket = resp.context['ticket_time_by_ticket']
+    assert len(by_ticket) == 1
+    row = by_ticket[0]
+    assert row['ticket'].pk == ticket.pk
+    assert row['minutes'] == 15            # total time on the ticket
+    assert row['entries'] == 2
+    # Both techs who worked on it, with their split, most-first
+    techs = dict(row['techs'])
+    assert techs[admin_user.get_full_name() or admin_user.username] == 10
+    assert techs['Tess Two'] == 5
+
+
+@pytest.mark.django_db
 def test_reports_invalid_domain_falls_back_to_financial(client, admin_user):
     client.force_login(admin_user)
     resp = client.get(reverse('core:reports'), {'domain': 'nonsense'})
