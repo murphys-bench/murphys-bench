@@ -4301,14 +4301,19 @@ REPORTS_DOMAINS = {
     },
     'tickets': {
         'label': 'Tickets',
-        'sections': [
-            'volume', 'status', 'byclient', 'bytech', 'resolution',
-            'sla', 'backlog', 'conversion',
-        ],
+        'sections': ['volume', 'status', 'byclient', 'bytech'],
     },
     'workorders': {
         'label': 'Work Orders',
-        'sections': ['techperf', 'mileage'],
+        'sections': ['mileage'],
+    },
+    # Performance/metrics — deliberately separate from Financial (money) and
+    # from Tickets/Work Orders (raw activity data): SLA, resolution time,
+    # conversion rate, technician performance, and backlog health are all
+    # "how are we doing" numbers, not activity logs or dollars.
+    'metrics': {
+        'label': 'Business Metrics',
+        'sections': ['techperf', 'resolution', 'sla', 'backlog', 'conversion'],
     },
 }
 
@@ -4322,6 +4327,13 @@ class ReportsView(LoginRequiredMixin, View):
         from datetime import timedelta, date
         from django.db.models import Count, Avg, F, Q, Sum, ExpressionWrapper, DurationField, FloatField
         from django.db.models.functions import TruncDay, TruncWeek
+
+        # Domain side-menu (Slice 1 of the Reports restructure): resolved early
+        # so heavier domain-specific computation (e.g. Financial's revenue
+        # breakdowns) can be skipped entirely when a different domain is active.
+        domain = request.GET.get('domain', 'financial')
+        if domain not in REPORTS_DOMAINS:
+            domain = 'financial'
 
         # Date range
         end_date_str = request.GET.get('end_date', '')
@@ -4533,6 +4545,95 @@ class ReportsView(LoginRequiredMixin, View):
         # above) — only Collected is an honestly combinable figure.
         paid_total = wo_paid_total + counter_sales_total
 
+        # 12. Revenue breakdown (Financial domain, Slice 2 of the Reports
+        # restructure) — a REVENUE statement, deliberately not a P&L: MB has
+        # no expense/cost data anywhere (per-job part cost was explicitly
+        # deferred), so profit can't be honestly computed. Combines paid WO
+        # invoices + completed counter sales (the same two pools Collected
+        # already merges) into one revenue pool, broken down by period,
+        # client type, category, and WO-vs-Sale source. Gated on the active
+        # domain — skip the extra queries entirely when Financial isn't shown.
+        revenue_granularity = 'month'
+        revenue_by_period = []
+        revenue_by_client_type = []
+        revenue_by_category = []
+        revenue_by_source = []
+        revenue_total = 0
+
+        if domain == 'financial':
+            from collections import defaultdict
+            from decimal import Decimal
+            from django.contrib.contenttypes.models import ContentType
+
+            revenue_granularity = request.GET.get('granularity', 'month')
+            if revenue_granularity not in ('day', 'week', 'month', 'year'):
+                revenue_granularity = 'month'
+
+            def _period_key(d):
+                if revenue_granularity == 'day':
+                    return d.isoformat()
+                if revenue_granularity == 'week':
+                    return (d - timedelta(days=d.weekday())).isoformat()
+                if revenue_granularity == 'year':
+                    return str(d.year)
+                return d.strftime('%Y-%m')
+
+            def _client_type_label(client_):
+                return client_.get_client_type_display() if client_ else 'Walk-in'
+
+            paid_wos = list(
+                WorkOrder.objects.filter(
+                    invoice__billing_status='paid', invoice__paid_date__range=(start_date, end_date),
+                ).select_related('client', 'invoice')
+            )
+            revenue_sales = list(counter_sales_qs)
+
+            period_totals = defaultdict(Decimal)
+            client_type_totals = defaultdict(Decimal)
+            source_totals = defaultdict(Decimal)
+
+            for wo in paid_wos:
+                amt = wo.invoice.amount or Decimal('0')
+                revenue_total += amt
+                period_totals[_period_key(wo.invoice.paid_date)] += amt
+                client_type_totals[_client_type_label(wo.client)] += amt
+                source_totals['Work Orders'] += amt
+
+            for sale in revenue_sales:
+                amt = sale.amount or Decimal('0')
+                revenue_total += amt
+                if sale.paid_at:
+                    period_totals[_period_key(sale.paid_at.date())] += amt
+                client_type_totals[_client_type_label(sale.client)] += amt
+                source_totals['Counter Sales'] += amt
+
+            revenue_by_period = sorted(period_totals.items())
+            revenue_by_client_type = sorted(client_type_totals.items(), key=lambda kv: -kv[1])
+            revenue_by_source = sorted(source_totals.items(), key=lambda kv: -kv[1])
+
+            # Category comes from each transaction's LineItems (the only place
+            # a category lives). A no-charge transaction's lines may still
+            # carry a price — that's revenue waived, not collected — so those
+            # transactions are excluded here even though their $0 total is
+            # still correctly included above.
+            wo_ct = ContentType.objects.get_for_model(WorkOrder)
+            sale_ct = ContentType.objects.get_for_model(Sale)
+            cat_wo_ids = [wo.id for wo in paid_wos if wo.invoice.payment_method != 'no_charge']
+            cat_sale_ids = [s.id for s in revenue_sales if s.payment_method != 'no_charge']
+
+            category_totals = defaultdict(Decimal)
+            cat_line_items = (
+                LineItem.objects.filter(
+                    Q(content_type=wo_ct, object_id__in=cat_wo_ids) |
+                    Q(content_type=sale_ct, object_id__in=cat_sale_ids),
+                    unit_price__isnull=False,
+                ).select_related('catalog_item')
+            )
+            for li in cat_line_items:
+                label = li.catalog_item.category if li.catalog_item_id else 'Uncategorized'
+                category_totals[label] += li.line_total
+            revenue_by_category = sorted(category_totals.items(), key=lambda kv: -kv[1])
+
         # 10. Technician performance
         tech_perf = []
         for tech in User.objects.filter(is_active=True).order_by('first_name', 'last_name'):
@@ -4566,13 +4667,6 @@ class ReportsView(LoginRequiredMixin, View):
                     'avg_hours': avg_hours,
                     'open_wos': open_wos,
                 })
-
-        # Domain side-menu (Slice 1 of the Reports restructure): sections stay
-        # computed together (admin-only, infrequent — no need to split the view
-        # yet), but only one domain's sections render at a time.
-        domain = request.GET.get('domain', 'financial')
-        if domain not in REPORTS_DOMAINS:
-            domain = 'financial'
 
         context = {
             'domain': domain,
@@ -4621,6 +4715,13 @@ class ReportsView(LoginRequiredMixin, View):
             'counter_sales_total': counter_sales_total,
             'counter_sales_count': counter_sales_count,
             'counter_sales_list': counter_sales_list,
+            # 12
+            'revenue_granularity': revenue_granularity,
+            'revenue_by_period': revenue_by_period,
+            'revenue_by_client_type': revenue_by_client_type,
+            'revenue_by_category': revenue_by_category,
+            'revenue_by_source': revenue_by_source,
+            'revenue_total': revenue_total,
         }
         return render(request, 'core/reports.html', context)
 

@@ -28,6 +28,16 @@ the Unreleased entries move under that version and prod gets a single update.
   work-order list above it is now action-focused: an already-paid work order no longer
   clutters the "needs settling" list (an explicit search still finds it, to pull its
   receipt back up).
+- **Reports restructure Slice 2: Financial "Revenue" section, and a new Business Metrics
+  domain.** Adds a Revenue breakdown to the Financial domain — combines paid work orders
+  and completed counter sales into one figure, broken down by day/week/month/year, client
+  type (Business/Residential/Walk-in), product/service category, and source (Work Orders
+  vs. Counter Sales). Deliberately a REVENUE statement, not a profit/loss — Murphy's Bench
+  doesn't track costs or expenses, so a real P&L can't be honestly computed yet.
+  Also reorganizes the domain side-menu: SLA Compliance, Resolution Time, Conversion Rate,
+  Backlog Health, and Technician Performance move out of Tickets/Work Orders into a new
+  **Business Metrics** domain — they're "how are we doing" numbers, not raw activity data
+  or money, and don't belong mixed into either.
 
 ## v0.4.46 — 2026-07-19
 

@@ -23,22 +23,22 @@
                 <a href="#" @click.prevent="downloadCSV('billing')"    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Billing Summary</a>
                 <a href="#" @click.prevent="downloadCSV('counter_sales')" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Counter Sales</a>
                 {% endif %}
-                {% if domain == 'workorders' %}
-                <a href="#" @click.prevent="downloadCSV('tech_perf')"  class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Technician Performance</a>
-                {% endif %}
                 {% if domain == 'tickets' %}
                 <a href="#" @click.prevent="downloadCSV('volume')"     class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Ticket Volume</a>
                 <a href="#" @click.prevent="downloadCSV('status')"     class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Status</a>
                 <a href="#" @click.prevent="downloadCSV('by_client')"  class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Client</a>
                 <a href="#" @click.prevent="downloadCSV('by_tech')"    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Technician</a>
+                {% endif %}
+                {% if domain == 'workorders' %}
+                <a href="#" @click.prevent="downloadCSV('mileage')"    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Mileage</a>
+                {% endif %}
+                {% if domain == 'metrics' %}
+                <a href="#" @click.prevent="downloadCSV('tech_perf')"  class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Technician Performance</a>
                 <a href="#" @click.prevent="downloadCSV('resolution')" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Resolution Time</a>
                 <a href="#" @click.prevent="downloadCSV('sla')"        class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">SLA Compliance</a>
                 <a href="#" @click.prevent="downloadCSV('sla_breakdown')" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">SLA by Tech/Client</a>
                 <a href="#" @click.prevent="downloadCSV('backlog')"    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Backlog Health</a>
                 <a href="#" @click.prevent="downloadCSV('conversion')" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Conversion Rate</a>
-                {% endif %}
-                {% if domain == 'workorders' %}
-                <a href="#" @click.prevent="downloadCSV('mileage')"    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Mileage</a>
                 {% endif %}
             </div>
         </div>
@@ -55,22 +55,23 @@
                 {% if domain == 'financial' %}
                 <a href="#" @click.prevent="printSection('billing');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Billing Summary</a>
                 <a href="#" @click.prevent="printSection('countersales'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Counter Sales</a>
-                {% endif %}
-                {% if domain == 'workorders' %}
-                <a href="#" @click.prevent="printSection('techperf');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Technician Performance</a>
+                <a href="#" @click.prevent="printSection('revenue');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Revenue</a>
                 {% endif %}
                 {% if domain == 'tickets' %}
                 <a href="#" @click.prevent="printSection('volume');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Ticket Volume</a>
                 <a href="#" @click.prevent="printSection('status');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Status</a>
                 <a href="#" @click.prevent="printSection('byclient');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Client</a>
                 <a href="#" @click.prevent="printSection('bytech');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Technician</a>
+                {% endif %}
+                {% if domain == 'workorders' %}
+                <a href="#" @click.prevent="printSection('mileage');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Mileage</a>
+                {% endif %}
+                {% if domain == 'metrics' %}
+                <a href="#" @click.prevent="printSection('techperf');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Technician Performance</a>
                 <a href="#" @click.prevent="printSection('resolution'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Resolution Time</a>
                 <a href="#" @click.prevent="printSection('sla');        open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">SLA Compliance</a>
                 <a href="#" @click.prevent="printSection('backlog');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Backlog Health</a>
                 <a href="#" @click.prevent="printSection('conversion'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Conversion Rate</a>
-                {% endif %}
-                {% if domain == 'workorders' %}
-                <a href="#" @click.prevent="printSection('mileage');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Mileage</a>
                 {% endif %}
                 <hr class="my-1 border-gray-100">
                 <a href="#" @click.prevent="printSection('all');        open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium">All Sections (this page)</a>
@@ -89,22 +90,23 @@
                 {% if domain == 'financial' %}
                 <a href="#" @click.prevent="downloadPDF('billing');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Billing Summary</a>
                 <a href="#" @click.prevent="downloadPDF('countersales'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Counter Sales</a>
-                {% endif %}
-                {% if domain == 'workorders' %}
-                <a href="#" @click.prevent="downloadPDF('techperf');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Technician Performance</a>
+                <a href="#" @click.prevent="downloadPDF('revenue');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Revenue</a>
                 {% endif %}
                 {% if domain == 'tickets' %}
                 <a href="#" @click.prevent="downloadPDF('volume');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Ticket Volume</a>
                 <a href="#" @click.prevent="downloadPDF('status');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Status</a>
                 <a href="#" @click.prevent="downloadPDF('byclient');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Client</a>
                 <a href="#" @click.prevent="downloadPDF('bytech');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Technician</a>
+                {% endif %}
+                {% if domain == 'workorders' %}
+                <a href="#" @click.prevent="downloadPDF('mileage');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Mileage</a>
+                {% endif %}
+                {% if domain == 'metrics' %}
+                <a href="#" @click.prevent="downloadPDF('techperf');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Technician Performance</a>
                 <a href="#" @click.prevent="downloadPDF('resolution'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Resolution Time</a>
                 <a href="#" @click.prevent="downloadPDF('sla');        open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">SLA Compliance</a>
                 <a href="#" @click.prevent="downloadPDF('backlog');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Backlog Health</a>
                 <a href="#" @click.prevent="downloadPDF('conversion'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Conversion Rate</a>
-                {% endif %}
-                {% if domain == 'workorders' %}
-                <a href="#" @click.prevent="downloadPDF('mileage');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Mileage</a>
                 {% endif %}
                 <hr class="my-1 border-gray-100">
                 <a href="#" @click.prevent="downloadPDF('all');        open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 font-medium">All Sections (this page)</a>
@@ -254,9 +256,109 @@
     <p class="text-sm text-gray-400">No counter sales in this period.</p>
     {% endif %}
 </div>
+
+<!-- Revenue breakdown — a revenue statement, not a P&L (MB tracks no costs) -->
+<div class="bg-white rounded-lg shadow p-5" id="section-revenue">
+    <div class="flex items-center justify-between mb-1">
+        <h2 class="text-base font-semibold text-gray-900">Revenue</h2>
+        <form method="get" class="flex items-center gap-2 print:hidden">
+            <input type="hidden" name="domain" value="financial">
+            <input type="hidden" name="start_date" value="{{ start_date|date:'Y-m-d' }}">
+            <input type="hidden" name="end_date" value="{{ end_date|date:'Y-m-d' }}">
+            <label class="text-xs text-gray-500">Group by</label>
+            <select name="granularity" onchange="this.form.submit()"
+                    class="text-sm border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="day" {% if revenue_granularity == 'day' %}selected{% endif %}>Day</option>
+                <option value="week" {% if revenue_granularity == 'week' %}selected{% endif %}>Week</option>
+                <option value="month" {% if revenue_granularity == 'month' %}selected{% endif %}>Month</option>
+                <option value="year" {% if revenue_granularity == 'year' %}selected{% endif %}>Year</option>
+            </select>
+        </form>
+    </div>
+    <p class="text-xs text-gray-400 mb-4">Combines paid work orders and completed counter sales — the same "Collected" figure above, broken down. Not a profit/loss statement — Murphy's Bench doesn't track costs or expenses.</p>
+
+    <div class="rounded-lg border-l-4 border-green-400 bg-green-50 p-4 mb-6 inline-block">
+        <p class="text-xs text-green-600 font-medium uppercase tracking-wide mb-1">Total Revenue (period)</p>
+        <p class="text-2xl font-bold text-green-700">${{ revenue_total|floatformat:2 }}</p>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div>
+            <h3 class="text-sm font-semibold text-gray-700 mb-2">By {{ revenue_granularity }}</h3>
+            {% if revenue_by_period %}
+            <table class="text-sm w-full">
+                <tbody class="divide-y divide-gray-50">
+                    {% for period, amount in revenue_by_period %}
+                    <tr>
+                        <td class="py-1.5 text-gray-700">{{ period }}</td>
+                        <td class="py-1.5 text-right font-medium text-gray-900">${{ amount|floatformat:2 }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-sm text-gray-400">No revenue in this period.</p>
+            {% endif %}
+        </div>
+
+        <div>
+            <h3 class="text-sm font-semibold text-gray-700 mb-2">By client type</h3>
+            {% if revenue_by_client_type %}
+            <table class="text-sm w-full">
+                <tbody class="divide-y divide-gray-50">
+                    {% for label, amount in revenue_by_client_type %}
+                    <tr>
+                        <td class="py-1.5 text-gray-700">{{ label }}</td>
+                        <td class="py-1.5 text-right font-medium text-gray-900">${{ amount|floatformat:2 }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-sm text-gray-400">No revenue in this period.</p>
+            {% endif %}
+        </div>
+
+        <div>
+            <h3 class="text-sm font-semibold text-gray-700 mb-2">By category</h3>
+            {% if revenue_by_category %}
+            <table class="text-sm w-full">
+                <tbody class="divide-y divide-gray-50">
+                    {% for label, amount in revenue_by_category %}
+                    <tr>
+                        <td class="py-1.5 text-gray-700">{{ label }}</td>
+                        <td class="py-1.5 text-right font-medium text-gray-900">${{ amount|floatformat:2 }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-sm text-gray-400">No categorized revenue in this period.</p>
+            {% endif %}
+        </div>
+
+        <div>
+            <h3 class="text-sm font-semibold text-gray-700 mb-2">By source</h3>
+            {% if revenue_by_source %}
+            <table class="text-sm w-full">
+                <tbody class="divide-y divide-gray-50">
+                    {% for label, amount in revenue_by_source %}
+                    <tr>
+                        <td class="py-1.5 text-gray-700">{{ label }}</td>
+                        <td class="py-1.5 text-right font-medium text-gray-900">${{ amount|floatformat:2 }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-sm text-gray-400">No revenue in this period.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
 {% endif %}{# end financial #}
 
-{% if domain == 'workorders' %}
+{% if domain == 'metrics' %}
 <!-- Technician Performance -->
 {% if tech_perf %}
 <div class="bg-white rounded-lg shadow p-5" id="section-techperf">
@@ -300,7 +402,7 @@
     </table>
 </div>
 {% endif %}
-{% endif %}{# end workorders (techperf half) #}
+{% endif %}{# end metrics (techperf half) #}
 
 {% if domain == 'tickets' %}
 <!-- 1. Ticket Volume Over Time -->
@@ -381,7 +483,9 @@
     <p class="text-sm text-gray-400 italic">No assigned tickets in this period.</p>
     {% endif %}
 </div>
+{% endif %}{# end tickets (raw activity) #}
 
+{% if domain == 'metrics' %}
 <!-- 5. Average Resolution Time -->
 <div class="bg-white rounded-lg shadow p-5" id="section-resolution">
     <h2 class="text-base font-semibold text-gray-900 mb-4">5. Average Ticket Resolution Time</h2>
@@ -522,7 +626,7 @@
     <p class="text-sm text-gray-400 italic">No tickets in this period.</p>
     {% endif %}
 </div>
-{% endif %}{# end tickets #}
+{% endif %}{# end metrics (resolution/sla/backlog/conversion half) #}
 
 {% if domain == 'workorders' %}
 <!-- 8. Mileage by Tech and Month -->
@@ -564,6 +668,7 @@
 var SECTION_LABELS = {
     billing:    'Billing Summary',
     countersales: 'Counter Sales',
+    revenue:    'Revenue',
     techperf:   'Technician Performance',
     volume:     'Ticket Volume',
     status:     'Tickets by Status',

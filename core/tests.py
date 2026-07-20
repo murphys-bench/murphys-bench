@@ -6366,36 +6366,60 @@ def test_reports_default_domain_is_financial(client, admin_user):
     assert b'id="section-countersales"' in resp.content
     assert b'id="section-volume"' not in resp.content   # Tickets domain
     assert b'id="section-mileage"' not in resp.content  # Work Orders domain
+    assert b'id="section-techperf"' not in resp.content  # Business Metrics domain
 
 
 @pytest.mark.django_db
-def test_reports_tickets_domain_shows_only_ticket_sections(client, admin_user):
+def test_reports_tickets_domain_shows_only_raw_activity(client, admin_user):
+    """Tickets domain is raw activity data — volume/status/by-client/by-tech —
+    NOT performance metrics (those moved to Business Metrics)."""
     client.force_login(admin_user)
     resp = client.get(reverse('core:reports'), {'domain': 'tickets'})
     assert resp.status_code == 200
     assert b'id="section-volume"' in resp.content
-    assert b'id="section-sla"' in resp.content
-    assert b'id="section-backlog"' in resp.content
-    assert b'id="section-billing"' not in resp.content     # Financial domain
-    assert b'id="section-mileage"' not in resp.content     # Work Orders domain
+    assert b'id="section-status"' in resp.content
+    assert b'id="section-byclient"' in resp.content
+    assert b'id="section-bytech"' in resp.content
+    assert b'id="section-sla"' not in resp.content        # Business Metrics domain
+    assert b'id="section-backlog"' not in resp.content    # Business Metrics domain
+    assert b'id="section-billing"' not in resp.content    # Financial domain
 
 
 @pytest.mark.django_db
-def test_reports_workorders_domain_shows_techperf_and_mileage(client, admin_user, client_obj):
-    """Technician Performance and Mileage sit far apart in the template (the
-    old flat scroll) but must both land in the Work Orders domain."""
+def test_reports_workorders_domain_shows_mileage_only(client, admin_user, client_obj):
     from datetime import date
     from core.models import Mileage
-    WorkOrder.objects.create(client=client_obj, status='completed', assigned_to=admin_user)
     Mileage.objects.create(technician=admin_user, trip_date=date.today(), miles=10, trip_type='one_way')
 
     client.force_login(admin_user)
     resp = client.get(reverse('core:reports'), {'domain': 'workorders'})
     assert resp.status_code == 200
-    assert b'id="section-techperf"' in resp.content
     assert b'id="section-mileage"' in resp.content
-    assert b'id="section-billing"' not in resp.content  # Financial domain
-    assert b'id="section-volume"' not in resp.content   # Tickets domain
+    assert b'id="section-techperf"' not in resp.content  # Business Metrics domain
+    assert b'id="section-billing"' not in resp.content   # Financial domain
+    assert b'id="section-volume"' not in resp.content    # Tickets domain
+
+
+@pytest.mark.django_db
+def test_reports_metrics_domain_shows_all_performance_sections(client, admin_user, client_obj):
+    """Business Metrics groups every performance number (SLA, resolution time,
+    conversion rate, technician performance, backlog health) in one place,
+    separate from Financial (money) and Tickets/Work Orders (raw activity) —
+    Mike's explicit call: these are 'how are we doing' numbers, not money or
+    activity logs."""
+    WorkOrder.objects.create(client=client_obj, status='completed', assigned_to=admin_user)
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'), {'domain': 'metrics'})
+    assert resp.status_code == 200
+    assert b'id="section-techperf"' in resp.content
+    assert b'id="section-resolution"' in resp.content
+    assert b'id="section-sla"' in resp.content
+    assert b'id="section-backlog"' in resp.content
+    assert b'id="section-conversion"' in resp.content
+    assert b'id="section-billing"' not in resp.content   # Financial domain
+    assert b'id="section-volume"' not in resp.content    # Tickets domain
+    assert b'id="section-mileage"' not in resp.content   # Work Orders domain
 
 
 @pytest.mark.django_db
@@ -6442,6 +6466,133 @@ def test_reports_collected_merges_wo_and_counter_sales(client, admin_user, clien
     resp = client.get(reverse('core:reports'))
     assert resp.context['paid_total'] == Decimal('100.00')  # 75 (WO) + 25 (counter sale)
     assert resp.context['counter_sales_total'] == Decimal('25.00')  # unchanged, still its own figure
+
+
+# ---------------------------------------------------------------------------
+# Reports restructure Slice 2 — Financial "Revenue" breakdown (period /
+# client type / category / source). A REVENUE statement, not a P&L: MB has
+# no cost/expense data, so profit can't be honestly computed.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_revenue_only_computed_for_financial_domain(client, admin_user, client_obj):
+    """The revenue breakdown is a real query cost — skip it entirely unless
+    the Financial domain is actually being viewed."""
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'), {'domain': 'tickets'})
+    assert resp.context['revenue_total'] == 0
+    assert resp.context['revenue_by_period'] == []
+
+
+@pytest.mark.django_db
+def test_revenue_combines_wo_and_sale_totals(client, admin_user, client_obj):
+    from decimal import Decimal
+    from django.utils import timezone
+    wo = WorkOrder.objects.create(client=client_obj)
+    _POSInvoice.objects.filter(work_order=wo).update(
+        billing_status='paid', amount=Decimal('75.00'), paid_date=timezone.localdate(),
+    )
+    sale = Sale.objects.create(client=client_obj, status='completed',
+                                amount=Decimal('25.00'), payment_method='cash')
+    Sale.objects.filter(pk=sale.pk).update(paid_at=timezone.now())
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'))
+    assert resp.context['revenue_total'] == Decimal('100.00')
+    source = dict(resp.context['revenue_by_source'])
+    assert source['Work Orders'] == Decimal('75.00')
+    assert source['Counter Sales'] == Decimal('25.00')
+
+
+@pytest.mark.django_db
+def test_revenue_by_client_type_buckets_walkin_separately(client, admin_user, client_obj):
+    from decimal import Decimal
+    from django.utils import timezone
+    client_obj.client_type = 'business'
+    client_obj.save()
+    wo_biz = WorkOrder.objects.create(client=client_obj)
+    _POSInvoice.objects.filter(work_order=wo_biz).update(
+        billing_status='paid', amount=Decimal('50.00'), paid_date=timezone.localdate(),
+    )
+    walkin_sale = Sale.objects.create(client=None, status='completed',
+                                      amount=Decimal('10.00'), payment_method='cash')
+    Sale.objects.filter(pk=walkin_sale.pk).update(paid_at=timezone.now())
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'))
+    by_type = dict(resp.context['revenue_by_client_type'])
+    assert by_type['Business'] == Decimal('50.00')
+    assert by_type['Walk-in'] == Decimal('10.00')
+
+
+@pytest.mark.django_db
+def test_revenue_by_category_buckets_uncategorized(client, admin_user, client_obj):
+    """A line item with no catalog item (a custom-typed entry) still counts
+    toward total revenue but has no category — bucketed as 'Uncategorized'
+    rather than silently dropped, per Mike's call."""
+    from decimal import Decimal
+    from django.utils import timezone
+    from core.models import LineItem, CatalogItem
+    cat_item = CatalogItem.objects.create(name='Virus Removal', category='Repair',
+                                          item_type='service', default_price=Decimal('40.00'))
+    wo = WorkOrder.objects.create(client=client_obj)
+    LineItem.objects.create(content_object=wo, kind='labor', description='Virus Removal',
+                            quantity=1, unit_price=Decimal('40.00'), catalog_item=cat_item)
+    LineItem.objects.create(content_object=wo, kind='labor', description='Custom fix',
+                            quantity=1, unit_price=Decimal('20.00'))  # no catalog_item
+    _POSInvoice.objects.filter(work_order=wo).update(
+        billing_status='paid', amount=Decimal('60.00'), paid_date=timezone.localdate(),
+    )
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'))
+    by_cat = dict(resp.context['revenue_by_category'])
+    assert by_cat['Repair'] == Decimal('40.00')
+    assert by_cat['Uncategorized'] == Decimal('20.00')
+
+
+@pytest.mark.django_db
+def test_revenue_by_category_excludes_no_charge_lines(client, admin_user, client_obj):
+    """A no-charge WO's priced line items didn't actually generate revenue
+    (waived to $0) — they must not inflate the category breakdown even
+    though the line items themselves still carry a price."""
+    from decimal import Decimal
+    from django.utils import timezone
+    from core.models import LineItem, CatalogItem
+    cat_item = CatalogItem.objects.create(name='Diagnostic', category='Repair',
+                                          item_type='service', default_price=Decimal('30.00'))
+    wo = WorkOrder.objects.create(client=client_obj)
+    LineItem.objects.create(content_object=wo, kind='labor', description='Diagnostic',
+                            quantity=1, unit_price=Decimal('30.00'), catalog_item=cat_item)
+    _POSInvoice.objects.filter(work_order=wo).update(
+        billing_status='paid', amount=Decimal('0.00'), payment_method='no_charge',
+        paid_date=timezone.localdate(),
+    )
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'))
+    assert resp.context['revenue_total'] == Decimal('0.00')
+    assert dict(resp.context['revenue_by_category']) == {}
+
+
+@pytest.mark.django_db
+def test_revenue_granularity_defaults_to_month_and_is_selectable(client, admin_user, client_obj):
+    from decimal import Decimal
+    from django.utils import timezone
+    wo = WorkOrder.objects.create(client=client_obj)
+    _POSInvoice.objects.filter(work_order=wo).update(
+        billing_status='paid', amount=Decimal('10.00'), paid_date=timezone.localdate(),
+    )
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'))
+    assert resp.context['revenue_granularity'] == 'month'
+
+    resp = client.get(reverse('core:reports'), {'granularity': 'day'})
+    assert resp.context['revenue_granularity'] == 'day'
+
+    resp = client.get(reverse('core:reports'), {'granularity': 'bogus'})
+    assert resp.context['revenue_granularity'] == 'month'
 
 
 # ---------------------------------------------------------------------------
