@@ -6386,7 +6386,7 @@ def test_reports_tickets_domain_shows_only_raw_activity(client, admin_user):
 
 
 @pytest.mark.django_db
-def test_reports_workorders_domain_shows_mileage_only(client, admin_user, client_obj):
+def test_reports_workorders_domain_shows_raw_activity_and_mileage(client, admin_user, client_obj):
     from datetime import date
     from core.models import Mileage
     Mileage.objects.create(technician=admin_user, trip_date=date.today(), miles=10, trip_type='one_way')
@@ -6394,10 +6394,42 @@ def test_reports_workorders_domain_shows_mileage_only(client, admin_user, client
     client.force_login(admin_user)
     resp = client.get(reverse('core:reports'), {'domain': 'workorders'})
     assert resp.status_code == 200
+    assert b'id="section-wostatus"' in resp.content
+    assert b'id="section-wobyclient"' in resp.content
+    assert b'id="section-wolist"' in resp.content
     assert b'id="section-mileage"' in resp.content
     assert b'id="section-techperf"' not in resp.content  # Business Metrics domain
     assert b'id="section-billing"' not in resp.content   # Financial domain
     assert b'id="section-volume"' not in resp.content    # Tickets domain
+
+
+@pytest.mark.django_db
+def test_reports_wo_status_includes_closed_work_orders(client, admin_user, client_obj):
+    """Unlike Tickets' 'by status' view (which excludes closed on purpose),
+    Work Orders by Status must include closed/completed WOs — Mike's exact
+    report: 'no open WOs, but there are 5 closed ones, should I see them
+    here?' Hiding them would repeat the same gap."""
+    WorkOrder.objects.create(client=client_obj, status='completed')
+    WorkOrder.objects.create(client=client_obj, status='closed')
+    WorkOrder.objects.create(client=client_obj, status='new')
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'), {'domain': 'workorders'})
+    labels = {row['label'] for row in resp.context['wo_status_counts']}
+    assert 'Completed' in labels
+    assert 'Closed' in labels
+    assert 'New' in labels
+    numbers = [wo.work_order_number for wo in resp.context['wo_list']]
+    assert len(numbers) == 3
+
+
+@pytest.mark.django_db
+def test_reports_wo_raw_activity_only_computed_for_workorders_domain(client, admin_user, client_obj):
+    WorkOrder.objects.create(client=client_obj, status='completed')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'), {'domain': 'financial'})
+    assert resp.context['wo_status_counts'] == []
+    assert resp.context['wo_list'] == []
 
 
 @pytest.mark.django_db

@@ -64,6 +64,9 @@
                 <a href="#" @click.prevent="printSection('bytech');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Technician</a>
                 {% endif %}
                 {% if domain == 'workorders' %}
+                <a href="#" @click.prevent="printSection('wostatus');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Work Orders by Status</a>
+                <a href="#" @click.prevent="printSection('wobyclient'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Work Orders by Client</a>
+                <a href="#" @click.prevent="printSection('wolist');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Work Orders</a>
                 <a href="#" @click.prevent="printSection('mileage');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Mileage</a>
                 {% endif %}
                 {% if domain == 'metrics' %}
@@ -99,6 +102,9 @@
                 <a href="#" @click.prevent="downloadPDF('bytech');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Tickets by Technician</a>
                 {% endif %}
                 {% if domain == 'workorders' %}
+                <a href="#" @click.prevent="downloadPDF('wostatus');   open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Work Orders by Status</a>
+                <a href="#" @click.prevent="downloadPDF('wobyclient'); open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Work Orders by Client</a>
+                <a href="#" @click.prevent="downloadPDF('wolist');     open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Work Orders</a>
                 <a href="#" @click.prevent="downloadPDF('mileage');    open=false" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Mileage</a>
                 {% endif %}
                 {% if domain == 'metrics' %}
@@ -629,6 +635,86 @@
 {% endif %}{# end metrics (resolution/sla/backlog/conversion half) #}
 
 {% if domain == 'workorders' %}
+<!-- Work Orders by Status (ALL statuses, incl. closed — unlike Tickets'
+     by-status view, which excludes closed on purpose) -->
+<div class="bg-white rounded-lg shadow p-5" id="section-wostatus">
+    <h2 class="text-base font-semibold text-gray-900 mb-4">Work Orders by Status</h2>
+    {% if wo_status_counts %}
+    <table class="text-sm w-full max-w-md">
+        <thead><tr class="text-xs text-gray-500 uppercase border-b">
+            <th class="text-left pb-1">Status</th>
+            <th class="text-right pb-1">Work Orders</th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-50">
+        {% for row in wo_status_counts %}
+        <tr>
+            <td class="py-1.5 text-gray-800">{{ row.label }}</td>
+            <td class="py-1.5 text-right font-medium text-gray-900">{{ row.count }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-sm text-gray-400 italic">No work orders created in this period.</p>
+    {% endif %}
+</div>
+
+<!-- Work Orders by Client -->
+<div class="bg-white rounded-lg shadow p-5" id="section-wobyclient">
+    <h2 class="text-base font-semibold text-gray-900 mb-4">Work Orders by Client</h2>
+    {% if wo_by_client %}
+    <table class="text-sm w-full max-w-md">
+        <thead><tr class="text-xs text-gray-500 uppercase border-b">
+            <th class="text-left pb-1">Client</th>
+            <th class="text-right pb-1">Work Orders</th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-50">
+        {% for row in wo_by_client %}
+        <tr>
+            <td class="py-1.5 text-gray-800">{{ row.client__name|default:"Walk-in" }}</td>
+            <td class="py-1.5 text-right font-medium text-gray-900">{{ row.count }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-sm text-gray-400 italic">No work orders created in this period.</p>
+    {% endif %}
+</div>
+
+<!-- Work Orders list — created in the selected date range, newest first -->
+<div class="bg-white rounded-lg shadow p-5" id="section-wolist">
+    <h2 class="text-base font-semibold text-gray-900 mb-4">Work Orders</h2>
+    {% if wo_list %}
+    <table class="min-w-full text-sm">
+        <thead>
+            <tr class="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-200">
+                <th class="pb-2 pr-4">WO #</th>
+                <th class="pb-2 pr-4">Client</th>
+                <th class="pb-2 pr-4">Status</th>
+                <th class="pb-2 pr-4">Created</th>
+                <th class="pb-2 print:hidden">Open</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+            {% for wo in wo_list %}
+            <tr>
+                <td class="py-2 pr-4 font-medium text-gray-900">{{ wo.work_order_number }}</td>
+                <td class="py-2 pr-4 text-gray-700">{% if wo.client %}{{ wo.client.name }}{% else %}Walk-in{% endif %}</td>
+                <td class="py-2 pr-4 text-gray-600">{{ wo.get_status_display }}</td>
+                <td class="py-2 pr-4 text-gray-600">{{ wo.created_at|date:"M j, Y" }}</td>
+                <td class="py-2 print:hidden">
+                    <a href="{% url 'core:work_order_detail' wo.pk %}" class="text-xs text-blue-600 hover:underline">View</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-sm text-gray-400 italic">No work orders created in this period.</p>
+    {% endif %}
+</div>
+
 <!-- 8. Mileage by Tech and Month -->
 <div class="bg-white rounded-lg shadow p-5" id="section-mileage">
     <h2 class="text-base font-semibold text-gray-900 mb-4">8. Mileage by Technician &amp; Month</h2>
@@ -679,6 +765,9 @@ var SECTION_LABELS = {
     backlog:    'Backlog Health',
     conversion: 'Conversion Rate',
     mileage:    'Mileage',
+    wostatus:   'Work Orders by Status',
+    wobyclient: 'Work Orders by Client',
+    wolist:     'Work Orders',
 };
 
 // CSV export — reads current date range from form inputs

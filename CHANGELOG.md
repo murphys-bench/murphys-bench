@@ -38,6 +38,11 @@ the Unreleased entries move under that version and prod gets a single update.
   Backlog Health, and Technician Performance move out of Tickets/Work Orders into a new
   **Business Metrics** domain — they're "how are we doing" numbers, not raw activity data
   or money, and don't belong mixed into either.
+- **Reports restructure Slice 3: Work Orders domain gets real content.** The Work Orders
+  domain previously had only Mileage — Mike noticed 5 closed work orders were nowhere to
+  be found in Reports. Added Work Orders by Status (all statuses, including closed —
+  unlike Tickets' by-status view, which intentionally excludes closed), Work Orders by
+  Client, and a Work Orders list (linking to each WO) for the selected date range.
 
 ## v0.4.46 — 2026-07-19
 

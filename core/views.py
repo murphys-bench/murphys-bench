@@ -4297,7 +4297,7 @@ def _sla_breakdown_by(tickets_with_sla, key_func, label_func):
 REPORTS_DOMAINS = {
     'financial': {
         'label': 'Financial',
-        'sections': ['billing', 'countersales'],
+        'sections': ['billing', 'countersales', 'revenue'],
     },
     'tickets': {
         'label': 'Tickets',
@@ -4305,7 +4305,7 @@ REPORTS_DOMAINS = {
     },
     'workorders': {
         'label': 'Work Orders',
-        'sections': ['mileage'],
+        'sections': ['wostatus', 'wobyclient', 'wolist', 'mileage'],
     },
     # Performance/metrics — deliberately separate from Financial (money) and
     # from Tickets/Work Orders (raw activity data): SLA, resolution time,
@@ -4634,6 +4634,29 @@ class ReportsView(LoginRequiredMixin, View):
                 category_totals[label] += li.line_total
             revenue_by_category = sorted(category_totals.items(), key=lambda kv: -kv[1])
 
+        # 13. Work Orders raw activity (Work Orders domain, Slice 3 of the
+        # Reports restructure) — mirrors what Tickets already has (by status,
+        # by client), plus a plain list so a closed WO is actually visible
+        # somewhere. Unlike the Tickets "by status" view, this does NOT
+        # exclude closed/completed — Mike's exact ask was "I have 5 closed
+        # ones, should I see them here?"; hiding them would repeat the gap.
+        wo_status_counts = []
+        wo_by_client = []
+        wo_list = []
+        if domain == 'workorders':
+            wos_in_range = WorkOrder.objects.filter(
+                created_at__range=(start_dt, end_dt)
+            ).select_related('client')
+            wo_status_labels = dict(WorkOrder.STATUS_CHOICES)
+            wo_status_counts = [
+                {'label': wo_status_labels.get(r['status'], r['status']), 'count': r['count']}
+                for r in wos_in_range.values('status').annotate(count=Count('id')).order_by('-count')
+            ]
+            wo_by_client = list(
+                wos_in_range.values('client__name').annotate(count=Count('id')).order_by('-count')[:15]
+            )
+            wo_list = list(wos_in_range.order_by('-created_at')[:100])
+
         # 10. Technician performance
         tech_perf = []
         for tech in User.objects.filter(is_active=True).order_by('first_name', 'last_name'):
@@ -4722,6 +4745,10 @@ class ReportsView(LoginRequiredMixin, View):
             'revenue_by_category': revenue_by_category,
             'revenue_by_source': revenue_by_source,
             'revenue_total': revenue_total,
+            # 13
+            'wo_status_counts': wo_status_counts,
+            'wo_by_client': wo_by_client,
+            'wo_list': wo_list,
         }
         return render(request, 'core/reports.html', context)
 
