@@ -10,6 +10,10 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+_Nothing yet._
+
+## v0.4.49 — 2026-07-20
+
 ### Fixed
 - **Ticket Time Spent now shown in the Details card, matching Work Orders.** The Timer card
   used to show its own "Logged: X" total in its header — inconsistent with Work Orders, where
