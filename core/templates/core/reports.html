@@ -632,6 +632,44 @@
     <p class="text-sm text-gray-400 italic">No tickets in this period.</p>
     {% endif %}
 </div>
+
+<!-- Ticket Time Logged (non-billable ticket work) -->
+<div class="bg-white rounded-lg shadow p-5" id="section-tickettime">
+    <h2 class="text-base font-semibold text-gray-900 mb-4">Ticket Time Logged <span class="text-xs font-normal text-gray-400">(non-billable work tracked directly on tickets)</span></h2>
+    {% if ticket_time_count %}
+    <div class="flex items-center gap-8 flex-wrap mb-4">
+        <div>
+            <p class="text-5xl font-bold text-blue-600">{{ ticket_time_total }}<span class="text-2xl"> min</span></p>
+            <p class="text-sm text-gray-500 mt-1">Total time logged</p>
+        </div>
+        <div class="text-sm text-gray-600 space-y-1">
+            <p>Entries logged: <strong>{{ ticket_time_count }}</strong></p>
+        </div>
+    </div>
+    {% if ticket_time_by_tech %}
+    <table class="min-w-full text-sm">
+        <thead>
+            <tr class="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-200">
+                <th class="pb-2 pr-4">Technician</th>
+                <th class="pb-2 text-right pr-4">Minutes</th>
+                <th class="pb-2 text-right">Entries</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+            {% for row in ticket_time_by_tech %}
+            <tr>
+                <td class="py-2 pr-4 font-medium text-gray-900">{{ row.logged_by__first_name }} {{ row.logged_by__last_name }}{% if not row.logged_by__first_name and not row.logged_by__last_name %}{{ row.logged_by__username }}{% endif %}</td>
+                <td class="py-2 pr-4 text-right text-gray-700">{{ row.minutes }}</td>
+                <td class="py-2 text-right text-gray-700">{{ row.entries }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+    {% else %}
+    <p class="text-sm text-gray-400 italic">No ticket time logged in this period.</p>
+    {% endif %}
+</div>
 {% endif %}{# end metrics (resolution/sla/backlog/conversion half) #}
 
 {% if domain == 'workorders' %}

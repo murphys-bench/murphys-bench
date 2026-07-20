@@ -274,9 +274,19 @@ window.addEventListener('beforeunload', function() {
     <!-- Right Column: Sidebar -->
     <div class="space-y-6">
 
-        <!-- Details -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4">Details</h2>
+        <!-- Details (accordion) -->
+        <div class="bg-white rounded-lg shadow overflow-hidden"
+             x-data="{ open: JSON.parse(localStorage.getItem('acc_ticket_details') ?? 'false') }"
+             x-init="$watch('open', v => localStorage.setItem('acc_ticket_details', v))">
+            <button type="button" @click="open = !open"
+                    class="w-full px-6 py-4 flex items-center gap-2 text-left hover:bg-gray-50 transition-colors">
+                <span class="text-lg font-semibold text-gray-900">Details</span>
+                <svg class="w-4 h-4 text-gray-400 transition-transform ml-auto" :class="open && 'rotate-180'"
+                     fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </button>
+            <div x-show="open" x-cloak class="px-6 pb-6 border-t border-gray-100 pt-4">
             <dl class="space-y-3">
                 <div>
                     <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Client</dt>
@@ -394,6 +404,38 @@ window.addEventListener('beforeunload', function() {
                     </dd>
                 </div>
             </dl>
+            </div>
+        </div>
+
+        <!-- Timer -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-lg font-semibold text-gray-900">Timer</h2>
+                <span class="text-sm">Logged: <span id="ticket-time-spent-wrapper">{% include "core/partials/ticket_time_spent.html" %}</span></span>
+            </div>
+            <div class="text-center">
+                <div id="tk-timer-display" class="text-4xl font-mono font-semibold text-gray-800 mb-3 tracking-wider">00:00:00</div>
+                <div class="flex justify-center gap-2 mb-4">
+                    <button id="tk-timer-start" onclick="tkTimerStart()"
+                        class="px-4 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 font-medium">Start</button>
+                    <button id="tk-timer-pause" onclick="tkTimerPause()" disabled
+                        class="px-4 py-1.5 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600 font-medium disabled:opacity-40 disabled:cursor-not-allowed">Pause</button>
+                    <button onclick="tkTimerReset()"
+                        class="px-4 py-1.5 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300 font-medium">Reset</button>
+                </div>
+                <form id="tk-timer-log-form"
+                      hx-post="{% url 'core:ticket_add_time' ticket.pk %}"
+                      hx-target="#ticket-time-spent-wrapper"
+                      hx-swap="innerHTML"
+                      hx-on:htmx:after-request="tkTimerAfterLog()">
+                    {% csrf_token %}
+                    <input type="hidden" name="minutes" id="tk-timer-minutes-input" value="0">
+                    <button type="submit" id="tk-timer-log-btn" disabled
+                        class="w-full px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 font-medium disabled:opacity-40 disabled:cursor-not-allowed">
+                        Log <span id="tk-timer-log-label">0</span> min
+                    </button>
+                </form>
+            </div>
         </div>
 
         {% if custom_field_values %}
@@ -543,6 +585,60 @@ function showTab(id, btn) {
     btn.classList.add('border-blue-600', 'text-blue-600');
     btn.classList.remove('border-transparent', 'text-gray-500');
 }
+
+// ── Timer ──────────────────────────────────────────────────────────────────
+const TK_TIMER_KEY = 'ticket_timer_{{ ticket.pk }}';
+let tkTimerInterval = null;
+
+function tkTimerLoad() {
+    const raw = localStorage.getItem(TK_TIMER_KEY);
+    return raw ? JSON.parse(raw) : { accumulated: 0, startedAt: null };
+}
+function tkTimerSave(state) { localStorage.setItem(TK_TIMER_KEY, JSON.stringify(state)); }
+function tkTimerElapsedMs(state) {
+    let ms = state.accumulated;
+    if (state.startedAt) ms += Date.now() - state.startedAt;
+    return ms;
+}
+function tkTimerFormat(ms) {
+    const s = Math.floor(ms / 1000);
+    return [Math.floor(s/3600), Math.floor((s%3600)/60), s%60].map(n => String(n).padStart(2,'0')).join(':');
+}
+function tkTimerUpdateUI() {
+    const state = tkTimerLoad();
+    const ms = tkTimerElapsedMs(state);
+    const totalMin = Math.floor(ms / 60000);
+    document.getElementById('tk-timer-display').textContent = tkTimerFormat(ms);
+    document.getElementById('tk-timer-minutes-input').value = totalMin;
+    document.getElementById('tk-timer-log-label').textContent = totalMin;
+    const running = !!state.startedAt;
+    document.getElementById('tk-timer-start').disabled = running;
+    document.getElementById('tk-timer-pause').disabled = !running;
+    document.getElementById('tk-timer-log-btn').disabled = totalMin === 0;
+}
+function tkTimerStart() {
+    const state = tkTimerLoad();
+    if (!state.startedAt) { state.startedAt = Date.now(); tkTimerSave(state); }
+    clearInterval(tkTimerInterval);
+    tkTimerInterval = setInterval(tkTimerUpdateUI, 1000);
+    tkTimerUpdateUI();
+}
+function tkTimerPause() {
+    const state = tkTimerLoad();
+    if (state.startedAt) { state.accumulated += Date.now() - state.startedAt; state.startedAt = null; tkTimerSave(state); }
+    clearInterval(tkTimerInterval);
+    tkTimerUpdateUI();
+}
+function tkTimerReset() {
+    clearInterval(tkTimerInterval);
+    tkTimerSave({ accumulated: 0, startedAt: null });
+    tkTimerUpdateUI();
+}
+function tkTimerAfterLog() { tkTimerReset(); }
+(function() {
+    const state = tkTimerLoad();
+    if (state.startedAt) tkTimerStart(); else tkTimerUpdateUI();
+})();
 </script>
 {% endblock %}
 {% endblock %}

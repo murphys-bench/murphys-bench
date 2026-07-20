@@ -22,7 +22,7 @@ from two_factor.views import SetupView as TwoFactorSetupView
 from .middleware import mfa_setup_is_mandatory
 from .models import (
     WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist, ChecklistItem,
-    Ticket, TicketReply, TicketLock, TicketLink, Attachment, SiteSettings,
+    Ticket, TicketReply, TicketWorkLog, TicketLock, TicketLink, Attachment, SiteSettings,
     KBCategory, KBArticle, TicketQueue, DashboardTile, User,
     CustomField, CustomFieldChoice, CustomFieldValue,
     CatalogItem, LineItem, ContactPhone,
@@ -660,6 +660,28 @@ class WorkOrderAddTimeView(LoginRequiredMixin, View):
             )
             wo.refresh_from_db(fields=['time_spent_minutes'])
         return render(request, 'core/partials/wo_time_spent.html', {'work_order': wo})
+
+
+class TicketAddTimeView(LoginRequiredMixin, View):
+    """Log a block of time against a ticket as a TicketWorkLog entry.
+
+    Returns the updated logged-total fragment.
+    """
+
+    def post(self, request, pk):
+        ticket = _get_scoped_ticket_or_404(request, pk)
+        try:
+            minutes = max(0, int(request.POST.get('minutes', 0)))
+        except (ValueError, TypeError):
+            minutes = 0
+        if minutes > 0:
+            TicketWorkLog.objects.create(
+                ticket=ticket,
+                minutes=minutes,
+                note=(request.POST.get('note', '') or '').strip()[:255],
+                logged_by=request.user,
+            )
+        return render(request, 'core/partials/ticket_time_spent.html', {'ticket': ticket})
 
 
 class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
@@ -4313,7 +4335,7 @@ REPORTS_DOMAINS = {
     # "how are we doing" numbers, not activity logs or dollars.
     'metrics': {
         'label': 'Business Metrics',
-        'sections': ['techperf', 'resolution', 'sla', 'backlog', 'conversion'],
+        'sections': ['techperf', 'resolution', 'sla', 'backlog', 'conversion', 'tickettime'],
     },
 }
 
@@ -4691,6 +4713,27 @@ class ReportsView(LoginRequiredMixin, View):
                     'open_wos': open_wos,
                 })
 
+        # 14. Ticket time logged (Business Metrics domain) — the reporting
+        # payoff for lightweight, non-billable ticket work (TicketWorkLog).
+        # Makes "someone spent 20 min on a ticket that never became a WO"
+        # visible: total minutes + entry count for the period, broken down by
+        # tech. Gated on the active domain so the extra queries are skipped
+        # elsewhere.
+        ticket_time_total = 0
+        ticket_time_count = 0
+        ticket_time_by_tech = []
+        if domain == 'metrics':
+            logs_in_range = TicketWorkLog.objects.filter(logged_at__range=(start_dt, end_dt))
+            agg = logs_in_range.aggregate(total=Sum('minutes'), count=Count('id'))
+            ticket_time_total = agg['total'] or 0
+            ticket_time_count = agg['count'] or 0
+            ticket_time_by_tech = list(
+                logs_in_range.filter(logged_by__isnull=False)
+                .values('logged_by__first_name', 'logged_by__last_name', 'logged_by__username')
+                .annotate(minutes=Sum('minutes'), entries=Count('id'))
+                .order_by('-minutes')
+            )
+
         context = {
             'domain': domain,
             'domains': REPORTS_DOMAINS,
@@ -4749,6 +4792,10 @@ class ReportsView(LoginRequiredMixin, View):
             'wo_status_counts': wo_status_counts,
             'wo_by_client': wo_by_client,
             'wo_list': wo_list,
+            # 14
+            'ticket_time_total': ticket_time_total,
+            'ticket_time_count': ticket_time_count,
+            'ticket_time_by_tech': ticket_time_by_tech,
         }
         return render(request, 'core/reports.html', context)
 

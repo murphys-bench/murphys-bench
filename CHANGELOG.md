@@ -10,7 +10,21 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
-_Nothing yet._
+### Added
+- **Ticket time tracking (lightweight, non-billable).** A Timer card on ticket detail (same
+  stopwatch as Work Orders) logs blocks of time directly against a ticket via a new
+  `TicketWorkLog` entry — per-entry rows (duration + optional note + who + when), no billing,
+  never touches Invoice Ninja. Captures work that never becomes a work order (a quick account
+  unlock, checking an alert and resolving it) so the time is still visible. A new **Ticket
+  Time Logged** section under the Reports → Business Metrics domain totals minutes/entries by
+  period and technician.
+
+### Changed
+- **Work Order Timer moved** below the Update Work Order card; **Update Work Order** and the
+  **Ticket Details** card are now collapsible accordions.
+- **All accordion cards default to closed and remember their open/closed state per browser**
+  (Ticket Details, Update Work Order, WO Checklist, catalog Services/Products, Settings
+  repair-type and canned-response category cards).
 
 ## v0.4.47 — 2026-07-20
 

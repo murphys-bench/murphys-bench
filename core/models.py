@@ -887,6 +887,23 @@ class Ticket(models.Model):
     CLOSED_STATUSES = {'resolved', 'closed', 'converted'}
 
     @property
+    def time_spent_minutes(self):
+        """Total logged minutes across all TicketWorkLog entries."""
+        return self.work_logs.aggregate(total=models.Sum('minutes'))['total'] or 0
+
+    @property
+    def time_spent_display(self):
+        m = self.time_spent_minutes
+        if m == 0:
+            return '—'
+        h, rem = divmod(m, 60)
+        if h and rem:
+            return f'{h}h {rem}m'
+        elif h:
+            return f'{h}h'
+        return f'{rem}m'
+
+    @property
     def is_overdue(self):
         if not self.due_at:
             return False
@@ -1010,6 +1027,33 @@ class TicketReply(models.Model):
 
     def __str__(self):
         return f"Reply on {self.ticket} by {self.created_by}"
+
+
+class TicketWorkLog(models.Model):
+    """A logged block of time spent on a ticket — lightweight, non-billable.
+
+    Deliberately separate from WorkOrder/LineItem: this captures work that never
+    becomes an invoice (a quick account unlock, checking an alert and resolving it)
+    so the time still shows up somewhere reportable. Per-entry rows (not a running
+    counter) so notes and richer reporting can grow on top of it.
+    """
+
+    id = models.AutoField(primary_key=True)
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='work_logs')
+    minutes = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    note = models.CharField(max_length=255, blank=True)
+    logged_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='ticket_work_logs')
+    logged_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'ticket_work_logs'
+        ordering = ['-logged_at']
+        indexes = [
+            models.Index(fields=['ticket', 'logged_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.minutes} min on {self.ticket} by {self.logged_by}"
 
 
 class WorkOrder(models.Model):

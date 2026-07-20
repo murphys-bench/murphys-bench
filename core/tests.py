@@ -7912,3 +7912,38 @@ def test_dump_schema_reflects_live_models():
     buf2 = StringIO()
     call_command('dump_schema', stdout=buf2)
     assert buf2.getvalue() == out
+
+
+# ── Ticket time logging (lightweight, non-billable via TicketWorkLog) ───────
+
+from core.models import TicketWorkLog
+
+
+@pytest.mark.django_db
+def test_ticket_add_time_creates_worklog_entries(client, client_obj, admin_user):
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    client.force_login(admin_user)
+
+    client.post(reverse('core:ticket_add_time', args=[ticket.pk]),
+                {'minutes': 15, 'note': 'account unlock'})
+    client.post(reverse('core:ticket_add_time', args=[ticket.pk]), {'minutes': 10})
+
+    logs = TicketWorkLog.objects.filter(ticket=ticket)
+    assert logs.count() == 2                      # per-entry rows, not a counter
+    assert ticket.time_spent_minutes == 25        # computed total sums the rows
+    first = logs.order_by('logged_at').first()
+    assert first.minutes == 15
+    assert first.note == 'account unlock'
+    assert first.logged_by == admin_user
+
+
+@pytest.mark.django_db
+def test_ticket_add_time_ignores_bad_input(client, client_obj, admin_user):
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    client.force_login(admin_user)
+
+    client.post(reverse('core:ticket_add_time', args=[ticket.pk]), {'minutes': -5})
+    client.post(reverse('core:ticket_add_time', args=[ticket.pk]), {'minutes': 'abc'})
+
+    assert TicketWorkLog.objects.filter(ticket=ticket).count() == 0
+    assert ticket.time_spent_minutes == 0

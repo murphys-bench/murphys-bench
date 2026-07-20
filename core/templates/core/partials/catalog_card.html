@@ -1,7 +1,9 @@
 {% comment %}A collapsible catalog card (Services or Products). Items are grouped by
 category with a divider per category. Inherits can_edit + type_choices from
 the parent context. Expects: title, groups (by_category dict), count, empty_text.{% endcomment %}
-<div class="bg-white rounded-lg shadow" x-data="{ open: false }">
+<div class="bg-white rounded-lg shadow"
+     x-data="{ open: JSON.parse(localStorage.getItem('acc_catalog_{{ title|slugify }}') ?? 'false') }"
+     x-init="$watch('open', v => localStorage.setItem('acc_catalog_{{ title|slugify }}', v))">
     <button type="button" @click="open = !open"
             style="background-color: var(--color-accent);"
             class="w-full flex items-center justify-between px-6 py-4 text-left rounded-t-lg text-white">

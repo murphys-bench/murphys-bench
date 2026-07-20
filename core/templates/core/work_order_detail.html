@@ -608,9 +608,19 @@
     <!-- Right Column -->
     <div class="space-y-6">
 
-        <!-- Update Work Order -->
-        <div class="bg-white rounded-lg shadow p-5">
-            <h2 class="text-base font-semibold text-gray-900 mb-4">Update Work Order</h2>
+        <!-- Update Work Order (accordion) -->
+        <div class="bg-white rounded-lg shadow overflow-hidden"
+             x-data="{ open: JSON.parse(localStorage.getItem('acc_wo_update') ?? 'false') }"
+             x-init="$watch('open', v => localStorage.setItem('acc_wo_update', v))">
+            <button type="button" @click="open = !open"
+                    class="w-full px-5 py-4 flex items-center gap-2 text-left hover:bg-gray-50 transition-colors">
+                <span class="text-base font-semibold text-gray-900">Update Work Order</span>
+                <svg class="w-4 h-4 text-gray-400 transition-transform ml-auto" :class="open && 'rotate-180'"
+                     fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </button>
+            <div x-show="open" x-cloak class="px-5 pb-5 border-t border-gray-100 pt-4">
             <form method="post" action="{% url 'core:work_order_quick_update' work_order.pk %}" class="space-y-3">
                 {% csrf_token %}
 
@@ -693,6 +703,35 @@
                     </button>
                 </div>
             </form>
+            </div>
+        </div>
+
+        <!-- Timer -->
+        <div class="bg-white rounded-lg shadow p-5">
+            <h2 class="text-base font-semibold text-gray-900 mb-3">Timer</h2>
+            <div class="text-center">
+                <div id="timer-display" class="text-4xl font-mono font-semibold text-gray-800 mb-3 tracking-wider">00:00:00</div>
+                <div class="flex justify-center gap-2 mb-4">
+                    <button id="timer-start" onclick="timerStart()"
+                        class="px-4 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 font-medium">Start</button>
+                    <button id="timer-pause" onclick="timerPause()" disabled
+                        class="px-4 py-1.5 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600 font-medium disabled:opacity-40 disabled:cursor-not-allowed">Pause</button>
+                    <button onclick="timerReset()"
+                        class="px-4 py-1.5 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300 font-medium">Reset</button>
+                </div>
+                <form id="timer-log-form"
+                      hx-post="{% url 'core:work_order_add_time' work_order.pk %}"
+                      hx-target="#time-spent-wrapper"
+                      hx-swap="innerHTML"
+                      hx-on:htmx:after-request="timerAfterLog()">
+                    {% csrf_token %}
+                    <input type="hidden" name="minutes" id="timer-minutes-input" value="0">
+                    <button type="submit" id="timer-log-btn" disabled
+                        class="w-full px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 font-medium disabled:opacity-40 disabled:cursor-not-allowed">
+                        Log <span id="timer-log-label">0</span> min
+                    </button>
+                </form>
+            </div>
         </div>
 
         <!-- Billing -->
@@ -735,7 +774,9 @@
         </div>
 
         <!-- Checklist (collapsed by default) -->
-        <div class="bg-white rounded-lg shadow overflow-hidden" x-data="{ open: false }">
+        <div class="bg-white rounded-lg shadow overflow-hidden"
+             x-data="{ open: JSON.parse(localStorage.getItem('acc_wo_checklist') ?? 'false') }"
+             x-init="$watch('open', v => localStorage.setItem('acc_wo_checklist', v))">
             <div class="px-5 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
                 <button type="button" @click="open = !open" class="flex items-center gap-2 flex-1 text-left">
                     <span class="text-base font-semibold text-gray-900">Pre / Post Checklist</span>
@@ -758,34 +799,6 @@
                 <div id="checklist-wrapper">
                     {% include "core/partials/checklist_list.html" with items=checklist_items checked_count=checklist_checked_count work_order=work_order %}
                 </div>
-            </div>
-        </div>
-
-        <!-- Timer -->
-        <div class="bg-white rounded-lg shadow p-5">
-            <h2 class="text-base font-semibold text-gray-900 mb-3">Timer</h2>
-            <div class="text-center">
-                <div id="timer-display" class="text-4xl font-mono font-semibold text-gray-800 mb-3 tracking-wider">00:00:00</div>
-                <div class="flex justify-center gap-2 mb-4">
-                    <button id="timer-start" onclick="timerStart()"
-                        class="px-4 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 font-medium">Start</button>
-                    <button id="timer-pause" onclick="timerPause()" disabled
-                        class="px-4 py-1.5 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600 font-medium disabled:opacity-40 disabled:cursor-not-allowed">Pause</button>
-                    <button onclick="timerReset()"
-                        class="px-4 py-1.5 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300 font-medium">Reset</button>
-                </div>
-                <form id="timer-log-form"
-                      hx-post="{% url 'core:work_order_add_time' work_order.pk %}"
-                      hx-target="#time-spent-wrapper"
-                      hx-swap="innerHTML"
-                      hx-on:htmx:after-request="timerAfterLog()">
-                    {% csrf_token %}
-                    <input type="hidden" name="minutes" id="timer-minutes-input" value="0">
-                    <button type="submit" id="timer-log-btn" disabled
-                        class="w-full px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 font-medium disabled:opacity-40 disabled:cursor-not-allowed">
-                        Log <span id="timer-log-label">0</span> min
-                    </button>
-                </form>
             </div>
         </div>
 
