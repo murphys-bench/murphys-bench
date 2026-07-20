@@ -22,6 +22,12 @@ the Unreleased entries move under that version and prod gets a single update.
   the selected domain's sections render at a time; Export CSV/Print/PDF menus are scoped
   to the visible domain too. The date-range filter still applies across all domains.
   Financial gains room to grow into deeper sales/P&L reporting in a later slice.
+- **Register: added a "Recent sales" card and decluttered the work-order list.** Counter
+  sales had zero visibility on the Register page — only work orders showed up. A new
+  "Recent sales" card lists recently completed counter sales with a receipt link. The
+  work-order list above it is now action-focused: an already-paid work order no longer
+  clutters the "needs settling" list (an explicit search still finds it, to pull its
+  receipt back up).
 
 ## v0.4.46 — 2026-07-19
 

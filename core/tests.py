@@ -5701,6 +5701,47 @@ def test_pos_home_no_query_browses_recent_finished_wos(client, admin_user, clien
 
 
 @pytest.mark.django_db
+def test_pos_home_default_browse_excludes_already_paid_wos(client, admin_user, client_obj):
+    """The default (no-search) list is action-focused — an already-paid WO
+    doesn't belong in 'what still needs settling', so it's excluded. An
+    explicit search still finds it (e.g. to pull its receipt back up)."""
+    unpaid = WorkOrder.objects.create(client=client_obj, status='completed')
+    paid = WorkOrder.objects.create(client=client_obj, status='completed')
+    paid.invoice.billing_status = 'paid'
+    paid.invoice.save()
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:pos_home'))
+    numbers = [w.work_order_number for w in resp.context['results']]
+    assert unpaid.work_order_number in numbers
+    assert paid.work_order_number not in numbers
+
+    # Explicit search still surfaces the paid one.
+    resp = client.get(reverse('core:pos_home'), {'q': paid.work_order_number})
+    numbers = [w.work_order_number for w in resp.context['results']]
+    assert paid.work_order_number in numbers
+
+
+@pytest.mark.django_db
+def test_pos_home_lists_recent_completed_sales(client, admin_user, client_obj, monkeypatch):
+    """The register's 'Recent sales' card shows completed counter sales with a
+    receipt link — sales previously had zero visibility on the Register page."""
+    from decimal import Decimal
+    from django.utils import timezone
+    completed = Sale.objects.create(client=client_obj, status='completed',
+                                    amount=Decimal('25.00'), payment_method='cash')
+    Sale.objects.filter(pk=completed.pk).update(paid_at=timezone.now())
+    draft = Sale.objects.create(client=client_obj, status='draft')
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:pos_home'))
+    sale_numbers = [s.sale_number for s in resp.context['recent_sales']]
+    assert completed.sale_number in sale_numbers
+    assert draft.sale_number not in sale_numbers
+    assert completed.sale_number.encode() in resp.content
+
+
+@pytest.mark.django_db
 def test_pos_home_browse_sorts_null_completed_date_by_created_at(client, admin_user, client_obj):
     """completed_date is only stamped by WorkOrder.mark_completed() — a WO whose
     status was set to 'completed' by any other path (e.g. a quick status update)

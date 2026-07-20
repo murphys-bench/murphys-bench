@@ -78,5 +78,33 @@
             {% endif %}
         </div>
     </div>
+
+    <!-- Recent counter sales -->
+    <div class="bg-white rounded-lg shadow-md border-l-4 border-purple-500 p-6">
+        <div class="flex items-center gap-4 mb-4">
+            <div class="shrink-0 w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center text-purple-600">
+                {% icon "list" 6 %}
+            </div>
+            <div class="min-w-0">
+                <h2 class="text-base font-semibold text-gray-900">Recent sales</h2>
+                <p class="text-sm text-gray-500">Completed counter sales — for full history, see Reports.</p>
+            </div>
+        </div>
+        {% if recent_sales %}
+        <div class="divide-y divide-gray-100 border-t border-gray-100 max-h-96 overflow-y-auto">
+            {% for sale in recent_sales %}
+            <div class="flex items-center justify-between py-3">
+                <div>
+                    <div class="text-sm font-medium text-gray-900">{{ sale.sale_number }}</div>
+                    <div class="text-xs text-gray-500">{{ sale.display_name }} · ${{ sale.amount|default:"0.00"|floatformat:2 }}</div>
+                </div>
+                <a href="{% url 'core:sale_receipt_print' sale.pk %}" target="_blank" class="text-sm text-gray-500 hover:text-gray-700">View Receipt</a>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-sm text-gray-400 mt-3">No completed sales yet.</p>
+        {% endif %}
+    </div>
 </div>
 {% endblock %}

@@ -5636,8 +5636,24 @@ class POSHomeView(POSAccessMixin, View):
         )
         if q:
             qs = qs.filter(Q(work_order_number__icontains=q) | Q(client__name__icontains=q))
+        else:
+            # Default browse is action-focused (things still needing a Settle
+            # click) — an already-paid WO clutters it and belongs to its own
+            # receipt history, not the "what do I still need to settle" list.
+            # An explicit search still finds a paid WO too, so its receipt
+            # can be pulled back up by number/name.
+            qs = qs.exclude(invoice__billing_status='paid')
         results = list(qs[:25])
-        return render(request, 'core/pos_home.html', {'query': q, 'results': results, 'browsing': not q})
+
+        recent_sales = list(
+            Sale.objects.filter(status='completed')
+            .select_related('client')
+            .order_by('-paid_at')[:10]
+        )
+        return render(request, 'core/pos_home.html', {
+            'query': q, 'results': results, 'browsing': not q,
+            'recent_sales': recent_sales,
+        })
 
 
 class POSSaleStartView(POSAccessMixin, View):
