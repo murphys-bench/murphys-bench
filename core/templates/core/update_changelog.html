@@ -1,0 +1,26 @@
+{% extends "core/base.html" %}
+{% load mb_icons %}
+
+{% block title %}Changelog - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow page-title-bar">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        <a href="{% url 'core:settings' %}?tab=maintenance" class="text-sm text-gray-400 hover:text-gray-600">← Updates</a>
+        <h1 class="text-2xl font-bold text-gray-900">Changelog</h1>
+        {% if version %}<p class="text-sm text-gray-500">{{ version }}</p>{% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="bg-white rounded-lg shadow p-6">
+        {% if changelog_text %}
+        <div class="prose prose-gray max-w-none">{{ changelog_text|markdownify }}</div>
+        {% else %}
+        <p class="text-sm text-gray-400">No changelog entry found for this version.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

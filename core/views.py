@@ -6628,6 +6628,25 @@ class UpdateStatusView(LoginRequiredMixin, View):
         return render(request, 'core/partials/update_status.html', _update_status_context())
 
 
+class UpdateChangelogView(LoginRequiredMixin, View):
+    """Read-only view of CHANGELOG.md's section for the latest available release —
+    reached from a link on the Settings → Updates card. Admin only, same as the
+    other update views. Read directly from that tag's git blob (not the working
+    tree) so it's accurate even if a newer, undeployed commit has since changed
+    CHANGELOG.md."""
+
+    def get(self, request):
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
+        from . import update_ops
+        version = update_ops.available_version() or update_ops.current_tag()
+        text = update_ops.changelog_for_version(version)
+        return render(request, 'core/update_changelog.html', {
+            'version': version,
+            'changelog_text': text,
+        })
+
+
 class UpdateCheckView(LoginRequiredMixin, View):
     """Fetch tags from origin so 'available version' is fresh, then re-render the
     status fragment. Admin only. Read-only git — no sudo, no code change."""

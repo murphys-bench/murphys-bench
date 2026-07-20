@@ -18,6 +18,9 @@ is queued/running it polls itself every 3s; terminal states stop polling.
     <div class="text-sm text-right">
       <div class="text-gray-500">Latest available</div>
       <div class="text-lg font-semibold text-gray-900">{{ update_available|default:"—" }}</div>
+      {% if update_available %}
+      <a href="{% url 'core:update_changelog' %}" target="_blank" class="text-xs text-blue-600 hover:underline">View changelog</a>
+      {% endif %}
     </div>
   </div>
 

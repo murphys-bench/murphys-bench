@@ -208,6 +208,7 @@ urlpatterns = [
     path('settings/updates/status/', views.UpdateStatusView.as_view(), name='update_status'),
     path('settings/updates/check/', views.UpdateCheckView.as_view(), name='update_check'),
     path('settings/updates/start/', views.UpdateTriggerView.as_view(), name='update_start'),
+    path('settings/updates/changelog/', views.UpdateChangelogView.as_view(), name='update_changelog'),
     path('settings/backups/test/<str:which>/', views.BackupTestView.as_view(), name='backup_test'),
     path('settings/backups/status/', views.BackupStatusView.as_view(), name='backup_status'),
     path('settings/backups/run/', views.BackupRunView.as_view(), name='backup_run'),

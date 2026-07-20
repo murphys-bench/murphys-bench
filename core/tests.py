@@ -2699,6 +2699,66 @@ def test_update_status_fragment_renders_states(client, admin_user, settings, tmp
     assert needle in resp.content.decode().lower()
 
 
+# ── Update card: "View changelog" link + changelog view ─────────────────────
+
+def test_changelog_for_version_extracts_just_that_section(monkeypatch):
+    """The section runs from its own '## vX.Y.Z ...' heading to the next
+    '## ' heading (or end of file) — not the whole CHANGELOG.md."""
+    from core import update_ops
+    fake_changelog = (
+        "# Changelog\n\n"
+        "## v0.4.46 — 2026-07-19\n\n"
+        "### Fixed\n- Newest thing.\n\n"
+        "## v0.4.45 — 2026-07-19\n\n"
+        "### Added\n- Older thing.\n"
+    )
+    monkeypatch.setattr(update_ops, '_git', lambda *a: fake_changelog if a[0] == 'show' else '')
+    section = update_ops.changelog_for_version('v0.4.46')
+    assert 'Newest thing' in section
+    assert 'Older thing' not in section
+    assert section.startswith('## v0.4.46')
+
+
+def test_changelog_for_version_empty_when_tag_or_section_missing(monkeypatch):
+    from core import update_ops
+    monkeypatch.setattr(update_ops, '_git', lambda *a: '')
+    assert update_ops.changelog_for_version('v9.9.9') == ''
+    assert update_ops.changelog_for_version('') == ''
+
+    monkeypatch.setattr(update_ops, '_git', lambda *a: '# Changelog\n\n## v0.1.0\nsomething\n')
+    assert update_ops.changelog_for_version('v9.9.9') == ''
+
+
+@pytest.mark.django_db
+def test_update_changelog_view_requires_admin(client, client_obj):
+    from core.models import User
+    non_admin = User.objects.create_user(username='tech', password='x')
+    client.force_login(non_admin)
+    assert client.get(reverse('core:update_changelog')).status_code == 403
+
+
+@pytest.mark.django_db
+def test_update_changelog_view_renders_for_admin(client, admin_user, monkeypatch):
+    from core import update_ops
+    monkeypatch.setattr(update_ops, 'available_version', lambda: 'v0.4.46')
+    monkeypatch.setattr(update_ops, 'changelog_for_version', lambda v: '## v0.4.46\n- Something new.')
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:update_changelog'))
+    assert resp.status_code == 200
+    assert b'Something new' in resp.content
+
+
+@pytest.mark.django_db
+def test_update_card_links_to_changelog_when_update_available(client, admin_user, settings, tmp_path, monkeypatch):
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    monkeypatch.setattr(update_ops, 'available_version', lambda: 'v0.4.46')
+    monkeypatch.setattr(update_ops, 'is_update_available', lambda: True)
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:update_status'))
+    assert reverse('core:update_changelog').encode() in resp.content
+
+
 # ── Content-Security-Policy header + report endpoint ────────────────────────
 
 @pytest.mark.django_db

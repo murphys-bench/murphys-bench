@@ -10,6 +10,12 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+### Added
+- **"View changelog" link on the Software Updates card.** Settings → Maintenance now links
+  from the "Latest available" version straight to that release's CHANGELOG.md section,
+  read from the actual release tag (not the working tree) so it's accurate even if newer,
+  undeployed work has since changed the file.
+
 ### Changed
 - **Sales history moved into Reports.** The Sales list is no longer a sidebar tab; it's
   reached from the **Counter Sales** section of the Reports page ("View all sales →").

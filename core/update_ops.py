@@ -135,3 +135,30 @@ def request_update() -> bool:
     # Empty file: "deploy latest tag" (update.sh with no arg). No arbitrary input.
     trigger_path().write_text('')
     return True
+
+
+def changelog_for_version(version: str) -> str:
+    """The CHANGELOG.md section for one version tag (its '## vX.Y.Z ...' heading
+    through the next '## ' heading), read from that tag's git blob — not the
+    working tree — so it's accurate even if a newer, not-yet-deployed commit has
+    since changed CHANGELOG.md. Empty string if the tag, file, or section isn't
+    found (never raises — this is a read-only convenience view)."""
+    if not version:
+        return ''
+    text = _git('show', f'{version}:CHANGELOG.md')
+    if not text:
+        return ''
+    lines = text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.startswith('## ') and version in line:
+            start = i
+            break
+    if start is None:
+        return ''
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].startswith('## '):
+            end = i
+            break
+    return '\n'.join(lines[start:end]).strip()
