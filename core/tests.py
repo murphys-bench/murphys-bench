@@ -6541,6 +6541,31 @@ def test_reports_ticket_time_per_ticket_breakdown(client, admin_user, client_obj
 
 
 @pytest.mark.django_db
+def test_reports_wo_time_logged_section(client, admin_user, client_obj, django_user_model):
+    """Business Metrics must report WO stopwatch time too — it had a Ticket
+    Time section but no equivalent for Work Orders, a real reporting gap."""
+    other = django_user_model.objects.create_user(username='tech3', password='x', first_name='Rae', last_name='Three')
+    wo1 = WorkOrder.objects.create(client=client_obj, assigned_to=admin_user, time_spent_minutes=30)
+    wo2 = WorkOrder.objects.create(client=client_obj, assigned_to=other, time_spent_minutes=20)
+    WorkOrder.objects.create(client=client_obj, assigned_to=admin_user, time_spent_minutes=0)  # excluded: no time
+
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:reports'), {'domain': 'metrics'})
+    assert resp.status_code == 200
+    assert b'id="section-wotime"' in resp.content
+
+    assert resp.context['wo_time_total'] == 50
+    assert resp.context['wo_time_wo_count'] == 2
+
+    by_wo = {wo.pk: wo for wo in resp.context['wo_time_by_wo']}
+    assert set(by_wo) == {wo1.pk, wo2.pk}
+
+    by_tech = {row['assigned_to__first_name']: row for row in resp.context['wo_time_by_tech']}
+    assert by_tech['Rae']['minutes'] == 20
+    assert by_tech['Rae']['wo_count'] == 1
+
+
+@pytest.mark.django_db
 def test_reports_invalid_domain_falls_back_to_financial(client, admin_user):
     client.force_login(admin_user)
     resp = client.get(reverse('core:reports'), {'domain': 'nonsense'})
@@ -7973,3 +7998,19 @@ def test_ticket_add_time_ignores_bad_input(client, client_obj, admin_user):
 
     assert TicketWorkLog.objects.filter(ticket=ticket).count() == 0
     assert ticket.time_spent_minutes == 0
+
+
+@pytest.mark.django_db
+def test_ticket_time_spent_shown_in_details_card_not_timer(client, client_obj, admin_user):
+    """Time Spent must render inside the Details card, matching the Work
+    Order pattern -- not on the Timer card itself (the previous layout)."""
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    TicketWorkLog.objects.create(ticket=ticket, minutes=15, logged_by=admin_user)
+    client.force_login(admin_user)
+
+    resp = client.get(reverse('core:ticket_detail', args=[ticket.pk]))
+    content = resp.content.decode()
+    details_idx = content.index('id="ticket-time-spent-wrapper"')
+    timer_idx = content.index('>Timer<')
+    assert details_idx < timer_idx, 'Time Spent must appear before the Timer card (i.e. inside Details)'
+    assert 'Time Spent' in content

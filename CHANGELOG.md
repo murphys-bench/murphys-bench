@@ -10,7 +10,18 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
-_Nothing yet._
+### Fixed
+- **Ticket Time Spent now shown in the Details card, matching Work Orders.** The Timer card
+  used to show its own "Logged: X" total in its header — inconsistent with Work Orders, where
+  Time Spent has always lived in the Details card. Moved the display into Ticket Details
+  (same row label, same spot); the Timer card now just has the stopwatch/log controls.
+
+### Added
+- **Work Order time now shows up in Reports.** Business Metrics had a Ticket Time Logged
+  section but no equivalent for Work Orders — a real gap. New **Work Order Time Logged**
+  section reports the same period's WO stopwatch time: total minutes, a **by work order**
+  table, and a **by technician** breakdown (based on each WO's assigned tech, since WO time is
+  a single running counter, not per-entry like ticket time).
 
 ## v0.4.48 — 2026-07-20
 

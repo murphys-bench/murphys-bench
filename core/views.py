@@ -4335,7 +4335,7 @@ REPORTS_DOMAINS = {
     # "how are we doing" numbers, not activity logs or dollars.
     'metrics': {
         'label': 'Business Metrics',
-        'sections': ['techperf', 'resolution', 'sla', 'backlog', 'conversion', 'tickettime'],
+        'sections': ['techperf', 'resolution', 'sla', 'backlog', 'conversion', 'tickettime', 'wotime'],
     },
 }
 
@@ -4762,6 +4762,31 @@ class ReportsView(LoginRequiredMixin, View):
             for row in ticket_time_by_ticket:
                 row['techs'] = sorted(row.pop('_techs').items(), key=lambda kv: -kv[1])
 
+        # 15. Work order time logged (Business Metrics domain) — the same
+        # reporting payoff for WO stopwatch time, which had none. Unlike
+        # TicketWorkLog, WorkOrder.time_spent_minutes is a single running
+        # counter (no per-entry log, no multi-tech split) — matches what the
+        # WO Timer has always captured. Reports what the data actually
+        # supports: total across WOs in range, by assigned tech, by WO.
+        wo_time_total = 0
+        wo_time_wo_count = 0
+        wo_time_by_tech = []
+        wo_time_by_wo = []
+        if domain == 'metrics':
+            wos_with_time = WorkOrder.objects.filter(
+                created_at__range=(start_dt, end_dt), time_spent_minutes__gt=0
+            ).select_related('client', 'assigned_to')
+            agg = wos_with_time.aggregate(total=Sum('time_spent_minutes'), count=Count('id'))
+            wo_time_total = agg['total'] or 0
+            wo_time_wo_count = agg['count'] or 0
+            wo_time_by_tech = list(
+                wos_with_time.filter(assigned_to__isnull=False)
+                .values('assigned_to__first_name', 'assigned_to__last_name', 'assigned_to__username')
+                .annotate(minutes=Sum('time_spent_minutes'), wo_count=Count('id'))
+                .order_by('-minutes')
+            )
+            wo_time_by_wo = list(wos_with_time.order_by('-time_spent_minutes')[:100])
+
         context = {
             'domain': domain,
             'domains': REPORTS_DOMAINS,
@@ -4825,6 +4850,11 @@ class ReportsView(LoginRequiredMixin, View):
             'ticket_time_count': ticket_time_count,
             'ticket_time_by_tech': ticket_time_by_tech,
             'ticket_time_by_ticket': ticket_time_by_ticket,
+            # 15
+            'wo_time_total': wo_time_total,
+            'wo_time_wo_count': wo_time_wo_count,
+            'wo_time_by_tech': wo_time_by_tech,
+            'wo_time_by_wo': wo_time_by_wo,
         }
         return render(request, 'core/reports.html', context)
 
