@@ -1,0 +1,45 @@
+{% extends "core/base.html" %}
+
+{% block title %}{{ work_order.work_order_number }} — Details & History - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow page-title-bar">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        <a href="{% url 'core:work_order_detail' work_order.pk %}" class="text-gray-400 hover:text-gray-600 text-sm">← {{ work_order.work_order_number }}</a>
+        <h1 class="text-2xl font-bold text-gray-900 mt-1">Details &amp; History</h1>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <div class="bg-white rounded-lg shadow p-6">
+        <dl class="space-y-3">
+            <div>
+                <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Days Open</dt>
+                <dd class="text-sm text-gray-900 mt-1">{{ days_open }} day{{ days_open|pluralize }}</dd>
+            </div>
+            <div>
+                <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Opened</dt>
+                <dd class="text-sm text-gray-900 mt-1">{{ work_order.created_at|date:"M d, Y g:i A" }}</dd>
+            </div>
+            <div>
+                <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Updated</dt>
+                <dd class="text-sm text-gray-900 mt-1">{{ work_order.updated_at|date:"M d, Y g:i A" }}</dd>
+            </div>
+            {% if work_order.completed_date %}
+            <div>
+                <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Completed</dt>
+                <dd class="text-sm text-gray-900 mt-1">{{ work_order.completed_date|date:"M d, Y" }}</dd>
+            </div>
+            {% endif %}
+            {% if work_order.invoice_ninja_ref or work_order.invoice_ninja_id %}
+            <div>
+                <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Invoice Ninja Ref</dt>
+                <dd class="text-sm text-gray-900 mt-1 font-mono">{{ work_order.invoice_ninja_ref|default:work_order.invoice_ninja_id }}</dd>
+            </div>
+            {% endif %}
+        </dl>
+    </div>
+</div>
+{% endblock %}

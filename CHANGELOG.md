@@ -10,7 +10,15 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
-_Nothing yet._
+### Changed
+- **Ticket + Work Order detail pages standardized, Device gets its own card with notes.**
+  Ticket detail's right-rail "Details" list was crowded and had nowhere to show device notes;
+  Work Order already had the right shape (Client + Device cards up top, tools-only right rail),
+  it just lacked notes. Both pages now share one Device card (collapsed by default, click to
+  expand specs + notes). Ticket adopted WO's layout — Client + Device cards, a compact Ticket
+  Details card, slimmer right rail. Low-frequency metadata (created by/dates, source, linked
+  tickets, invoice ref) moved off both main pages onto a new "Details & history" sub-page per
+  record. Template-only, no migration.
 
 ## v0.4.49 — 2026-07-20
 

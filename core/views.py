@@ -645,6 +645,26 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         return context
 
 
+class WorkOrderMetaView(LoginRequiredMixin, DetailView):
+    """Low-frequency WO metadata (audit dates, invoice ref) — split off the
+    main detail page to keep it from crowding the right rail."""
+    model = WorkOrder
+    template_name = 'core/work_order_meta.html'
+    context_object_name = 'work_order'
+
+    def get_queryset(self):
+        qs = WorkOrder.objects.select_related('client')
+        return _scope_assignable_for(qs, self.request.user)
+
+    def get_context_data(self, **kwargs):
+        from django.utils import timezone
+        context = super().get_context_data(**kwargs)
+        wo = self.object
+        end = wo.completed_date.date() if wo.completed_date else timezone.now().date()
+        context['days_open'] = (end - wo.created_at.date()).days
+        return context
+
+
 class WorkOrderAddTimeView(LoginRequiredMixin, View):
     """Add minutes to a work order's time_spent_minutes. Returns updated display fragment."""
 
@@ -3505,6 +3525,23 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         context['ticket_statuses'] = StatusDefinition.objects.filter(
             entity_type='ticket', is_active=True
         ).order_by('sort_order')
+        return context
+
+
+class TicketMetaView(LoginRequiredMixin, DetailView):
+    """Low-frequency ticket metadata (source, audit dates, linked tickets) —
+    split off the main detail page to keep it from crowding the right rail."""
+    model = Ticket
+    template_name = 'core/ticket_meta.html'
+    context_object_name = 'ticket'
+
+    def get_queryset(self):
+        qs = Ticket.objects.select_related('client', 'created_by')
+        return _scope_tickets_for(qs, self.request.user)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['linked_tickets'] = self.object.get_linked_tickets()
         return context
 
 

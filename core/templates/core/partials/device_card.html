@@ -1,0 +1,91 @@
+{% comment %}
+Shared Device card — used on Ticket detail and WO detail.
+Context: `device` (Device or None). Optional `spec_cpu`/`spec_ram`/`spec_storage`
+(WO's as-serviced snapshot) and `asset` (managed asset link, WO only).
+Collapsed by default (name + make/model only); click to expand specs + notes.
+Pass `change_action` + `client_devices` (+ `current_device_id`) to enable an
+inline "Change" assignment form (WO detail only — Ticket doesn't reassign here).
+{% endcomment %}
+<div class="bg-white rounded-lg shadow p-4" x-data="{ expanded: false, editing: false }">
+    <div class="flex items-center justify-between mb-2">
+        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Device</h3>
+        <div class="flex items-center gap-3">
+            {% if device %}
+            <a href="{% url 'core:device_edit' device.pk %}" class="text-xs text-blue-600 hover:underline">Edit →</a>
+            <button type="button" @click="expanded = !expanded" class="text-xs text-blue-600 hover:underline" x-text="expanded ? 'Collapse' : 'Details'"></button>
+            {% endif %}
+            {% if change_action %}
+            <button type="button" @click="editing = !editing" class="text-xs text-blue-600 hover:underline" x-text="editing ? 'Cancel' : 'Change'"></button>
+            {% endif %}
+        </div>
+    </div>
+    <div x-show="!editing">
+        {% if device %}
+        <button type="button" @click="expanded = !expanded" class="text-left w-full">
+            <p class="text-sm font-semibold text-gray-900">{{ device.name }}</p>
+            {% if device.manufacturer or device.model %}
+            <p class="text-sm text-gray-600 mt-0.5">{{ device.manufacturer }} {{ device.model }}</p>
+            {% endif %}
+        </button>
+        <div x-show="expanded" x-cloak class="mt-2">
+            <dl class="space-y-1 text-xs text-gray-600">
+                {% if device.serial_number %}
+                <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">Serial</dt><dd class="font-mono">{{ device.serial_number }}</dd></div>
+                {% endif %}
+                {% if device.os %}
+                <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">OS</dt><dd>{{ device.get_os_display }}{% if device.os_version %} {{ device.os_version }}{% endif %}</dd></div>
+                {% endif %}
+                {% if device.condition_at_intake %}
+                <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">Condition</dt><dd>{{ device.get_condition_at_intake_display }}</dd></div>
+                {% endif %}
+                {% if spec_cpu %}
+                <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">CPU</dt><dd>{{ spec_cpu }}</dd></div>
+                {% endif %}
+                {% if spec_ram %}
+                <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">RAM</dt><dd>{{ spec_ram }}</dd></div>
+                {% endif %}
+                {% if spec_storage %}
+                <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">Storage</dt><dd>{{ spec_storage }}</dd></div>
+                {% endif %}
+            </dl>
+            {% if device.notes %}
+            <div class="mt-2 pt-2 border-t border-gray-100">
+                <p class="text-xs text-gray-400 mb-0.5">Device Notes</p>
+                <p class="text-xs text-gray-600 whitespace-pre-line">{{ device.notes }}</p>
+            </div>
+            {% endif %}
+            {% if asset %}
+            <p class="mt-2 text-xs">
+                <span class="text-gray-400">Managed asset:</span>
+                <a href="{% url 'core:asset_detail' asset.pk %}" class="text-indigo-600 hover:underline font-medium">{{ asset.name }}</a>
+            </p>
+            {% endif %}
+        </div>
+        {% else %}
+        <p class="text-sm text-gray-400 italic">No device assigned.</p>
+        {% endif %}
+    </div>
+    {% if change_action %}
+    <div x-show="editing" x-cloak>
+        <form method="post" action="{{ change_action }}" class="mt-2 space-y-2">
+            {% csrf_token %}
+            <input type="hidden" name="status" value="{{ work_order.status }}">
+            <input type="hidden" name="priority" value="{{ work_order.priority }}">
+            <input type="hidden" name="service_type" value="{{ work_order.service_type }}">
+            <input type="hidden" name="assigned_to" value="{{ work_order.assigned_to_id|default:'' }}">
+            <input type="hidden" name="contact" value="{{ work_order.contact_id|default:'' }}">
+            <input type="hidden" name="repair_type" value="{{ work_order.repair_type_id|default:'' }}">
+            <input type="hidden" name="scheduled_date" value="{{ work_order.scheduled_date|date:'Y-m-d'|default:'' }}">
+            <input type="hidden" name="invoice_ninja_ref" value="{{ work_order.invoice_ninja_ref }}">
+            <label class="block text-xs text-gray-500 mb-1">Assign Device</label>
+            <select name="device" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                <option value="">— No device —</option>
+                {% for d in client_devices %}
+                <option value="{{ d.pk }}" {% if current_device_id == d.pk %}selected{% endif %}>{{ d.name }}{% if d.serial_number %} ({{ d.serial_number }}){% endif %}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="w-full px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Save</button>
+        </form>
+    </div>
+    {% endif %}
+</div>

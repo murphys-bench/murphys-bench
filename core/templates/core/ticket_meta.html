@@ -1,0 +1,44 @@
+{% extends "core/base.html" %}
+
+{% block title %}{{ ticket.ticket_number }} — Details & History - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="bg-white shadow page-title-bar">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        <a href="{% url 'core:ticket_detail' ticket.pk %}" class="text-gray-400 hover:text-gray-600 text-sm">← {{ ticket.ticket_number }}</a>
+        <h1 class="text-2xl font-bold text-gray-900 mt-1">Details &amp; History</h1>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto space-y-6">
+    <div class="bg-white rounded-lg shadow p-6">
+        <dl class="space-y-3">
+            <div>
+                <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Source</dt>
+                <dd class="text-sm text-gray-900 mt-1">{{ ticket.get_source_display }}</dd>
+            </div>
+            <div>
+                <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Created By</dt>
+                <dd class="text-sm text-gray-900 mt-1">{{ ticket.created_by.get_full_name|default:"Unknown" }}</dd>
+            </div>
+            <div>
+                <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Created</dt>
+                <dd class="text-sm text-gray-900 mt-1">{{ ticket.created_at|date:"M d, Y g:i A" }}</dd>
+            </div>
+            <div>
+                <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Updated</dt>
+                <dd class="text-sm text-gray-900 mt-1">{{ ticket.updated_at|date:"M d, Y g:i A" }}</dd>
+            </div>
+        </dl>
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-6" x-data="{ manageLinks: true }">
+        <h2 class="text-base font-semibold text-gray-900 mb-3">Linked Tickets</h2>
+        <div id="linked-tickets-section">
+            {% include "core/partials/ticket_linked_list.html" with linked_tickets=linked_tickets link_error=None %}
+        </div>
+    </div>
+</div>
+{% endblock %}

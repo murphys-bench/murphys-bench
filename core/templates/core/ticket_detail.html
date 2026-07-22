@@ -141,10 +141,96 @@ window.addEventListener('beforeunload', function() {
     <!-- Left Column: Main Info -->
     <div class="lg:col-span-2 space-y-6">
 
+        <!-- Client + Device info cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+            <!-- Client card -->
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Client</h3>
+                    <a href="{% url 'core:client_detail' ticket.client.pk %}" class="text-xs text-blue-600 hover:underline">View →</a>
+                </div>
+                <p class="text-sm font-semibold text-gray-900">{{ ticket.client.name }}</p>
+                {% if ticket.contact %}
+                <p class="text-sm text-gray-700 mt-0.5">{{ ticket.contact.first_name }} {{ ticket.contact.last_name }}</p>
+                {% if ticket.contact.email %}<p class="text-sm text-gray-600">{{ ticket.contact.email }}</p>{% endif %}
+                {% endif %}
+            </div>
+
+            <!-- Device card -->
+            {% include "core/partials/device_card.html" with device=ticket.device %}
+        </div>
+
         <!-- Ticket Info -->
         <div class="bg-white rounded-lg shadow p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-2">{{ ticket.subject }}</h2>
             <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ ticket.description }}</p>
+        </div>
+
+        <!-- Ticket Details -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-base font-semibold text-gray-900 mb-3">Ticket Details</h2>
+            <dl class="grid grid-cols-2 gap-4 text-sm">
+                {% if ticket.help_topic %}
+                <div>
+                    <dt class="text-xs font-medium text-gray-500 uppercase">Help Topic</dt>
+                    <dd class="text-gray-900 mt-1">{{ ticket.help_topic.name }}</dd>
+                </div>
+                {% endif %}
+                {% if ticket.sla_plan %}
+                <div>
+                    <dt class="text-xs font-medium text-gray-500 uppercase">SLA Plan</dt>
+                    <dd class="text-gray-900 mt-1">
+                        {{ ticket.sla_plan.name }}
+                        {% if ticket.due_at %}<span class="block text-xs text-gray-400">Due {{ ticket.due_at|date:"M j, Y g:i A" }}</span>{% endif %}
+                    </dd>
+                </div>
+                {% endif %}
+                <div x-data="{ editing: false }" class="col-span-2">
+                    <dt class="text-xs font-medium text-gray-500 uppercase flex items-center justify-between">
+                        Assigned To
+                        <div class="flex items-center gap-2">
+                            {% if ticket.assigned_to != request.user %}
+                            <form method="post" action="{% url 'core:ticket_assign' ticket.pk %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="claim" value="1">
+                                <button type="submit" class="text-xs text-blue-600 hover:underline font-medium normal-case">Claim</button>
+                            </form>
+                            {% endif %}
+                            <button @click="editing = !editing" class="text-xs text-blue-500 hover:text-blue-400 underline normal-case">{% if is_admin %}Assign{% else %}Transfer{% endif %}</button>
+                            {% if ticket.can_escalate %}
+                            <form method="post" action="{% url 'core:ticket_escalate' ticket.pk %}">
+                                {% csrf_token %}
+                                <button type="submit" class="text-xs text-amber-600 hover:underline font-medium normal-case">Escalate &uarr;</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </dt>
+                    <dd class="text-gray-900 mt-1">
+                        <span x-show="!editing">
+                            {% if ticket.assigned_to %}{{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}{% else %}<span class="text-gray-400">Unassigned</span>{% endif %}
+                            <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-600">{% if ticket.assigned_to %}L{{ ticket.assigned_to.level }}{% else %}Needs L{{ ticket.escalation_level }}{% endif %}</span>
+                            {% if ticket.escalation_pending %}<span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-100 text-amber-700">Awaiting L{{ ticket.escalation_level }} pickup</span>{% endif %}
+                        </span>
+                        <form x-show="editing" x-cloak method="post" action="{% url 'core:ticket_assign' ticket.pk %}" class="flex gap-2 mt-1">
+                            {% csrf_token %}
+                            <select name="assigned_to" class="flex-1 text-sm px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+                                <option value="">— Unassigned —</option>
+                                {% for u in all_users %}
+                                <option value="{{ u.pk }}" {% if ticket.assigned_to_id == u.pk %}selected{% endif %}>{{ u.get_full_name|default:u.username }} (L{{ u.level }})</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" class="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
+                        </form>
+                    </dd>
+                </div>
+                <div>
+                    <dt class="text-xs font-medium text-gray-500 uppercase">Time Spent</dt>
+                    <dd class="text-gray-900 mt-1" id="ticket-time-spent-wrapper">
+                        {% include "core/partials/ticket_time_spent.html" %}
+                    </dd>
+                </div>
+            </dl>
         </div>
 
         <!-- Tab bar -->
@@ -274,145 +360,6 @@ window.addEventListener('beforeunload', function() {
     <!-- Right Column: Sidebar -->
     <div class="space-y-6">
 
-        <!-- Details (accordion) -->
-        <div class="bg-white rounded-lg shadow overflow-hidden"
-             x-data="{ open: JSON.parse(localStorage.getItem('acc_ticket_details') ?? 'false') }"
-             x-init="$watch('open', v => localStorage.setItem('acc_ticket_details', v))">
-            <button type="button" @click="open = !open"
-                    class="w-full px-6 py-4 flex items-center gap-2 text-left hover:bg-gray-50 transition-colors">
-                <span class="text-lg font-semibold text-gray-900">Details</span>
-                <svg class="w-4 h-4 text-gray-400 transition-transform ml-auto" :class="open && 'rotate-180'"
-                     fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-                </svg>
-            </button>
-            <div x-show="open" x-cloak class="px-6 pb-6 border-t border-gray-100 pt-4">
-            <dl class="space-y-3">
-                <div>
-                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Client</dt>
-                    <dd class="text-sm text-gray-900 mt-1">
-                        <a href="{% url 'core:client_detail' ticket.client.pk %}" class="text-blue-600 hover:underline">
-                            {{ ticket.client.name }}
-                        </a>
-                    </dd>
-                </div>
-                <div>
-                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Contact</dt>
-                    <dd class="text-sm text-gray-900 mt-1">
-                        {% if ticket.contact %}
-                            {{ ticket.contact.first_name }} {{ ticket.contact.last_name }}
-                            {% if ticket.contact.email %}<span class="text-gray-400 text-xs ml-1">({{ ticket.contact.email }})</span>{% endif %}
-                        {% else %}
-                            <span class="text-gray-400">—</span>
-                        {% endif %}
-                    </dd>
-                </div>
-                <div>
-                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Device</dt>
-                    <dd class="text-sm text-gray-900 mt-1">
-                        {% if ticket.device %}
-                            <a href="{% url 'core:device_detail' ticket.device.pk %}" class="text-blue-600 hover:underline">
-                                {{ ticket.device.name }}
-                            </a>
-                        {% else %}
-                            —
-                        {% endif %}
-                    </dd>
-                </div>
-                {% if ticket.help_topic %}
-                <div>
-                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Help Topic</dt>
-                    <dd class="text-sm text-gray-900 mt-1">{{ ticket.help_topic.name }}</dd>
-                </div>
-                {% endif %}
-                {% if ticket.sla_plan %}
-                <div>
-                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">SLA Plan</dt>
-                    <dd class="text-sm text-gray-900 mt-1">
-                        {{ ticket.sla_plan.name }}
-                        {% if ticket.due_at %}
-                        <span class="block text-xs text-gray-400">Due {{ ticket.due_at|date:"M j, Y g:i A" }}</span>
-                        {% endif %}
-                    </dd>
-                </div>
-                {% endif %}
-                <!-- Assigned To / Escalation -->
-                <div x-data="{ editing: false }">
-                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide flex items-center justify-between">
-                        Assigned To
-                        <div class="flex items-center gap-2">
-                            {% if ticket.assigned_to != request.user %}
-                            <form method="post" action="{% url 'core:ticket_assign' ticket.pk %}">
-                                {% csrf_token %}
-                                <input type="hidden" name="claim" value="1">
-                                <button type="submit" class="text-xs text-blue-600 hover:underline font-medium">Claim</button>
-                            </form>
-                            {% endif %}
-                            <button @click="editing = !editing" class="text-xs text-blue-500 hover:text-blue-400 underline">{% if is_admin %}Assign{% else %}Transfer{% endif %}</button>
-                            {% if ticket.can_escalate %}
-                            <form method="post" action="{% url 'core:ticket_escalate' ticket.pk %}">
-                                {% csrf_token %}
-                                <button type="submit" class="text-xs text-amber-600 hover:underline font-medium">Escalate &uarr;</button>
-                            </form>
-                            {% endif %}
-                        </div>
-                    </dt>
-                    <dd class="text-sm text-gray-900 mt-1">
-                        <span x-show="!editing">
-                            {% if ticket.assigned_to %}{{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}{% else %}<span class="text-gray-400">Unassigned</span>{% endif %}
-                            <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-600">{% if ticket.assigned_to %}L{{ ticket.assigned_to.level }}{% else %}Needs L{{ ticket.escalation_level }}{% endif %}</span>
-                            {% if ticket.escalation_pending %}<span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-100 text-amber-700">Awaiting L{{ ticket.escalation_level }} pickup</span>{% endif %}
-                        </span>
-                        <form x-show="editing" x-cloak method="post" action="{% url 'core:ticket_assign' ticket.pk %}" class="flex gap-2 mt-1">
-                            {% csrf_token %}
-                            <select name="assigned_to" class="flex-1 text-sm px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
-                                <option value="">— Unassigned —</option>
-                                {% for u in all_users %}
-                                <option value="{{ u.pk }}" {% if ticket.assigned_to_id == u.pk %}selected{% endif %}>{{ u.get_full_name|default:u.username }} (L{{ u.level }})</option>
-                                {% endfor %}
-                            </select>
-                            <button type="submit" class="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
-                        </form>
-                    </dd>
-                </div>
-
-                <div>
-                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Source</dt>
-                    <dd class="text-sm text-gray-900 mt-1">{{ ticket.get_source_display }}</dd>
-                </div>
-                <div>
-                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Created By</dt>
-                    <dd class="text-sm text-gray-900 mt-1">{{ ticket.created_by.get_full_name|default:"Unknown" }}</dd>
-                </div>
-                <div>
-                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Created</dt>
-                    <dd class="text-sm text-gray-900 mt-1">{{ ticket.created_at|date:"M d, Y g:i A" }}</dd>
-                </div>
-                <div>
-                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Updated</dt>
-                    <dd class="text-sm text-gray-900 mt-1">{{ ticket.updated_at|date:"M d, Y g:i A" }}</dd>
-                </div>
-                <div>
-                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">Time Spent</dt>
-                    <dd class="text-sm text-gray-900 mt-1" id="ticket-time-spent-wrapper">
-                        {% include "core/partials/ticket_time_spent.html" %}
-                    </dd>
-                </div>
-                <div x-data="{ manageLinks: false }">
-                    <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide flex items-center justify-between">
-                        Linked Tickets
-                        <button @click="manageLinks = !manageLinks" class="text-xs text-blue-500 hover:text-blue-400 underline" x-text="manageLinks ? 'Done' : 'Manage'"></button>
-                    </dt>
-                    <dd class="text-sm text-gray-900 mt-1">
-                        <div id="linked-tickets-section">
-                            {% include "core/partials/ticket_linked_list.html" with linked_tickets=linked_tickets link_error=None %}
-                        </div>
-                    </dd>
-                </div>
-            </dl>
-            </div>
-        </div>
-
         <!-- Timer -->
         <div class="bg-white rounded-lg shadow p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-3">Timer</h2>
@@ -488,17 +435,6 @@ window.addEventListener('beforeunload', function() {
         {% endif %}
         {% endif %}
 
-        <!-- Device Notes -->
-        {% if ticket.device and ticket.device.notes %}
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-3">Device Notes</h2>
-            <p class="text-sm text-gray-700 whitespace-pre-line">{{ ticket.device.notes }}</p>
-            <p class="mt-3 text-xs text-gray-400">
-                From <a href="{% url 'core:device_detail' ticket.device.pk %}" class="text-blue-600 hover:underline">{{ ticket.device.name }}</a>
-            </p>
-        </div>
-        {% endif %}
-
         <!-- Quick Actions -->
         <div class="bg-white rounded-lg shadow p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
@@ -541,6 +477,7 @@ window.addEventListener('beforeunload', function() {
                     </a>
                 {% endif %}
             </div>
+            <a href="{% url 'core:ticket_meta' ticket.pk %}" class="block mt-3 text-xs text-gray-400 hover:text-gray-600 text-center">Details &amp; history →</a>
         </div>
 
         <!-- Other open WOs for this client -->

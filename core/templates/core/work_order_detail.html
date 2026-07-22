@@ -138,76 +138,8 @@
             </div>
 
             <!-- Device card -->
-            <div class="bg-white rounded-lg shadow p-4" x-data="{ editing: false }">
-                <div class="flex items-center justify-between mb-2">
-                    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Device</h3>
-                    <div class="flex gap-2">
-                        {% if work_order.device %}
-                        <a href="{% url 'core:device_edit' work_order.device.pk %}" class="text-xs text-blue-600 hover:underline">Edit Device →</a>
-                        {% endif %}
-                        <button type="button" @click="editing = !editing" class="text-xs text-blue-600 hover:underline" x-text="editing ? 'Cancel' : 'Change'"></button>
-                    </div>
-                </div>
-                <!-- Display mode -->
-                <div x-show="!editing">
-                    {% if work_order.device %}
-                    <p class="text-sm font-semibold text-gray-900">{{ work_order.device.name }}</p>
-                    {% if work_order.device.manufacturer or work_order.device.model %}
-                    <p class="text-sm text-gray-600 mt-0.5">{{ work_order.device.manufacturer }} {{ work_order.device.model }}</p>
-                    {% endif %}
-                    <dl class="mt-2 space-y-1 text-xs text-gray-600">
-                        {% if work_order.device.serial_number %}
-                        <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">Serial</dt><dd class="font-mono">{{ work_order.device.serial_number }}</dd></div>
-                        {% endif %}
-                        {% if work_order.device.os %}
-                        <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">OS</dt><dd>{{ work_order.device.get_os_display }}{% if work_order.device.os_version %} {{ work_order.device.os_version }}{% endif %}</dd></div>
-                        {% endif %}
-                        {% if work_order.device.condition_at_intake %}
-                        <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">Condition</dt><dd>{{ work_order.device.get_condition_at_intake_display }}</dd></div>
-                        {% endif %}
-                        {% if work_order.cpu %}
-                        <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">CPU</dt><dd>{{ work_order.cpu }}</dd></div>
-                        {% endif %}
-                        {% if work_order.ram %}
-                        <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">RAM</dt><dd>{{ work_order.ram }}</dd></div>
-                        {% endif %}
-                        {% if work_order.storage %}
-                        <div class="flex gap-2"><dt class="text-gray-400 w-16 shrink-0">Storage</dt><dd>{{ work_order.storage }}</dd></div>
-                        {% endif %}
-                    </dl>
-                    {% else %}
-                    <p class="text-sm text-gray-400 italic">No device assigned.</p>
-                    {% endif %}
-                    {% if work_order.asset %}
-                    <p class="mt-2 text-xs">
-                        <span class="text-gray-400">Managed asset:</span>
-                        <a href="{% url 'core:asset_detail' work_order.asset.pk %}" class="text-indigo-600 hover:underline font-medium">{{ work_order.asset.name }}</a>
-                    </p>
-                    {% endif %}
-                </div>
-                <!-- Edit mode: assign device -->
-                <div x-show="editing" x-cloak>
-                    <form method="post" action="{% url 'core:work_order_quick_update' work_order.pk %}" class="mt-2 space-y-2">
-                        {% csrf_token %}
-                        <input type="hidden" name="status" value="{{ work_order.status }}">
-                        <input type="hidden" name="priority" value="{{ work_order.priority }}">
-                        <input type="hidden" name="service_type" value="{{ work_order.service_type }}">
-                        <input type="hidden" name="assigned_to" value="{{ work_order.assigned_to_id|default:'' }}">
-                        <input type="hidden" name="contact" value="{{ work_order.contact_id|default:'' }}">
-                        <input type="hidden" name="repair_type" value="{{ work_order.repair_type_id|default:'' }}">
-                        <input type="hidden" name="scheduled_date" value="{{ work_order.scheduled_date|date:'Y-m-d'|default:'' }}">
-                        <input type="hidden" name="invoice_ninja_ref" value="{{ work_order.invoice_ninja_ref }}">
-                        <label class="block text-xs text-gray-500 mb-1">Assign Device</label>
-                        <select name="device" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                            <option value="">— No device —</option>
-                            {% for d in client_devices %}
-                            <option value="{{ d.pk }}" {% if work_order.device_id == d.pk %}selected{% endif %}>{{ d.name }}{% if d.serial_number %} ({{ d.serial_number }}){% endif %}</option>
-                            {% endfor %}
-                        </select>
-                        <button type="submit" class="w-full px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Save</button>
-                    </form>
-                </div>
-            </div>
+            {% url 'core:work_order_quick_update' work_order.pk as wo_quick_update_url %}
+            {% include "core/partials/device_card.html" with device=work_order.device spec_cpu=work_order.cpu spec_ram=work_order.ram spec_storage=work_order.storage asset=work_order.asset change_action=wo_quick_update_url client_devices=client_devices current_device_id=work_order.device_id %}
         </div>
 
         <!-- Reported Issue / Work Requested -->
@@ -809,6 +741,7 @@
                 <a href="{% url 'core:kb_list' %}"
                    class="block w-full text-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">Search KB</a>
             </div>
+            <a href="{% url 'core:work_order_meta' work_order.pk %}" class="block mt-3 text-xs text-gray-400 hover:text-gray-600 text-center">Details &amp; history →</a>
         </div>
 
         <!-- Other open tickets for this client -->

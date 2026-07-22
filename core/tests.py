@@ -8014,3 +8014,85 @@ def test_ticket_time_spent_shown_in_details_card_not_timer(client, client_obj, a
     timer_idx = content.index('>Timer<')
     assert details_idx < timer_idx, 'Time Spent must appear before the Timer card (i.e. inside Details)'
     assert 'Time Spent' in content
+
+
+# ── Ticket/WO detail layout standardization + shared Device card ────────────
+# (session Jul 22 2026): Ticket detail's right-rail "Details" accordion was
+# crowded and had nowhere for device notes; WO detail already had the right
+# shape (Client + Device cards up top, tools-only right rail) but its Device
+# card had no notes. Both pages now share one Device card partial (collapsed
+# by default, expands to specs + notes), and low-frequency metadata moved to
+# a dedicated "Details & history" sub-page per record type.
+
+@pytest.mark.django_db
+def test_ticket_detail_shows_device_card_with_notes_collapsed(client, client_obj, admin_user):
+    device = Device.objects.create(client=client_obj, name='Cindis-Mac-mini', notes='8GB RAM, slow boot')
+    ticket = Ticket.objects.create(client=client_obj, device=device, subject='S', description='D')
+    client.force_login(admin_user)
+
+    resp = client.get(reverse('core:ticket_detail', args=[ticket.pk]))
+    content = resp.content.decode()
+    assert resp.status_code == 200
+    assert 'Cindis-Mac-mini' in content
+    assert 'Device Notes' in content
+    assert '8GB RAM, slow boot' in content
+    # Retired standalone Device Notes card / old sidebar Details accordion
+    assert content.count('Device Notes') == 1
+
+
+@pytest.mark.django_db
+def test_wo_detail_shows_device_card_with_notes(client, client_obj, admin_user):
+    device = Device.objects.create(client=client_obj, name='Dell Laptop', notes='Battery swollen — handle with care')
+    wo = WorkOrder.objects.create(client=client_obj, device=device)
+    client.force_login(admin_user)
+
+    resp = client.get(reverse('core:work_order_detail', args=[wo.pk]))
+    content = resp.content.decode()
+    assert resp.status_code == 200
+    assert 'Dell Laptop' in content
+    assert 'Device Notes' in content
+    assert 'Battery swollen' in content
+
+
+@pytest.mark.django_db
+def test_ticket_meta_page_renders_and_holds_linked_tickets(client, client_obj, admin_user):
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D', created_by=admin_user)
+    client.force_login(admin_user)
+
+    resp = client.get(reverse('core:ticket_meta', args=[ticket.pk]))
+    assert resp.status_code == 200
+    content = resp.content.decode()
+    assert 'Details &amp; History' in content or 'Details & History' in content
+    assert 'Linked Tickets' in content
+
+
+@pytest.mark.django_db
+def test_wo_meta_page_renders(client, client_obj, admin_user):
+    wo = WorkOrder.objects.create(client=client_obj)
+    client.force_login(admin_user)
+
+    resp = client.get(reverse('core:work_order_meta', args=[wo.pk]))
+    assert resp.status_code == 200
+    assert 'Days Open' in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_ticket_meta_404s_for_non_owning_non_admin_tech(client, client_obj):
+    owner = User.objects.create_user(username='meta_owner', password='x', is_staff=False)
+    other = User.objects.create_user(username='meta_other', password='x', is_staff=False)
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D', assigned_to=owner)
+
+    client.force_login(other)
+    resp = client.get(reverse('core:ticket_meta', args=[ticket.pk]))
+    assert resp.status_code == 404
+
+
+@pytest.mark.django_db
+def test_wo_meta_404s_for_non_owning_non_admin_tech(client, client_obj):
+    owner = User.objects.create_user(username='wo_meta_owner', password='x', is_staff=False)
+    other = User.objects.create_user(username='wo_meta_other', password='x', is_staff=False)
+    wo = WorkOrder.objects.create(client=client_obj, assigned_to=owner)
+
+    client.force_login(other)
+    resp = client.get(reverse('core:work_order_meta', args=[wo.pk]))
+    assert resp.status_code == 404
