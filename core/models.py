@@ -1115,11 +1115,10 @@ class WorkOrder(models.Model):
     invoice_ninja_ref = models.CharField(max_length=100, blank=True, help_text='Invoice Ninja invoice number (editable — record where the work actually landed if a draft was merged in IN)')
     # IN invoice id returned by the push — the duplicate-guard key. Set = pushed.
     invoice_ninja_id = models.CharField(max_length=64, blank=True, default='')
-    # Device credentials — encrypted at rest (AES-256), never shown on printed reports
-    device_username = EncryptedCharField(max_length=255, blank=True)
-    device_password = EncryptedCharField(max_length=255, blank=True)
-    device_pin = EncryptedCharField(max_length=50, blank=True)
-    credential_notes = EncryptedTextField(blank=True, help_text='Freeform credential notes, e.g. recovery email, security question answers')
+    # NOTE: device credentials used to live here as well as on Device. That split meant the
+    # WO card and the device page read different stores and could never agree. Retired in
+    # mig 0099 — the Device is the single source of truth. See plan
+    # ~/.claude/plans/device-credentials-single-store.md
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1882,6 +1881,14 @@ class DeviceCredentialAccessLog(models.Model):
     user        = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     action      = models.CharField(max_length=20, choices=ACTION_CHOICES)
     field       = models.CharField(max_length=50, blank=True, help_text='Which field was revealed (username/password)')
+    # Job context — which ticket or work order the reveal/edit was performed from.
+    # Null means it happened on the device page itself (no job context).
+    ticket      = models.ForeignKey('Ticket', on_delete=models.SET_NULL, null=True, blank=True, related_name='device_credential_logs')
+    work_order  = models.ForeignKey('WorkOrder', on_delete=models.SET_NULL, null=True, blank=True, related_name='device_credential_logs')
+    # Set on an edit that overwrote an existing stored value. The previous value is
+    # deliberately NOT retained — the log says who changed it and when; MB does not
+    # accumulate a store of old secrets.
+    replaced_existing = models.BooleanField(default=False)
     accessed_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
