@@ -10,6 +10,16 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+## v0.4.50 — 2026-07-25
+
+### Fixed
+- **The inbound duplicate-ticket regression test could fail spuriously.** The fetch command's
+  single-runner lock used one fixed path shared by every process on the host, so any other
+  process holding it (a second test run, or a live fetch timer) made the command skip its fetch
+  and the test see no new ticket. The lock path is now a setting and tests get their own; the
+  real job is unchanged — one fixed path per install, overlapping fetches still impossible. Also
+  adds the first test of the single-runner guarantee itself.
+
 ### Changed
 - **Device credentials are now stored in one place, and reachable from tickets.** Credentials
   used to exist twice — once on the Device, once on each Work Order — read by different pages,
