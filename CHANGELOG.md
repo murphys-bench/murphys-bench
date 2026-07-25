@@ -11,6 +11,9 @@ the Unreleased entries move under that version and prod gets a single update.
 ## Unreleased
 
 ### Changed
+- **Settings → Help Topics: the "Add Help Topic" form moved above the topics table.** With a
+  full list of topics the add form sat below the fold; it's now the first thing on the card.
+  Form itself is unchanged.
 - **Ticket + Work Order detail pages standardized, Device gets its own card with notes.**
   Ticket detail's right-rail "Details" list was crowded and had nowhere to show device notes;
   Work Order already had the right shape (Client + Device cards up top, tools-only right rail),
