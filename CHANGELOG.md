@@ -11,6 +11,13 @@ the Unreleased entries move under that version and prod gets a single update.
 ## Unreleased
 
 ### Changed
+- **Work Order detail right rail consolidated.** The separate "Update Work Order" accordion is
+  gone — Status, Priority and Service Type joined the Details card's Edit view, which already
+  held repair type / assigned to / scheduled date / contact / Invoice Ninja ref. Device
+  Credentials moved into the Details card as a sub-section (same permission gating and access
+  logging — the `credentials_display` partial is unchanged). Pre / Post Checklist moved out of
+  the rail into the main column as a full-width collapsible card between Details and Work
+  Performed. Timer is now the first card in the rail, matching Ticket detail.
 - **Settings → Help Topics: the "Add Help Topic" form moved above the topics table.** With a
   full list of topics the add form sat below the fold; it's now the first thing on the card.
   Form itself is unchanged.

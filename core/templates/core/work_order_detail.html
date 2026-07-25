@@ -207,10 +207,31 @@
                 <form method="post" action="{% url 'core:work_order_quick_update' work_order.pk %}" class="grid grid-cols-2 gap-4"
                       x-data="{ customRt: false }">
                     {% csrf_token %}
-                    <input type="hidden" name="status" value="{{ work_order.status }}">
-                    <input type="hidden" name="priority" value="{{ work_order.priority }}">
-                    <input type="hidden" name="service_type" value="{{ work_order.service_type }}">
                     <input type="hidden" name="device" value="{{ work_order.device_id|default:'' }}">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Status</label>
+                        <select name="status" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            {% for val, label in wo_status_choices %}
+                            <option value="{{ val }}" {% if work_order.status == val %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Priority</label>
+                        <select name="priority" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            {% for val, label in work_order.PRIORITY_CHOICES %}
+                            <option value="{{ val }}" {% if work_order.priority == val %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Service Type</label>
+                        <select name="service_type" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            {% for val, label in work_order.SERVICE_TYPE_CHOICES %}
+                            <option value="{{ val }}" {% if work_order.service_type == val %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
                     <div>
                         <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Repair Type</label>
                         <select name="repair_type" @change="customRt = $event.target.value === 'custom'"
@@ -258,6 +279,12 @@
                     </div>
                 </form>
             </div>
+
+            <!-- Device Credentials -->
+            <div class="mt-6 pt-4 border-t border-gray-100">
+                <h3 class="text-xs font-medium text-gray-500 uppercase mb-3 flex items-center gap-2">{% icon "key" 4 %} Device Credentials</h3>
+                {% include "core/partials/credentials_display.html" %}
+            </div>
         </div>
 
         {% if custom_field_values %}
@@ -281,6 +308,35 @@
             </dl>
         </div>
         {% endif %}
+
+        <!-- Pre / Post Checklist (collapsed by default) -->
+        <div class="bg-white rounded-lg shadow overflow-hidden"
+             x-data="{ open: JSON.parse(localStorage.getItem('acc_wo_checklist') ?? 'false') }"
+             x-init="$watch('open', v => localStorage.setItem('acc_wo_checklist', v))">
+            <div class="px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                <button type="button" @click="open = !open" class="flex items-center gap-2 flex-1 text-left">
+                    <span class="text-base font-semibold text-gray-900">Pre / Post Checklist</span>
+                    {% if checklist_checked_count %}
+                    <span class="text-xs text-gray-400">{{ checklist_checked_count }} item{{ checklist_checked_count|pluralize }} checked</span>
+                    {% endif %}
+                    <svg class="w-4 h-4 text-gray-400 transition-transform ml-auto" :class="open && 'rotate-180'"
+                         fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </button>
+                <form method="post" action="{% url 'core:work_order_apply_checklist' work_order.pk %}">
+                    {% csrf_token %}
+                    <button type="submit" class="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap ml-3">
+                        ↺ Apply Checklist
+                    </button>
+                </form>
+            </div>
+            <div x-show="open" x-cloak class="border-t border-gray-100">
+                <div id="checklist-wrapper">
+                    {% include "core/partials/checklist_list.html" with items=checklist_items checked_count=checklist_checked_count work_order=work_order %}
+                </div>
+            </div>
+        </div>
 
         <!-- Work Performed -->
         <div class="bg-white rounded-lg shadow p-6"
@@ -540,104 +596,6 @@
     <!-- Right Column -->
     <div class="space-y-6">
 
-        <!-- Update Work Order (accordion) -->
-        <div class="bg-white rounded-lg shadow overflow-hidden"
-             x-data="{ open: JSON.parse(localStorage.getItem('acc_wo_update') ?? 'false') }"
-             x-init="$watch('open', v => localStorage.setItem('acc_wo_update', v))">
-            <button type="button" @click="open = !open"
-                    class="w-full px-5 py-4 flex items-center gap-2 text-left hover:bg-gray-50 transition-colors">
-                <span class="text-base font-semibold text-gray-900">Update Work Order</span>
-                <svg class="w-4 h-4 text-gray-400 transition-transform ml-auto" :class="open && 'rotate-180'"
-                     fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-                </svg>
-            </button>
-            <div x-show="open" x-cloak class="px-5 pb-5 border-t border-gray-100 pt-4">
-            <form method="post" action="{% url 'core:work_order_quick_update' work_order.pk %}" class="space-y-3">
-                {% csrf_token %}
-
-                <div>
-                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Status</label>
-                    <select name="status" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                        {% for val, label in wo_status_choices %}
-                        <option value="{{ val }}" {% if work_order.status == val %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div>
-                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Service Type</label>
-                    <select name="service_type" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                        {% for val, label in work_order.SERVICE_TYPE_CHOICES %}
-                        <option value="{{ val }}" {% if work_order.service_type == val %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div>
-                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Priority</label>
-                    <select name="priority" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                        {% for val, label in work_order.PRIORITY_CHOICES %}
-                        <option value="{{ val }}" {% if work_order.priority == val %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div>
-                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Assigned To</label>
-                    <select name="assigned_to" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                        <option value="">— Unassigned —</option>
-                        {% for u in all_users %}
-                        <option value="{{ u.pk }}" {% if work_order.assigned_to_id == u.pk %}selected{% endif %}>{{ u.get_full_name|default:u.username }} (L{{ u.level }})</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div>
-                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Contact</label>
-                    <select name="contact" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                        <option value="">— None —</option>
-                        {% for c in client_contacts %}
-                        <option value="{{ c.pk }}" {% if work_order.contact_id == c.pk %}selected{% endif %}>{{ c.first_name }} {{ c.last_name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div>
-                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Repair Type</label>
-                    <select name="repair_type" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                        <option value="">— None —</option>
-                        {% for rt in all_repair_types %}
-                        <option value="{{ rt.pk }}" {% if work_order.repair_type_id == rt.pk %}selected{% endif %}>{{ rt.name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div>
-                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Scheduled Date</label>
-                    <input type="date" name="scheduled_date"
-                           value="{{ work_order.scheduled_date|date:'Y-m-d'|default:'' }}"
-                           class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                </div>
-
-                <div>
-                    <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Invoice Ninja Ref #</label>
-                    <input type="text" name="invoice_ninja_ref"
-                           value="{{ work_order.invoice_ninja_ref }}"
-                           placeholder="Invoice reference"
-                           class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                </div>
-
-                <div class="pt-1">
-                    <button type="submit"
-                            class="w-full px-4 py-2 bg-green-600 text-white text-sm font-medium rounded hover:bg-green-700">
-                        Save Changes
-                    </button>
-                </div>
-            </form>
-            </div>
-        </div>
-
         <!-- Timer -->
         <div class="bg-white rounded-lg shadow p-5">
             <h2 class="text-base font-semibold text-gray-900 mb-3">Timer</h2>
@@ -698,41 +656,6 @@
             {% endif %}
         </div>
         {% endif %}
-
-        <!-- Device Credentials -->
-        <div class="bg-white rounded-lg shadow p-5">
-            <h2 class="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">{% icon "key" 5 %} Device Credentials</h2>
-            {% include "core/partials/credentials_display.html" %}
-        </div>
-
-        <!-- Checklist (collapsed by default) -->
-        <div class="bg-white rounded-lg shadow overflow-hidden"
-             x-data="{ open: JSON.parse(localStorage.getItem('acc_wo_checklist') ?? 'false') }"
-             x-init="$watch('open', v => localStorage.setItem('acc_wo_checklist', v))">
-            <div class="px-5 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
-                <button type="button" @click="open = !open" class="flex items-center gap-2 flex-1 text-left">
-                    <span class="text-base font-semibold text-gray-900">Pre / Post Checklist</span>
-                    {% if checklist_checked_count %}
-                    <span class="text-xs text-gray-400">{{ checklist_checked_count }} item{{ checklist_checked_count|pluralize }} checked</span>
-                    {% endif %}
-                    <svg class="w-4 h-4 text-gray-400 transition-transform ml-auto" :class="open && 'rotate-180'"
-                         fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-                    </svg>
-                </button>
-                <form method="post" action="{% url 'core:work_order_apply_checklist' work_order.pk %}">
-                    {% csrf_token %}
-                    <button type="submit" class="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap ml-3">
-                        ↺ Apply Checklist
-                    </button>
-                </form>
-            </div>
-            <div x-show="open" x-cloak class="border-t border-gray-100">
-                <div id="checklist-wrapper">
-                    {% include "core/partials/checklist_list.html" with items=checklist_items checked_count=checklist_checked_count work_order=work_order %}
-                </div>
-            </div>
-        </div>
 
         <!-- Quick Actions -->
         <div class="bg-white rounded-lg shadow p-5">
