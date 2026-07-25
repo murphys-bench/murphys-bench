@@ -618,6 +618,9 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         context['all_repair_types'] = RepairType.objects.filter(is_active=True).order_by('name')
         context['client_contacts'] = Contact.objects.filter(client=wo.client).order_by('last_name', 'first_name')
         context['client_devices'] = Device.objects.filter(client=wo.client).order_by('name')
+        # Device credentials (single store on Device) — job context = this WO
+        if wo.device_id:
+            context.update(_device_cred_context(self.request.user, wo.device, work_order=wo))
         # Open tickets for this client (cross-visibility panel)
         linked_ticket_pk = getattr(self.object.ticket, 'pk', None) if hasattr(self.object, 'ticket') else None
         open_tickets = (
@@ -911,10 +914,8 @@ class DeviceDetailView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        ctx['is_admin'] = _is_admin(self.request.user)
-        ctx['can_view'] = _can_view_device_creds(self.request.user)
-        device = self.object
-        ctx['has_creds'] = bool(device.device_username or device.device_password or device.credential_notes)
+        # Device page has no job context -> reveal is admin-only by design.
+        ctx.update(_device_cred_context(self.request.user, self.object))
         return ctx
 
 
@@ -3500,6 +3501,9 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
             context['wo_is_open'] = wo.status not in WO_CLOSED_STATUSES
         # Linked tickets
         context['linked_tickets'] = ticket.get_linked_tickets()
+        # Device credentials (single store on Device) — job context = this ticket
+        if ticket.device_id:
+            context.update(_device_cred_context(self.request.user, ticket.device, ticket=ticket))
         context['audit_log'] = _audit_entries(ticket)
         # Ticket-level attachments
         ct = ContentType.objects.get_for_model(Ticket)
@@ -6489,19 +6493,6 @@ class ContactSetPrimaryView(LoginRequiredMixin, View):
 # Credentials (HTMX on WO detail)
 # ---------------------------------------------------------------------------
 
-class WorkOrderCredentialsSaveView(LoginRequiredMixin, View):
-    """Save device credentials inline on WO detail."""
-
-    def post(self, request, pk):
-        wo = _get_scoped_wo_or_404(request, pk)
-        wo.device_username = request.POST.get('device_username', '').strip()
-        wo.device_password = request.POST.get('device_password', '').strip()
-        wo.device_pin = request.POST.get('device_pin', '').strip()
-        wo.credential_notes = request.POST.get('credential_notes', '').strip()
-        wo.save(update_fields=['device_username', 'device_password', 'device_pin', 'credential_notes'])
-        return render(request, 'core/partials/credentials_display.html', {'work_order': wo})
-
-
 class WorkOrderBillingUpdateView(LoginRequiredMixin, View):
     """HTMX: update billing state inline on WO detail."""
 
@@ -7519,7 +7510,7 @@ class OrgCredentialDeleteView(LoginRequiredMixin, View):
 
 def _can_view_org_creds(user):
     """Who may reveal the shared org credential vault. Mirrors the device-cred
-    gate (_can_view_device_creds): admins always; other users only with the
+    gate (_has_device_cred_flag): admins always; other users only with the
     explicit can_view_org_credentials flag. Closes the prior hole where ANY
     logged-in user could reveal a non-admin_only vault entry by hitting the
     endpoint directly (the Settings UI is admin-only, but the endpoint wasn't)."""
@@ -7549,14 +7540,75 @@ class OrgCredentialRevealView(LoginRequiredMixin, View):
 
 # --- Device Credentials ---
 
-def _can_view_device_creds(user):
+def _has_device_cred_flag(user):
+    """Base trust: this user is allowed to handle device credentials at all."""
     return _is_admin(user) or user.has_perm_flag('can_view_device_credentials')
+
+
+def _job_context(request):
+    """Resolve the ticket/work order a credential action was performed from.
+
+    Returns (ticket, work_order), either or both None. Job context comes from the
+    request because credentials live on the Device, which itself has no job.
+    """
+    ticket = work_order = None
+    ticket_id = request.GET.get('ticket') or request.POST.get('ticket')
+    wo_id = request.GET.get('wo') or request.POST.get('wo')
+    if ticket_id:
+        ticket = Ticket.objects.filter(pk=ticket_id).first()
+    if wo_id:
+        work_order = WorkOrder.objects.filter(pk=wo_id).first()
+    return ticket, work_order
+
+
+def _can_reveal_device_creds(user, ticket=None, work_order=None):
+    """READ gate — deliberately tight, because revealing discloses a secret.
+
+    Requires the flag AND either admin, or assignment to the job it is being revealed
+    from. With no job context (the device page) it is admin-only, since there is no
+    assignment to check against.
+    """
+    if not _has_device_cred_flag(user):
+        return False
+    if _is_admin(user):
+        return True
+    if ticket is not None and ticket.assigned_to_id == user.pk:
+        return True
+    if work_order is not None and work_order.assigned_to_id == user.pk:
+        return True
+    return False
+
+
+def _can_write_device_creds(user):
+    """WRITE gate — deliberately LOOSER than the read gate. Do not "tighten" this.
+
+    Writing a credential discloses nothing. Requiring assignment to record one means a
+    tech who just got a new password from the client cannot store it, so it ends up in a
+    plaintext note or lost — a control that makes the system less secure. Accountability
+    for overwrites comes from the audit log, not from prohibition. See
+    ~/.claude/plans/device-credentials-single-store.md
+    """
+    return _has_device_cred_flag(user)
+
+
+def _device_cred_context(user, device, ticket=None, work_order=None):
+    """Template flags for the credential block. The endpoints are the real gate."""
+    return {
+        'device': device,
+        'cred_ticket': ticket,
+        'cred_work_order': work_order,
+        'can_view': _can_reveal_device_creds(user, ticket, work_order),
+        'can_write': _can_write_device_creds(user),
+        'is_admin': _is_admin(user),
+        'has_creds': bool(device.device_username or device.device_password or device.credential_notes),
+    }
 
 
 class DeviceCredentialRevealView(LoginRequiredMixin, View):
     """HTMX: return plaintext device credential value and log the access."""
     def get(self, request, pk, field):
-        if not _can_view_device_creds(request.user):
+        ticket, work_order = _job_context(request)
+        if not _can_reveal_device_creds(request.user, ticket, work_order):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         device = get_object_or_404(Device, pk=pk)
@@ -7566,30 +7618,36 @@ class DeviceCredentialRevealView(LoginRequiredMixin, View):
             value = device.device_password
         else:
             return HttpResponse('', status=400)
-        DeviceCredentialAccessLog.objects.create(device=device, user=request.user, action='viewed', field=field)
+        DeviceCredentialAccessLog.objects.create(
+            device=device, user=request.user, action='viewed', field=field,
+            ticket=ticket, work_order=work_order,
+        )
         return HttpResponse(value or '(empty)', content_type='text/plain')
 
 
 class DeviceCredentialUpdateView(LoginRequiredMixin, View):
-    """HTMX: save device credentials (admin only). Returns updated credential card."""
+    """HTMX: save device credentials. Returns the updated credential block."""
     def post(self, request, pk):
-        if not _is_admin(request.user):
+        if not _can_write_device_creds(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         device = get_object_or_404(Device, pk=pk)
+        ticket, work_order = _job_context(request)
+
+        had_secret = bool((device.device_username or '').strip() or (device.device_password or '').strip())
         device.device_username = request.POST.get('device_username', '').strip()
         new_pw = request.POST.get('device_password', '').strip()
         if new_pw:
             device.device_password = new_pw
         device.credential_notes = request.POST.get('credential_notes', '').strip()
         device.save(update_fields=['device_username', 'device_password', 'credential_notes', 'updated_at'])
-        DeviceCredentialAccessLog.objects.create(device=device, user=request.user, action='edited', field='all')
-        is_admin = _is_admin(request.user)
-        can_view = _can_view_device_creds(request.user)
-        has_creds = bool(device.device_username or device.device_password or device.credential_notes)
-        return render(request, 'core/partials/device_credential_card.html', {
-            'device': device, 'is_admin': is_admin, 'can_view': can_view, 'has_creds': has_creds,
-        })
+
+        DeviceCredentialAccessLog.objects.create(
+            device=device, user=request.user, action='edited', field='all',
+            ticket=ticket, work_order=work_order, replaced_existing=had_secret,
+        )
+        return render(request, 'core/partials/device_credential_card.html',
+                      _device_cred_context(request.user, device, ticket, work_order))
 
 
 # --- Email Template Manager ---

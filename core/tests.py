@@ -8096,3 +8096,199 @@ def test_wo_meta_404s_for_non_owning_non_admin_tech(client, client_obj):
     client.force_login(other)
     resp = client.get(reverse('core:work_order_meta', args=[wo.pk]))
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Device credentials — single store on Device, ASYMMETRIC gating.
+#
+# Read is tight (flag AND (admin OR assigned)); write is deliberately looser
+# (flag alone). Blocking the write path pushes new passwords into plaintext
+# notes or loses them, which is worse than the overwrite risk it would prevent.
+# Accountability for writes comes from the audit log. Do NOT "tighten" the
+# write gate to match the read gate — test_device_cred_unassigned_tech_can_write
+# exists specifically to catch that.
+# See ~/.claude/plans/device-credentials-single-store.md
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def cred_device(db, client_obj):
+    return Device.objects.create(
+        client=client_obj, name='Bench PC',
+        device_username='localadmin', device_password='hunter2',
+    )
+
+
+@pytest.fixture
+def cred_tech(db):
+    from core.models import Role
+    role = Role.objects.create(name='CredTech', can_view_device_credentials=True)
+    return User.objects.create_user(username='credtech', password='x', role_obj=role)
+
+
+@pytest.fixture
+def plain_tech(db):
+    from core.models import Role
+    role = Role.objects.create(name='NoCredTech')  # flag absent
+    return User.objects.create_user(username='plaintech', password='x', role_obj=role)
+
+
+@pytest.mark.django_db
+def test_device_cred_assigned_tech_can_reveal(client, client_obj, cred_device, cred_tech):
+    """Flag + assigned to the work order the reveal is made from -> allowed, logged
+    with the job context."""
+    from core.models import DeviceCredentialAccessLog
+    wo = WorkOrder.objects.create(client=client_obj, device=cred_device, assigned_to=cred_tech)
+
+    client.force_login(cred_tech)
+    resp = client.get(reverse('core:device_cred_reveal', args=[cred_device.pk, 'password']),
+                      {'wo': wo.pk})
+    assert resp.status_code == 200
+    assert resp.content == b'hunter2'
+    log = DeviceCredentialAccessLog.objects.get(device=cred_device, user=cred_tech, action='viewed')
+    assert log.work_order_id == wo.pk
+
+
+@pytest.mark.django_db
+def test_device_cred_unassigned_tech_cannot_reveal(client, client_obj, cred_device, cred_tech):
+    """Flag but NOT assigned -> denied, and the secret never reaches the response."""
+    other = User.objects.create_user(username='otherguy', password='x')
+    wo = WorkOrder.objects.create(client=client_obj, device=cred_device, assigned_to=other)
+
+    client.force_login(cred_tech)
+    resp = client.get(reverse('core:device_cred_reveal', args=[cred_device.pk, 'password']),
+                      {'wo': wo.pk})
+    assert resp.status_code == 403
+    assert b'hunter2' not in resp.content
+
+
+@pytest.mark.django_db
+def test_device_cred_reveal_on_device_page_is_admin_only(client, cred_device, cred_tech):
+    """No job context (the device page) -> no assignment to check, so admin only."""
+    client.force_login(cred_tech)
+    resp = client.get(reverse('core:device_cred_reveal', args=[cred_device.pk, 'password']))
+    assert resp.status_code == 403
+
+
+@pytest.mark.django_db
+def test_device_cred_admin_reveals_without_assignment(client, cred_device, admin_user):
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:device_cred_reveal', args=[cred_device.pk, 'password']))
+    assert resp.status_code == 200
+    assert resp.content == b'hunter2'
+
+
+@pytest.mark.django_db
+def test_device_cred_assigned_tech_can_reveal_from_ticket(client, client_obj, cred_device, cred_tech):
+    """A ticket is a valid job context — this is why credentials moved onto Device."""
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D',
+                                   device=cred_device, assigned_to=cred_tech)
+    client.force_login(cred_tech)
+    resp = client.get(reverse('core:device_cred_reveal', args=[cred_device.pk, 'password']),
+                      {'ticket': ticket.pk})
+    assert resp.status_code == 200
+    assert resp.content == b'hunter2'
+
+
+@pytest.mark.django_db
+def test_device_cred_unassigned_tech_can_write(client, client_obj, cred_device, cred_tech):
+    """THE ASYMMETRY. A flag-holder records a new password on a job that isn't theirs.
+
+    This is intentional: clients volunteer password changes mid-job, and a tech who
+    can't record one puts it somewhere worse. If this test starts failing because
+    someone added an assignment check to the write path, that's the regression —
+    not the test.
+    """
+    from core.models import DeviceCredentialAccessLog
+    other = User.objects.create_user(username='someoneelse', password='x')
+    wo = WorkOrder.objects.create(client=client_obj, device=cred_device, assigned_to=other)
+
+    client.force_login(cred_tech)
+    resp = client.post(reverse('core:device_cred_update', args=[cred_device.pk]), {
+        'device_username': 'localadmin',
+        'device_password': 'newpass99',
+        'credential_notes': '',
+        'wo': wo.pk,
+    })
+    assert resp.status_code == 200
+    cred_device.refresh_from_db()
+    assert cred_device.device_password == 'newpass99'
+    log = DeviceCredentialAccessLog.objects.get(device=cred_device, user=cred_tech, action='edited')
+    assert log.work_order_id == wo.pk
+    assert log.replaced_existing is True
+
+
+@pytest.mark.django_db
+def test_device_cred_write_without_flag_denied(client, cred_device, plain_tech):
+    """The flag is still the floor for both paths."""
+    client.force_login(plain_tech)
+    resp = client.post(reverse('core:device_cred_update', args=[cred_device.pk]), {
+        'device_username': 'x', 'device_password': 'nope', 'credential_notes': '',
+    })
+    assert resp.status_code == 403
+    cred_device.refresh_from_db()
+    assert cred_device.device_password == 'hunter2'
+
+
+@pytest.mark.django_db
+def test_device_cred_reveal_without_flag_denied(client, client_obj, cred_device, plain_tech):
+    """Assignment alone is not enough — the flag is required too."""
+    wo = WorkOrder.objects.create(client=client_obj, device=cred_device, assigned_to=plain_tech)
+    client.force_login(plain_tech)
+    resp = client.get(reverse('core:device_cred_reveal', args=[cred_device.pk, 'password']),
+                      {'wo': wo.pk})
+    assert resp.status_code == 403
+    assert b'hunter2' not in resp.content
+
+
+@pytest.mark.django_db
+def test_device_cred_first_write_not_marked_as_replacement(client, client_obj, cred_tech):
+    """replaced_existing distinguishes 'recorded' from 'overwrote'."""
+    from core.models import DeviceCredentialAccessLog
+    blank = Device.objects.create(client=client_obj, name='Fresh PC')
+    client.force_login(cred_tech)
+    client.post(reverse('core:device_cred_update', args=[blank.pk]), {
+        'device_username': '', 'device_password': 'first', 'credential_notes': '',
+    })
+    log = DeviceCredentialAccessLog.objects.get(device=blank, action='edited')
+    assert log.replaced_existing is False
+
+
+@pytest.mark.django_db
+def test_device_cred_blank_password_keeps_current(client, cred_device, admin_user):
+    """Saving the form with the password field left blank must not wipe the stored one."""
+    client.force_login(admin_user)
+    client.post(reverse('core:device_cred_update', args=[cred_device.pk]), {
+        'device_username': 'localadmin', 'device_password': '', 'credential_notes': 'note',
+    })
+    cred_device.refresh_from_db()
+    assert cred_device.device_password == 'hunter2'
+    assert cred_device.credential_notes == 'note'
+
+
+# ── Migration 0099: WO credentials merge onto the Device, nothing discarded ──
+
+@pytest.mark.parametrize('wo_creds,device_creds,expect', [
+    # prod's actual case: WO holds a password, device is empty
+    ({'password': 'hunter2'}, {}, {'username': '', 'password': 'hunter2', 'notes': ''}),
+    # device already holds the same value -> no duplicate note
+    ({'password': 'same'}, {'password': 'same'}, {'username': '', 'password': 'same', 'notes': ''}),
+])
+def test_migration_0099_merge_simple(wo_creds, device_creds, expect):
+    from importlib import import_module
+    mod = import_module('core.migrations.0099_retire_workorder_credentials')
+    assert mod.merge_credentials(wo_creds, device_creds, 'WO-00007') == expect
+
+
+def test_migration_0099_conflicting_value_is_carried_not_lost():
+    """The device is the master, but a differing WO value must survive in notes."""
+    from importlib import import_module
+    mod = import_module('core.migrations.0099_retire_workorder_credentials')
+    out = mod.merge_credentials(
+        {'password': 'from-wo', 'pin': '1234', 'notes': 'recovery: bob@x.com'},
+        {'password': 'from-device'},
+        'WO-00007',
+    )
+    assert out['password'] == 'from-device'          # master wins
+    assert 'from-wo' in out['notes']                 # nothing discarded
+    assert 'PIN from WO-00007: 1234' in out['notes'] # pin has no device field
+    assert 'recovery: bob@x.com' in out['notes']

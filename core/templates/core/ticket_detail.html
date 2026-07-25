@@ -158,7 +158,7 @@ window.addEventListener('beforeunload', function() {
             </div>
 
             <!-- Device card -->
-            {% include "core/partials/device_card.html" with device=ticket.device %}
+            {% include "core/partials/device_card.html" with device=ticket.device show_credentials=True cred_ticket=ticket %}
         </div>
 
         <!-- Ticket Info -->

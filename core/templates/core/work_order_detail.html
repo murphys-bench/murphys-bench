@@ -139,7 +139,7 @@
 
             <!-- Device card -->
             {% url 'core:work_order_quick_update' work_order.pk as wo_quick_update_url %}
-            {% include "core/partials/device_card.html" with device=work_order.device spec_cpu=work_order.cpu spec_ram=work_order.ram spec_storage=work_order.storage asset=work_order.asset change_action=wo_quick_update_url client_devices=client_devices current_device_id=work_order.device_id %}
+            {% include "core/partials/device_card.html" with device=work_order.device spec_cpu=work_order.cpu spec_ram=work_order.ram spec_storage=work_order.storage asset=work_order.asset change_action=wo_quick_update_url client_devices=client_devices current_device_id=work_order.device_id show_credentials=True cred_work_order=work_order %}
         </div>
 
         <!-- Reported Issue / Work Requested -->
@@ -278,12 +278,6 @@
                         <button type="submit" class="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">Save Changes</button>
                     </div>
                 </form>
-            </div>
-
-            <!-- Device Credentials -->
-            <div class="mt-6 pt-4 border-t border-gray-100">
-                <h3 class="text-xs font-medium text-gray-500 uppercase mb-3 flex items-center gap-2">{% icon "key" 4 %} Device Credentials</h3>
-                {% include "core/partials/credentials_display.html" %}
             </div>
         </div>
 
