@@ -11,6 +11,21 @@ the Unreleased entries move under that version and prod gets a single update.
 ## Unreleased
 
 ### Changed
+- **Device credentials are now stored in one place, and reachable from tickets.** Credentials
+  used to exist twice — once on the Device, once on each Work Order — read by different pages,
+  so a work order could show "No credentials on file" for a machine whose device page had a
+  password saved. The Device is now the single store, rendered in the shared Device card, which
+  also makes credentials available on a **ticket** for the first time (a ticket has a device but
+  never a work order). Migrations 0098/0099 move any work-order-held credentials onto their
+  device — the device's own value wins, and anything that would be lost (a differing value, a
+  PIN, notes) is carried into the credential notes rather than discarded.
+- **Credential access is gated asymmetrically.** *Revealing* one requires the credentials
+  permission AND either admin or assignment to the ticket/work order it's revealed from; on the
+  device page, where there's no job to check against, it's admin-only. *Recording or updating*
+  one requires only the permission — clients often volunteer a password change mid-job, and a
+  tech who can't save it puts it somewhere worse. Overwrites are covered by the audit log, which
+  now records which ticket or work order the action came from and whether it replaced an existing
+  value. Previous values are not retained.
 - **Work Order detail right rail consolidated.** The separate "Update Work Order" accordion is
   gone — Status, Priority and Service Type joined the Details card's Edit view, which already
   held repair type / assigned to / scheduled date / contact / Invoice Ninja ref. Device
