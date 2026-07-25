@@ -488,7 +488,10 @@ class Command(BaseCommand):
 
         # Single-runner lock: never let two fetches run concurrently. Overlapping
         # runs racing on the same message is what created duplicate tickets.
-        lock_path = os.path.join(str(django_settings.BASE_DIR), 'inbound_fetch.lock')
+        lock_path = str(getattr(
+            django_settings, 'INBOUND_FETCH_LOCK_PATH',
+            os.path.join(str(django_settings.BASE_DIR), 'inbound_fetch.lock'),
+        ))
         lock_file = open(lock_path, 'w')
         try:
             fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)

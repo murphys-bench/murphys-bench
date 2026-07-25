@@ -169,6 +169,13 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # attachment security review (memory project_mb_attachment_security_review).
 PRIVATE_MEDIA_ROOT = BASE_DIR / 'protected'
 
+# Single-runner lock for the inbound mail fetch. Overlapping fetches racing on the
+# same message is what produced duplicate tickets (session 37), so the real job must
+# keep one fixed path per install. It is a SETTING only so the test suite can point it
+# at a temp file — otherwise a concurrent test run (or, on a box where the fetch timer
+# is enabled, the timer itself) steals the lock and the dedup test fails spuriously.
+INBOUND_FETCH_LOCK_PATH = BASE_DIR / 'inbound_fetch.lock'
+
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

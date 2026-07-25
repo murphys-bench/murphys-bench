@@ -8292,3 +8292,43 @@ def test_migration_0099_conflicting_value_is_carried_not_lost():
     assert 'from-wo' in out['notes']                 # nothing discarded
     assert 'PIN from WO-00007: 1234' in out['notes'] # pin has no device field
     assert 'recovery: bob@x.com' in out['notes']
+
+
+@pytest.mark.django_db
+def test_inbound_fetch_skips_when_another_run_holds_the_lock(monkeypatch, settings):
+    """The single-runner lock is what stops overlapping fetches racing on one
+    message (the original duplicate-ticket cause). Locking the configured path
+    must make a second fetch a no-op rather than a second set of tickets.
+
+    Also pins the lock to a SETTING: it used to be a fixed BASE_DIR path shared by
+    every process on the host, so a concurrent test run stole it and this area of
+    the suite failed spuriously.
+    """
+    import fcntl
+    from core.management.commands.fetch_inbound_email import Command
+    from django.core.management import call_command
+
+    site = SiteSettings.get()
+    site.inbound_email_enabled = True
+    site.inbound_protocol = 'pop3'
+    site.inbound_host = 'mail.example'
+    site.inbound_username = 'support@example'
+    site.save()
+
+    raw = _raw_new_email(message_id='<locked-1@davis.example>')
+    monkeypatch.setattr(Command, '_fetch_pop3', lambda self, s, d, v: [raw])
+
+    before = Ticket.objects.count()
+    holder = open(settings.INBOUND_FETCH_LOCK_PATH, 'w')
+    fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        call_command('fetch_inbound_email', verbosity=0)
+    finally:
+        fcntl.flock(holder, fcntl.LOCK_UN)
+        holder.close()
+
+    assert Ticket.objects.count() == before, 'A fetch must not run while another holds the lock.'
+
+    # Lock released -> the same message is processed normally.
+    call_command('fetch_inbound_email', verbosity=0)
+    assert Ticket.objects.count() == before + 1
