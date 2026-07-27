@@ -8639,3 +8639,59 @@ def test_failed_send_records_why_not_just_that_it_failed(client, admin_user, cli
     hit = client.get(reverse('core:settings'),
                      {'tab': 'logs', 'log_q': 'authentication'}).content
     assert b'wayne@example.com' in hit
+
+
+# ── Static refs actually resolve under production (manifest) storage ─────────
+#
+# conftest's _plain_static_storage swaps the test suite onto plain StaticFilesStorage
+# so a fresh install that hasn't run build_css.sh + collectstatic isn't buried in 120
+# "Missing staticfiles manifest entry" failures. That trade would otherwise lose one
+# real regression class: a {% static %} in a TEMPLATE naming a file that doesn't exist.
+# Plain storage returns a URL for anything; collectstatic only walks static dirs, never
+# templates. So neither would catch the typo.
+#
+# This test buys that coverage back. It opts BACK IN to ManifestStaticFilesStorage and
+# renders the main pages, which is exactly when a bad ref raises. It skips when no
+# manifest exists (a working tree that hasn't collected static yet) rather than failing
+# — same precedent as the rclone-binary skip above. CI runs collectstatic before pytest,
+# so it always executes there, which is the environment that gates a release.
+
+def _staticfiles_manifest_ok():
+    import os
+    from django.conf import settings
+    root = getattr(settings, 'STATIC_ROOT', None)
+    return bool(root) and os.path.exists(os.path.join(str(root), 'staticfiles.json'))
+
+
+manifest_skip = pytest.mark.skipif(
+    not _staticfiles_manifest_ok(),
+    reason='no staticfiles manifest on this runner — run build_css.sh + collectstatic',
+)
+
+
+@manifest_skip
+@pytest.mark.django_db
+def test_static_refs_resolve_under_manifest_storage(client, admin_user):
+    """Every {% static %} on the main pages must name a file that really exists.
+
+    Under ManifestStaticFilesStorage a missing entry raises ValueError, so a 200 here
+    means every static reference on the page resolved.
+    """
+    from django.test import override_settings
+
+    manifest = {
+        'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+        'staticfiles': {
+            'BACKEND': 'django.contrib.staticfiles.storage.ManifestStaticFilesStorage'
+        },
+    }
+    with override_settings(STORAGES=manifest):
+        # Unauthenticated page — base_focus.html chrome.
+        assert client.get(reverse('two_factor:login')).status_code == 200
+
+        # Authenticated pages — base.html chrome, the sidebar, and the compiled CSS.
+        client.force_login(admin_user)
+        for name in ('core:dashboard', 'core:ticket_list', 'core:work_order_list',
+                     'core:client_list', 'core:settings'):
+            resp = client.get(reverse(name))
+            assert resp.status_code == 200, f'{name} did not render under manifest storage'

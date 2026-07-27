@@ -58,7 +58,26 @@ done
 log()  { echo "$(date '+%F %T') install: $*"; }
 fail() { echo "INSTALL FAILED: $*" >&2; exit 1; }
 
-[ -f manage.py ] || fail "no manage.py in $APP — run this from the cloned repo root"
+# NOTE: the working directory you ran this from is irrelevant — the script cd's to
+# its own parent (see APP above). So "run it from the repo root" is useless advice
+# and sent at least one tester chasing a directory problem that didn't exist. Say
+# where it actually looked, why it looked there, and how to recover.
+if [ ! -f manage.py ]; then
+    fail "no manage.py in $APP
+
+  This script installs the repository it lives inside. It looked in
+    $APP
+  because that is the parent of the scripts/ directory holding this file — the
+  directory you ran the command from does not matter.
+
+  That path is not a complete Murphy's Bench checkout. Usually this means the
+  script was copied or downloaded on its own, or a clone was interrupted.
+
+  Clone the whole repository, then run the copy inside it:
+    git clone <REPO_URL> murphys-bench
+    cd murphys-bench
+    scripts/install.sh"
+fi
 
 # 0) Preflight.
 command -v git >/dev/null || fail "git not installed"

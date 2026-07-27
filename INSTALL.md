@@ -1,6 +1,6 @@
 # Installing Murphy's Bench
 
-Murphy's Bench includes an installation script for a fresh Ubuntu 24.04 server or VM dedicated to the application.
+Murphy's Bench includes an installation script for a fresh Ubuntu 24.04 or 26.04 LTS server or VM dedicated to the application.
 
 The script installs the required system packages and Python dependencies, creates the database and application secrets, builds the CSS, runs migrations and tests, and configures Gunicorn and nginx.
 
@@ -20,7 +20,7 @@ Log in with the superuser account created during setup.
 
 This gives you a working LAN installation. Company details, email, users, backups, and workflow settings are configured after login.
 
-`install.sh` is intended for a fresh Ubuntu 24.04 system with no other website using port 80. It stops rather than altering an unsupported or conflicting web-server setup.
+`install.sh` is intended for a fresh Ubuntu 24.04 or 26.04 LTS system with no other website using port 80. It stops rather than altering an unsupported or conflicting web-server setup.
 
 For an existing web server, a different reverse proxy, or a nonstandard deployment, use:
 
@@ -34,14 +34,14 @@ That installs and initializes the application but leaves the Gunicorn, reverse-p
 
 The standard installer assumes:
 
-- Ubuntu 24.04 LTS
+- Ubuntu 24.04 LTS or 26.04 LTS
 - `sudo` access
 - `systemd`
 - a server or VM dedicated to Murphy's Bench
 - no existing service using port 80
 - access to the Murphy's Bench Git repository
 
-Other Debian- or Ubuntu-based systems may work, but Ubuntu 24.04 is the supported installation target.
+Other Debian- or Ubuntu-based systems may work, but Ubuntu 24.04 and 26.04 LTS are the supported installation targets. Both are verified end to end: a fresh install on each applies every migration, passes the full test suite, and comes up serving the login page. 26.04 ships Python 3.14, which the application runs on without changes.
 
 ## What the Installer Does
 

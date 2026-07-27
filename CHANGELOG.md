@@ -38,6 +38,25 @@ the Unreleased entries move under that version and prod gets a single update.
   else picks the ticket up, neither of which a per-recipient row does. Nothing to dismiss.
 
 ### Fixed
+- **A bad `FIELD_ENCRYPTION_KEY` now says so, instead of erroring 40 lines deep.** Copying
+  `.env.example` without generating the keys left the placeholder string in place, which
+  isn't a valid Fernet key — the first `manage.py` command died inside an import chain with
+  `Fernet key must be 32 url-safe base64-encoded bytes` and no indication of the cause or the
+  cure. The existing safety guard didn't catch it: it only checks for the *committed default*,
+  and only when `DEBUG=False`, while `.env.example` ships `DEBUG=True`. The key is now
+  validated at startup in every mode, with the generate command in the error message.
+- **The installer's "no manage.py" error no longer sends you to the wrong place.** It said
+  "run this from the cloned repo root", but the script `cd`s to its own parent before any
+  check, so the working directory is irrelevant — following that advice can't fix anything.
+  It now names the directory it actually inspected, explains that the directory came from the
+  script's own location, and gives the clone-and-rerun recovery. (Reported by a tester who hit
+  this on a fresh install and had to wipe and start over.)
+- **The test suite no longer requires `collectstatic` to have been run.** On a fresh manual
+  install, 120 tests failed with `Missing staticfiles manifest entry for 'css/app.css'` —
+  which reads like broken code but only means the CSS build step hadn't run yet. Tests now use
+  plain static storage. The coverage that would otherwise be lost — a `{% static %}` in a
+  template naming a file that doesn't exist — is kept by a dedicated test that opts back into
+  manifest storage and skips itself when no manifest is present, so it always runs in CI.
 - **A failed email now records *why* it failed.** Both SMTP failure paths caught the
   exception, wrote it to `murphys_bench.log` on the server, and stored only the slug
   `send_error` — so the Logs page could say "Failed" but never "authentication rejected"
@@ -54,6 +73,9 @@ the Unreleased entries move under that version and prod gets a single update.
   lingering notice is the failure mode rather than a vanished alert.
 
 ### Changed
+- **Ubuntu 26.04 LTS is now a supported install target**, alongside 24.04. Verified end to
+  end on a fresh 26.04 VM: every migration applies, the full suite passes, and the app comes
+  up serving the login page. 26.04 ships Python 3.14, which the application runs on unchanged.
 - **The installer script is now `scripts/install.sh`** (was `scripts/setup.sh`). A tester
   reasonably looked for the script named after `INSTALL.md` and found `setup.sh` instead —
   made worse by `SETUP.md`, which is the *post*-install configuration guide and has nothing

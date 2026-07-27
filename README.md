@@ -170,7 +170,7 @@ Content Security Policy middleware is included. The repository defaults to repor
 
 ## Installation
 
-The `scripts/install.sh` script can take a fresh Ubuntu 24.04 installation to a working local login page. It installs the required system packages, application, database, and web server.
+The `scripts/install.sh` script can take a fresh Ubuntu 24.04 or 26.04 LTS installation to a working local login page. It installs the required system packages, application, database, and web server.
 
 See [INSTALL.md](INSTALL.md) for installation instructions, exceptions to the standard setup, and options for exposing the application outside the local network.
 

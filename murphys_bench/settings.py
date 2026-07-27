@@ -48,6 +48,27 @@ if not DEBUG:
             '  FIELD_ENCRYPTION_KEY: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
         )
 
+# The guard above catches the *committed default*; this catches a key that is set
+# but isn't a usable Fernet key at all — the common first-install mistake, since
+# .env.example ships a placeholder string and copying it verbatim leaves DEBUG=True,
+# which skips the guard above entirely. Without this, the failure surfaces ~40 lines
+# deep in an import traceback ("Fernet key must be 32 url-safe base64-encoded bytes")
+# during the first manage.py command, with no hint of how to fix it. Checked in every
+# mode, dev included, because the placeholder is unusable in dev too.
+try:
+    from cryptography.fernet import Fernet as _Fernet
+    _Fernet(FIELD_ENCRYPTION_KEY.encode() if isinstance(FIELD_ENCRYPTION_KEY, str)
+            else FIELD_ENCRYPTION_KEY)
+except Exception as _key_err:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured(
+        f'FIELD_ENCRYPTION_KEY in .env is not a valid encryption key ({_key_err}).\n'
+        '  Generate one:  python -c "from cryptography.fernet import Fernet; '
+        'print(Fernet.generate_key().decode())"\n'
+        '  Then set FIELD_ENCRYPTION_KEY in .env to that value.\n'
+        '  Keep a copy somewhere safe — without it, stored credentials cannot be decrypted.'
+    ) from None
+
 # Allowed hosts for internal network
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
 
