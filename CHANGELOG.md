@@ -10,6 +10,50 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+### Added
+- **Settings → Logs is searchable.** The tab rendered five separate tables, each capped at
+  its most recent 200 rows — so anything older was unreachable in the UI at all, and a
+  question spanning two logs ("what happened around 9:01 PM?") meant eyeballing them side
+  by side. Now one merged, newest-first stream by default, with free-text search, a date
+  range, and a source filter. Picking a source gives that log its own columns and its
+  **complete** history, paged in the database. The merged view stays bounded on purpose —
+  it's an overview, not an archive. Which of those two a shop reaches for first differs by
+  shop, so the filter is one click away rather than a stored setting. Notifications are
+  one of the sources, which is what makes retaining dismissed notices defensible — the
+  bell hides them, and this is where the who-saw-it-when record can actually be read.
+- **Notices can be dismissed.** An × on each, plus Dismiss all. Dismissing also marks it
+  read — acting on a notice is acknowledging it. Rows are **never deleted**: recipient and
+  `read_at` are the only record in MB of which tech saw an alert and when (the audit log
+  records changes, not reads), which is accountability data once a shop has more than one
+  tech. Migration 0100 adds `dismissed_at`.
+- **The bell now shows tickets awaiting your reply.** A client reply sets
+  `Ticket.needs_response`, which until now only surfaced on the dashboard, the ticket list
+  and the ticket itself — so on a work order or in Settings, nothing told you a client had
+  written back. These are queried live rather than mirrored into notification rows,
+  deliberately: the flag clears itself when a tech replies and stays correct when someone
+  else picks the ticket up, neither of which a per-recipient row does. Nothing to dismiss.
+
+### Fixed
+- **A failed email now records *why* it failed.** Both SMTP failure paths caught the
+  exception, wrote it to `murphys_bench.log` on the server, and stored only the slug
+  `send_error` — so the Logs page could say "Failed" but never "authentication rejected"
+  or "connection refused". The cause is now captured onto the log entry (truncated to the
+  field's 255 chars) and is searchable, so an admin can diagnose a broken mailbox from the
+  UI instead of needing SSH.
+- **A notice for finished work no longer sticks around forever.** A System Alert opens a
+  ticket and pings the bell; closing that ticket left the notice sitting there with nothing
+  left to act on. A notice now drops out once its ticket is resolved/closed/converted or
+  its work order is completed/closed/cancelled. That's a filter on the ticket's own status
+  rather than a stored flag, so it fixes existing notices with no data migration and
+  reverses on its own if the ticket is reopened. Only MB's built-in statuses count as
+  settled — a custom status added in Settings → Statuses won't auto-clear, chosen so a
+  lingering notice is the failure mode rather than a vanished alert.
+
+### Changed
+- **Notifications removed from the sidebar.** The bell in each page header already goes to
+  the same place, so the count lived in two spots. The bell was added to the Settings
+  header, which was the one area without one.
+
 ### Security
 - **Pinned the last unpinned dependency (`markdown`).** Every other line in
   `requirements.txt` was already `==` pinned; `markdown` was not, which left one line where

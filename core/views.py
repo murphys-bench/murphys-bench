@@ -1195,27 +1195,72 @@ class TechMessageView(LoginRequiredMixin, View):
         )
 
 
+def _tickets_awaiting_reply(user):
+    """Tickets flagged by an inbound client reply that this user should answer.
+
+    Queried live rather than mirrored into Notification rows on purpose: the flag
+    clears itself the moment a tech replies, and it stays correct when a
+    different tech picks the ticket up. A per-recipient row would do neither.
+    Admins see every flagged ticket, matching the dashboard's own count.
+    """
+    qs = (Ticket.objects.filter(needs_response=True)
+          .select_related('client')
+          .order_by('-updated_at'))
+    if not _is_admin(user):
+        qs = qs.filter(assigned_to=user)
+    return qs
+
+
 class NotificationListView(LoginRequiredMixin, View):
-    """The notification center page — unread first, then recent."""
+    """The attention page — what still wants this person, from both sources."""
 
     def get(self, request):
-        notes = (request.user.notifications
+        notes = (request.user.notifications.live()
                  .select_related('actor', 'ticket', 'work_order')
                  .order_by('is_read', '-created_at')[:100])
-        return render(request, 'core/notifications.html', {'notifications': notes})
+        return render(request, 'core/notifications.html', {
+            'notifications': notes,
+            'awaiting_reply': _tickets_awaiting_reply(request.user)[:50],
+        })
 
 
 class NotificationCountView(LoginRequiredMixin, View):
-    """Bell badge fragment — polled via HTMX from the sidebar and page headers."""
+    """Bell badge fragment — polled via HTMX from the page headers."""
 
     def get(self, request):
-        count = request.user.notifications.filter(is_read=False).count()
+        count = (request.user.notifications.unread().count()
+                 + _tickets_awaiting_reply(request.user).count())
         template = (
             'core/partials/notification_badge_header.html'
             if request.GET.get('style') == 'header'
             else 'core/partials/notification_badge.html'
         )
         return render(request, template, {'count': count})
+
+
+class NotificationDismissView(LoginRequiredMixin, View):
+    """Hide one notice. Also marks it read — dismissing is acknowledging."""
+
+    def post(self, request, pk):
+        note = get_object_or_404(Notification, pk=pk, recipient=request.user)
+        if not note.is_read:
+            note.is_read = True
+            note.read_at = timezone.now()
+            note.save(update_fields=['is_read', 'read_at'])
+        note.dismiss()
+        return redirect('core:notifications')
+
+
+class NotificationDismissAllView(LoginRequiredMixin, View):
+    def post(self, request):
+        now = timezone.now()
+        # Resolve to ids first: `live()` spans ticket/work_order joins, and the
+        # read-stamp pass would otherwise change what the dismiss pass matches.
+        ids = list(request.user.notifications.live().values_list('pk', flat=True))
+        qs = Notification.objects.filter(pk__in=ids)
+        qs.filter(is_read=False).update(is_read=True, read_at=now)
+        qs.update(dismissed_at=now)
+        return redirect('core:notifications')
 
 
 class NotificationOpenView(LoginRequiredMixin, View):
@@ -1230,12 +1275,6 @@ class NotificationOpenView(LoginRequiredMixin, View):
         return redirect(note.target_url)
 
 
-class NotificationMarkAllReadView(LoginRequiredMixin, View):
-    def post(self, request):
-        request.user.notifications.filter(is_read=False).update(
-            is_read=True, read_at=timezone.now()
-        )
-        return redirect('core:notifications')
 
 
 # --- Work Order Item Toggle (HTMX) ---
@@ -6752,6 +6791,45 @@ def _maintenance_context():
     return ctx
 
 
+LOG_PAGE_SIZE = 100
+
+
+def _log_search_context(request):
+    """Settings → Logs. Every source interleaved by default; pick one to get its
+    own columns and its full history, paged in the database rather than capped."""
+    from django.core.paginator import Paginator
+    from . import log_search
+
+    source = request.GET.get('log_source') or ''
+    q = (request.GET.get('log_q') or '').strip()
+    raw_from = request.GET.get('log_from') or ''
+    raw_to = request.GET.get('log_to') or ''
+    dt_from = log_search.parse_date(raw_from)
+    dt_to = log_search.parse_date(raw_to, end_of_day=True)
+
+    ctx = {
+        'log_sources': [(k, v['label']) for k, v in log_search.SOURCES.items()],
+        'log_source': source if source in log_search.SOURCES else '',
+        'log_q': q,
+        'log_from': raw_from,
+        'log_to': raw_to,
+        'log_filtered': bool(q or dt_from or dt_to),
+    }
+
+    if ctx['log_source']:
+        entries = log_search.search_source(ctx['log_source'], q, dt_from, dt_to)
+        page = Paginator(entries, LOG_PAGE_SIZE).get_page(request.GET.get('page'))
+        ctx['log_page'] = page
+        ctx['log_rows'] = log_search.rows_for(ctx['log_source'], page.object_list)
+        ctx['log_source_label'] = log_search.SOURCES[ctx['log_source']]['label']
+    else:
+        # Merged view is bounded on purpose — an overview, not an archive.
+        ctx['log_rows'] = log_search.unified(q, dt_from, dt_to)
+        ctx['log_page'] = None
+        ctx['log_capped'] = len(ctx['log_rows']) >= log_search.UNIFIED_LIMIT
+    return ctx
+
+
 class UpdateStatusView(LoginRequiredMixin, View):
     """HTMX-polled fragment showing current/available version + last run status.
     Admin only. Polled every few seconds while a run is in progress."""
@@ -6911,13 +6989,7 @@ class SettingsView(LoginRequiredMixin, View):
         if active_tab == 'maintenance':
             ctx.update(_maintenance_context())
         if active_tab == 'logs':
-            from .models import EmailSendLog, InboundEmailLog
-            from auditlog.models import LogEntry
-            ctx['email_send_logs'] = EmailSendLog.objects.select_related('ticket').order_by('-created_at')[:200]
-            ctx['inbound_logs'] = InboundEmailLog.objects.select_related('ticket').order_by('-created_at')[:200]
-            ctx['credential_logs'] = CredentialAccessLog.objects.select_related('credential', 'user').order_by('-accessed_at')[:200]
-            ctx['device_cred_logs'] = DeviceCredentialAccessLog.objects.select_related('device', 'user').order_by('-accessed_at')[:200]
-            ctx['audit_log_entries'] = LogEntry.objects.select_related('actor', 'content_type').order_by('-timestamp')[:200]
+            ctx.update(_log_search_context(self.request))
         if active_tab == 'email_templates':
             # Ensure all 4 trigger templates exist
             for trigger, _ in EmailTemplate.TRIGGER_CHOICES:
