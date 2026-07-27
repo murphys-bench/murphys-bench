@@ -657,12 +657,120 @@ def test_notification_ui_surfaces(client, client_obj):
                                    assigned_to=u)
     wo = WorkOrder.objects.create(client=client_obj, ticket=ticket, assigned_to=u)
     client.force_login(u)
-    assert b'title="Notifications"' in client.get('/').content               # sidebar bell
+    assert b'title="Notifications"' in client.get('/').content               # header bell
     assert client.get(reverse('core:notifications')).status_code == 200      # center page
     assert b'Message Ticket Tech' in client.get(
         reverse('core:work_order_detail', args=[wo.pk])).content             # WO affordance
     assert b'Message Bench Tech' in client.get(
         reverse('core:ticket_detail', args=[ticket.pk])).content            # ticket affordance
+
+
+@pytest.mark.django_db
+def test_notice_clears_itself_when_its_ticket_settles(client, client_obj):
+    """The reported bug: a System Alert became a ticket, the ticket was closed,
+    the notice stayed in the bell forever. Filtering on the ticket's own status
+    fixes it retroactively — and reverses if the ticket is reopened."""
+    from core.models import Notification
+    u = User.objects.create_user(username='uclear', password='x')
+    ticket = Ticket.objects.create(client=client_obj, subject='500 error',
+                                   description='trace', assigned_to=u)
+    n = Notification.objects.create(recipient=u, text='500 error',
+                                    kind='system_alert', ticket=ticket)
+    client.force_login(u)
+    assert b'>1<' in client.get(reverse('core:notification_count')).content
+
+    ticket.status = 'closed'
+    ticket.save(update_fields=['status'])
+    assert u.notifications.live().count() == 0
+    assert b'>1<' not in client.get(reverse('core:notification_count')).content
+    assert n.text.encode() not in client.get(reverse('core:notifications')).content
+    # Nothing was destroyed, and reopening brings the notice back on its own.
+    n.refresh_from_db()
+    assert n.dismissed_at is None
+    ticket.status = 'open'
+    ticket.save(update_fields=['status'])
+    assert u.notifications.live().count() == 1
+
+
+@pytest.mark.django_db
+def test_notice_clears_when_its_work_order_completes(client, client_obj):
+    from core.models import Notification
+    u = User.objects.create_user(username='uwo', password='x')
+    wo = WorkOrder.objects.create(client=client_obj, assigned_to=u)
+    Notification.objects.create(recipient=u, text='msg', kind='tech_message',
+                                work_order=wo)
+    assert u.notifications.live().count() == 1
+    wo.status = 'completed'
+    wo.save(update_fields=['status'])
+    assert u.notifications.live().count() == 0
+
+
+@pytest.mark.django_db
+def test_dismiss_hides_notice_but_keeps_the_who_saw_it_record(client, client_obj):
+    """Dismiss is deliberately NOT a delete — recipient + read_at are the only
+    record in MB of which tech saw an alert and when (the audit log tracks
+    changes, not reads), which is accountability data in a multi-tech shop."""
+    from core.models import Notification
+    u = User.objects.create_user(username='udis', password='x')
+    n = Notification.objects.create(recipient=u, text='alert', kind='system_alert')
+    client.force_login(u)
+    resp = client.post(reverse('core:notification_dismiss', args=[n.pk]))
+    assert resp.status_code == 302
+
+    n.refresh_from_db()
+    assert n.dismissed_at is not None
+    assert n.is_read and n.read_at is not None      # dismissing is acknowledging
+    assert Notification.objects.filter(pk=n.pk).exists()   # row survives
+    assert u.notifications.live().count() == 0
+    assert b'>1<' not in client.get(reverse('core:notification_count')).content
+
+    # Another user can't dismiss someone else's notice.
+    other = User.objects.create_user(username='udis2', password='x')
+    n2 = Notification.objects.create(recipient=u, text='b', kind='system_alert')
+    client.force_login(other)
+    assert client.post(
+        reverse('core:notification_dismiss', args=[n2.pk])).status_code == 404
+
+
+@pytest.mark.django_db
+def test_dismiss_all_clears_live_notices_only(client, client_obj):
+    from core.models import Notification
+    u = User.objects.create_user(username='udall', password='x')
+    other = User.objects.create_user(username='udall2', password='x')
+    Notification.objects.create(recipient=u, text='a', kind='system_alert')
+    Notification.objects.create(recipient=u, text='b', kind='system_alert')
+    theirs = Notification.objects.create(recipient=other, text='c', kind='system_alert')
+
+    client.force_login(u)
+    client.post(reverse('core:notification_dismiss_all'))
+    assert u.notifications.live().count() == 0
+    assert Notification.objects.filter(recipient=u, dismissed_at__isnull=False).count() == 2
+    theirs.refresh_from_db()
+    assert theirs.dismissed_at is None              # never touches another user's
+
+
+@pytest.mark.django_db
+def test_bell_includes_tickets_awaiting_reply_scoped_to_the_tech(client, client_obj):
+    """A client reply is Ticket.needs_response, not a Notification row — the bell
+    reads it live so it stays self-clearing and survives reassignment."""
+    tech = User.objects.create_user(username='ubell', password='x', is_staff=False)
+    othertech = User.objects.create_user(username='ubell2', password='x', is_staff=False)
+    mine = Ticket.objects.create(client=client_obj, subject='Mine', description='D',
+                                 assigned_to=tech, needs_response=True)
+    Ticket.objects.create(client=client_obj, subject='Theirs', description='D',
+                          assigned_to=othertech, needs_response=True)
+
+    client.force_login(tech)
+    assert b'>1<' in client.get(reverse('core:notification_count')).content
+    page = client.get(reverse('core:notifications')).content
+    assert mine.ticket_number.encode() in page
+    assert b'Theirs' not in page                    # not this tech's to answer
+
+    # Replying clears the flag on the ticket, so the bell empties on its own —
+    # there is no notification row to dismiss.
+    mine.needs_response = False
+    mine.save(update_fields=['needs_response'])
+    assert b'>1<' not in client.get(reverse('core:notification_count')).content
 
 
 @pytest.mark.django_db
@@ -8332,3 +8440,90 @@ def test_inbound_fetch_skips_when_another_run_holds_the_lock(monkeypatch, settin
     # Lock released -> the same message is processed normally.
     call_command('fetch_inbound_email', verbosity=0)
     assert Ticket.objects.count() == before + 1
+
+
+# ── Settings → Logs: unified search across every audit trail ────────────────
+
+@pytest.fixture
+def log_fixtures(db, client_obj):
+    """One row in each of the sources the Logs tab merges."""
+    from core.models import (EmailSendLog, InboundEmailLog, OrgCredential,
+                             CredentialAccessLog, Device, DeviceCredentialAccessLog)
+    u = User.objects.create_user(username='logtech', password='x', first_name='Log',
+                                 last_name='Tech')
+    ticket = Ticket.objects.create(client=client_obj, subject='Printer jam',
+                                   description='D')
+    EmailSendLog.objects.create(ticket=ticket, to_email='wayne@example.com',
+                                trigger='ticket_reply', status='sent')
+    InboundEmailLog.objects.create(from_email='wayne@example.com',
+                                   subject='Re: Printer jam', ticket=ticket,
+                                   status='reply')
+    cred = OrgCredential.objects.create(name='Router admin')
+    CredentialAccessLog.objects.create(credential=cred, user=u, action='viewed')
+    device = Device.objects.create(client=client_obj, name='Front desk PC')
+    DeviceCredentialAccessLog.objects.create(device=device, user=u, action='viewed',
+                                             field='password')
+    return {'user': u, 'ticket': ticket, 'device': device}
+
+
+@pytest.mark.django_db
+def test_logs_tab_merges_every_source_by_default(client, admin_user, log_fixtures):
+    client.force_login(admin_user)
+    body = client.get(reverse('core:settings'), {'tab': 'logs'}).content
+    assert b'wayne@example.com' in body          # outbound email
+    assert b'Re: Printer jam' in body            # inbound email
+    assert b'Router admin' in body               # org credential
+    assert b'Front desk PC' in body              # device credential
+    assert b'All Activity' in body
+
+
+@pytest.mark.django_db
+def test_logs_search_spans_sources_and_source_filter_narrows(client, admin_user, log_fixtures):
+    client.force_login(admin_user)
+    # One term, two different logs — the thing a stacked-tables page can't do.
+    hit = client.get(reverse('core:settings'),
+                     {'tab': 'logs', 'log_q': 'wayne'}).content
+    assert b'ticket_reply' in hit and b'Re: Printer jam' in hit
+    assert b'Router admin' not in hit
+
+    only = client.get(reverse('core:settings'),
+                      {'tab': 'logs', 'log_source': 'org_cred'}).content
+    assert b'Router admin' in only
+    assert b'wayne@example.com' not in only
+
+
+@pytest.mark.django_db
+def test_logs_date_range_filters_and_bad_input_is_ignored(client, admin_user, log_fixtures):
+    client.force_login(admin_user)
+    future = client.get(reverse('core:settings'),
+                        {'tab': 'logs', 'log_from': '2099-01-01'}).content
+    assert b'wayne@example.com' not in future
+    assert b'Nothing matched' in future
+
+    # A half-typed date must not blank the page the user is reading.
+    ok = client.get(reverse('core:settings'),
+                    {'tab': 'logs', 'log_from': '2026-0'}).content
+    assert b'wayne@example.com' in ok
+
+
+@pytest.mark.django_db
+def test_filtered_log_pages_past_the_old_200_row_ceiling(client, admin_user, client_obj):
+    """The gap this closes: the tab used to render a flat most-recent-200, so
+    older entries were unreachable in the UI at all."""
+    from core.models import EmailSendLog
+    for i in range(205):
+        EmailSendLog.objects.create(to_email=f'user{i}@example.com',
+                                    trigger='ticket_reply', status='sent')
+    client.force_login(admin_user)
+    url = reverse('core:settings')
+    p1 = client.get(url, {'tab': 'logs', 'log_source': 'email_out'})
+    assert p1.context['log_page'].paginator.count == 205
+    assert p1.context['log_page'].paginator.num_pages == 3
+
+    p3 = client.get(url, {'tab': 'logs', 'log_source': 'email_out', 'page': 3})
+    assert len(p3.context['log_rows']) == 5      # the tail, previously invisible
+
+    # And a targeted search finds a row that sat past the old ceiling.
+    found = client.get(url, {'tab': 'logs', 'log_source': 'email_out',
+                             'log_q': 'user203@example.com'})
+    assert found.context['log_page'].paginator.count == 1

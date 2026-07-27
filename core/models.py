@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 from django.contrib.auth.models import AbstractUser
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
@@ -2756,9 +2757,46 @@ class EmailSendLog(models.Model):
         return f'{self.trigger} → {self.to_email} [{self.status}]'
 
 
+class NotificationQuerySet(models.QuerySet):
+    """The one place that decides what still wants a person's attention.
+
+    A notice drops off when its underlying work is finished — the alert became a
+    ticket and that ticket got closed, or the work order it pointed at was
+    completed. That's a filter rather than a stored flag so it self-corrects: a
+    reopened ticket brings its notice back for everyone it was sent to, and no
+    backfill is needed for notices already sitting in the table.
+
+    Rows are never deleted. `dismissed_at` only hides one; the recipient and
+    `read_at` stay as the sole record of who saw an alert and when, which is
+    accountability data in a shop with more than one tech and exists nowhere
+    else in MB (the audit log records changes, not reads).
+    """
+
+    #: Work is finished — a notice pointing here has nothing left to prompt.
+    SETTLED_TICKET_STATUSES = ('resolved', 'closed', 'converted')
+    SETTLED_WO_STATUSES = ('completed', 'closed', 'cancelled')
+
+    def live(self):
+        """Notices still worth showing: not dismissed, work not yet settled."""
+        return self.filter(dismissed_at__isnull=True).exclude(
+            Q(ticket__isnull=False) & Q(ticket__status__in=self.SETTLED_TICKET_STATUSES)
+        ).exclude(
+            Q(work_order__isnull=False) & Q(work_order__status__in=self.SETTLED_WO_STATUSES)
+        )
+
+    def unread(self):
+        return self.live().filter(is_read=False)
+
+
 class Notification(models.Model):
     """An in-app alert for a user — e.g. an internal tech message that needs a
-    timely response. Surfaced via the sidebar bell with an unread count."""
+    timely response. Surfaced via the header bell with an unread count.
+
+    The bell shows these alongside tickets awaiting a reply, but those are not
+    rows here — `Ticket.needs_response` is state on the ticket, queried live.
+    Keep it that way: it clears itself when a tech replies and stays correct when
+    someone else picks the ticket up, neither of which a per-recipient row does.
+    """
 
     KIND_CHOICES = [
         ('tech_message', 'Tech Message'),
@@ -2774,6 +2812,10 @@ class Notification(models.Model):
     is_read = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     read_at = models.DateTimeField(null=True, blank=True)
+    # Hides the notice without destroying it — see NotificationQuerySet.
+    dismissed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    objects = NotificationQuerySet.as_manager()
 
     class Meta:
         db_table = 'notifications'
@@ -2782,6 +2824,11 @@ class Notification(models.Model):
 
     def __str__(self):
         return f'{self.kind} → {self.recipient} [{"read" if self.is_read else "unread"}]'
+
+    def dismiss(self):
+        if self.dismissed_at is None:
+            self.dismissed_at = timezone.now()
+            self.save(update_fields=['dismissed_at'])
 
     @property
     def target_url(self):
