@@ -27,8 +27,10 @@
 <div class="max-w-3xl mx-auto space-y-6">
 
     {% if awaiting_reply %}
-    {# Not notification rows — Ticket.needs_response, queried live. Nothing to
-       dismiss here: replying to the client clears the flag on its own. #}
+    {% comment %}
+    Not notification rows — Ticket.needs_response, queried live. Nothing to
+    dismiss here: replying to the client clears the flag on its own.
+    {% endcomment %}
     <div>
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
             Awaiting your reply

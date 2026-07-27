@@ -18,7 +18,9 @@ the Unreleased entries move under that version and prod gets a single update.
   range, and a source filter. Picking a source gives that log its own columns and its
   **complete** history, paged in the database. The merged view stays bounded on purpose —
   it's an overview, not an archive. Which of those two a shop reaches for first differs by
-  shop, so the filter is one click away rather than a stored setting.
+  shop, so the filter is one click away rather than a stored setting. Notifications are
+  one of the sources, which is what makes retaining dismissed notices defensible — the
+  bell hides them, and this is where the who-saw-it-when record can actually be read.
 - **Notices can be dismissed.** An × on each, plus Dismiss all. Dismissing also marks it
   read — acting on a notice is acknowledging it. Rows are **never deleted**: recipient and
   `read_at` are the only record in MB of which tech saw an alert and when (the audit log

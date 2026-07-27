@@ -1,8 +1,9 @@
 """Search across MB's audit trails, as one stream or one source at a time.
 
-MB keeps five independent logs — outbound email, inbound email, org credential
-access, device credential access, and the model audit log. They answer two
-different kinds of question, and the Logs tab serves both from one page:
+MB keeps six independent trails — outbound email, inbound email, org credential
+access, device credential access, notifications, and the model audit log. They
+answer two different kinds of question, and the Logs tab serves both from one
+page:
 
   * "What happened around 9:01 PM?" — incident forensics, which needs every
     source interleaved in time. `unified()` does that, merging in memory because
@@ -25,15 +26,15 @@ from django.db.models import Q
 from django.urls import reverse
 from django.utils import timezone
 
-#: Cap on rows pulled from each source before merging. Five sources, so the
-#: unified view shows at most 5x this before trimming to `UNIFIED_LIMIT`.
+#: Cap on rows pulled from each source before merging, so the unified view
+#: shows at most len(SOURCES) x this before trimming to `UNIFIED_LIMIT`.
 PER_SOURCE_FETCH = 200
 UNIFIED_LIMIT = 300
 
 
 @dataclass(frozen=True)
 class LogRow:
-    """One event, normalized so five different models can share a table."""
+    """One event, normalized so six different models can share a table."""
     when: datetime
     source: str
     source_label: str
@@ -120,6 +121,31 @@ def _device_cred_row(e):
     )
 
 
+def _notification_qs():
+    from .models import Notification
+    # Every notice ever sent, including dismissed ones — this is the archive the
+    # bell deliberately hides. Keeping the rows is only defensible if there is
+    # somewhere to read them, and this is that somewhere.
+    return Notification.objects.select_related('recipient', 'actor', 'ticket',
+                                               'work_order')
+
+
+def _notification_row(e):
+    if e.dismissed_at:
+        state = f'Dismissed {e.dismissed_at:%b %d %H:%M}'
+    elif e.read_at:
+        state = f'Read {e.read_at:%b %d %H:%M}'
+    else:
+        state = 'Unread' if not e.is_read else 'Read'
+    return LogRow(
+        when=e.created_at, source='notification', source_label='Notifications',
+        actor=_person(e.recipient),
+        summary=e.text,
+        detail=f'{e.get_kind_display()} · {state}',
+        url=e.target_url,
+    )
+
+
 _AUDIT_ACTIONS = {0: 'Created', 1: 'Updated', 2: 'Deleted'}
 
 
@@ -162,6 +188,13 @@ SOURCES = {
         'time_field': 'accessed_at',
         'search': ['device__name', 'field', 'action', 'user__username',
                    'user__first_name', 'user__last_name'],
+    },
+    'notification': {
+        'label': 'Notifications', 'qs': _notification_qs, 'row': _notification_row,
+        'time_field': 'created_at',
+        'search': ['text', 'kind', 'recipient__username', 'recipient__first_name',
+                   'recipient__last_name', 'ticket__ticket_number',
+                   'work_order__work_order_number'],
     },
     'audit': {
         'label': 'Record Changes', 'qs': _audit_qs, 'row': _audit_row,

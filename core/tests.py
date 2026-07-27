@@ -8546,3 +8546,51 @@ def test_logs_search_covers_status_and_action_words(client, admin_user, log_fixt
     # An inbound status word, and a credential action word.
     assert b'Re: Printer jam' in client.get(url, {'tab': 'logs', 'log_q': 'reply'}).content
     assert b'Router admin' in client.get(url, {'tab': 'logs', 'log_q': 'viewed'}).content
+
+
+def test_no_multiline_django_comments_in_templates():
+    """`{# #}` is single-line only — a comment spanning lines renders as visible
+    text on the page. This has shipped twice now (sale_checkout_card.html in the
+    v0.4.15 hotfix, then three templates in the log-search work), and neither
+    time did any view test catch it, because the page still returns 200. Use
+    `{% comment %}` for anything multi-line."""
+    from pathlib import Path
+    base = Path(__file__).resolve().parent.parent
+    offenders = []
+    for tpl in base.glob('**/templates/**/*.html'):
+        if 'venv' in tpl.parts or 'node_modules' in tpl.parts:
+            continue
+        for lineno, line in enumerate(tpl.read_text().splitlines(), 1):
+            if '{#' in line and '#}' not in line.split('{#', 1)[1]:
+                offenders.append(f'{tpl.relative_to(base)}:{lineno}')
+    assert not offenders, (
+        'Unterminated {# #} comment renders as visible page text; '
+        'use {% comment %}…{% endcomment %} instead:\n  ' + '\n  '.join(offenders)
+    )
+
+
+@pytest.mark.django_db
+def test_dismissed_notices_stay_readable_in_the_log(client, admin_user, client_obj):
+    """Retaining dismissed rows is only defensible if they can be read back.
+    The bell hides them; Settings → Logs is where the who-saw-it-when record
+    actually lives."""
+    from core.models import Notification
+    tech = User.objects.create_user(username='seen', password='x',
+                                    first_name='Gene', last_name='Oster')
+    n = Notification.objects.create(recipient=tech, kind='system_alert',
+                                    text='Job failed: murphys-bench-sla-check')
+    client.force_login(tech)
+    client.post(reverse('core:notification_dismiss', args=[n.pk]))
+    assert tech.notifications.live().count() == 0        # gone from the bell
+
+    client.force_login(admin_user)
+    body = client.get(reverse('core:settings'),
+                      {'tab': 'logs', 'log_source': 'notification'}).content
+    assert b'Job failed: murphys-bench-sla-check' in body
+    assert b'Gene Oster' in body                          # who it reached
+    assert b'Dismissed' in body                           # and what they did
+
+    # And it is findable by the tech's name across the merged stream.
+    merged = client.get(reverse('core:settings'),
+                        {'tab': 'logs', 'log_q': 'Gene'}).content
+    assert b'Job failed: murphys-bench-sla-check' in merged

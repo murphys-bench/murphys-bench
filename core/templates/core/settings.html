@@ -2592,8 +2592,10 @@
         {% if active_tab == 'logs' %}
         <div class="space-y-6">
 
-            {# Search/filter strip — the site's card vocabulary, same shape as
-               the list-page search bars. #}
+            {% comment %}
+            Search/filter strip — the site's card vocabulary, same shape as the
+            list-page search bars.
+            {% endcomment %}
             <form method="get" class="bg-white rounded-lg shadow px-5 py-4">
                 <input type="hidden" name="tab" value="logs">
                 <div class="flex items-center gap-2 flex-nowrap">
