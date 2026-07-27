@@ -34,6 +34,12 @@ the Unreleased entries move under that version and prod gets a single update.
   else picks the ticket up, neither of which a per-recipient row does. Nothing to dismiss.
 
 ### Fixed
+- **A failed email now records *why* it failed.** Both SMTP failure paths caught the
+  exception, wrote it to `murphys_bench.log` on the server, and stored only the slug
+  `send_error` — so the Logs page could say "Failed" but never "authentication rejected"
+  or "connection refused". The cause is now captured onto the log entry (truncated to the
+  field's 255 chars) and is searchable, so an admin can diagnose a broken mailbox from the
+  UI instead of needing SSH.
 - **A notice for finished work no longer sticks around forever.** A System Alert opens a
   ticket and pings the bell; closing that ticket left the notice sitting there with nothing
   left to act on. A notice now drops out once its ticket is resolved/closed/converted or

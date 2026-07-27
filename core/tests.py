@@ -8594,3 +8594,48 @@ def test_dismissed_notices_stay_readable_in_the_log(client, admin_user, client_o
     merged = client.get(reverse('core:settings'),
                         {'tab': 'logs', 'log_q': 'Gene'}).content
     assert b'Job failed: murphys-bench-sla-check' in merged
+
+
+@pytest.mark.django_db
+def test_failed_send_records_why_not_just_that_it_failed(client, admin_user, client_obj):
+    """A log row reading only "Failed · send_error" tells an admin nothing they
+    can act on — the real SMTP cause used to reach murphys_bench.log and stop
+    there, invisible from the UI."""
+    from unittest.mock import patch
+    from smtplib import SMTPAuthenticationError
+    from core.models import EmailSendLog, EmailTemplate, SiteSettings
+
+    site = SiteSettings.get()
+    site.email_enabled = True
+    site.email_host = 'mail.example.com'
+    site.email_from = 'shop@example.com'
+    site.save()
+    EmailTemplate.objects.update_or_create(
+        trigger='ticket_created',
+        defaults={'subject_template': 'Hi', 'body_template': 'Body', 'is_active': True},
+    )
+    contact = Contact.objects.create(client=client_obj, first_name='Wayne',
+                                     last_name='B', email='wayne@example.com',
+                                     is_primary=True)
+    ticket = Ticket.objects.create(client=client_obj, contact=contact,
+                                   subject='S', description='D')
+
+    boom = SMTPAuthenticationError(535, b'5.7.8 Authentication credentials invalid')
+    with patch('django.core.mail.EmailMultiAlternatives.send', side_effect=boom):
+        from core.email_utils import send_ticket_email
+        send_ticket_email('ticket_created', ticket)
+
+    entry = EmailSendLog.objects.filter(status='failed').latest('created_at')
+    assert 'SMTPAuthenticationError' in entry.detail
+    assert 'Authentication credentials invalid' in entry.detail
+    assert len(entry.detail) <= 255
+
+    # And it is visible on the Logs page, not just in the database.
+    client.force_login(admin_user)
+    body = client.get(reverse('core:settings'),
+                      {'tab': 'logs', 'log_source': 'email_out'}).content
+    assert b'Authentication credentials invalid' in body
+    # Searchable too — "authentication" is what someone would actually type.
+    hit = client.get(reverse('core:settings'),
+                     {'tab': 'logs', 'log_q': 'authentication'}).content
+    assert b'wayne@example.com' in hit

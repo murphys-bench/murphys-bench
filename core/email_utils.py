@@ -4,6 +4,26 @@ from fnmatch import fnmatch
 logger = logging.getLogger('core')
 
 
+#: EmailSendLog.detail is a CharField(255).
+_DETAIL_MAX = 255
+
+
+def _error_detail(exc):
+    """Flatten a send exception into something the Logs page can show.
+
+    Without this the log records only the slug `send_error`, and the actual
+    cause — auth rejected, connection refused, recipient unknown — lives solely
+    in murphys_bench.log on the server, which is no use to an admin looking at
+    the UI. The exception type is included because SMTP errors are often terse
+    or empty on their own.
+    """
+    text = str(exc).strip() or exc.__class__.__name__
+    if exc.__class__.__name__ not in text:
+        text = f'{exc.__class__.__name__}: {text}'
+    text = ' '.join(text.split())
+    return text[:_DETAIL_MAX - 1] + '…' if len(text) > _DETAIL_MAX else text
+
+
 def _status_label(slug, entity_type):
     from .models import StatusDefinition
     sd = StatusDefinition.objects.filter(entity_type=entity_type, slug=slug).first()
@@ -272,17 +292,19 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
         sent = msg.send(fail_silently=False)
         status = 'sent' if sent else 'failed'
         reason = '' if sent else 'send_error'
-    except Exception:
+        detail = '' if sent else 'SMTP accepted no recipients'
+    except Exception as exc:
         logger.exception(
             'SMTP send failed for trigger %s → %s (ticket %s).',
             trigger, to_email, getattr(ticket, 'ticket_number', '?'),
         )
         status = 'failed'
         reason = 'send_error'
+        detail = _error_detail(exc)
 
     EmailSendLog.objects.create(
         ticket=ticket, to_email=to_email, trigger=trigger,
-        status=status, reason=reason,
+        status=status, reason=reason, detail=detail,
     )
 
 
@@ -365,8 +387,10 @@ def send_document_email(to_email, subject, cover_body, *, from_email=None,
         sent = msg.send(fail_silently=False)
         status = 'sent' if sent else 'failed'
         reason = '' if sent else 'send_error'
-    except Exception:
+        detail = '' if sent else 'SMTP accepted no recipients'
+    except Exception as exc:
         logger.exception('SMTP send failed for %s → %s.', trigger, to_email)
         status, reason = 'failed', 'send_error'
+        detail = _error_detail(exc)
 
-    return _log(status, reason)
+    return _log(status, reason, detail)
