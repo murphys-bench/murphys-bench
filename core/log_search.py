@@ -15,8 +15,8 @@ different kinds of question, and the Logs tab serves both from one page:
 
 Which of those a shop reaches for first differs by shop, so the page defaults to
 the unified stream and the source filter is one click away rather than a stored
-setting. If that default ever needs to change, it is `LogQuery.source` picking a
-branch in the view — nothing here assumes one is primary.
+setting. If that default ever needs to change it is one branch in the view's
+`_log_search_context` — nothing here assumes either mode is the primary one.
 """
 from dataclasses import dataclass
 from datetime import datetime, time
@@ -143,22 +143,25 @@ SOURCES = {
     'email_out': {
         'label': 'Outbound Email', 'qs': _email_out_qs, 'row': _email_out_row,
         'time_field': 'created_at',
-        'search': ['to_email', 'trigger', 'detail', 'ticket__ticket_number', 'ticket__subject'],
+        'search': ['to_email', 'trigger', 'status', 'reason', 'detail',
+                   'ticket__ticket_number', 'ticket__subject'],
     },
     'email_in': {
         'label': 'Inbound Email', 'qs': _email_in_qs, 'row': _email_in_row,
         'time_field': 'created_at',
-        'search': ['from_email', 'subject', 'detail', 'ticket__ticket_number'],
+        'search': ['from_email', 'subject', 'status', 'detail', 'ticket__ticket_number'],
     },
     'org_cred': {
         'label': 'Org Credentials', 'qs': _org_cred_qs, 'row': _org_cred_row,
         'time_field': 'accessed_at',
-        'search': ['credential__name', 'user__username', 'user__first_name', 'user__last_name'],
+        'search': ['credential__name', 'action', 'user__username',
+                   'user__first_name', 'user__last_name'],
     },
     'device_cred': {
         'label': 'Device Credentials', 'qs': _device_cred_qs, 'row': _device_cred_row,
         'time_field': 'accessed_at',
-        'search': ['device__name', 'field', 'user__username', 'user__first_name', 'user__last_name'],
+        'search': ['device__name', 'field', 'action', 'user__username',
+                   'user__first_name', 'user__last_name'],
     },
     'audit': {
         'label': 'Record Changes', 'qs': _audit_qs, 'row': _audit_row,

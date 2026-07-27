@@ -8527,3 +8527,22 @@ def test_filtered_log_pages_past_the_old_200_row_ceiling(client, admin_user, cli
     found = client.get(url, {'tab': 'logs', 'log_source': 'email_out',
                              'log_q': 'user203@example.com'})
     assert found.context['log_page'].paginator.count == 1
+
+
+@pytest.mark.django_db
+def test_logs_search_covers_status_and_action_words(client, admin_user, log_fixtures):
+    """"failed", "error", "viewed" are the words someone actually types. They
+    live in status/action columns, so those have to be searchable too."""
+    from core.models import EmailSendLog
+    EmailSendLog.objects.create(to_email='bounce@example.com', trigger='ticket_reply',
+                                status='failed', reason='send_error')
+    client.force_login(admin_user)
+    url = reverse('core:settings')
+
+    failed = client.get(url, {'tab': 'logs', 'log_q': 'failed'}).content
+    assert b'bounce@example.com' in failed
+    assert b'wayne@example.com' not in failed        # the sent one is excluded
+
+    # An inbound status word, and a credential action word.
+    assert b'Re: Printer jam' in client.get(url, {'tab': 'logs', 'log_q': 'reply'}).content
+    assert b'Router admin' in client.get(url, {'tab': 'logs', 'log_q': 'viewed'}).content
