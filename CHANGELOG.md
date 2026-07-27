@@ -10,6 +10,15 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+### Security
+- **Pinned the last unpinned dependency (`markdown`).** Every other line in
+  `requirements.txt` was already `==` pinned; `markdown` was not, which left one line where
+  a resolver could pick up something other than what was reviewed. Pinned to `3.10.2` — the
+  version already installed on prod, so this is a no-op at deploy time and purely closes the
+  hole. Context: the "slopsquatting" class of attack, where a plausible-but-wrong package
+  name (hallucinated by an AI assistant, or simply mistyped) resolves to a package an
+  attacker pre-registered. Pinning is the main defense and MB already had it everywhere else.
+
 ## v0.4.50 — 2026-07-25
 
 ### Fixed
