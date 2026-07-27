@@ -19,6 +19,12 @@ the Unreleased entries move under that version and prod gets a single update.
   name (hallucinated by an AI assistant, or simply mistyped) resolves to a package an
   attacker pre-registered. Pinning is the main defense and MB already had it everywhere else.
 
+### Changed
+- **README leads with a screenshot.** The Screenshots section was at line 117, below the
+  feature list — a visitor saw only text above the fold. GitHub Traffic showed real
+  visitors clicking straight into screenshot files, so the dashboard image now sits
+  directly under the tagline with a link down to the full gallery. Documentation only.
+
 ## v0.4.50 — 2026-07-25
 
 ### Fixed

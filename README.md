@@ -2,6 +2,10 @@
 
 **A self-hosted service management system for small MSPs that handle both managed clients and repair work.**
 
+![Dashboard](screenshots/dashboard.png)
+
+<sub>[More screenshots below](#screenshots) — tickets, work orders, clients, register, reports, and dark mode.</sub>
+
 Murphy's Bench is the system I use to run my own IT service business.
 
 Most of my clients are managed clients. They have a service agreement, covered devices, and recurring monthly billing. Murphy's Bench tracks those contracts, the assets attached to them, and the billing generated from them.
