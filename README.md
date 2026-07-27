@@ -85,17 +85,7 @@ It runs in production in my shop. It has automated tests, CI checks, backup and 
 
 A self-hosted installation still requires someone who is comfortable reading documentation, maintaining a server, and troubleshooting when necessary. Issues and pull requests are welcome, but support is best-effort. This is currently a one-person project developed alongside normal client work.
 
-Planned areas of development include:
-
-- stock levels, reorder points, and parts purchasing
-- billing and payment backends other than Invoice Ninja
-- deeper management and reporting tools
-- SMS
-- a customer self-service portal
-- more complete user documentation
-- testing across a wider range of shops and workflows
-
-These are planned directions, not promised features or release dates. Feedback from shops that might use Murphy's Bench will help determine what gets built next.
+See [ROADMAP.md](ROADMAP.md) for what I'm working on, what I'm considering, and what I've decided against. Those are directions, not promised features or release dates. Feedback from shops that might use Murphy's Bench will help determine what gets built next.
 
 ## Who It Might Fit
 
@@ -180,7 +170,7 @@ Content Security Policy middleware is included. The repository defaults to repor
 
 ## Installation
 
-The `scripts/setup.sh` script can take a fresh Ubuntu 24.04 installation to a working local login page. It installs the required system packages, application, database, and web server.
+The `scripts/install.sh` script can take a fresh Ubuntu 24.04 installation to a working local login page. It installs the required system packages, application, database, and web server.
 
 See [INSTALL.md](INSTALL.md) for installation instructions, exceptions to the standard setup, and options for exposing the application outside the local network.
 

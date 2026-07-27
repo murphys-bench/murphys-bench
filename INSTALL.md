@@ -7,7 +7,7 @@ The script installs the required system packages and Python dependencies, create
 ```bash
 git clone <REPO_URL> murphys-bench
 cd murphys-bench
-scripts/setup.sh
+scripts/install.sh
 ```
 
 When it finishes, Murphy's Bench should be available at:
@@ -20,12 +20,12 @@ Log in with the superuser account created during setup.
 
 This gives you a working LAN installation. Company details, email, users, backups, and workflow settings are configured after login.
 
-`setup.sh` is intended for a fresh Ubuntu 24.04 system with no other website using port 80. It stops rather than altering an unsupported or conflicting web-server setup.
+`install.sh` is intended for a fresh Ubuntu 24.04 system with no other website using port 80. It stops rather than altering an unsupported or conflicting web-server setup.
 
 For an existing web server, a different reverse proxy, or a nonstandard deployment, use:
 
 ```bash
-scripts/setup.sh --skip-web
+scripts/install.sh --skip-web
 ```
 
 That installs and initializes the application but leaves the Gunicorn, reverse-proxy, and TLS configuration to you.

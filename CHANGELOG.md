@@ -11,6 +11,10 @@ the Unreleased entries move under that version and prod gets a single update.
 ## Unreleased
 
 ### Added
+- **`ROADMAP.md`** — a public view of where Murphy's Bench is going: Working On,
+  Considering, Not Planned. Prompted by a tester asking about data import and having
+  nowhere to look for the answer. README's own planned-development list is retired in
+  favor of it, so the two can't drift apart.
 - **Settings → Logs is searchable.** The tab rendered five separate tables, each capped at
   its most recent 200 rows — so anything older was unreachable in the UI at all, and a
   question spanning two logs ("what happened around 9:01 PM?") meant eyeballing them side
@@ -50,6 +54,11 @@ the Unreleased entries move under that version and prod gets a single update.
   lingering notice is the failure mode rather than a vanished alert.
 
 ### Changed
+- **The installer script is now `scripts/install.sh`** (was `scripts/setup.sh`). A tester
+  reasonably looked for the script named after `INSTALL.md` and found `setup.sh` instead —
+  made worse by `SETUP.md`, which is the *post*-install configuration guide and has nothing
+  to do with the script. Install lives in `install.sh` / `INSTALL.md`; setup-after-login
+  lives in `SETUP.md`.
 - **Notifications removed from the sidebar.** The bell in each page header already goes to
   the same place, so the count lived in two spots. The bell was added to the Settings
   header, which was the one area without one.

@@ -3,7 +3,7 @@
 A single choke point so every customer-facing document (repair reports now,
 quotes next) renders the same way. WeasyPrint needs system libraries
 (pango / cairo / glib) that are installed out-of-band — apt on the Ubuntu
-boxes, Homebrew on macOS dev (see INSTALL.md and scripts/setup.sh).
+boxes, Homebrew on macOS dev (see INSTALL.md and scripts/install.sh).
 
 WeasyPrint is imported *lazily* inside render_pdf, never at module load: if the
 system libs are missing, importing it raises at import time and would otherwise
