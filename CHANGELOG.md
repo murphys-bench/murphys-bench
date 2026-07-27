@@ -10,6 +10,8 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+## v0.4.51 — 2026-07-27
+
 ### Added
 - **`ROADMAP.md`** — a public view of where Murphy's Bench is going: Working On,
   Considering, Not Planned. Prompted by a tester asking about data import and having
