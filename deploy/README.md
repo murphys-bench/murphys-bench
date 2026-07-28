@@ -1,7 +1,35 @@
 # Deployment units
 
-systemd units for scheduled Murphy's Bench jobs. This VM has no `cron`, so
-scheduling uses systemd timers. Installing them is a one-time `sudo` step.
+systemd units for Murphy's Bench: the gunicorn service, the two path units behind
+the in-app **Back up now** and **Update** buttons, and the timers for scheduled
+backups, inbound email, and SLA checks. There is no `cron`, so scheduling uses
+systemd timers.
+
+## Install them all with one command
+
+```bash
+scripts/install_units.sh
+```
+
+`scripts/install.sh` already runs this, so a normal install needs nothing here.
+Run it by hand after moving the install, renaming the app user, or pulling a
+release that changes a unit file. Add `--with-disk-check` to also install disk
+space alerting (needs notifications configured first, or it just fails loudly).
+
+**The files in this directory are templates, not installable units.** They carry
+`__APP__`, `__RUN_USER__` and `__RUN_GROUP__` placeholders that `install_units.sh`
+substitutes for this install's real values. Do not `sudo cp` them into
+`/etc/systemd/system` — systemd will happily load a unit with an unsubstituted
+placeholder and it will fail only when it eventually fires.
+
+> These units used to hardcode `/opt/murphys-bench` and `User=scs-tech`, and this
+> file used to tell you to copy them in as-is. On any install that wasn't the
+> author's own server that produced units that could never run: the in-app Back
+> up now and Update buttons queued work nothing picked up, and scheduled backups
+> never fired — silently, in every case. Fixed July 2026; `scripts/verify_install.sh`
+> now gates releases on these features actually working on a clean box.
+
+The sections below explain what each unit does and how to check it is working.
 
 ## Backups — scheduler tick
 
@@ -19,21 +47,17 @@ the old fixed nightly `backup_db.sh` timer, so the schedule is app-configurable
 without editing systemd. **When upgrading an existing box, re-copy both unit files**
 (the `.service` now runs the scheduler, not `backup_db.sh`).
 
-Install / upgrade on the VM:
+Installed by `scripts/install_units.sh` (re-run it to upgrade). Confirm it ticks:
 
 ```bash
-sudo cp /opt/murphys-bench/deploy/murphys-bench-backup.service /etc/systemd/system/
-sudo cp /opt/murphys-bench/deploy/murphys-bench-backup.timer   /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now murphys-bench-backup.timer
-sudo systemctl list-timers murphys-bench-backup.timer   # confirm it's ticking
+systemctl list-timers murphys-bench-backup.timer
 ```
 
 Verify a manual run and inspect output (bypasses the schedule gate):
 
 ```bash
-sudo -u scs-tech /opt/murphys-bench/scripts/mb_backup.sh
-tail /opt/murphys-bench/logs/backup.log
+scripts/mb_backup.sh      # as the app user, from the install directory
+tail logs/backup.log
 ```
 
 ## Inbound email polling (every 2 min) + SLA overdue check (every 15 min)
@@ -43,17 +67,10 @@ fetch_inbound_email`) and `murphys-bench-sla-check.{service,timer}` (runs
 `manage.py check_sla_overdue`). Both timers use `OnUnitActiveSec` so the next
 run is scheduled after the previous one finishes (no overlap).
 
-Install on the VM:
+Installed by `scripts/install_units.sh`. Confirm both are scheduled:
 
 ```bash
-sudo cp /opt/murphys-bench/deploy/murphys-bench-fetch-email.service /etc/systemd/system/
-sudo cp /opt/murphys-bench/deploy/murphys-bench-fetch-email.timer   /etc/systemd/system/
-sudo cp /opt/murphys-bench/deploy/murphys-bench-sla-check.service   /etc/systemd/system/
-sudo cp /opt/murphys-bench/deploy/murphys-bench-sla-check.timer     /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now murphys-bench-fetch-email.timer
-sudo systemctl enable --now murphys-bench-sla-check.timer
-sudo systemctl list-timers 'murphys-bench-*'   # confirm both are scheduled
+systemctl list-timers 'murphys-bench-*'
 ```
 
 Watch inbound email actually run:
@@ -78,10 +95,8 @@ Install the log rotation, the OnFailure→ticket handler, and the disk check:
 
 ```bash
 sudo apt install -y logrotate     # not present on minimal Ubuntu installs
-sudo cp /opt/murphys-bench/deploy/logrotate-murphys-bench /etc/logrotate.d/murphys-bench
-sudo cp /opt/murphys-bench/deploy/murphys-bench-alert@.service /etc/systemd/system/
-sudo cp /opt/murphys-bench/deploy/murphys-bench-disk-check.service /etc/systemd/system/
-sudo cp /opt/murphys-bench/deploy/murphys-bench-disk-check.timer   /etc/systemd/system/
+sudo cp "$(pwd)/deploy/logrotate-murphys-bench" /etc/logrotate.d/murphys-bench
+scripts/install_units.sh --with-disk-check    # renders + enables the disk check + alert unit
 for u in murphys-bench-backup murphys-bench-fetch-email murphys-bench-sla-check; do
   sudo mkdir -p /etc/systemd/system/$u.service.d
   sudo tee /etc/systemd/system/$u.service.d/onfailure.conf >/dev/null <<'DROPIN'
@@ -119,7 +134,8 @@ scripts/release.sh v0.1.0     # semver vMAJOR.MINOR.PATCH; pushes an annotated t
 `release.sh` refuses unless you're on a clean `main` that's in sync with
 `origin/main` (so the tag points at a commit GitHub Actions actually validated).
 
-**Deploy on a server** (`/opt/murphys-bench`, as `scs-tech`):
+**Deploy on a server** (from the install directory, as the app user — `update.sh`
+works out where it is installed from its own location, so no path is baked in):
 
 ```bash
 scripts/update.sh             # deploy the LATEST release tag (the normal path)
@@ -148,7 +164,7 @@ bad release self-heals to the last good state instead of leaving the box broken.
 Lets an admin trigger `update.sh` from the web UI instead of SSHing in. A web
 request can't restart its own gunicorn, so the page drops a trigger file that a
 systemd **path unit** watches; the path unit launches a **one-shot service**
-(running as `scs-tech`, outside gunicorn's cgroup) that runs `update.sh` and
+(running as the app user, outside gunicorn's cgroup) that runs `update.sh` and
 records status for the page to poll. No extra sudo — the app only writes a file,
 and the one-shot reuses the already-NOPASSWD `systemctl restart` inside
 `update.sh`.
@@ -156,14 +172,10 @@ and the one-shot reuses the already-NOPASSWD `systemctl restart` inside
 Files: `murphys-bench-update.path` (watches `logs/update-trigger`),
 `murphys-bench-update.service` (runs `scripts/run_update.sh`).
 
-Install on the VM:
+Installed by `scripts/install_units.sh`. Confirm it is armed:
 
 ```bash
-sudo cp /opt/murphys-bench/deploy/murphys-bench-update.path    /etc/systemd/system/
-sudo cp /opt/murphys-bench/deploy/murphys-bench-update.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now murphys-bench-update.path
-sudo systemctl status murphys-bench-update.path   # should be active (waiting)
+systemctl status murphys-bench-update.path   # should be active (waiting)
 ```
 
 Without these units installed the "Update to latest" button writes the trigger
@@ -190,14 +202,10 @@ Files: `murphys-bench-backup-now.path` (watches `logs/backup-trigger`),
 **distinct** from the nightly `murphys-bench-backup.timer`/`.service` — leave
 those in place.
 
-Install on the VM:
+Installed by `scripts/install_units.sh`. Confirm it is armed:
 
 ```bash
-sudo cp /opt/murphys-bench/deploy/murphys-bench-backup-now.path    /etc/systemd/system/
-sudo cp /opt/murphys-bench/deploy/murphys-bench-backup-now.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now murphys-bench-backup-now.path
-sudo systemctl status murphys-bench-backup-now.path   # should be active (waiting)
+systemctl status murphys-bench-backup-now.path   # should be active (waiting)
 ```
 
 Without these units the "Run backup now" button writes the trigger file but

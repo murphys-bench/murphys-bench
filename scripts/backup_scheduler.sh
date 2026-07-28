@@ -11,7 +11,10 @@
 # effect on the next tick. Backups fire within ~5 min of the configured HH:MM.
 set -uo pipefail
 
-APP=/opt/murphys-bench
+# Derived from this script's own location, not hardcoded — Murphy's Bench is not
+# always installed at /opt/murphys-bench, and a wrong path here means the backup
+# schedule set in the UI silently never fires.
+APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 today="$(date +%F)"
 now_day="$(date +%a | tr '[:upper:]' '[:lower:]')"   # mon,tue,...
 now_hm="$(date +%H:%M)"

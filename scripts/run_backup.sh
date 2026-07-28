@@ -5,12 +5,12 @@
 # scripts/mb_backup.sh (which writes the terminal succeeded/failed status itself),
 # then removes the trigger so the .path unit re-arms for next time.
 #
-# Runs as the app user (scs-tech) under systemd, outside gunicorn's cgroup — a web
+# Runs as the app user under systemd, outside gunicorn's cgroup — a web
 # request must not run the long backup in-process. mb_backup.sh stays the single
 # source of backup logic; this wrapper only marks "running" and clears the trigger.
 set -uo pipefail
 
-APP=/opt/murphys-bench
+APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$APP"
 PY="$APP/venv/bin/python"
 STATUS="$APP/logs/backup-status.json"

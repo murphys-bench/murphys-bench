@@ -4,14 +4,14 @@
 # tag), records progress to logs/update-status.json for the Settings → Updates
 # page to poll, then removes the trigger so the .path unit re-arms for next time.
 #
-# Runs as the app user (scs-tech) under systemd — OUTSIDE gunicorn's cgroup — so
+# Runs as the app user under systemd — OUTSIDE gunicorn's cgroup — so
 # update.sh's `sudo systemctl restart murphys-bench` doesn't kill this process.
 # update.sh stays pure; all status bookkeeping lives here.
 #
 # NOTE: not `set -e` — we must capture update.sh's exit code, not abort on it.
 set -uo pipefail
 
-APP=/opt/murphys-bench
+APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$APP"
 PY="$APP/venv/bin/python"
 STATUS="$APP/logs/update-status.json"

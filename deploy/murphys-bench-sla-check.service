@@ -4,6 +4,7 @@ After=network.target
 
 [Service]
 Type=oneshot
-User=scs-tech
-WorkingDirectory=/opt/murphys-bench
-ExecStart=/opt/murphys-bench/venv/bin/python /opt/murphys-bench/manage.py check_sla_overdue
+User=__RUN_USER__
+Group=__RUN_GROUP__
+WorkingDirectory=__APP__
+ExecStart=__APP__/venv/bin/python __APP__/manage.py check_sla_overdue

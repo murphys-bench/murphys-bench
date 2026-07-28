@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Render and install every systemd unit Murphy's Bench needs.
+#
+# The unit files in deploy/ are TEMPLATES: they carry __APP__, __RUN_USER__ and
+# __RUN_GROUP__ placeholders rather than baked-in paths. This script substitutes
+# the real values for THIS install and writes the results to /etc/systemd/system,
+# then enables them.
+#
+# Why this exists: the units used to hardcode /opt/murphys-bench and User=scs-tech
+# — the author's own server. On any other box the in-app "Back up now" and
+# "Update" buttons queued a job that nothing ever picked up, and the backup
+# schedule set in the UI never fired. Silently, in both cases. Deriving both
+# values here means there is no path or username to keep in sync by hand.
+#
+# Run by scripts/install.sh. Safe and useful to run by hand at any time — after
+# moving the install, renaming the app user, or pulling a release that changes a
+# unit file. Re-running just re-renders and reloads.
+#
+# Usage: scripts/install_units.sh [--with-disk-check]
+#   --with-disk-check   also install the disk-space check + its failure-alert
+#                       unit. Off by default: it needs send_alert configured
+#                       (Settings -> Notifications) or it just fails loudly.
+set -euo pipefail
+
+APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RUN_USER="$(id -un)"
+RUN_GROUP="$(id -gn)"
+UNIT_DIR=/etc/systemd/system
+
+WITH_DISK_CHECK=0
+for a in "$@"; do
+  case "$a" in
+    --with-disk-check) WITH_DISK_CHECK=1 ;;
+    *) echo "install_units: unknown arg '$a'" >&2; exit 2 ;;
+  esac
+done
+
+log()  { echo "$(date '+%F %T') units: $*"; }
+fail() { echo "UNIT INSTALL FAILED: $*" >&2; exit 1; }
+
+command -v systemctl >/dev/null || fail "this host has no systemd; \
+Murphy's Bench's scheduled backups and in-app update need it. Wire up the \
+equivalents for your init system using deploy/ as the reference."
+
+# Units that are always installed. The two .path units are what make the in-app
+# "Back up now" and "Update" buttons do anything at all — without them the UI
+# spins forever. The three timers are inert until the matching feature is
+# configured in the app, but must exist BEFORE that, because the web process
+# deliberately has no privilege to enable a systemd unit itself.
+UNITS=(
+    murphys-bench.service              # gunicorn
+    murphys-bench-update.path          # in-app Update button
+    murphys-bench-update.service
+    murphys-bench-backup-now.path      # in-app "Back up now" button
+    murphys-bench-backup-now.service
+    murphys-bench-backup.timer         # scheduled backups (per in-app schedule)
+    murphys-bench-backup.service
+    murphys-bench-fetch-email.timer    # inbound email -> tickets
+    murphys-bench-fetch-email.service
+    murphys-bench-sla-check.timer      # overdue-SLA sweep
+    murphys-bench-sla-check.service
+)
+[ "$WITH_DISK_CHECK" = 1 ] && UNITS+=(
+    murphys-bench-disk-check.timer
+    murphys-bench-disk-check.service
+    'murphys-bench-alert@.service'
+)
+
+# Units systemd should actually start. Plain .service units named by a .path or
+# .timer are launched by their trigger and must NOT be enabled themselves.
+ENABLE=(
+    murphys-bench.service
+    murphys-bench-update.path
+    murphys-bench-backup-now.path
+    murphys-bench-backup.timer
+    murphys-bench-fetch-email.timer
+    murphys-bench-sla-check.timer
+)
+[ "$WITH_DISK_CHECK" = 1 ] && ENABLE+=(murphys-bench-disk-check.timer)
+
+log "rendering ${#UNITS[@]} units for APP=$APP USER=$RUN_USER (sudo)..."
+for u in "${UNITS[@]}"; do
+    src="$APP/deploy/$u"
+    [ -f "$src" ] || fail "missing unit template $src — is this a complete checkout?"
+    sed -e "s|__APP__|$APP|g" \
+        -e "s|__RUN_USER__|$RUN_USER|g" \
+        -e "s|__RUN_GROUP__|$RUN_GROUP|g" "$src" \
+      | sudo tee "$UNIT_DIR/$u" >/dev/null || fail "could not write $UNIT_DIR/$u"
+done
+
+# Guard against shipping a template with a placeholder we forgot to substitute —
+# systemd would accept the file and the unit would fail at run time, which is
+# exactly the silent-failure shape this whole change exists to remove.
+for u in "${UNITS[@]}"; do
+    if sudo grep -q '__APP__\|__RUN_USER__\|__RUN_GROUP__' "$UNIT_DIR/$u"; then
+        fail "$u still contains an unsubstituted placeholder after rendering"
+    fi
+done
+
+sudo systemctl daemon-reload || fail "systemctl daemon-reload failed"
+
+for u in "${ENABLE[@]}"; do
+    sudo systemctl enable --now "$u" || fail "enabling $u failed — see: journalctl -u $u"
+done
+
+log "installed ${#UNITS[@]} units, enabled ${#ENABLE[@]}:"
+for u in "${ENABLE[@]}"; do
+    printf '  %-38s %s\n' "$u" "$(systemctl is-active "$u" 2>/dev/null || true)"
+done
+if [ "$WITH_DISK_CHECK" = 0 ]; then
+    log "disk-space check not installed (pass --with-disk-check once alerts are configured)"
+fi

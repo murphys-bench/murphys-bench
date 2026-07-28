@@ -9,11 +9,11 @@
 # It ALWAYS backs up first (snapshot-before-migrate). If anything after that goes
 # wrong — bad deps, failed migration, broken restart — it AUTOMATICALLY rolls the
 # code AND the database back to where it started and verifies the app is healthy
-# again. Run as the app user (scs-tech); the only privileged step is the service
+# again. Run as the app user; the only privileged step is the service
 # restart (already passwordless for this unit).
 set -euo pipefail
 
-APP=/opt/murphys-bench
+APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="$APP/venv/bin"
 cd "$APP"
 
@@ -129,6 +129,11 @@ log "code: $PREV_VER ($PREV) -> $NEW_VER ($NEW)"
 # 6) Build the self-hosted Tailwind stylesheet (standalone CLI, no Node), then collect static.
 "$APP/scripts/build_css.sh" || rollback "CSS build failed"
 "$VENV/python" manage.py collectstatic --noinput >/dev/null || rollback "collectstatic failed"
+# collectstatic writes new files with the app user's umask; nginx serves them as
+# www-data. Without this, an update can leave freshly-added assets unreadable and
+# the UI renders unstyled — the same failure install.sh guards against at install
+# time, reintroduced one release later.
+chmod -R o+rX "$APP/staticfiles" 2>/dev/null || true
 
 # 6b) Regenerate the backup destination files from SiteSettings, so a fresh box /
 # post-restore never silently loses its configured offsite target. Non-fatal —
