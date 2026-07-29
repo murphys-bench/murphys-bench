@@ -7,6 +7,7 @@ from django.views.decorators.http import require_POST
 from django.views import View
 from django.views.generic import ListView, DetailView, CreateView, UpdateView
 from django.contrib.auth.mixins import LoginRequiredMixin
+from two_factor.views import BackupTokensView as TwoFactorBackupTokensView
 from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
 from django.urls import reverse, reverse_lazy
@@ -6648,6 +6649,7 @@ SETTINGS_TABS = [
     ('tech_skills',      'Tech Skills',      None),
     ('dashboard_tiles',  'Dashboard Tiles',  None),
     ('custom_fields',    'Custom Fields',    None),
+    ('account_security', 'Account Security', None),
     ('users',            'Users',            None),
     ('roles',            'Roles',            None),
     ('logs',             'Logs',             None),
@@ -6669,7 +6671,7 @@ SETTINGS_TAB_GROUPS = [
         'dashboard_tiles', 'kb_categories',
     ]),
     ('Integrations', ['invoice_ninja', 'attachments', 'mileage']),
-    ('Access & Security', ['users', 'roles', 'credentials', 'security']),
+    ('Access & Security', ['account_security', 'users', 'roles', 'credentials', 'security']),
     ('System', ['logs', 'maintenance']),
 ]
 
@@ -8338,3 +8340,28 @@ class MFASetupView(TwoFactorSetupView):
         if mfa_setup_is_mandatory(self.request.user):
             context.pop('cancel_url', None)
         return context
+
+
+class AdminOnlyBackupTokensView(TwoFactorBackupTokensView):
+    """MFA backup codes are ADMIN ONLY — enforced here, not merely undisplayed.
+
+    Decision (Mike, July 29 2026): no employee generates their own backup codes.
+    A tech who loses their authenticator recovers via an admin reset
+    (`_can_reset_mfa` / `manage.py reset_mfa`), which leaves an MFAResetLog entry.
+    Self-service codes would be a silent way around that accountability.
+
+    ⚠ THIS ROUTE MUST STAY REGISTERED AHEAD OF two_factor's own urlpatterns in
+    murphys_bench/urls.py — first match wins, so dropping the override silently
+    restores upstream's ungated view. test_backup_tokens_denied_to_non_admin is
+    the guard.
+
+    Note this CLOSES a claim CLAUDE.md has made since Batch 8 ("backup codes for
+    admin only") that was never actually implemented: before this, any user with a
+    confirmed device got 200 on this page. The docs described a control that did
+    not exist.
+    """
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _is_admin(request.user):
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)

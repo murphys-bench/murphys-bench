@@ -36,7 +36,16 @@
             <ul x-show="open" x-cloak class="divide-y divide-gray-100 border-t border-gray-100">
                 {% for key, label in group_tabs %}
                 <li>
-                    {% if key == 'users' %}
+                    {% if key == 'account_security' %}
+                    {% comment %}
+                    Links out to the two_factor page, like Users and Roles below.
+                    Lives in the admin section because backup codes are admin-only.
+                    {% endcomment %}
+                    <a href="{% url 'two_factor:profile' %}"
+                       class="block px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                        {{ label }}
+                    </a>
+                    {% elif key == 'users' %}
                     <a href="{% url 'core:user_list' %}"
                        class="block px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
                         {{ label }}

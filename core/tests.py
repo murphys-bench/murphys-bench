@@ -9033,18 +9033,83 @@ def test_email_test_views_are_admin_only(client, db):
 
 
 @pytest.mark.django_db
-def test_account_security_is_reachable_from_the_nav(client, client_obj, admin_user):
-    """Backup codes must be discoverable in the UI.
+def test_account_security_is_linked_from_the_admin_settings_nav(client, admin_user):
+    """Backup codes must be reachable — but from the admin section, not the sidebar.
 
-    The Account Security page (2FA status, backup codes, disable 2FA) was dropped
-    from the sidebar in the session-20 nav redesign, leaving it linked only from a
-    sentence of body text on the admin /users/ page. So there was no discoverable
-    way to generate MFA backup codes at all. That is load-bearing now that Django
-    admin requires OTP: with no backup codes, a lost authenticator means recovery
-    only via `manage.py reset_mfa` on the box. Every logged-in user gets the link —
-    it is their own account.
+    The page had been dropped from the sidebar in the session-20 nav redesign and
+    was linked from exactly one sentence of body text on /users/, so there was no
+    discoverable way to generate MFA backup codes at all. That is load-bearing now
+    that Django admin requires OTP. Placement is Settings → Access & Security
+    (Mike, July 29 2026): backup codes are an administrative capability.
     """
+    client.force_login(admin_user)
+    resp = client.get('/settings/?tab=security')
+    assert resp.status_code == 200
+    assert reverse('two_factor:profile').encode() in resp.content
+
+
+@pytest.mark.django_db
+def test_account_security_is_not_in_the_sidebar(client, client_obj, admin_user):
+    """Deliberately absent from the sidebar — it belongs to the admin section."""
     client.force_login(admin_user)
     resp = client.get(reverse('core:dashboard'))
     assert resp.status_code == 200
-    assert reverse('two_factor:profile').encode() in resp.content
+    assert reverse('two_factor:profile').encode() not in resp.content
+
+
+@pytest.mark.django_db
+def test_backup_tokens_denied_to_non_admin(client, db):
+    """No employee generates their own backup codes (Mike, July 29 2026).
+
+    Pre-fix ANY user with a confirmed device got 200 here, despite CLAUDE.md having
+    claimed "backup codes for admin only" since Batch 8 — a documented control that
+    was never implemented. Self-service codes would also route around the
+    accountability of an admin reset, which writes an MFAResetLog entry.
+
+    Guards the URL override in murphys_bench/urls.py: if that route stops being
+    registered ahead of two_factor's own urlpatterns, upstream's ungated view
+    silently takes over and this test fails.
+    """
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    from core.models import Role
+    role = Role.objects.create(name='BackupTech')
+    tech = User.objects.create_user(username='backuptech', password='x', role_obj=role)
+    device = TOTPDevice.objects.create(user=tech, name='d', confirmed=True)
+
+    client.force_login(tech)
+    session = client.session
+    session['otp_device_id'] = str(device.persistent_id)
+    session.save()
+
+    for method in ('get', 'post'):
+        resp = getattr(client, method)(reverse('two_factor:backup_tokens'))
+        assert resp.status_code == 403, f'{method} returned {resp.status_code}'
+
+
+@pytest.mark.django_db
+def test_backup_tokens_allowed_for_admin(client, admin_user):
+    """The admin path must still work — this is the recovery capability itself."""
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    device = TOTPDevice.objects.create(user=admin_user, name='d', confirmed=True)
+    client.force_login(admin_user)
+    session = client.session
+    session['otp_device_id'] = str(device.persistent_id)
+    session.save()
+    assert client.get(reverse('two_factor:backup_tokens')).status_code == 200
+
+
+@pytest.mark.django_db
+def test_backup_tokens_button_hidden_from_non_admin(client, db):
+    """Cosmetic companion to the view gate: do not offer a control that 403s."""
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    from core.models import Role
+    role = Role.objects.create(name='ProfileTech')
+    tech = User.objects.create_user(username='profiletech', password='x', role_obj=role)
+    device = TOTPDevice.objects.create(user=tech, name='d', confirmed=True)
+    client.force_login(tech)
+    session = client.session
+    session['otp_device_id'] = str(device.persistent_id)
+    session.save()
+    resp = client.get(reverse('two_factor:profile'))
+    assert resp.status_code == 200
+    assert reverse('two_factor:backup_tokens').encode() not in resp.content

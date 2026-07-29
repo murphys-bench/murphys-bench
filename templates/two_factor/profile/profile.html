@@ -22,6 +22,12 @@
                 </div>
 
                 <div class="flex flex-wrap gap-3 mt-4">
+                    {% comment %}
+                    Backup codes are admin-only, enforced in AdminOnlyBackupTokensView.
+                    Hidden rather than shown-and-403'd so a tech is not offered a
+                    control they cannot use. The view is the gate; this is cosmetic.
+                    {% endcomment %}
+                    {% if is_admin %}
                     <a href="{% url 'two_factor:backup_tokens' %}"
                        class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
                         Backup Tokens
@@ -29,6 +35,7 @@
                             <span class="ml-1 text-xs text-gray-400">({{ backup_tokens }} left)</span>
                         {% endif %}
                     </a>
+                    {% endif %}
                     <a href="{% url 'two_factor:disable' %}"
                        class="px-4 py-2 text-sm font-medium text-red-600 bg-white border border-red-300 rounded-md hover:bg-red-50">
                         Disable 2FA
