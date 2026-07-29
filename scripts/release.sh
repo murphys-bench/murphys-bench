@@ -39,5 +39,5 @@ git push origin "$V" || fail "git push of tag $V failed (tag created locally; re
 echo
 echo "Released $V at $SHA."
 echo "Deploy it on a server:"
-echo "    cd /opt/murphys-bench && scripts/update.sh        # no-arg = latest tag = $V"
-echo "    cd /opt/murphys-bench && scripts/update.sh $V     # or pin explicitly"
+echo "    cd <install-dir> && scripts/update.sh        # no-arg = latest tag = $V"
+echo "    cd <install-dir> && scripts/update.sh $V     # or pin explicitly"

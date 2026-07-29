@@ -240,29 +240,14 @@ re-run with --skip-web and wire up your own process manager/reverse proxy"
     command -v nginx >/dev/null || fail "--skip-web wasn't passed but nginx isn't installed; \
 either drop --skip-apt so this script installs it, or pass --skip-web to wire up your own"
 
-    log "writing gunicorn systemd unit (sudo)..."
-    sudo tee /etc/systemd/system/murphys-bench.service >/dev/null <<UNITEOF
-[Unit]
-Description=Murphy's Bench (Gunicorn)
-After=network.target
-
-[Service]
-User=${RUN_USER}
-Group=${RUN_GROUP}
-WorkingDirectory=${APP}
-ExecStart=${VENV}/gunicorn --workers 3 --bind 127.0.0.1:8001 \\
-    --access-logfile ${APP}/logs/gunicorn-access.log \\
-    --error-logfile ${APP}/logs/gunicorn-error.log \\
-    murphys_bench.wsgi:application
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-UNITEOF
-    sudo systemctl daemon-reload || fail "systemctl daemon-reload failed"
-    sudo systemctl enable --now murphys-bench || fail "starting the gunicorn service failed"
-    log "gunicorn service enabled + started"
+    # Every systemd unit — gunicorn, the two .path units behind the in-app
+    # Back up now / Update buttons, and the backup / inbound-email / SLA timers —
+    # is rendered from the templates in deploy/ with this install's real path and
+    # user. Installing only gunicorn here (as this script used to) left those
+    # buttons spinning forever and scheduled backups never running, on every box
+    # that wasn't the author's own.
+    log "installing systemd units (sudo)..."
+    "$APP/scripts/install_units.sh" || fail "installing systemd units failed"
 
     log "writing nginx site (sudo)..."
     sudo tee /etc/nginx/sites-available/murphys-bench >/dev/null <<NGINXEOF
@@ -288,6 +273,33 @@ NGINXEOF
     sudo nginx -t || fail "nginx config test failed — check /etc/nginx/sites-available/murphys-bench"
     sudo systemctl reload nginx 2>/dev/null || sudo systemctl restart nginx || fail "nginx reload/restart failed"
     log "nginx site enabled + reloaded"
+
+    # nginx serves /static/ straight off disk as www-data, so www-data needs to be
+    # able to traverse every directory from / down to the app. Ubuntu has created
+    # home directories mode 750 since 21.04, so an install under ~ gives a working
+    # login page with every stylesheet and image 403ing — the app looks broken in a
+    # way that doesn't obviously point at permissions. Grant traverse on the chain.
+    log "granting the web server traverse permission on $APP..."
+    d="$APP"
+    while [ "$d" != "/" ]; do
+        sudo chmod o+x "$d" || fail "could not chmod o+x $d"
+        d="$(dirname "$d")"
+    done
+    sudo chmod -R o+rX "$APP/staticfiles" || fail "could not make staticfiles world-readable"
+
+    # Prove it rather than assume it. This is the exact check that would have
+    # caught the unstyled-login bug before a tester ever saw it: ask nginx for a
+    # real static file the way a browser does.
+    probe="$(ls "$APP"/staticfiles/css/*.css 2>/dev/null | head -1 || true)"
+    [ -n "$probe" ] || fail "collectstatic produced no CSS in $APP/staticfiles/css — the UI would render unstyled"
+    code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1/static/css/$(basename "$probe")" || echo 000)"
+    [ "$code" = "200" ] || fail "nginx returned HTTP $code for /static/css/$(basename "$probe")
+
+  The app is installed but the web server cannot read its stylesheets, so the
+  login page would render as unstyled HTML with no logo. Usually this means a
+  directory above $APP denies access to the www-data user.
+  Check with:  sudo -u www-data stat $APP/staticfiles"
+    log "static files verified served by nginx (HTTP 200)"
 else
     log "skipping web server setup (--skip-web) — app layer only"
 fi
@@ -312,8 +324,14 @@ Log in as the superuser you just created. This is plain HTTP on your local
 network — the same way MB's own production instance runs. Nothing further is
 required to use it day to day.
 
-Optional next steps (not required to log in):
-  - Scheduled-job timers: backup / inbound-email / SLA  (deploy/README.md)
+Background jobs are installed and running — scheduled backups, inbound email,
+SLA checks, and the in-app Back up now / Update buttons. Nothing to wire up by
+hand. Confirm any time with:
+  systemctl list-units 'murphys-bench-*'
+
+Truly optional (not required for anything above):
+  - Disk-space alerting: scripts/install_units.sh --with-disk-check, once
+    notifications are configured (Settings → Notifications)
   - A public domain with TLS (Cloudflare Tunnel or otherwise) — see
     INSTALL.md "Going public (remote access)" — only if you need to reach
     this instance from outside your network.

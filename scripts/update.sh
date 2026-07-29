@@ -9,11 +9,11 @@
 # It ALWAYS backs up first (snapshot-before-migrate). If anything after that goes
 # wrong — bad deps, failed migration, broken restart — it AUTOMATICALLY rolls the
 # code AND the database back to where it started and verifies the app is healthy
-# again. Run as the app user (scs-tech); the only privileged step is the service
+# again. Run as the app user; the only privileged step is the service
 # restart (already passwordless for this unit).
 set -euo pipefail
 
-APP=/opt/murphys-bench
+APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="$APP/venv/bin"
 cd "$APP"
 
@@ -129,6 +129,48 @@ log "code: $PREV_VER ($PREV) -> $NEW_VER ($NEW)"
 # 6) Build the self-hosted Tailwind stylesheet (standalone CLI, no Node), then collect static.
 "$APP/scripts/build_css.sh" || rollback "CSS build failed"
 "$VENV/python" manage.py collectstatic --noinput >/dev/null || rollback "collectstatic failed"
+# collectstatic writes new files with the app user's umask; nginx serves them as
+# www-data. Without this, an update can leave freshly-added assets unreadable and
+# the UI renders unstyled — the same failure install.sh guards against at install
+# time, reintroduced one release later.
+chmod -R o+rX "$APP/staticfiles" 2>/dev/null || true
+
+# Post-update health of the DEPLOYMENT layer, not just the app. An install made
+# before the July 2026 portability fix has no background-job units at all and may
+# have an unreadable static directory; updating the code does not repair either,
+# because both need sudo that this script deliberately does not have (prod grants
+# it NOPASSWD for `systemctl restart` and nothing else). So: detect, and say so
+# loudly with the exact command. Never silent, never fatal — a good update must
+# not roll back over this.
+deploy_layer_warning() {
+    local missing=()
+    for u in murphys-bench-update.path murphys-bench-backup-now.path murphys-bench-backup.timer; do
+        systemctl cat "$u" >/dev/null 2>&1 || missing+=("$u")
+    done
+    css="$(ls "$APP"/staticfiles/css/*.css 2>/dev/null | head -1 || true)"
+    css_code=000
+    [ -n "$css" ] && css_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+        "http://127.0.0.1/static/css/$(basename "$css")" 2>/dev/null || echo 000)"
+
+    [ "${#missing[@]}" -eq 0 ] && [ "$css_code" = "200" ] && return 0
+
+    echo
+    echo "⚠ THIS INSTALL IS INCOMPLETE — the update itself succeeded, but:" >&2
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo "  • Background jobs are NOT installed (${missing[*]})." >&2
+        echo "    Scheduled backups do not run. The in-app Back up now and Update" >&2
+        echo "    buttons will queue a job that nothing picks up, and spin forever." >&2
+    fi
+    if [ "$css_code" != "200" ]; then
+        echo "  • The web server cannot read this install's stylesheets (HTTP $css_code)." >&2
+        echo "    Pages render as unstyled HTML with no logo." >&2
+    fi
+    echo >&2
+    echo "  Fix both, safe to re-run over an existing install:" >&2
+    echo "    cd $APP && scripts/install.sh" >&2
+    echo >&2
+}
+deploy_layer_warning
 
 # 6b) Regenerate the backup destination files from SiteSettings, so a fresh box /
 # post-restore never silently loses its configured offsite target. Non-fatal —

@@ -3,10 +3,11 @@ Description=Murphy's Bench backup scheduler tick
 
 [Service]
 Type=oneshot
-User=scs-tech
-WorkingDirectory=/opt/murphys-bench
+User=__RUN_USER__
+Group=__RUN_GROUP__
+WorkingDirectory=__APP__
 # Runs the scheduler tick, which fires scripts/mb_backup.sh only when a slot is
 # due per the in-app schedule. (Replaced the old backup_db.sh nightly oneshot;
 # the Postgres After=/Wants= were removed — MB is SQLite-only.)
-ExecStart=/opt/murphys-bench/scripts/backup_scheduler.sh
+ExecStart=__APP__/scripts/backup_scheduler.sh
 TimeoutStartSec=1800

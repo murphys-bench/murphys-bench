@@ -6,7 +6,7 @@ Description=Watch for an in-app Murphy's Bench on-demand backup request
 # appearance starts murphys-bench-backup-now.service. PathExists (not
 # PathChanged) means the wrapper deleting the file at the end doesn't re-fire —
 # a fresh file = one run. Distinct from the nightly murphys-bench-backup.timer.
-PathExists=/opt/murphys-bench/logs/backup-trigger
+PathExists=__APP__/logs/backup-trigger
 
 [Install]
 WantedBy=multi-user.target

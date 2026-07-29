@@ -17,7 +17,7 @@ set -euo pipefail
 # APP is overridable (MB_BACKUP_APP) only so the test suite can point this
 # script at a scratch directory; every real deploy always runs it unset and
 # gets the real path.
-APP="${MB_BACKUP_APP:-/opt/murphys-bench}"
+APP="${MB_BACKUP_APP:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 DB="$APP/db.sqlite3"
 STAGE="$APP/backups"
 LOG="$APP/logs/backup.log"

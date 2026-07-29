@@ -5,6 +5,7 @@ After=network.target
 
 [Service]
 Type=oneshot
-User=scs-tech
-WorkingDirectory=/opt/murphys-bench
-ExecStart=/opt/murphys-bench/scripts/mb_disk_check.sh 85
+User=__RUN_USER__
+Group=__RUN_GROUP__
+WorkingDirectory=__APP__
+ExecStart=__APP__/scripts/mb_disk_check.sh 85

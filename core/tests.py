@@ -8695,3 +8695,82 @@ def test_static_refs_resolve_under_manifest_storage(client, admin_user):
                      'core:client_list', 'core:settings'):
             resp = client.get(reverse(name))
             assert resp.status_code == 200, f'{name} did not render under manifest storage'
+
+
+# ---------------------------------------------------------------------------
+# Deployment-layer portability
+#
+# In July 2026 every shell script and systemd unit hardcoded /opt/murphys-bench
+# and User=scs-tech — the author's own server. On any other install the in-app
+# Back up now and Update buttons queued work nothing ever picked up, scheduled
+# backups never ran, and none of it reported a failure. An outside tester found
+# it, because nothing here could: pytest runs Django in-process and never looks
+# at the deployment layer.
+#
+# scripts/verify_install.sh is the real gate (it asserts these features WORK on
+# a clean box), but it needs a VM. These two tests are the cheap half that runs
+# on every push, so a hardcoded path can't quietly come back between clean-room
+# runs.
+# ---------------------------------------------------------------------------
+
+def _repo_root():
+    from pathlib import Path
+    return Path(__file__).resolve().parent.parent
+
+
+def test_no_script_hardcodes_the_authors_install_path_or_user():
+    """Executable lines in scripts/ must not name /opt/murphys-bench or scs-tech.
+
+    Comments are exempt — several deliberately mention the old values to explain
+    why they're gone. Two scripts are exempt entirely because the strings are
+    their subject matter, not their configuration: release.sh prints example
+    deploy commands for a human to read, and verify_install.sh greps for these
+    very strings as its own check.
+    """
+    import re
+
+    exempt = {'release.sh', 'verify_install.sh'}
+    offenders = []
+    for path in sorted((_repo_root() / 'scripts').glob('*.sh')):
+        if path.name in exempt:
+            continue
+        for n, line in enumerate(path.read_text().splitlines(), 1):
+            if re.match(r'\s*#', line) or not line.strip():
+                continue
+            if '/opt/murphys-bench' in line or 'scs-tech' in line:
+                offenders.append(f'{path.name}:{n}: {line.strip()}')
+
+    assert not offenders, (
+        'These lines hardcode the author\'s install path or app user, which '
+        'silently breaks backups/updates on every other install:\n  '
+        + '\n  '.join(offenders)
+    )
+
+
+def test_unit_templates_are_templates_not_baked_for_one_box():
+    """deploy/*.service|timer|path must use placeholders, not literal values.
+
+    scripts/install_units.sh substitutes __APP__/__RUN_USER__/__RUN_GROUP__ at
+    install time. A unit that ships with a literal path loads fine under systemd
+    and fails only when it eventually fires — the silent shape this whole change
+    exists to remove.
+    """
+    deploy = _repo_root() / 'deploy'
+    units = sorted(
+        p for ext in ('*.service', '*.timer', '*.path') for p in deploy.glob(ext)
+    )
+    assert units, 'no unit templates found in deploy/'
+
+    baked, unsubstituted = [], []
+    for path in units:
+        text = path.read_text()
+        if '/opt/murphys-bench' in text or 'User=scs-tech' in text:
+            baked.append(path.name)
+        # Anything with an ExecStart or a watched path must reference __APP__.
+        if ('ExecStart=' in text or 'PathExists=' in text) and '__APP__' not in text:
+            unsubstituted.append(path.name)
+
+    assert not baked, f'unit templates carry a baked-in path/user: {baked}'
+    assert not unsubstituted, (
+        f'unit templates reference no __APP__ placeholder: {unsubstituted}'
+    )

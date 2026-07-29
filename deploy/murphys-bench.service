@@ -1,0 +1,17 @@
+[Unit]
+Description=Murphy's Bench (Gunicorn)
+After=network.target
+
+[Service]
+User=__RUN_USER__
+Group=__RUN_GROUP__
+WorkingDirectory=__APP__
+ExecStart=__APP__/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:8001 \
+    --access-logfile __APP__/logs/gunicorn-access.log \
+    --error-logfile __APP__/logs/gunicorn-error.log \
+    murphys_bench.wsgi:application
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

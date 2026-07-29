@@ -3,7 +3,7 @@
 # Run by murphys-bench-disk-check.timer. Usage: mb_disk_check.sh [threshold%]
 set -euo pipefail
 
-APP=/opt/murphys-bench
+APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 THRESHOLD="${1:-85}"
 USE="$(df --output=pcent / | tail -1 | tr -dc '0-9')"
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-command restore for Murphy's Bench, from a backup tarball produced by mb_backup.sh.
 #
-#   scripts/restore.sh /opt/murphys-bench/backups/mb-backup-YYYYMMDD-HHMMSS.tar.gz
+#   scripts/restore.sh backups/mb-backup-YYYYMMDD-HHMMSS.tar.gz
 #   scripts/restore.sh <tarball> --with-env     # also restore the bundled .env (fresh-box DR)
 #
 # Restores the SQLite database + protected/ (attachments) + media/. By DEFAULT it does
@@ -11,14 +11,14 @@
 #
 # Before swapping anything in, it (1) integrity-checks the restored DB and (2) snapshots
 # the CURRENT db/protected/media/.env to backups/pre-restore-<ts>/ — so the restore is
-# itself reversible. Run as the app user (scs-tech). The only privileged step is the
+# itself reversible. Run as the app user. The only privileged step is the
 # service stop/start (already passwordless for this unit).
 #
 # Automation hook: set RESTORE_YES=1 to skip the interactive confirmation (used by
 # update.sh's rollback path).
 set -euo pipefail
 
-APP=/opt/murphys-bench
+APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$APP"
 
 log()  { echo "$(date '+%F %T') restore: $*"; }
