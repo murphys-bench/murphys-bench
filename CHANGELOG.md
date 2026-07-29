@@ -46,6 +46,14 @@ the Unreleased entries move under that version and prod gets a single update.
   green run of this script is now the release gate.
 - Two tests that fail if a script or unit file starts hardcoding an install path or user
   again, so the regression can't return between clean-room runs.
+- **`update.sh` now reports an incomplete install instead of leaving you to find out.**
+  Updating an install made before this release does not repair it: the background jobs
+  still aren't installed and the stylesheet permissions still aren't set, and `update.sh`
+  can't fix either itself because it deliberately holds no sudo beyond restarting the
+  service. So it checks after the restart and says plainly what is broken, in terms of what
+  stops working rather than unit names, with the single command that fixes it
+  (`scripts/install.sh`, safe to re-run over an existing install). It never fails the
+  update over this.
 
 ## v0.4.51 — 2026-07-27
 
