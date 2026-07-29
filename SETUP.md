@@ -191,7 +191,20 @@ See `deploy/README.md` for timer installation and verification.
 
 ## 10. Create Test Data
 
-Before entering real client information, create enough fake data to test the main workflows:
+The fastest way is one command, which creates a coherent set (two business
+clients, one residential, contacts, devices, an open ticket, a ticket converted to
+a work order with priced labour and parts, a managed contract, and a counter sale):
+
+```bash
+venv/bin/python manage.py seed_demo_data
+```
+
+Everything it creates is unmistakably fake — `example.com` addresses, `555` phone
+numbers, invented business names. It refuses to run on an install that looks real
+(`DEBUG=False`) or one that already has clients, so it cannot pollute live data;
+`--force` overrides that if your test box genuinely looks like production.
+
+To do it by hand instead, create enough fake data to test the main workflows:
 
 1. Create one residential client and one business client.
 2. Add at least one contact and device to each.

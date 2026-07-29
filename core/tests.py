@@ -8774,3 +8774,97 @@ def test_unit_templates_are_templates_not_baked_for_one_box():
     assert not unsubstituted, (
         f'unit templates reference no __APP__ placeholder: {unsubstituted}'
     )
+
+
+# ══ seed_demo_data — fake demo/evaluation data ══════════════════════════════
+
+@pytest.mark.django_db
+def test_seed_demo_data_creates_a_coherent_workflow(settings):
+    """One command must replace SETUP.md §10's 8-step manual checklist, and the
+    result has to exercise the actual spine — a converted ticket with a work order
+    carrying priced lines — not just isolated rows."""
+    from django.core.management import call_command
+    from core.models import Client, Contract, Device, LineItem, Sale
+    settings.DEBUG = True
+
+    call_command('seed_demo_data', verbosity=0)
+
+    real = Client.objects.filter(is_unsorted=False)   # the system Unsorted bucket
+    assert real.filter(client_type='business').count() == 2   # is residential-typed
+    assert real.filter(client_type='residential').count() == 1
+    # The spine: a ticket converted to a work order.
+    wo = WorkOrder.objects.get(ticket__isnull=False)
+    assert wo.ticket.status == 'converted'
+    assert wo.line_items_total > 0
+    # A standalone WO too — work does not always arrive as a ticket.
+    assert WorkOrder.objects.filter(ticket__isnull=True).exists()
+    # Managed lane and counter lane both represented.
+    assert Contract.objects.filter(status='active').exists()
+    assert Sale.objects.filter(client__isnull=True).exists()
+    # The encrypted-credential path is exercised.
+    assert Device.objects.exclude(device_password='').exists()
+    assert LineItem.objects.filter(kind='part').exists()
+
+
+@pytest.mark.django_db
+def test_seed_demo_data_refuses_on_a_production_install(settings):
+    """DEBUG=False means this looks like a real install. Fake client records mixed
+    into a real client list have to be cleaned up by hand, so refuse."""
+    from django.core.management import call_command
+    from django.core.management.base import CommandError
+    from core.models import Client
+    settings.DEBUG = False
+
+    with pytest.raises(CommandError, match='DEBUG=False'):
+        call_command('seed_demo_data', verbosity=0)
+    assert not Client.objects.filter(is_unsorted=False).exists()
+
+
+@pytest.mark.django_db
+def test_seed_demo_data_refuses_when_clients_already_exist(settings, client_obj):
+    """Second guard, independent of DEBUG: never interleave demo records with data
+    that is already here. reset_operational_data is the way to clear a test box."""
+    from django.core.management import call_command
+    from django.core.management.base import CommandError
+    settings.DEBUG = True
+
+    with pytest.raises(CommandError, match='already exist'):
+        call_command('seed_demo_data', verbosity=0)
+
+
+@pytest.mark.django_db
+def test_seed_demo_data_force_overrides_both_guards(settings, client_obj):
+    """--force is the documented escape hatch for a box that genuinely is a test
+    box but does not look like one."""
+    from django.core.management import call_command
+    from core.models import Client
+    settings.DEBUG = False
+
+    call_command('seed_demo_data', '--force', verbosity=0)
+    assert Client.objects.count() > 1
+
+
+@pytest.mark.django_db
+def test_seeded_data_is_unmistakably_fake(settings):
+    """MB is public and this data lands on demo boxes other people see. The July
+    2026 hygiene pass had to scrub real prod IPs and a real name out of test
+    fixtures; this locks the conventions so it cannot happen again.
+
+    RFC 2606 reserves example.com/.org; 555 is reserved for fiction.
+    """
+    from django.core.management import call_command
+    from core.models import Client, Contact
+    settings.DEBUG = True
+    call_command('seed_demo_data', verbosity=0)
+
+    for email in list(Client.objects.exclude(email='').values_list('email', flat=True)) + \
+                 list(Contact.objects.exclude(email='').values_list('email', flat=True)):
+        assert email.endswith(('example.com', 'example.org')), email
+
+    for phone in list(Client.objects.exclude(phone='').values_list('phone', flat=True)) + \
+                 list(Contact.objects.exclude(phone='').values_list('phone', flat=True)):
+        assert '555' in phone, phone
+
+    # No real internal addresses may ever appear in seeded records.
+    blob = ' '.join(Client.objects.values_list('address_line1', flat=True))
+    assert '10.58.' not in blob
