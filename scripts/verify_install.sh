@@ -118,7 +118,10 @@ fi
 
 # The login page must actually reference a stylesheet that resolves. This is the
 # check that maps directly to what the tester saw: a readable page, no styling.
-login_html="$(curl -s http://127.0.0.1/accounts/login/ 2>/dev/null || true)"
+# Reached by following the redirect from /, rather than by naming a login URL —
+# the URL is two_factor's and has moved before, and a hardcoded path here fails
+# as a 404 that looks exactly like the styling bug it is meant to detect.
+login_html="$(curl -sL http://127.0.0.1/ 2>/dev/null || true)"
 ref="$(printf '%s' "$login_html" | grep -o '/static/[^"'"'"']*\.css' | head -1 || true)"
 if [ -z "$ref" ]; then
     bad "login page references no stylesheet"
@@ -131,9 +134,17 @@ else
     fi
 fi
 
-head_ "In-app 'Back up now' actually produces a backup"
+head_ "In-app 'Back up now' reaches the backup script"
 # Drive the real mechanism the button uses: drop the trigger file and let the
 # .path unit take it from there. Nothing else in the test suite exercises this.
+#
+# What is under test is that SOMETHING CONSUMES THE TRIGGER. That is the defect
+# this release fixes: the file was written and no unit existed to act on it, so
+# the UI spun forever. Whether the backup then succeeds depends on the admin
+# having configured a destination, which a fresh box has not — mb_backup.sh
+# refusing with "no backup destination configured" is correct fail-loud
+# behaviour and must not be reported as an install failure. Only a run that
+# never starts, or one that fails for any OTHER reason, is a defect here.
 before="$(ls -1 "$APP"/backups/*.tar.gz 2>/dev/null | wc -l | tr -d ' ')"
 rm -f "$APP/logs/backup-status.json"
 touch "$APP/logs/backup-trigger"
@@ -143,14 +154,24 @@ for _ in $(seq 1 60); do
     sleep 2
 done
 after="$(ls -1 "$APP"/backups/*.tar.gz 2>/dev/null | wc -l | tr -d ' ')"
+log_tail="$(tail -5 "$APP/logs/backup.log" 2>/dev/null || true)"
 case "${state:-}" in
-    succeeded) if [ "$after" -gt "$before" ]; then
-                   ok "backup ran on demand and wrote an archive"
-               else
-                   bad "backup reported success but produced no archive"
-               fi ;;
-    failed)    bad "on-demand backup ran and FAILED — see logs/backup.log" ;;
-    *)         bad "on-demand backup never started (still '${state:-queued}' after 120s)
+    succeeded)
+        if [ "$after" -gt "$before" ]; then
+            ok "backup ran on demand and wrote an archive"
+        else
+            bad "backup reported success but produced no archive"
+        fi ;;
+    failed)
+        # Distinguish the one expected failure on an unconfigured box from a real one.
+        if printf '%s' "$log_tail" | grep -q 'no backup destination configured'; then
+            ok "trigger consumed and mb_backup.sh ran (correctly refused: no destination configured yet)"
+        else
+            bad "on-demand backup ran and FAILED for a real reason:
+$(printf '%s' "$log_tail" | sed 's/^/        /')"
+        fi ;;
+    *)
+        bad "on-demand backup never started (still '${state:-queued}' after 120s)
         This is the tester-reported bug: the trigger file is written and nothing
         consumes it. Check: systemctl status murphys-bench-backup-now.path" ;;
 esac
