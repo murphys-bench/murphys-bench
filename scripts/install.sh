@@ -183,6 +183,17 @@ SESSION_COOKIE_SECURE=False
 CSRF_COOKIE_SECURE=False
 SECURE_HSTS_SECONDS=0
 # CSRF_TRUSTED_ORIGINS=https://your.hostname
+
+# Reverse-proxy trust — OFF, matching this direct-access LAN install.
+# X-Forwarded-Proto / X-Forwarded-Host are forgeable by anyone who can reach the
+# app port directly, so MB does not trust them unless you say so. Turn this ON
+# only when a proxy YOU control (Cloudflare Tunnel, nginx, Caddy) sits in front
+# and overwrites those headers. See docs/deployment-tls.md.
+TRUST_PROXY_HEADERS=False
+
+# Content-Security-Policy is ENFORCING by default (settings.py). Nothing to set
+# here. If a deployment genuinely breaks, set CSP_REPORT_ONLY=True to fall back to
+# report-only (violations still log to /csp-report/) and report the breakage.
 ENVEOF
     chmod 600 .env
     log ".env created (chmod 600)"

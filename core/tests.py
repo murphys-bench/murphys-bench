@@ -9234,3 +9234,39 @@ def test_admin_otp_lockout_recovery_drill(client):
     session['otp_device_id'] = str(new_device.persistent_id)
     session.save()
     assert client.get('/admin/').status_code == 200
+
+
+# ── Shipped security defaults (July 2026 review, slice 2) ───────────────────
+#
+# These assert what a STRANGER gets after scripts/install.sh, not what the
+# author's two boxes have in their .env. Both of these were correct in the
+# author's deployment and wrong as shipped defaults, which is the whole finding.
+
+def test_csp_ships_enforcing_not_report_only():
+    """CSP defaulted to report-only, so it enforced nothing on every install except
+    the two whose .env said otherwise — the author's. A header that protects only
+    its author is not a shipped control."""
+    from django.conf import settings
+    assert settings.CSP_REPORT_ONLY is False
+    assert "default-src 'self'" in settings.CSP_POLICY
+    assert "frame-ancestors 'none'" in settings.CSP_POLICY
+
+
+def test_proxy_header_trust_is_off_by_default():
+    """X-Forwarded-Proto/Host are forgeable by anyone who can reach the app port.
+    Trusting them unconditionally let an unproxied deployment believe an
+    attacker-supplied Host, poisoning absolute URLs in outbound email."""
+    from django.conf import settings
+    assert settings.TRUST_PROXY_HEADERS is False
+    assert getattr(settings, 'SECURE_PROXY_SSL_HEADER', None) is None
+    assert getattr(settings, 'USE_X_FORWARDED_HOST', False) is False
+
+
+def test_installer_writes_both_security_defaults_explicitly():
+    """The installer must state these in the generated .env rather than leaning on a
+    settings default a later release could change underneath an existing install —
+    the same reasoning as the explicit cookie flags already there."""
+    from pathlib import Path
+    installer = (Path(__file__).resolve().parent.parent / 'scripts' / 'install.sh').read_text()
+    assert 'TRUST_PROXY_HEADERS=False' in installer
+    assert 'CSP_REPORT_ONLY' in installer
