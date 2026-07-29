@@ -429,10 +429,19 @@
         {% endif %}
 
         {% comment %}
-        Account Security is deliberately NOT in the sidebar. It lives in
-        Settings → Access & Security (admin section) per Mike's call, July 29 2026:
-        backup codes are an administrative capability, not a per-employee one.
+        Account Security (the two_factor profile page) is deliberately NOT in the
+        sidebar and is admin-only: it carries backup codes and Disable 2FA. Admins
+        reach it via Settings → Access & Security. Employees get their own read-only
+        status page here instead, so they see nothing from the admin back end.
+        Mike's call, July 29 2026.
         {% endcomment %}
+        {% if not is_admin %}
+        <a href="{% url 'core:my_security' %}" title="My Security — two-factor status"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-base transition-colors hover:bg-white/10"
+           style="opacity:0.75">
+            {% icon 'lock-closed' 5 %}<span class="nav-label">My Security</span>
+        </a>
+        {% endif %}
         <a href="{% url 'accounts:logout' %}" title="Log Out"
            class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-base transition-colors hover:bg-white/10"
            style="opacity:0.75">

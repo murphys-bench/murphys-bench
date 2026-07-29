@@ -24,8 +24,9 @@
                 <div class="flex flex-wrap gap-3 mt-4">
                     {% comment %}
                     Backup codes are admin-only, enforced in AdminOnlyBackupTokensView.
-                    Hidden rather than shown-and-403'd so a tech is not offered a
-                    control they cannot use. The view is the gate; this is cosmetic.
+                    This whole page is admin-only too (AdminOnlyProfileView), so this
+                    guard is defence in depth rather than the gate — it keeps the
+                    button correct if the page is ever opened up again.
                     {% endcomment %}
                     {% if is_admin %}
                     <a href="{% url 'two_factor:backup_tokens' %}"

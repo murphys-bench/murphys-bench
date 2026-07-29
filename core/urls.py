@@ -199,6 +199,9 @@ urlpatterns = [
     path('contacts/<int:pk>/set-primary/', views.ContactSetPrimaryView.as_view(), name='contact_set_primary'),
 
     # Native Settings UI
+    # An employee's own 2FA status. Separate from the admin Account Security page
+    # (two_factor:profile), which carries backup codes and Disable 2FA.
+    path('my-security/', views.MySecurityView.as_view(), name='my_security'),
     path('settings/', views.SettingsView.as_view(), name='settings'),
     path('settings/test-outbound-email/', views.EmailTestOutboundView.as_view(), name='settings_test_outbound'),
     path('settings/suppressed-addresses/add/', views.SuppressedAddressAddView.as_view(), name='suppressed_address_add'),

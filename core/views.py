@@ -8,6 +8,8 @@ from django.views import View
 from django.views.generic import ListView, DetailView, CreateView, UpdateView
 from django.contrib.auth.mixins import LoginRequiredMixin
 from two_factor.views import BackupTokensView as TwoFactorBackupTokensView
+from two_factor.views import ProfileView as TwoFactorProfileView
+from two_factor.views import DisableView as TwoFactorDisableView
 from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
 from django.urls import reverse, reverse_lazy
@@ -8365,3 +8367,51 @@ class AdminOnlyBackupTokensView(TwoFactorBackupTokensView):
         if request.user.is_authenticated and not _is_admin(request.user):
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
+
+
+class _AdminOnlyTwoFactorMixin:
+    """Restricts a two_factor page to admins.
+
+    Employees must see nothing in the admin back end (Mike, July 29 2026). The
+    stock two_factor profile page is an admin-section page: it exposes backup codes
+    and Disable 2FA. Employees get MySecurityView instead, which shows their own
+    2FA state and nothing else.
+
+    ⚠ These overrides only take effect while their routes are registered AHEAD of
+    two_factor's urlpatterns in murphys_bench/urls.py. First match wins, so losing
+    that ordering silently restores upstream's ungated views.
+    """
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _is_admin(request.user):
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+
+class AdminOnlyProfileView(_AdminOnlyTwoFactorMixin, TwoFactorProfileView):
+    """Account Security (admin). Employees are sent to MySecurityView."""
+
+
+class AdminOnlyDisableView(_AdminOnlyTwoFactorMixin, TwoFactorDisableView):
+    """Turning 2FA off is an administrative act, never self-service."""
+
+
+class MySecurityView(LoginRequiredMixin, View):
+    """An employee's own two-factor status. Read-only by design.
+
+    Deliberately NOT the two_factor profile page: that one carries backup codes and
+    a Disable 2FA button, both of which are admin-only here. This page reports state
+    and points at the enrolment wizard when there is nothing enrolled yet. Recovery
+    after a lost authenticator is an admin reset (`manage.py reset_mfa` or the web
+    reset), which leaves an MFAResetLog entry — that accountability is the whole
+    reason self-service is not offered.
+    """
+
+    def get(self, request):
+        from django_otp import devices_for_user
+        devices = list(devices_for_user(request.user))
+        return render(request, 'core/account_security.html', {
+            'devices': devices,
+            'has_device': bool(devices),
+            'mfa_required': SiteSettings.get().require_mfa,
+        })

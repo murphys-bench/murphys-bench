@@ -9098,18 +9098,139 @@ def test_backup_tokens_allowed_for_admin(client, admin_user):
     assert client.get(reverse('two_factor:backup_tokens')).status_code == 200
 
 
-@pytest.mark.django_db
-def test_backup_tokens_button_hidden_from_non_admin(client, db):
-    """Cosmetic companion to the view gate: do not offer a control that 403s."""
-    from django_otp.plugins.otp_totp.models import TOTPDevice
+# NOTE: the old test_backup_tokens_button_hidden_from_non_admin was removed here,
+# superseded by test_two_factor_profile_and_disable_are_admin_only below: the whole
+# profile page is now 403 for employees, so there is no page on which to hide a
+# button. The template guard is kept as defence in depth, not as the gate.
+
+
+# ── Employees see nothing from the admin back end (Mike, July 29 2026) ──────
+
+@pytest.fixture
+def enrolled_tech(db):
+    """A non-admin with a confirmed authenticator and a verified session."""
     from core.models import Role
-    role = Role.objects.create(name='ProfileTech')
-    tech = User.objects.create_user(username='profiletech', password='x', role_obj=role)
-    device = TOTPDevice.objects.create(user=tech, name='d', confirmed=True)
-    client.force_login(tech)
+    role = Role.objects.create(name='SecTech')
+    return User.objects.create_user(username='sectech', password='x', role_obj=role)
+
+
+def _verify(client, user):
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    device = TOTPDevice.objects.create(user=user, name='Authenticator', confirmed=True)
+    client.force_login(user)
     session = client.session
     session['otp_device_id'] = str(device.persistent_id)
     session.save()
-    resp = client.get(reverse('two_factor:profile'))
+    return device
+
+
+@pytest.mark.django_db
+def test_two_factor_profile_and_disable_are_admin_only(client, enrolled_tech):
+    """The stock two_factor profile page is an admin-section page: it carries backup
+    codes and Disable 2FA. Employees must not reach it at all — they get
+    core:my_security. Guards the URL overrides in murphys_bench/urls.py; if those
+    stop being registered ahead of two_factor's include, upstream's ungated views
+    silently take over and this fails."""
+    _verify(client, enrolled_tech)
+    assert client.get(reverse('two_factor:profile')).status_code == 403
+    assert client.get(reverse('two_factor:disable')).status_code == 403
+
+
+@pytest.mark.django_db
+def test_admin_can_still_reach_account_security(client, admin_user):
+    _verify(client, admin_user)
+    assert client.get(reverse('two_factor:profile')).status_code == 200
+
+
+@pytest.mark.django_db
+def test_employee_security_page_shows_status_without_admin_controls(client, enrolled_tech):
+    """My Security reports state and offers nothing administrative: no backup codes,
+    no disable. Recovery is an admin reset, which leaves an MFAResetLog entry."""
+    _verify(client, enrolled_tech)
+    resp = client.get(reverse('core:my_security'))
+    body = resp.content.decode()
     assert resp.status_code == 200
-    assert reverse('two_factor:backup_tokens').encode() not in resp.content
+    assert 'Two-factor authentication is on' in body
+    assert reverse('two_factor:backup_tokens') not in body
+    assert reverse('two_factor:disable') not in body
+    assert reverse('two_factor:profile') not in body
+
+
+@pytest.mark.django_db
+def test_employee_security_page_offers_setup_when_unenrolled(client, enrolled_tech):
+    client.force_login(enrolled_tech)
+    resp = client.get(reverse('core:my_security'))
+    assert resp.status_code == 200
+    assert 'not set up' in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_sidebar_shows_my_security_to_employees_only(client, client_obj, enrolled_tech, admin_user):
+    """Employees get My Security in the sidebar; admins use Settings → Account
+    Security, so the sidebar entry would be a second door to a different page."""
+    _verify(client, enrolled_tech)
+    tech_body = client.get(reverse('core:dashboard')).content.decode()
+    assert reverse('core:my_security') in tech_body
+
+    client.logout()
+    _verify(client, admin_user)
+    admin_body = client.get(reverse('core:dashboard')).content.decode()
+    assert reverse('core:my_security') not in admin_body
+
+
+@pytest.mark.django_db
+def test_admin_otp_lockout_recovery_drill(client):
+    """END-TO-END: lose the authenticator, get locked out of /admin/, recover.
+
+    Kept as a test rather than a one-off script because this is the ONLY way back
+    into an OTP-required admin, so it has to keep working. Proves the full path
+    Mike approved on July 29 2026 before the unconditional admin-OTP gate shipped.
+    """
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    from django_otp import devices_for_user
+    from core.models import MFAResetLog
+    from django.core.management import call_command
+
+    admin = User.objects.create_user(username='drilladmin', password='x',
+                                     is_staff=True, is_superuser=True)
+
+    # 1. Enrolled and OTP-verified: admin works.
+    device = TOTPDevice.objects.create(user=admin, name='Bitwarden', confirmed=True)
+    client.force_login(admin)
+    session = client.session
+    session['otp_device_id'] = str(device.persistent_id)
+    session.save()
+    assert client.get('/admin/').status_code == 200
+
+    # 2. Authenticator lost — the device row still exists, but no session can be
+    #    verified against it. Admin is closed.
+    client.logout()
+    client.force_login(admin)  # password-only
+    assert client.get('/admin/').status_code == 302
+
+    # 3. No self-rescue: backup codes need a verified session too.
+    assert client.get(reverse('two_factor:backup_tokens')).status_code == 302
+
+    # 4. The recovery: the real management command, run on the box. Clears devices
+    #    and writes an audit record stamped with the shell identity.
+    before = MFAResetLog.objects.count()
+    call_command('reset_mfa', 'drilladmin', '--note', 'drill: lost authenticator')
+    assert list(devices_for_user(admin)) == []
+    assert MFAResetLog.objects.count() == before + 1
+    assert MFAResetLog.objects.latest('id').source == 'cli'
+
+    # 5. With no device, /admin/ now routes to ENROLMENT rather than looping.
+    client.logout()
+    client.force_login(admin)
+    resp = client.get('/admin/login/')
+    assert resp.status_code == 302
+    assert 'two_factor/setup' in resp['Location']
+
+    # 6. Re-enrol -> access restored.
+    new_device = TOTPDevice.objects.create(user=admin, name='Bitwarden (new)', confirmed=True)
+    client.logout()
+    client.force_login(admin)
+    session = client.session
+    session['otp_device_id'] = str(new_device.persistent_id)
+    session.save()
+    assert client.get('/admin/').status_code == 200
