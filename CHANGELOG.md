@@ -20,17 +20,24 @@ the Unreleased entries move under that version and prod gets a single update.
   that nothing ever picked up, so they spun forever and survived a reboot; **scheduled
   backups never ran at all**; inbound email polling and SLA checks never ran. Nothing
   reported any of it. If you installed Murphy's Bench with `scripts/install.sh` before this
-  release, **you have had no working backups** — re-run `scripts/install_units.sh` (or
-  `scripts/install.sh`) and confirm with `systemctl list-units 'murphys-bench-*'`.
+  release, **you have had no working backups.**
+
+  **To pick this release up, run `git pull && scripts/install.sh`, not the in-app Update
+  button.** On the version you are coming from, the updater is itself one of the broken
+  scripts: outside `/opt` it dies looking for a directory that isn't there and leaves the
+  request file behind, so the button spins forever. It works normally from this release on.
+  `scripts/install.sh` is safe to re-run over an existing install and repairs both the
+  missing services and the file permissions. Confirm with
+  `systemctl list-units 'murphys-bench-*'`.
 
   Scripts now derive their location from where they actually are. The unit files in
   `deploy/` became templates rendered per-install by the new `scripts/install_units.sh`,
-  which `install.sh` runs — so there is no path or username left to keep in sync by hand.
+  which `install.sh` runs, so there is no path or username left to keep in sync by hand.
 - **`scripts/install.sh` installs every unit, not just gunicorn.** It previously installed
   the web server and listed the timers as "optional next steps," which is what let the gap
-  survive review — they are not optional, they are the entire background-jobs layer.
+  survive review. They are not optional. They are the entire background-jobs layer.
 - **The login page renders styled on installs outside `/opt`.** nginx serves static files
-  as `www-data`, and Ubuntu has created home directories mode 750 since 21.04 — so an
+  as `www-data`, and Ubuntu has created home directories mode 750 since 21.04, so an
   install under `~` produced a working login form with every stylesheet and image failing
   to load, which looks like broken software rather than a permissions problem. The
   installer now grants the web server traverse permission and **verifies a real stylesheet
@@ -38,12 +45,12 @@ the Unreleased entries move under that version and prod gets a single update.
   `collectstatic`, so a later release can't quietly undo it.
 
 ### Added
-- **`scripts/verify_install.sh` — a clean-room install gate.** Run it on a throwaway VM
+- **`scripts/verify_install.sh`, a clean-room install gate.** Run it on a throwaway VM
   after `install.sh` and it asserts the features actually work: static files are served,
-  every unit is installed and running, and **Back up now** really produces a backup
-  archive. Every check that existed before this verified the *code* — pytest runs Django
-  in-process and can't see systemd, nginx, or file permissions — so everything past that
-  boundary had only ever been validated by hand on boxes that were set up by hand. That is
+  every unit is installed and running, and **Back up now** really reaches the backup
+  script. Every check that existed before this verified the *code*. pytest runs Django
+  in-process and cannot see systemd, nginx, or file permissions, so everything past that
+  boundary had only ever been validated by hand, on boxes that were set up by hand. That is
   why this class of bug reached a tester before it reached us. A green pytest run plus a
   green run of this script is now the release gate.
 - Two tests that fail if a script or unit file starts hardcoding an install path or user
