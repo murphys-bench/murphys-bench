@@ -142,12 +142,30 @@ Murphy's Bench requires Python 3.10 or later.
 
 ### 2. Create the Application Directory
 
+Murphy's Bench runs from wherever you clone it. There is no required location. The
+installer puts it in whatever directory you run it from, and the systemd units are
+generated against that path, so a home-directory install and an `/opt` install are equally
+supported.
+
+Pick a directory and clone into it:
+
+```bash
+git clone <REPO_URL> ~/murphys-bench
+cd ~/murphys-bench
+```
+
+If you would rather keep it under `/opt`, that works too and needs one extra step to give
+your user ownership:
+
 ```bash
 sudo mkdir -p /opt/murphys-bench
 sudo chown "$USER":"$USER" /opt/murphys-bench
 git clone <REPO_URL> /opt/murphys-bench
 cd /opt/murphys-bench
 ```
+
+The rest of this guide writes the install directory as `<app-dir>`. Substitute whichever
+path you chose.
 
 The application should run as a normal system user, not as `root`.
 
@@ -234,11 +252,11 @@ After=network.target
 [Service]
 User=<application-user>
 Group=<application-user>
-WorkingDirectory=/opt/murphys-bench
-ExecStart=/opt/murphys-bench/venv/bin/gunicorn --workers 3 \
+WorkingDirectory=<app-dir>
+ExecStart=<app-dir>/venv/bin/gunicorn --workers 3 \
     --bind 127.0.0.1:8001 \
-    --access-logfile /opt/murphys-bench/logs/gunicorn-access.log \
-    --error-logfile /opt/murphys-bench/logs/gunicorn-error.log \
+    --access-logfile <app-dir>/logs/gunicorn-access.log \
+    --error-logfile <app-dir>/logs/gunicorn-error.log \
     murphys_bench.wsgi:application
 Restart=always
 RestartSec=3
@@ -266,11 +284,11 @@ server {
     client_max_body_size 50M;
 
     location /static/ {
-        alias /opt/murphys-bench/staticfiles/;
+        alias <app-dir>/staticfiles/;
     }
 
     location /media/ {
-        alias /opt/murphys-bench/media/;
+        alias <app-dir>/media/;
     }
 
     location / {

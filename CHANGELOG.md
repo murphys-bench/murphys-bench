@@ -10,6 +10,21 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+### Fixed
+- **INSTALL.md contradicted itself about where Murphy's Bench goes.** The quick install
+  cloned into whatever directory you were in, while the manual instructions and the sample
+  service file hardcoded `/opt/murphys-bench`. A tester installed to their home directory,
+  which is correct and fully supported, and then had reason to think they had done it wrong.
+  The manual section now states that the location is your choice, shows a home-directory
+  install first with `/opt` as an equally valid alternative, and writes the install path as
+  `<app-dir>` everywhere else instead of naming one specific directory.
+
+### Added
+- **Roadmap: restore from the web interface.** Backups can be run and downloaded from
+  Settings, but restoring one is still a command-line step. A guided restore in the UI is
+  planned; `scripts/restore.sh` stays as the disaster-recovery path.
+- **Roadmap: calendar and scheduling**, under Considering. Requested by a tester.
+
 ## v0.4.52 — 2026-07-28
 
 ### Fixed

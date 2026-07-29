@@ -18,6 +18,11 @@ actually use this is what decides what gets built next.
   counter sales from the Register don't appear in any report yet.
 - **Design and UI consistency.** A page-by-page pass so every screen uses the same header,
   search, and card patterns.
+- **Restore from the web interface.** Backups can be run and downloaded from Settings today,
+  but restoring one is a command-line step. The plan is a guided restore in the UI that lists
+  your backups by date, says plainly what will be replaced, and requires a typed confirmation.
+  The command-line restore stays, because a machine that won't boot can't serve a web page:
+  the UI covers "undo a bad day," the CLI covers disaster recovery.
 - **Documentation.** Filling the gaps between "it installed" and "I know how to run it."
 
 ## Considering
@@ -32,6 +37,8 @@ building — not that it's scheduled.
   work order today, but nothing tracks what's on the shelf.
 - **Billing backends other than Invoice Ninja.** The integration already sits behind a seam
   so another backend can be added without touching the rest of the app.
+- **Calendar and scheduling.** A shop view of what's booked: appointments, promised-by dates,
+  and on-site visits. Requested by a tester; nothing designed yet.
 - **Deeper management and reporting tools.**
 - **SMS notifications.**
 - **Testing across a wider range of shops and workflows.** The most valuable thing on this
