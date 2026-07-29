@@ -164,6 +164,35 @@ def _can_reset_mfa(user):
     return user.is_superuser or user.has_perm_flag('can_reset_user_mfa')
 
 
+class SettingsAdminMixin(LoginRequiredMixin):
+    """The single administrative gate for everything under /settings/.
+
+    ⚠ EVERY view routed under `settings/` must use this. The Settings PAGE was
+    gated while ~23 directly-routable mutation views under the same prefix were
+    only LoginRequired, so hiding or denying the parent page secured nothing: any
+    logged-in tech could rewrite repair types, KB and canned-response categories,
+    checklist items and the email suppression list by POSTing to the action URL.
+
+    The invariant is deliberately "the whole prefix", not "the sensitive ones",
+    because a per-view judgement call is what drifted in the first place.
+    `test_every_settings_route_is_admin_only` enumerates the URLconf and fails on
+    any settings route that a non-admin can reach, so a new one cannot forget.
+    Genuinely tech-facing endpoints (the canned-response picker used from the work
+    order page) live OUTSIDE the settings prefix rather than being excepted here.
+
+    Exactly ONE view under settings/ deliberately does not use this mixin:
+    OrgCredentialRevealView, whose read is flag-gated by design (see its docstring).
+    It still denies a flag-less tech, so the enumeration test holds. Any *new*
+    exception needs the same standard: a designed capability for non-admins, its own
+    gate, and its own test — not convenience.
+    """
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _is_admin(request.user):
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+
 def _scope_assignable_for(qs, user):
     """Restrict an assignable queryset (Work Orders) for non-admins: they see their
     own assigned items plus the unassigned pool — so they can still claim new work —
@@ -6663,7 +6692,7 @@ def _repair_types_context():
     return {'rt_categories': categories, 'rt_uncategorised': uncategorised}
 
 
-class SuppressedAddressAddView(LoginRequiredMixin, View):
+class SuppressedAddressAddView(SettingsAdminMixin, View):
     def post(self, request):
         if not request.user.is_staff:
             return HttpResponse('Forbidden', status=403)
@@ -6674,7 +6703,7 @@ class SuppressedAddressAddView(LoginRequiredMixin, View):
         return redirect(f"{reverse('core:settings')}?tab=outbound")
 
 
-class SuppressedAddressDeleteView(LoginRequiredMixin, View):
+class SuppressedAddressDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not request.user.is_staff:
             return HttpResponse('Forbidden', status=403)
@@ -6682,18 +6711,43 @@ class SuppressedAddressDeleteView(LoginRequiredMixin, View):
         return redirect(f"{reverse('core:settings')}?tab=outbound")
 
 
-class EmailTestOutboundView(LoginRequiredMixin, View):
-    """HTMX: send a test email using saved SMTP settings."""
+class EmailTestOutboundView(SettingsAdminMixin, View):
+    """HTMX: send a test email using saved SMTP settings.
+
+    ⚠ THE RECIPIENT IS NOT USER-SUPPLIED, deliberately. This view used to accept any
+    address from the browser and send to it using the shop's stored SMTP credentials,
+    which made it an open relay for anyone with a login: a tech (or anyone who got a
+    session) could make the shop's own mail server send to arbitrary addresses, risking
+    the domain's sending reputation and therefore every client email the shop sends.
+    Admin-gating alone would only narrow that; a diagnostic does not need arbitrary
+    recipients at all, so the capability is removed rather than restricted.
+
+    The test goes to the acting admin's own address, falling back to the configured
+    From/username, which is what actually proves outbound works. `_test_recipient`
+    returns None when there is nowhere safe to send.
+    """
+
+    def _test_recipient(self, request, s):
+        """Fixed destination for the test. Never reads the request body."""
+        own = (getattr(request.user, 'email', '') or '').strip()
+        if own:
+            return own
+        return (s.email_from or s.email_username or '').strip() or None
 
     def post(self, request):
         import smtplib, ssl
         from email.mime.text import MIMEText
         s = SiteSettings.get()
-        to_addr = request.POST.get('to', '').strip()
-        if not to_addr:
-            return HttpResponse('<p class="text-red-600 text-sm mt-2">Please enter a recipient address.</p>')
         if not s.email_host or not s.email_username:
-            return HttpResponse('<p class="text-red-600 text-sm mt-2">SMTP settings not configured.</p>')
+            return render(request, 'core/partials/settings_test_result.html',
+                          {'ok': False, 'message': 'SMTP settings are not configured yet.'})
+        to_addr = self._test_recipient(request, s)
+        if not to_addr:
+            return render(request, 'core/partials/settings_test_result.html', {
+                'ok': False,
+                'message': ('No address to test with. Add an email address to your own user '
+                            'account, or set the From address in Outbound Email.'),
+            })
         try:
             msg = MIMEText("This is a test email from Murphy's Bench. Your outbound email is working correctly.")
             msg['Subject'] = "Murphy's Bench — Outbound Email Test"
@@ -6715,19 +6769,28 @@ class EmailTestOutboundView(LoginRequiredMixin, View):
                     if s.email_password:
                         server.login(s.email_username, s.email_password)
                     server.sendmail(msg['From'], [to_addr], msg.as_string())
-            return HttpResponse(f'<p class="text-green-600 text-sm mt-2">✓ Test email sent to {to_addr}.</p>')
+            return render(request, 'core/partials/settings_test_result.html',
+                          {'ok': True, 'message': f'Test email sent to {to_addr}.'})
         except Exception as e:
-            return HttpResponse(f'<p class="text-red-600 text-sm mt-2">✗ Failed: {e}</p>')
+            # The real error goes to the log, not the browser: SMTP failures routinely
+            # carry the server banner, software version and sometimes the login name.
+            logger.warning('Outbound email test failed for host %s: %s', s.email_host, e)
+            return render(request, 'core/partials/settings_test_result.html', {
+                'ok': False,
+                'message': ('Could not send. Check the host, port and credentials in '
+                            'Outbound Email; the full error is in the application log.'),
+            })
 
 
-class EmailTestInboundView(LoginRequiredMixin, View):
+class EmailTestInboundView(SettingsAdminMixin, View):
     """HTMX: test inbound email connection using saved IMAP/POP3 settings."""
 
     def post(self, request):
         import imaplib, poplib, ssl
         s = SiteSettings.get()
         if not s.inbound_host or not s.inbound_username:
-            return HttpResponse('<p class="text-red-600 text-sm mt-2">Inbound settings not configured.</p>')
+            return render(request, 'core/partials/settings_test_result.html',
+                          {'ok': False, 'message': 'Inbound settings are not configured yet.'})
         try:
             if s.inbound_protocol == 'imap':
                 if s.inbound_ssl:
@@ -6738,7 +6801,9 @@ class EmailTestInboundView(LoginRequiredMixin, View):
                 status, msgs = conn.select(s.inbound_folder or 'INBOX', readonly=True)
                 count = msgs[0].decode() if msgs else '?'
                 conn.logout()
-                return HttpResponse(f'<p class="text-green-600 text-sm mt-2">✓ Connected. {count} message(s) in {s.inbound_folder or "INBOX"}.</p>')
+                folder = s.inbound_folder or 'INBOX'
+                return render(request, 'core/partials/settings_test_result.html',
+                              {'ok': True, 'message': f'Connected. {count} message(s) in {folder}.'})
             else:  # pop3
                 if s.inbound_ssl:
                     conn = poplib.POP3_SSL(s.inbound_host, s.inbound_port)
@@ -6748,12 +6813,20 @@ class EmailTestInboundView(LoginRequiredMixin, View):
                 conn.pass_(s.inbound_password)
                 count = len(conn.list()[1])
                 conn.quit()
-                return HttpResponse(f'<p class="text-green-600 text-sm mt-2">✓ Connected. {count} message(s) in mailbox.</p>')
+                return render(request, 'core/partials/settings_test_result.html',
+                              {'ok': True, 'message': f'Connected. {count} message(s) in mailbox.'})
         except Exception as e:
-            return HttpResponse(f'<p class="text-red-600 text-sm mt-2">✗ Failed: {e}</p>')
+            # Logged, not echoed — see EmailTestOutboundView for the reasoning.
+            logger.warning('Inbound email test failed for host %s: %s', s.inbound_host, e)
+            return render(request, 'core/partials/settings_test_result.html', {
+                'ok': False,
+                'message': ('Could not connect. Check the host, port, protocol and '
+                            'credentials in Inbound Email; the full error is in the '
+                            'application log.'),
+            })
 
 
-class InvoiceNinjaTestView(LoginRequiredMixin, View):
+class InvoiceNinjaTestView(SettingsAdminMixin, View):
     """Settings 'Test Connection' — admin only. Hits IN's API and reports back."""
 
     def post(self, request):
@@ -6830,7 +6903,7 @@ def _log_search_context(request):
     return ctx
 
 
-class UpdateStatusView(LoginRequiredMixin, View):
+class UpdateStatusView(SettingsAdminMixin, View):
     """HTMX-polled fragment showing current/available version + last run status.
     Admin only. Polled every few seconds while a run is in progress."""
 
@@ -6840,7 +6913,7 @@ class UpdateStatusView(LoginRequiredMixin, View):
         return render(request, 'core/partials/update_status.html', _update_status_context())
 
 
-class UpdateChangelogView(LoginRequiredMixin, View):
+class UpdateChangelogView(SettingsAdminMixin, View):
     """Read-only view of CHANGELOG.md's section for the latest available release —
     reached from a link on the Settings → Updates card. Admin only, same as the
     other update views. Read directly from that tag's git blob (not the working
@@ -6859,7 +6932,7 @@ class UpdateChangelogView(LoginRequiredMixin, View):
         })
 
 
-class UpdateCheckView(LoginRequiredMixin, View):
+class UpdateCheckView(SettingsAdminMixin, View):
     """Fetch tags from origin so 'available version' is fresh, then re-render the
     status fragment. Admin only. Read-only git — no sudo, no code change."""
 
@@ -6872,7 +6945,7 @@ class UpdateCheckView(LoginRequiredMixin, View):
         return render(request, 'core/partials/update_status.html', _update_status_context())
 
 
-class UpdateTriggerView(LoginRequiredMixin, View):
+class UpdateTriggerView(SettingsAdminMixin, View):
     """Queue an update to the latest release. Drops the trigger file the systemd
     .path unit watches (the actual update runs out-of-band — a web request can't
     restart its own gunicorn). Admin only; refuses if a run is already going."""
@@ -6886,7 +6959,7 @@ class UpdateTriggerView(LoginRequiredMixin, View):
         return render(request, 'core/partials/update_status.html', _update_status_context())
 
 
-class BackupTestView(LoginRequiredMixin, View):
+class BackupTestView(SettingsAdminMixin, View):
     """Settings → Maintenance 'Test destination' — admin only. Probes the onsite
     or offsite backup destination (`which`) and reports back via a flash message."""
 
@@ -6899,7 +6972,7 @@ class BackupTestView(LoginRequiredMixin, View):
         return redirect('/settings/?tab=maintenance')
 
 
-class BackupStatusView(LoginRequiredMixin, View):
+class BackupStatusView(SettingsAdminMixin, View):
     """HTMX-polled fragment showing the last/in-progress backup run. Admin only.
     Polled every few seconds while a run is queued/running."""
 
@@ -6909,7 +6982,7 @@ class BackupStatusView(LoginRequiredMixin, View):
         return render(request, 'core/partials/backup_status.html', _backup_status_context())
 
 
-class BackupRunView(LoginRequiredMixin, View):
+class BackupRunView(SettingsAdminMixin, View):
     """Queue an out-of-band backup run (the actual backup runs via a systemd
     .path unit — a web request must not run the long job in-process). Admin only;
     refuses if a run is already going."""
@@ -6923,16 +6996,19 @@ class BackupRunView(LoginRequiredMixin, View):
         return render(request, 'core/partials/backup_status.html', _backup_status_context())
 
 
-class SettingsView(LoginRequiredMixin, View):
-    """Native settings UI — admin/can_manage_settings only."""
+class SettingsView(SettingsAdminMixin, View):
+    """Native settings UI — admin/can_manage_settings only.
+
+    The gate now comes from SettingsAdminMixin like every other settings route,
+    rather than a hand-rolled per-method check. The old inline version was correct
+    but it was also the reason this page looked gated while 22 sibling action views
+    were not: one page checking for itself proves nothing about the prefix.
+    """
 
     def _check_permission(self, request):
-        if not (request.user.is_staff or (
-            hasattr(request.user, 'role_obj') and request.user.role_obj and
-            request.user.role_obj.can_manage_settings
-        )):
-            from django.core.exceptions import PermissionDenied
-            raise PermissionDenied
+        """Retained as a no-op guard point for the POST handlers that call it.
+        Authorization happens in dispatch() before any handler runs."""
+        return None
 
     def get(self, request):
         self._check_permission(request)
@@ -7086,7 +7162,7 @@ def _kb_categories_context():
     return {'kb_categories': KBCategory.objects.order_by('sort_order', 'name')}
 
 
-class KBCategoryCreateView(LoginRequiredMixin, View):
+class KBCategoryCreateView(SettingsAdminMixin, View):
     def post(self, request):
         name = request.POST.get('name', '').strip()
         desc = request.POST.get('description', '').strip()
@@ -7096,7 +7172,7 @@ class KBCategoryCreateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(KB_CAT_REDIRECT) + KB_CAT_TAB)
 
 
-class KBCategoryUpdateView(LoginRequiredMixin, View):
+class KBCategoryUpdateView(SettingsAdminMixin, View):
     def post(self, request, pk):
         cat = get_object_or_404(KBCategory, pk=pk)
         name = request.POST.get('name', '').strip()
@@ -7107,7 +7183,7 @@ class KBCategoryUpdateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(KB_CAT_REDIRECT) + KB_CAT_TAB)
 
 
-class KBCategoryDeleteView(LoginRequiredMixin, View):
+class KBCategoryDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         cat = get_object_or_404(KBCategory, pk=pk)
         KBArticle.objects.filter(category=cat).update(category=None)
@@ -7115,7 +7191,7 @@ class KBCategoryDeleteView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(KB_CAT_REDIRECT) + KB_CAT_TAB)
 
 
-class RepairTypeCategoryCreateView(LoginRequiredMixin, View):
+class RepairTypeCategoryCreateView(SettingsAdminMixin, View):
     def post(self, request):
         name = request.POST.get('name', '').strip()
         if name:
@@ -7129,7 +7205,7 @@ class RepairTypeCategoryCreateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(REPAIR_TYPES_REDIRECT) + REPAIR_TYPES_TAB)
 
 
-class RepairTypeCategoryDeleteView(LoginRequiredMixin, View):
+class RepairTypeCategoryDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         cat = get_object_or_404(RepairTypeCategory, pk=pk)
         RepairType.objects.filter(category=cat).update(category=None)
@@ -7137,7 +7213,7 @@ class RepairTypeCategoryDeleteView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(REPAIR_TYPES_REDIRECT) + REPAIR_TYPES_TAB)
 
 
-class RepairTypeCategoryReorderView(LoginRequiredMixin, View):
+class RepairTypeCategoryReorderView(SettingsAdminMixin, View):
     def post(self, request, pk):
         direction = request.POST.get('direction')
         cat = get_object_or_404(RepairTypeCategory, pk=pk)
@@ -7156,7 +7232,7 @@ class RepairTypeCategoryReorderView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(REPAIR_TYPES_REDIRECT) + REPAIR_TYPES_TAB)
 
 
-class RepairTypeCreateView(LoginRequiredMixin, View):
+class RepairTypeCreateView(SettingsAdminMixin, View):
     def post(self, request):
         name = request.POST.get('name', '').strip()
         cat_id = request.POST.get('category_id') or None
@@ -7166,7 +7242,7 @@ class RepairTypeCreateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(REPAIR_TYPES_REDIRECT) + REPAIR_TYPES_TAB)
 
 
-class RepairTypeUpdateView(LoginRequiredMixin, View):
+class RepairTypeUpdateView(SettingsAdminMixin, View):
     def post(self, request, pk):
         rt = get_object_or_404(RepairType, pk=pk)
         name = request.POST.get('name', '').strip()
@@ -7179,7 +7255,7 @@ class RepairTypeUpdateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(REPAIR_TYPES_REDIRECT) + REPAIR_TYPES_TAB)
 
 
-class RepairTypeDeleteView(LoginRequiredMixin, View):
+class RepairTypeDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         rt = get_object_or_404(RepairType, pk=pk)
         rt.delete()
@@ -7206,7 +7282,7 @@ def _canned_responses_context():
     return {'cr_streams': cr_streams}
 
 
-class CannedResponseCategoryCreateView(LoginRequiredMixin, View):
+class CannedResponseCategoryCreateView(SettingsAdminMixin, View):
     def post(self, request):
         stream = request.POST.get('stream', 'customer')
         name = request.POST.get('name', '').strip()
@@ -7215,7 +7291,7 @@ class CannedResponseCategoryCreateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(CANNED_REDIRECT) + CANNED_TAB)
 
 
-class CannedResponseCategoryDeleteView(LoginRequiredMixin, View):
+class CannedResponseCategoryDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         cat = get_object_or_404(CannedResponseCategory, pk=pk)
         # reassign orphaned responses to no category before deleting
@@ -7224,7 +7300,7 @@ class CannedResponseCategoryDeleteView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(CANNED_REDIRECT) + CANNED_TAB)
 
 
-class CannedResponseCategoryReorderView(LoginRequiredMixin, View):
+class CannedResponseCategoryReorderView(SettingsAdminMixin, View):
     def post(self, request, pk):
         direction = request.POST.get('direction')
         cat = get_object_or_404(CannedResponseCategory, pk=pk)
@@ -7242,7 +7318,7 @@ class CannedResponseCategoryReorderView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(CANNED_REDIRECT) + CANNED_TAB)
 
 
-class CannedResponseCreateView(LoginRequiredMixin, View):
+class CannedResponseCreateView(SettingsAdminMixin, View):
     def post(self, request):
         stream = request.POST.get('stream', 'customer')
         label = request.POST.get('label', '').strip()
@@ -7258,7 +7334,7 @@ class CannedResponseCreateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(CANNED_REDIRECT) + CANNED_TAB)
 
 
-class CannedResponseUpdateView(LoginRequiredMixin, View):
+class CannedResponseUpdateView(SettingsAdminMixin, View):
     def post(self, request, pk):
         cr = get_object_or_404(CannedResponse, pk=pk)
         label = request.POST.get('label', '').strip()
@@ -7275,7 +7351,7 @@ class CannedResponseUpdateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(CANNED_REDIRECT) + CANNED_TAB)
 
 
-class CannedResponseDeleteView(LoginRequiredMixin, View):
+class CannedResponseDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         cr = get_object_or_404(CannedResponse, pk=pk)
         cr.delete()
@@ -7491,7 +7567,7 @@ def _display_context():
     }
 
 
-class ChecklistItemCreateView(LoginRequiredMixin, View):
+class ChecklistItemCreateView(SettingsAdminMixin, View):
     def post(self, request):
         name = request.POST.get('name', '').strip()
         device_types = request.POST.getlist('device_types')
@@ -7500,7 +7576,7 @@ class ChecklistItemCreateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(CLI_REDIRECT) + CLI_TAB)
 
 
-class ChecklistItemUpdateView(LoginRequiredMixin, View):
+class ChecklistItemUpdateView(SettingsAdminMixin, View):
     def post(self, request, pk):
         item = get_object_or_404(ChecklistItem, pk=pk)
         name = request.POST.get('name', '').strip()
@@ -7514,7 +7590,7 @@ class ChecklistItemUpdateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(CLI_REDIRECT) + CLI_TAB)
 
 
-class ChecklistItemDeleteView(LoginRequiredMixin, View):
+class ChecklistItemDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         item = get_object_or_404(ChecklistItem, pk=pk)
         item.delete()
@@ -7527,7 +7603,7 @@ CRED_REDIRECT = 'core:settings'
 CRED_TAB = '?tab=credentials'
 
 
-class OrgCredentialCreateView(LoginRequiredMixin, View):
+class OrgCredentialCreateView(SettingsAdminMixin, View):
     def post(self, request):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
@@ -7549,7 +7625,7 @@ class OrgCredentialCreateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(CRED_REDIRECT) + CRED_TAB)
 
 
-class OrgCredentialUpdateView(LoginRequiredMixin, View):
+class OrgCredentialUpdateView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
@@ -7569,7 +7645,7 @@ class OrgCredentialUpdateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(CRED_REDIRECT) + CRED_TAB)
 
 
-class OrgCredentialDeleteView(LoginRequiredMixin, View):
+class OrgCredentialDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
@@ -7590,7 +7666,17 @@ def _can_view_org_creds(user):
 
 
 class OrgCredentialRevealView(LoginRequiredMixin, View):
-    """HTMX: return plaintext credential value and log the access."""
+    """HTMX: return plaintext credential value and log the access.
+
+    ⚠ THE ONE DELIBERATE EXCEPTION to the admin-only /settings/ invariant, and it
+    must stay LoginRequiredMixin. The vault's CRUD is admin-only, but *reading* an
+    entry is flag-gated (`can_view_credentials`) with a second tier for entries
+    marked admin_only — the same intentional asymmetry as device credentials: a tech
+    who needs a shared shop password should be able to read it and be logged doing
+    so. Putting this behind SettingsAdminMixin breaks that and is caught by
+    test_org_cred_reveal_allowed_with_flag. A flag-less tech is still denied, which
+    is what test_every_settings_route_is_admin_only asserts.
+    """
     def get(self, request, pk, field):
         from django.core.exceptions import PermissionDenied
         cred = get_object_or_404(OrgCredential, pk=pk)
@@ -7617,19 +7703,28 @@ def _has_device_cred_flag(user):
     return _is_admin(user) or user.has_perm_flag('can_view_device_credentials')
 
 
-def _job_context(request):
+def _job_context(request, device):
     """Resolve the ticket/work order a credential action was performed from.
 
     Returns (ticket, work_order), either or both None. Job context comes from the
     request because credentials live on the Device, which itself has no job.
+
+    ⚠ SECURITY — the job MUST belong to `device`, and that is enforced here rather
+    than in each caller. The reveal gate authorizes on assignment to the supplied
+    job, so an unbound job id let a tech assigned to ANY one job read EVERY device's
+    password by passing their own job id while requesting someone else's device.
+    Both Ticket and WorkOrder carry a device FK, so the relationship is checkable;
+    a job that names a different device (or none) is treated as no context at all,
+    which falls back to the admin-only path. This also keeps the access log honest:
+    a disclosure can never be recorded against an unrelated job.
     """
     ticket = work_order = None
     ticket_id = request.GET.get('ticket') or request.POST.get('ticket')
     wo_id = request.GET.get('wo') or request.POST.get('wo')
     if ticket_id:
-        ticket = Ticket.objects.filter(pk=ticket_id).first()
+        ticket = Ticket.objects.filter(pk=ticket_id, device_id=device.pk).first()
     if wo_id:
-        work_order = WorkOrder.objects.filter(pk=wo_id).first()
+        work_order = WorkOrder.objects.filter(pk=wo_id, device_id=device.pk).first()
     return ticket, work_order
 
 
@@ -7679,11 +7774,14 @@ def _device_cred_context(user, device, ticket=None, work_order=None):
 class DeviceCredentialRevealView(LoginRequiredMixin, View):
     """HTMX: return plaintext device credential value and log the access."""
     def get(self, request, pk, field):
-        ticket, work_order = _job_context(request)
+        # Resolve the REQUESTED device first — the job context is only meaningful
+        # once we know which device it has to belong to. Authorizing before the
+        # device is known is what allowed a cross-device reveal.
+        device = get_object_or_404(Device, pk=pk)
+        ticket, work_order = _job_context(request, device)
         if not _can_reveal_device_creds(request.user, ticket, work_order):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
-        device = get_object_or_404(Device, pk=pk)
         if field == 'username':
             value = device.device_username
         elif field == 'password':
@@ -7704,7 +7802,7 @@ class DeviceCredentialUpdateView(LoginRequiredMixin, View):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         device = get_object_or_404(Device, pk=pk)
-        ticket, work_order = _job_context(request)
+        ticket, work_order = _job_context(request, device)
 
         had_secret = bool((device.device_username or '').strip() or (device.device_password or '').strip())
         device.device_username = request.POST.get('device_username', '').strip()
@@ -7724,7 +7822,7 @@ class DeviceCredentialUpdateView(LoginRequiredMixin, View):
 
 # --- Email Template Manager ---
 
-class EmailTemplateUpdateView(LoginRequiredMixin, View):
+class EmailTemplateUpdateView(SettingsAdminMixin, View):
     """Settings: update a single email template's subject, body, and active state."""
 
     def post(self, request, pk):
@@ -7748,7 +7846,7 @@ def _sig_redirect():
     return reverse('core:settings') + '?tab=email_templates'
 
 
-class EmailSignatureCreateView(LoginRequiredMixin, View):
+class EmailSignatureCreateView(SettingsAdminMixin, View):
     def post(self, request):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
@@ -7763,7 +7861,7 @@ class EmailSignatureCreateView(LoginRequiredMixin, View):
         return redirect(_sig_redirect())
 
 
-class EmailSignatureUpdateView(LoginRequiredMixin, View):
+class EmailSignatureUpdateView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
@@ -7777,7 +7875,7 @@ class EmailSignatureUpdateView(LoginRequiredMixin, View):
         return redirect(_sig_redirect())
 
 
-class EmailSignatureDeleteView(LoginRequiredMixin, View):
+class EmailSignatureDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
@@ -7789,7 +7887,7 @@ class EmailSignatureDeleteView(LoginRequiredMixin, View):
         return redirect(_sig_redirect())
 
 
-class EmailBrandingUpdateView(LoginRequiredMixin, View):
+class EmailBrandingUpdateView(SettingsAdminMixin, View):
     """Settings: outgoing-email header color + logo (Email Templates tab)."""
 
     def post(self, request):
@@ -7808,7 +7906,7 @@ class EmailBrandingUpdateView(LoginRequiredMixin, View):
         return redirect(reverse('core:settings') + '?tab=email_templates')
 
 
-class SLADefaultsUpdateView(LoginRequiredMixin, View):
+class SLADefaultsUpdateView(SettingsAdminMixin, View):
     """Settings: client-type default SLA (SLA Plans tab)."""
 
     def post(self, request):
@@ -7832,7 +7930,7 @@ STATUS_REDIRECT = 'core:settings'
 STATUS_TAB = '?tab=statuses'
 
 
-class StatusDefinitionCreateView(LoginRequiredMixin, View):
+class StatusDefinitionCreateView(SettingsAdminMixin, View):
     def post(self, request):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
@@ -7851,7 +7949,7 @@ class StatusDefinitionCreateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(STATUS_REDIRECT) + STATUS_TAB)
 
 
-class StatusDefinitionUpdateView(LoginRequiredMixin, View):
+class StatusDefinitionUpdateView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
@@ -7865,7 +7963,7 @@ class StatusDefinitionUpdateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(STATUS_REDIRECT) + STATUS_TAB)
 
 
-class StatusDefinitionDeleteView(LoginRequiredMixin, View):
+class StatusDefinitionDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
@@ -7884,7 +7982,7 @@ class StatusDefinitionDeleteView(LoginRequiredMixin, View):
 # Blocked Senders (inbound email filter)
 # ---------------------------------------------------------------------------
 
-class BlockedSenderAddView(LoginRequiredMixin, View):
+class BlockedSenderAddView(SettingsAdminMixin, View):
     def post(self, request):
         if not _is_admin(request.user):
             return HttpResponse('Forbidden', status=403)
@@ -7895,7 +7993,7 @@ class BlockedSenderAddView(LoginRequiredMixin, View):
         return redirect(f"{reverse('core:settings')}?tab=inbound")
 
 
-class BlockedSenderDeleteView(LoginRequiredMixin, View):
+class BlockedSenderDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             return HttpResponse('Forbidden', status=403)
@@ -7911,7 +8009,7 @@ _SLA_REDIRECT = 'core:settings'
 _SLA_TAB = '?tab=sla_plans'
 
 
-class SLAPlanCreateView(LoginRequiredMixin, View):
+class SLAPlanCreateView(SettingsAdminMixin, View):
     def post(self, request):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied; raise PermissionDenied
@@ -7934,7 +8032,7 @@ class SLAPlanCreateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(_SLA_REDIRECT) + _SLA_TAB)
 
 
-class SLAPlanUpdateView(LoginRequiredMixin, View):
+class SLAPlanUpdateView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied; raise PermissionDenied
@@ -7951,7 +8049,7 @@ class SLAPlanUpdateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(_SLA_REDIRECT) + _SLA_TAB)
 
 
-class SLAPlanDeleteView(LoginRequiredMixin, View):
+class SLAPlanDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied; raise PermissionDenied
@@ -7971,7 +8069,7 @@ _HT_REDIRECT = 'core:settings'
 _HT_TAB = '?tab=help_topics'
 
 
-class HelpTopicCreateView(LoginRequiredMixin, View):
+class HelpTopicCreateView(SettingsAdminMixin, View):
     def post(self, request):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied; raise PermissionDenied
@@ -7995,7 +8093,7 @@ class HelpTopicCreateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(_HT_REDIRECT) + _HT_TAB)
 
 
-class HelpTopicUpdateView(LoginRequiredMixin, View):
+class HelpTopicUpdateView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied; raise PermissionDenied
@@ -8013,7 +8111,7 @@ class HelpTopicUpdateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(_HT_REDIRECT) + _HT_TAB)
 
 
-class HelpTopicDeleteView(LoginRequiredMixin, View):
+class HelpTopicDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied; raise PermissionDenied
@@ -8033,7 +8131,7 @@ _TS_REDIRECT = 'core:settings'
 _TS_TAB = '?tab=tech_skills'
 
 
-class TechSkillCreateView(LoginRequiredMixin, View):
+class TechSkillCreateView(SettingsAdminMixin, View):
     def post(self, request):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied; raise PermissionDenied
@@ -8044,7 +8142,7 @@ class TechSkillCreateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(_TS_REDIRECT) + _TS_TAB)
 
 
-class TechSkillDeleteView(LoginRequiredMixin, View):
+class TechSkillDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied; raise PermissionDenied
@@ -8060,7 +8158,7 @@ _DT_REDIRECT = 'core:settings'
 _DT_TAB = '?tab=dashboard_tiles'
 
 
-class DashboardTileUpdateView(LoginRequiredMixin, View):
+class DashboardTileUpdateView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied; raise PermissionDenied
@@ -8093,7 +8191,7 @@ _CF_REDIRECT = 'core:settings'
 _CF_TAB = '?tab=custom_fields'
 
 
-class CustomFieldCreateView(LoginRequiredMixin, View):
+class CustomFieldCreateView(SettingsAdminMixin, View):
     def post(self, request):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied; raise PermissionDenied
@@ -8130,7 +8228,7 @@ class CustomFieldCreateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(_CF_REDIRECT) + _CF_TAB)
 
 
-class CustomFieldUpdateView(LoginRequiredMixin, View):
+class CustomFieldUpdateView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied; raise PermissionDenied
@@ -8153,7 +8251,7 @@ class CustomFieldUpdateView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(_CF_REDIRECT) + _CF_TAB)
 
 
-class CustomFieldDeleteView(LoginRequiredMixin, View):
+class CustomFieldDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied; raise PermissionDenied
@@ -8161,7 +8259,7 @@ class CustomFieldDeleteView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(_CF_REDIRECT) + _CF_TAB)
 
 
-class CustomFieldChoiceAddView(LoginRequiredMixin, View):
+class CustomFieldChoiceAddView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             return HttpResponse('Forbidden', status=403)
@@ -8173,7 +8271,7 @@ class CustomFieldChoiceAddView(LoginRequiredMixin, View):
         return redirect(reverse_lazy(_CF_REDIRECT) + _CF_TAB)
 
 
-class CustomFieldChoiceDeleteView(LoginRequiredMixin, View):
+class CustomFieldChoiceDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
         if not _is_admin(request.user):
             return HttpResponse('Forbidden', status=403)
