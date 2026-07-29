@@ -10,6 +10,8 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+## v0.4.52 — 2026-07-28
+
 ### Fixed
 - **Backups, updates, and every scheduled job now work on installs that aren't the
   author's own server.** Every shell script and systemd unit hardcoded the path
