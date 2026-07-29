@@ -9030,3 +9030,21 @@ def test_email_test_views_are_admin_only(client, db):
     client.force_login(tech)
     assert client.post(reverse('core:settings_test_outbound')).status_code == 403
     assert client.post(reverse('core:settings_test_inbound')).status_code == 403
+
+
+@pytest.mark.django_db
+def test_account_security_is_reachable_from_the_nav(client, client_obj, admin_user):
+    """Backup codes must be discoverable in the UI.
+
+    The Account Security page (2FA status, backup codes, disable 2FA) was dropped
+    from the sidebar in the session-20 nav redesign, leaving it linked only from a
+    sentence of body text on the admin /users/ page. So there was no discoverable
+    way to generate MFA backup codes at all. That is load-bearing now that Django
+    admin requires OTP: with no backup codes, a lost authenticator means recovery
+    only via `manage.py reset_mfa` on the box. Every logged-in user gets the link —
+    it is their own account.
+    """
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:dashboard'))
+    assert resp.status_code == 200
+    assert reverse('two_factor:profile').encode() in resp.content

@@ -428,6 +428,20 @@
         </a>
         {% endif %}
 
+        {% comment %}
+        Account Security must stay reachable from the nav. It was dropped from the
+        sidebar in the session-20 redesign, which left the page linked from exactly
+        one sentence of body text on the admin /users/ page — so there was no
+        discoverable way to generate MFA backup codes. That became load-bearing when
+        Django admin was made OTP-required: without backup codes, a lost
+        authenticator means recovery only via `manage.py reset_mfa` on the box.
+        {% endcomment %}
+        <a href="{% url 'two_factor:profile' %}" title="Account Security — 2FA and backup codes"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-base transition-colors hover:bg-white/10"
+           style="opacity:0.75">
+            {% icon 'lock-closed' 5 %}<span class="nav-label">Account Security</span>
+        </a>
+
         <a href="{% url 'accounts:logout' %}" title="Log Out"
            class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-base transition-colors hover:bg-white/10"
            style="opacity:0.75">
