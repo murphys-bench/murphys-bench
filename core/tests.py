@@ -9270,3 +9270,37 @@ def test_installer_writes_both_security_defaults_explicitly():
     installer = (Path(__file__).resolve().parent.parent / 'scripts' / 'install.sh').read_text()
     assert 'TRUST_PROXY_HEADERS=False' in installer
     assert 'CSP_REPORT_ONLY' in installer
+
+
+def test_installer_http_checks_retry_and_verify_the_app_not_just_static():
+    """The installer's own success checks must not lie, and must not lie flakily.
+
+    Two defects, both found by rebuilding mb-test from the current installer:
+
+    1. The v0.4.52 static probe curled once, immediately after `systemctl reload
+       nginx`. That reload returns when the signal is sent; nginx drains old workers
+       asynchronously, so the probe can be answered by a worker still holding the
+       old config. On a real install it duly reported "INSTALL FAILED ... HTTP 404"
+       while the identical request returned 200 moments later. An intermittent false
+       failure is worse than no check: it teaches people to ignore the installer.
+
+    2. /static/ is an nginx alias served straight off disk, so that probe passes
+       with gunicorn completely dead — verified on the box, static 200 / app 502.
+       That is how a re-run printed DONE and "running at ..." over an app returning
+       502 to every request.
+    """
+    from pathlib import Path
+    sh = (Path(__file__).resolve().parent.parent / 'scripts' / 'install.sh').read_text()
+
+    # A retrying probe helper exists and the static check goes through it.
+    assert 'http_probe()' in sh
+    assert 'code="$(http_probe' in sh
+    # The app itself is verified through nginx, not only static files.
+    assert "http_probe \"http://127.0.0.1/\" '2*|3*'" in sh
+    # And the app is restarted first: `enable --now` does not restart a running
+    # service, so a re-run that changed the unit would leave the old process bound.
+    assert 'systemctl restart murphys-bench' in sh
+    # 403 and 404 must not share one guess-the-cause message.
+    assert 'static_probe_hint' in sh
+    # No single-shot curl left behind that could race a reload.
+    assert "code=\"$(curl -s -o /dev/null -w '%{http_code}' \"http://127.0.0.1/static" not in sh
