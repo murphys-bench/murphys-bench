@@ -24,7 +24,7 @@ from django.utils.html import escape
 from two_factor.views import SetupView as TwoFactorSetupView
 from .middleware import mfa_setup_is_mandatory
 from .models import (
-    WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, Checklist, ChecklistItem,
+    WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, ChecklistItem,
     Ticket, TicketReply, TicketWorkLog, TicketLock, TicketLink, Attachment, SiteSettings,
     KBCategory, KBArticle, TicketQueue, DashboardTile, User,
     CustomField, CustomFieldChoice, CustomFieldValue,
@@ -41,7 +41,7 @@ from .models import (
     Notification, Prospect, Estimate, Sale, EstimateOption, PaymentChargeAttempt,
     Asset, Contract,
 )
-from .forms import (WorkOrderForm, ClientForm, ContactForm, ContactPhoneForm, DeviceForm, DeviceQuickAddForm,
+from .forms import (WorkOrderForm, ClientForm, ContactForm, DeviceForm, DeviceQuickAddForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
                     CompanySettingsForm, OutboundEmailSettingsForm, InboundEmailSettingsForm,
                     AttachmentSettingsForm, SecuritySettingsForm, MileageSettingsForm,
@@ -470,7 +470,6 @@ class DashboardView(LoginRequiredMixin, View):
         # Team workload (admin only)
         team_workload = []
         if is_admin:
-            from django.db.models import Count
             techs = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
             open_wo_statuses = ['new', 'in_progress', 'waiting_on_customer', 'on_hold']
             open_ticket_statuses = ['new', 'open', 'in_progress', 'waiting_on_customer', 'converted']
@@ -1451,7 +1450,6 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
         return kwargs
 
     def form_valid(self, form):
-        old_status = WorkOrder.objects.get(pk=self.object.pk).status
         response = super().form_valid(form)
         # Push any edited hardware specs back to the device master so it stays current
         self.object.sync_specs_to_device()
@@ -4292,13 +4290,11 @@ class QueueDetailView(LoginRequiredMixin, View):
 
 class QueueCreateView(LoginRequiredMixin, View):
     def get(self, request):
-        from .forms import TicketQueueForm
         is_admin = _is_admin(request.user)
         form = TicketQueueForm(is_admin=is_admin)
         return render(request, 'core/queue_form.html', {'form': form, 'action': 'Create'})
 
     def post(self, request):
-        from .forms import TicketQueueForm
         is_admin = _is_admin(request.user)
         form = TicketQueueForm(request.POST, is_admin=is_admin)
         if form.is_valid():
@@ -4323,13 +4319,11 @@ class QueueEditView(LoginRequiredMixin, View):
         return queue, is_admin
 
     def get(self, request, pk):
-        from .forms import TicketQueueForm
         queue, is_admin = self._get_queue(request, pk)
         form = TicketQueueForm(instance=queue, is_admin=is_admin)
         return render(request, 'core/queue_form.html', {'form': form, 'queue': queue, 'action': 'Edit'})
 
     def post(self, request, pk):
-        from .forms import TicketQueueForm
         queue, is_admin = self._get_queue(request, pk)
         form = TicketQueueForm(request.POST, instance=queue, is_admin=is_admin)
         if form.is_valid():
@@ -4459,8 +4453,8 @@ class ReportsView(LoginRequiredMixin, View):
             raise PermissionDenied
 
         from datetime import timedelta, date
-        from django.db.models import Count, Avg, F, Q, Sum, ExpressionWrapper, DurationField, FloatField
-        from django.db.models.functions import TruncDay, TruncWeek
+        from django.db.models import Count, F, Q, Sum
+        from django.db.models.functions import TruncDay
 
         # Domain side-menu (Slice 1 of the Reports restructure): resolved early
         # so heavier domain-specific computation (e.g. Financial's revenue
@@ -6790,7 +6784,7 @@ class EmailTestInboundView(SettingsAdminMixin, View):
     """HTMX: test inbound email connection using saved IMAP/POP3 settings."""
 
     def post(self, request):
-        import imaplib, poplib, ssl
+        import imaplib, poplib
         s = SiteSettings.get()
         if not s.inbound_host or not s.inbound_username:
             return render(request, 'core/partials/settings_test_result.html',
@@ -7076,8 +7070,8 @@ class SettingsView(SettingsAdminMixin, View):
                 EmailTemplate.objects.get_or_create(
                     trigger=trigger,
                     defaults={
-                        'subject_template': f'[{{{{ ticket.ticket_number }}}}] {{{{ ticket.subject }}}}',
-                        'body_template': f'Hi {{{{ customer_name }}}},\n\nYour ticket {{{{ ticket.ticket_number }}}} has been updated.\n\nThank you,\n{{{{ tech_name }}}}',
+                        'subject_template': '[{{{{ ticket.ticket_number }}}}] {{{{ ticket.subject }}}}',
+                        'body_template': 'Hi {{{{ customer_name }}}},\n\nYour ticket {{{{ ticket.ticket_number }}}} has been updated.\n\nThank you,\n{{{{ tech_name }}}}',
                         'is_active': False,
                     }
                 )

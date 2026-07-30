@@ -170,7 +170,7 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
     Checks all three suppression layers before sending.
     Always writes an EmailSendLog entry for auditing.
     """
-    from .models import SiteSettings, EmailTemplate, EmailSignature, SuppressedAddress, EmailSendLog
+    from .models import SiteSettings, EmailTemplate, EmailSignature, EmailSendLog
 
     site = SiteSettings.get()
 

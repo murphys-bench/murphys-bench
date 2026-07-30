@@ -6,7 +6,6 @@ Configuration is environment-based (dev/production).
 """
 
 from pathlib import Path
-import os
 from decouple import config, Csv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.

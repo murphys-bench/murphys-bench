@@ -622,7 +622,6 @@ def test_notification_count_fragment_shows_unread(client, client_obj):
 @pytest.mark.django_db
 def test_opening_notification_marks_read_and_redirects(client, client_obj):
     from core.models import Notification
-    from django.utils import timezone as _tz
     u = User.objects.create_user(username='u5', password='x')
     ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
     n = Notification.objects.create(recipient=u, text='hi', kind='tech_message',
@@ -1004,7 +1003,6 @@ def test_apply_status_change_stamps_and_clears_closed_at():
     """Ticket.apply_status_change: stamps closed_at entering resolved/closed,
     clears it leaving them, and does NOT re-stamp resolved<->closed (still
     'done', just a different flavor)."""
-    from django.utils import timezone
     client_obj = Client.objects.create(name='Closed-At Co')
     ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
     assert ticket.closed_at is None
@@ -1268,7 +1266,7 @@ def test_get_unsorted_is_idempotent_and_unique():
 def test_unsorted_bucket_cannot_be_deleted(client, admin_user):
     bucket = Client.get_unsorted()
     client.force_login(admin_user)
-    resp = client.post(reverse('core:client_delete', args=[bucket.pk]),
+    client.post(reverse('core:client_delete', args=[bucket.pk]),
                        {'confirm_name': bucket.name})
     assert Client.objects.filter(pk=bucket.pk).exists(), 'Triage bucket must survive a delete attempt.'
 
@@ -1891,7 +1889,6 @@ def test_custom_part_line_with_price(client, client_obj, admin_user):
 @pytest.mark.django_db
 def test_line_item_update_sets_price(client, client_obj, admin_user):
     from decimal import Decimal
-    from core.models import LineItem
     wo = WorkOrder.objects.create(client=client_obj)
     li = wo.line_items.create(kind='labor', description='Cleanup')
     client.force_login(admin_user)
@@ -2101,7 +2098,7 @@ def test_user_delete_blocks_self_and_last_superuser(client, admin_user):
     client.force_login(su2)
     client.post(reverse('core:user_delete', args=[admin_user.pk]))   # now 1 left
     assert User.objects.filter(is_superuser=True).count() == 1
-    resp = client.post(reverse('core:user_delete', args=[su2.pk]))    # deleting self anyway blocked
+    client.post(reverse('core:user_delete', args=[su2.pk]))    # deleting self anyway blocked
     assert User.objects.filter(pk=su2.pk).exists()
 
 
@@ -4751,7 +4748,7 @@ def test_charge_now_blank_monthly_amount_creates_unpriced_line(client, admin_use
     assert sale.line_items_total == 0
     # Existing checkout guard blocks completion until a price is entered.
     client.force_login(admin_user)
-    resp = client.post(reverse('core:sale_checkout', args=[sale.pk]), {
+    client.post(reverse('core:sale_checkout', args=[sale.pk]), {
         'payment_method': 'cash', 'amount': '0',
     })
     sale.refresh_from_db()
@@ -5005,7 +5002,7 @@ def test_prepare_clones_client_recurring_template_lines(admin_user):
     negotiated prices) are cloned into the month's draft — not a single generic
     Monthly Service line."""
     from decimal import Decimal
-    from core.models import LineItem, CatalogItem
+    from core.models import CatalogItem
     from core.views import _prepare_recurring_sale
     c = Client.objects.create(name='Multi Svc Co', is_managed=True)
     svc = CatalogItem.objects.create(name='Managed IT', category='Managed', item_type='service')
@@ -5229,7 +5226,7 @@ def test_catalog_card_does_not_leak_template_comment(client, admin_user):
 # Slice 5d — MB-initiated charge against a card on file (Path C, guarded)
 # ---------------------------------------------------------------------------
 
-from core.models import Role, PaymentChargeAttempt
+from core.models import PaymentChargeAttempt
 
 
 @pytest.mark.django_db
@@ -6232,7 +6229,6 @@ def test_pos_wo_settle_already_paid_in_in_posts_no_second_payment(client, admin_
 
 @pytest.mark.django_db
 def test_pos_wo_settle_refuses_when_already_paid(client, admin_user, client_obj, monkeypatch):
-    from decimal import Decimal
     from core import invoice_ninja
     _enable_in()
     wo = WorkOrder.objects.create(client=client_obj, status='completed', invoice_ninja_id='777')
@@ -7166,7 +7162,7 @@ def test_owner_dashboard_business_metrics(client, client_obj, admin_user):
     from django.utils import timezone
 
     # Ready to bill: completed WO whose auto-invoice is still uninvoiced.
-    ready = WorkOrder.objects.create(client=client_obj, status='completed')
+    WorkOrder.objects.create(client=client_obj, status='completed')
     # Outstanding: a WO billed (invoiced) and waiting on payment.
     billed = WorkOrder.objects.create(client=client_obj, status='completed')
     inv = billed.invoice
@@ -7564,7 +7560,6 @@ def test_mb_backup_sh_staging_only_succeeds_on_near_empty_db(tmp_path):
     runs with it unset) against a scratch app dir with a structurally valid
     but empty-of-data SQLite file."""
     import os
-    import shutil
     import sqlite3
     import subprocess
     import tarfile
@@ -7717,7 +7712,7 @@ def test_asset_card_renders_on_client_detail(client, client_obj, admin_user):
 
 # ── Contracts (managed-client layer — Slice 2) ──────────────────────────
 
-from core.models import Contract, CatalogItem as _CatalogItem, LineItem as _LineItem
+from core.models import Contract
 
 
 @pytest.mark.django_db
@@ -8012,7 +8007,6 @@ def test_contract_views_require_sales_gate(client, client_obj, tech_user):
 def test_line_edit_gate_is_host_aware(client, client_obj, tech_user):
     """A plain tech may edit Work Order lines (login-only) but NOT Contract lines
     (billing-gated), through the shared line-edit endpoint."""
-    from core.models import LineItem
     # WorkOrder line — editable by a tech.
     wo = WorkOrder.objects.create(client=client_obj)
     wo_line = wo.line_items.create(kind='labor', description='Fix', quantity=1, unit_price=50)
@@ -9438,3 +9432,94 @@ def test_installer_seeds_by_default_and_says_so():
     assert 'seed_demo_data --force' not in sh       # never the blanket bypass
     assert 'DEMO DATA IS PRESENT' in sh             # user is told
     assert 'reset_operational_data' in sh           # and told how to clear it
+
+
+# ══ CI gate properties (July 2026 review, slice 3) ══════════════════════════
+
+def _ci_workflow():
+    from pathlib import Path
+    return (Path(__file__).resolve().parent.parent
+            / '.github' / 'workflows' / 'ci.yml').read_text()
+
+
+def test_ci_keeps_the_status_check_name_branch_protection_requires():
+    """main's branch protection requires a status check named exactly "test".
+
+    Turning the single `test` job into a matrix renamed its contexts to
+    "test (3.12)" / "test (3.14)", so a check named "test" would never report again
+    and every future PR would be silently unmergeable through the normal path — a
+    gate quietly broken by the change meant to strengthen it. An aggregate job named
+    "test" preserves the contract: green only when lint and every matrix leg passed.
+
+    If the required check is ever renamed in branch protection, update this test with
+    it — do not delete it.
+    """
+    ci = _ci_workflow()
+    assert '\n  test:\n' in ci, 'a job named exactly "test" must exist'
+    assert 'needs: [lint, suite]' in ci
+    # It must actually fail when a dependency failed, not just run after it.
+    assert 'needs.suite.result' in ci and 'needs.lint.result' in ci
+    assert 'if: always()' in ci, 'must run even when a dependency failed, to report red'
+
+
+def test_ci_tests_every_supported_python_runtime():
+    """MB claims support for Ubuntu 24.04 (Python 3.12, what prod runs) AND 26.04
+    (Python 3.14, what the installer targets and mb-test runs). CI tested only 3.12,
+    so half of that support claim was verified once by hand on a throwaway VM that
+    was then destroyed — the same "verified against a box we built" gap as the
+    installer defects."""
+    ci = _ci_workflow()
+    assert "python-version: ['3.12', '3.14']" in ci
+    assert 'fail-fast: false' in ci, 'one version failing must not hide the other'
+
+
+def test_ci_runs_the_production_deployment_check():
+    """`check --deploy` exists to catch exactly the misconfigurations self-hosters
+    make, and CI ran plain `check` instead."""
+    ci = _ci_workflow()
+    assert 'check --deploy' in ci
+
+
+def test_ci_lints_for_real_errors_and_blocks_on_them():
+    """flake8 was pinned in requirements.txt and never run. Enforced on the error
+    classes only (F, E9) — undefined names, dead imports, dead assignments, syntax
+    errors. Style is deliberately not enforced yet; see the workflow comment.
+
+    It must BLOCK. A non-failing check is the report-only-CSP mistake again.
+    """
+    ci = _ci_workflow()
+    assert 'flake8 --select=F,E9' in ci
+    assert 'continue-on-error' not in ci, 'a check that cannot fail is not a check'
+
+
+def test_ci_actions_are_pinned_to_commit_shas():
+    """A version tag can be repointed at new code by whoever controls the action's
+    repository; a commit SHA cannot. This workflow runs on every push with repo
+    read access, so it pins SHAs."""
+    import re
+    ci = _ci_workflow()
+    uses = re.findall(r'uses:\s*(\S+)', ci)
+    assert uses, 'expected at least one action'
+    for ref in uses:
+        assert '@' in ref, ref
+        pinned = ref.split('@', 1)[1]
+        assert re.fullmatch(r'[0-9a-f]{40}', pinned), \
+            f'{ref} is not pinned to a 40-char commit SHA'
+
+
+def test_no_dead_imports_or_undefined_names_in_the_codebase():
+    """Runs the same gate locally so the tree stays clean between CI runs. This
+    caught a 7-week-old dead DB query in WorkOrderUpdateView.form_valid, left behind
+    when the AUTO_RESOLVE_TICKET_ON_WO_CLOSE block was deliberately removed."""
+    import subprocess
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    proc = subprocess.run(
+        [sys.executable, '-m', 'flake8', '--select=F,E9',
+         'core/', 'murphys_bench/', 'accounts/'],
+        cwd=root, capture_output=True, text=True)
+    if proc.returncode != 0 and 'No module named' in (proc.stderr or ''):
+        import pytest as _pytest
+        _pytest.skip('flake8 not installed in this environment')
+    assert proc.returncode == 0, f'flake8 found real errors:\n{proc.stdout}'
