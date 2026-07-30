@@ -97,8 +97,10 @@ That removes operational records only. Settings, roles, email templates, repair
 types, logins and every other piece of configuration are kept. Run it without
 `--confirm` first for a dry run.
 
-Reinstalling or rerunning the installer on a system that already has client records
-will **not** add demo data again.
+Reinstalling or rerunning the installer on a system that is already set up will
+**not** add demo data again. The installer marks a system as initialised once it
+finishes, so this holds even for a shop whose database is empty or whose work is
+entirely clientless (counter sales, walk-ins).
 
 See `SETUP.md` for the initial configuration walkthrough and `FEATURES.md` for the day-to-day features.
 
@@ -266,8 +268,9 @@ venv/bin/python manage.py seed_demo_data --new-install
 
 Every record it creates is fake (invented names, `example.com`, `555` numbers).
 Clear it with `reset_operational_data` before entering real client work — see
-"Resetting a Demo or Test System" below. The command refuses to run if the database
-already holds client records.
+"Resetting a Demo or Test System" below. The command refuses to run once the
+installer has marked the system set up, or if the database already holds
+operational data of any kind.
 
 **Optional — verify the install** by running the test suite. This is not part of
 initializing the application; it's a smoke test you can run if you want confirmation

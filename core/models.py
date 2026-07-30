@@ -2518,6 +2518,17 @@ class SiteSettings(models.Model):
     color_dash_backlog4_bg     = models.CharField(max_length=7, default='#fcebeb', blank=True)  # Backlog 7+ days
     color_dash_backlog4_text   = models.CharField(max_length=7, default='#a32d2d', blank=True)
 
+    # ⚠ NOT a cosmetic timestamp — this is the guard that stops `seed_demo_data`
+    # injecting fake clients into a real shop. scripts/install.sh stamps it once the
+    # install completes, so a re-run (the documented recovery path) declines to seed
+    # no matter what the tables contain. It has to live in the DATABASE, not on disk:
+    # a shop that restores a backup onto a new box is still an initialised install,
+    # and a disk marker would not survive that.
+    install_initialized_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Set once when the install is first completed. Blocks demo-data seeding.',
+    )
+
     class Meta:
         db_table = 'site_settings'
         verbose_name = 'Site Settings'

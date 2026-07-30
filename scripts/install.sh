@@ -300,23 +300,46 @@ fi
 #
 # ⚠ --new-install, NOT --force. install.sh writes DEBUG=False, which the command
 # refuses to seed over, so one guard has to be waived. --new-install waives ONLY
-# that one and keeps the existing-clients guard, because this script is documented
-# as safe to re-run over an existing install — re-running it on a live shop must
-# never inject demo records into real client data. On a re-run the command declines
-# and we carry on; that is the intended outcome, not a failure.
+# that one and keeps the initialised-install and existing-data guards, because this
+# script is documented as safe to re-run over an existing install — re-running it on
+# a live shop must never inject demo records into real client data.
+#
+# ⚠ Exit code 3 means "declined, nothing changed" and is a NORMAL outcome on a
+# re-run. Anything else is a real failure — an encryption key, a migration, a
+# missing dependency — and used to be reported here as "already has client records",
+# which was simply false. Do not collapse these back into one branch, and do not
+# send the output to /dev/null: on the failure path it is the only diagnostic there is.
 if [ "$SEED_DEMO" = 1 ]; then
     log "seeding demo data (fake clients/tickets/work orders; --no-demo-data to skip)..."
-    if "$VENV/python" manage.py seed_demo_data --new-install >/dev/null 2>&1; then
+    SEED_OUT="$(mktemp)"
+    SEED_RC=0
+    # `|| SEED_RC=$?` so `set -e` does not abort the install on a declined seed.
+    "$VENV/python" manage.py seed_demo_data --new-install >"$SEED_OUT" 2>&1 || SEED_RC=$?
+    if [ "$SEED_RC" -eq 0 ]; then
         SEEDED=1
         log "demo data created — every record is fake; clear it before real work (see the note at the end)"
+    elif [ "$SEED_RC" -eq 3 ]; then
+        SEEDED=0
+        log "demo data not added — this install is already set up; nothing changed"
     else
         SEEDED=0
-        log "demo data not added (this install already has client records) — nothing changed"
+        log "WARNING: seeding demo data FAILED. This is not a re-run; something is wrong."
+        log "The install continues, but read this before using the app:"
+        sed 's/^/    /' "$SEED_OUT" >&2
     fi
+    rm -f "$SEED_OUT"
 else
     SEEDED=0
     log "skipping demo data (--no-demo-data)"
 fi
+
+# 8c) Mark the install initialised — AFTER the seed attempt above, or the very
+# first install would decline to seed itself. From here on seed_demo_data refuses
+# on this box no matter what the tables hold, which is what makes re-running this
+# script on a live shop safe. Covers --no-demo-data installs too: those leave an
+# empty database, the one case a data-shaped guard cannot recognise.
+"$VENV/python" manage.py mark_install_initialized \
+    || log "WARNING: could not mark this install initialised — seeding stays guarded by the data check alone"
 
 # 9) Smoke checks.
 log "running deploy check (HTTPS warnings are expected on a plain-HTTP box)..."
