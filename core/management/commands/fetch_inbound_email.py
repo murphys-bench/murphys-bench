@@ -16,7 +16,6 @@ import logging
 import os
 import poplib
 import re
-import traceback
 
 logger = logging.getLogger('core')
 from email.header import decode_header, make_header

@@ -1,9 +1,17 @@
 name: CI
 
-# The gate: build the self-hosted CSS, run Django checks, collectstatic, and the
-# test spine automatically on every change, so broken code is caught here instead
-# of in production. Mirrors prod (Python 3.12, SQLite). Green = the suite, Django
-# checks, and the Tailwind build all pass.
+# The gate: lint, build the self-hosted CSS, run Django checks, collectstatic, and
+# the test spine automatically on every change, so broken code is caught here
+# instead of in production.
+#
+# Runs on a MATRIX of the Python versions MB actually has to work on:
+#   3.12 — Ubuntu 24.04, which prod runs
+#   3.14 — Ubuntu 26.04, which the installer targets and mb-test runs
+# Testing only one of those meant claiming support for a runtime nothing verified.
+#
+# Actions are pinned to immutable commit SHAs, not moving tags. A tag can be
+# repointed at new code by whoever controls the action's repo; a SHA cannot. This
+# workflow has repository read access and runs on every push.
 
 on:
   push:
@@ -12,11 +20,47 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
+  lint:
+    # Fast and separate: a dead-import or undefined-name problem shouldn't wait on
+    # the matrix, and a lint failure names the file and line rather than surfacing
+    # as a confusing red test run.
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install flake8
+        # Pinned in requirements.txt but never actually run until now.
+        run: pip install flake8==7.0.0
+
+      - name: Lint (real errors only, blocking)
+        # DELIBERATELY --select=F,E9 and nothing else. These are the classes that
+        # indicate a genuine defect: F821 undefined name, F811 redefinition, F401
+        # dead import, F841 dead assignment, E9 syntax error. Enabling it found a
+        # 7-week-old dead DB query in WorkOrderUpdateView.form_valid — the leftover
+        # of an auto-close block removed on 2026-06-10.
+        #
+        # Style (line length, quoting, import order) is NOT enforced. Black and
+        # isort are pinned but have never been run, so enforcing them means
+        # reformatting the whole codebase — a large mechanical diff that belongs in
+        # its own change, not smuggled into a CI job. A non-blocking style check was
+        # considered and rejected: a check that cannot fail is the report-only-CSP
+        # mistake again, and it teaches people to ignore CI output.
+        run: flake8 --select=F,E9 --show-source core/ murphys_bench/ accounts/
+
+  suite:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false          # one version failing must not hide the other's result
+      matrix:
+        python-version: ['3.12', '3.14']
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Install WeasyPrint system libraries
         # PDF generation (repair reports, quotes) needs the pango/cairo stack at
@@ -36,10 +80,10 @@ jobs:
           cp "$(command -v rclone)" bin/rclone
           chmod +x bin/rclone
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
       - name: Install dependencies
@@ -74,13 +118,61 @@ jobs:
         run: scripts/build_css.sh
 
       - name: Django system checks
-        # Plain check (not --deploy) so green means green — --deploy would flag
-        # the deliberate HTTPS-on-LAN warnings and make CI perpetually yellow.
         run: python manage.py check
+
+      - name: Production deployment checks
+        # `check --deploy` is the command whose entire job is catching the
+        # misconfigurations self-hosters make, and CI skipped it.
+        #
+        # NOT run with --fail-level WARNING, deliberately: MB is designed to run
+        # plain HTTP on a trusted LAN (docs/deployment-tls.md), so the HTTPS
+        # warnings are the correct posture for that deployment, not defects.
+        # Failing on them would force either a false configuration or a permanently
+        # red gate. This still fails on any ERROR-level finding, and the warnings
+        # are printed so a genuine new one is visible in the log.
+        env:
+          DEBUG: 'False'
+        run: python manage.py check --deploy
 
       - name: Collect static files
         # Surfaces missing/broken static refs and confirms app.css collects.
         run: python manage.py collectstatic --noinput
 
-      - name: Run tests
-        run: python -m pytest
+      - name: Run tests with coverage
+        # Coverage is REPORTED, not gated. A percentage threshold measures how much
+        # code is executed, not whether the behaviour that matters is asserted, and
+        # gating on it rewards padding the easy paths. Security and state-transition
+        # behaviour is covered by named regression tests instead.
+        # term:skip-covered, NOT term-missing — the latter prints every uncovered
+        # line number and buries the log in thousands of lines of noise.
+        run: python -m pytest --cov=core --cov=murphys_bench --cov-report=term:skip-covered
+
+      - name: Least-covered modules
+        # Ascending by coverage, so the top of this list is where the risk is. Not a
+        # gate — a signal for choosing what to test next.
+        if: always()
+        run: python -m coverage report --sort=cover | head -20
+
+  test:
+    # ⚠ THE NAME MATTERS. main's branch protection requires a status check called
+    # exactly "test". Turning the old single `test` job into a matrix renamed its
+    # contexts to "test (3.12)" / "test (3.14)", which means a check named "test"
+    # would never report again and EVERY future PR would be silently unmergeable
+    # through the normal path — a gate quietly broken by a change meant to
+    # strengthen it. (enforce_admins is false, so an admin merge would still get
+    # through; relying on that is exactly the wrong answer.)
+    #
+    # This aggregate keeps that contract: one context named "test", green only when
+    # the lint job and every matrix leg passed. Adding a runtime to the matrix needs
+    # no branch-protection change, and a failing leg cannot be mistaken for a pass.
+    needs: [lint, suite]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require lint and every matrix leg to have passed
+        run: |
+          echo "lint:  ${{ needs.lint.result }}"
+          echo "suite: ${{ needs.suite.result }}"
+          [ "${{ needs.lint.result }}"  = "success" ] || { echo "lint did not pass";  exit 1; }
+          [ "${{ needs.suite.result }}" = "success" ] || { echo "suite did not pass"; exit 1; }
+          echo "all required jobs passed"
