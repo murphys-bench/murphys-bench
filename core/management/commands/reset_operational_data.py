@@ -11,14 +11,20 @@ DELETES (operational data):
   Contacts, Tickets, replies, locks, links, notes, items, work-performed,
   invoices), Mileage, Attachments (rows AND files on disk), Custom-field
   VALUES, email send/receive logs, the audit-log history, device-credential
-  access logs, and all non-superuser users.
+  access logs, and all non-superuser users. Also Sales, Estimates (+ options),
+  Prospects, Contracts, Assets, card-charge attempts, notifications and any
+  orphaned line items — these do NOT cascade from Client (a counter sale or a
+  prospect need no client at all) and were silently left behind until Jul 30 2026.
 
 KEEPS (configuration + you):
   SiteSettings, Roles, Status definitions, Help Topics, SLA Plans, Repair Types
   & categories, Checklists & items, Canned Responses, Quick Labor items, Email
   Templates & Signatures, Dashboard Tiles, Custom-field DEFINITIONS, KB
   articles/categories, Org Credentials (+ their access log), blocked/suppressed
-  senders, Tech Skills, system queues, and all superuser accounts.
+  senders, Tech Skills, system queues, and all superuser accounts. Also the
+  Products & Services catalog — a price list is configuration, so a shop resetting
+  test data keeps it. Note demo data seeds five catalog entries, which therefore
+  survive this command; review them under Settings if you did not add them.
 
 SAFE BY DEFAULT: running with no flags is a DRY RUN — it only prints counts.
 To actually delete, pass the exact confirmation phrase:
@@ -54,6 +60,15 @@ class Command(BaseCommand):
             Client, Contact, Device, Ticket, WorkOrder, Mileage, Attachment,
             CustomFieldValue, EmailSendLog, InboundEmailLog,
             DeviceCredentialAccessLog, User,
+            # Added Jul 30 2026. Every one of these postdates this command, and
+            # none of them cascade reliably from Client: Sale.client and
+            # Prospect have no required client, Estimate can anchor to a Prospect
+            # instead, and PaymentChargeAttempt/Notification point at rows being
+            # deleted. Proven before fixing: a seeded install cleared with this
+            # command still held SALE-00001 and its priced line item, while the
+            # docs and the installer both said everything was gone.
+            Sale, Estimate, EstimateOption, Prospect, Asset, Contract,
+            PaymentChargeAttempt, Notification, LineItem,
         )
 
         keep_users = {u.strip() for u in options['keep_users'].split(',') if u.strip()}
@@ -73,6 +88,14 @@ class Command(BaseCommand):
             'Inbound email logs': InboundEmailLog.objects.count(),
             'Audit-log entries': LogEntry.objects.count(),
             'Device cred access logs': DeviceCredentialAccessLog.objects.count(),
+            'Sales (counter/recurring)': Sale.objects.count(),
+            'Estimates (+ options)': Estimate.objects.count(),
+            'Prospects': Prospect.objects.count(),
+            'Managed contracts': Contract.objects.count(),
+            'Managed assets': Asset.objects.count(),
+            'Card-charge attempts': PaymentChargeAttempt.objects.count(),
+            'Notifications': Notification.objects.count(),
+            'Priced line items': LineItem.objects.count(),
             'Non-superuser users': users_to_delete.count(),
         }
 
@@ -97,6 +120,11 @@ class Command(BaseCommand):
             'Custom-field DEFINITIONS kept': self._safe_count('CustomField'),
             'KB articles kept': self._safe_count('KBArticle'),
             'Org credentials kept': self._safe_count('OrgCredential'),
+            # Called out explicitly because demo data seeds five catalog entries,
+            # and a price list is configuration a real shop must not lose. Users
+            # were told "clear it all"; they need to know these remain.
+            'Products & Services kept': self._safe_count('CatalogItem'),
+            'Quick-labour checklists kept': self._safe_count('Checklist'),
         }
         self.stdout.write('')
         self.stdout.write(self.style.MIGRATE_HEADING('Keeping (configuration):'))
@@ -135,6 +163,23 @@ class Command(BaseCommand):
             # explicitly first, including walk-in rows that never had a client.
             WorkOrder.objects.all().delete()
             Device.objects.all().delete()
+
+            # Sales, Estimates and Prospects can exist with NO client at all (a
+            # walk-in counter sale, a lead that was never promoted), and an Estimate
+            # may anchor to a Prospect rather than a Client — so none of them can be
+            # relied on to cascade. Delete explicitly, children first.
+            PaymentChargeAttempt.objects.all().delete()
+            EstimateOption.objects.all().delete()
+            Estimate.objects.all().delete()
+            Sale.objects.all().delete()
+            Prospect.objects.all().delete()
+            Contract.objects.all().delete()
+            Asset.objects.all().delete()
+            Notification.objects.all().delete()
+
+            # LineItem is a GenericForeignKey host-agnostic row. Its hosts are gone
+            # by now, so anything left is an orphan by definition.
+            LineItem.objects.all().delete()
 
             # Clients cascade to contacts, tickets, and everything else under them
             Client.objects.all().delete()

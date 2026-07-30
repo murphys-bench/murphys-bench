@@ -9523,3 +9523,65 @@ def test_no_dead_imports_or_undefined_names_in_the_codebase():
         import pytest as _pytest
         _pytest.skip('flake8 not installed in this environment')
     assert proc.returncode == 0, f'flake8 found real errors:\n{proc.stdout}'
+
+
+@pytest.mark.django_db
+def test_reset_operational_data_actually_clears_seeded_demo_data(settings):
+    """The instruction shipped in CHANGELOG.md and in the installer's own output.
+
+    It was NOT true. reset_operational_data was written in session 27 and never
+    learned about Sale, Estimate, Prospect, Contract, Asset, PaymentChargeAttempt or
+    Notification. None of those cascade reliably from Client — a counter sale and a
+    prospect need no client at all, and an Estimate can anchor to a Prospect — so a
+    seeded install cleared with the documented command still held SALE-00001 and its
+    priced line item while the docs claimed everything was gone.
+
+    Proven empirically before fixing, on a real box and on a scratch database.
+
+    This test pairs the two commands so the promise cannot drift from the code again:
+    seed, clear, then assert that NO operational record of any kind remains.
+    """
+    from django.apps import apps
+    from django.core.management import call_command
+    settings.DEBUG = True
+
+    call_command('seed_demo_data', verbosity=0)
+    call_command('reset_operational_data', '--confirm',
+                 'DELETE ALL OPERATIONAL DATA', verbosity=0)
+
+    operational = {
+        'Client', 'Contact', 'ContactPhone', 'Device', 'Ticket', 'TicketReply',
+        'TicketLink', 'TicketLock', 'TicketWorkLog', 'WorkOrder', 'WorkOrderNote',
+        'WorkOrderItem', 'Invoice', 'Mileage', 'Sale', 'Estimate', 'EstimateOption',
+        'Prospect', 'Contract', 'Asset', 'PaymentChargeAttempt', 'Notification',
+        'LineItem', 'Attachment', 'CustomFieldValue', 'DeviceCredentialAccessLog',
+    }
+    survivors = {
+        m.__name__: m.objects.count()
+        for m in apps.get_app_config('core').get_models()
+        if m.__name__ in operational and m.objects.count()
+    }
+    assert not survivors, f'operational records survived the documented clear: {survivors}'
+
+
+@pytest.mark.django_db
+def test_reset_operational_data_keeps_configuration_including_the_catalog(settings):
+    """The other half of the promise: clearing must not cost a shop its setup.
+
+    The Products & Services catalog is deliberately KEPT — a price list is
+    configuration. Demo data seeds five catalog entries, so they survive too, which
+    is why the command now reports them explicitly instead of letting a user believe
+    'clear it all' removed everything.
+    """
+    from django.core.management import call_command
+    from core.models import CatalogItem, RepairType, StatusDefinition, SiteSettings
+    settings.DEBUG = True
+
+    call_command('seed_demo_data', verbosity=0)
+    call_command('reset_operational_data', '--confirm',
+                 'DELETE ALL OPERATIONAL DATA', verbosity=0)
+
+    assert CatalogItem.objects.count() == 5, 'the price list is configuration'
+    assert RepairType.objects.exists()
+    assert StatusDefinition.objects.exists()
+    assert SiteSettings.objects.exists()

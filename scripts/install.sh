@@ -462,13 +462,15 @@ DEMO DATA IS PRESENT
   EVERY ONE IS FAKE. Invented business names, example.com addresses, 555 phone
   numbers. Nothing here belongs to a real customer.
 
-  Clear it ALL before you enter real client work:
+  Remove it before you enter real client work:
     cd $APP && venv/bin/python manage.py reset_operational_data \\
         --confirm "DELETE ALL OPERATIONAL DATA"
 
   That removes operational records only — your settings, roles, email templates,
-  repair types and logins are all kept. Install with --no-demo-data next time to
-  start empty.
+  repair types and logins are all kept. It also KEEPS the Products & Services
+  catalog, so the five sample priced services stay behind: a price list is
+  configuration, and a real shop must not lose it to a data reset. Review them under
+  Settings if you did not add them. Install with --no-demo-data to start empty.
 DEMO
 fi
 if [ "$SKIP_WEB" = 0 ]; then

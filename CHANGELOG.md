@@ -86,9 +86,13 @@ the Unreleased entries move under that version and prod gets a single update.
 - **A new install now starts with sample data.** Two clients, contacts, devices,
   tickets, a work order with priced labour, a managed contract and a counter sale, so
   you can see how the parts fit together instead of facing an empty database and a
-  checklist. Every record is obviously fake. Clear it all before entering real work
-  with `manage.py reset_operational_data --confirm "DELETE ALL OPERATIONAL DATA"`,
-  which keeps your settings. Install with `--no-demo-data` to start empty.
+  checklist. Every record is obviously fake. Remove it before entering real work with
+  `manage.py reset_operational_data --confirm "DELETE ALL OPERATIONAL DATA"`, which
+  clears the records and keeps your configuration. **One thing it deliberately keeps
+  is the Products & Services catalog**, because a price list is configuration a real
+  shop must not lose — so the five sample entries survive, and the command now lists
+  them so you can review or delete them under Settings. Install with
+  `--no-demo-data` to start empty.
 
 ### Fixed
 
@@ -108,6 +112,15 @@ the Unreleased entries move under that version and prod gets a single update.
   confirms the application itself answers. The restart also means re-running the
   installer picks up a changed service definition rather than leaving the old process
   running against it.
+
+- **"Clear the demo data" did not clear all of it.** `reset_operational_data` was
+  written before Sales, Estimates, Prospects, Contracts and Assets existed and never
+  learned about them. None of those reliably disappear with their client — a counter
+  sale and a sales lead need no client at all — so clearing a seeded install left a
+  sample sale and its priced line item behind, in a database the documentation said
+  was clean. The command now removes them, reports every category it deletes, and
+  lists what it keeps. A test seeds and then clears, and fails if any operational
+  record of any kind survives, so the instruction cannot drift from the code again.
 
 - **A dead database query on every work order edit**, left behind when automatic
   ticket closing was removed in June. No behaviour change; it simply stops happening.
