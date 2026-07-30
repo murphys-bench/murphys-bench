@@ -12,7 +12,7 @@ django-htmx==1.17.3
 pytest==9.0.3
 pytest-django==4.12.0
 pytest-cov==4.1.0
-factory-boy==3.3.0
+factory-boy==3.3.0   # core/factories.py — demo/test data (seed_demo_data)
 
 # Development
 django-extensions==3.2.3

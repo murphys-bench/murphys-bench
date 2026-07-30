@@ -55,9 +55,10 @@ The installer:
 6. Runs database migrations.
 7. Collects static files.
 8. Creates the initial superuser.
-9. Runs Django checks and the test suite.
-10. Installs and starts the Gunicorn systemd service.
-11. Configures and enables the nginx site.
+9. Seeds obviously-fake demo data, so the app is usable immediately (skip with `--no-demo-data`).
+10. Runs Django checks and the test suite.
+11. Installs and starts the Gunicorn systemd service.
+12. Configures and enables the nginx site.
 
 The installer preserves an existing `.env` when rerun. Review the script before rerunning it on a system whose web-server configuration has been changed manually.
 
@@ -74,6 +75,30 @@ Then:
 1. Log in with the superuser account created by the installer.
 2. Open Settings.
 3. Configure company information, email, users, workflow options, and backups.
+
+### The install contains demo data
+
+Unless you passed `--no-demo-data`, a fresh install is seeded with sample records so
+you can try the workflow straight away — clients, contacts, devices, tickets, work
+orders, a managed contract and a counter sale.
+
+**Every one of them is fake.** Invented business names, `example.com` addresses,
+`555` phone numbers. None of it belongs to a real customer, and none of it is
+required by the application.
+
+**Clear it before entering real client work:**
+
+```bash
+venv/bin/python manage.py reset_operational_data \
+    --confirm "DELETE ALL OPERATIONAL DATA"
+```
+
+That removes operational records only. Settings, roles, email templates, repair
+types, logins and every other piece of configuration are kept. Run it without
+`--confirm` first for a dry run.
+
+Reinstalling or rerunning the installer on a system that already has client records
+will **not** add demo data again.
 
 See `SETUP.md` for the initial configuration walkthrough and `FEATURES.md` for the day-to-day features.
 
@@ -232,6 +257,18 @@ venv/bin/python manage.py createsuperuser
 venv/bin/python manage.py check
 ```
 
+**Optional — demo data.** The scripted installer seeds fake sample records by
+default; a manual install starts empty. To populate it the same way:
+
+```bash
+venv/bin/python manage.py seed_demo_data --new-install
+```
+
+Every record it creates is fake (invented names, `example.com`, `555` numbers).
+Clear it with `reset_operational_data` before entering real client work — see
+"Resetting a Demo or Test System" below. The command refuses to run if the database
+already holds client records.
+
 **Optional — verify the install** by running the test suite. This is not part of
 initializing the application; it's a smoke test you can run if you want confirmation
 the code is healthy on this box (it's also run automatically by CI on every change):
@@ -326,6 +363,9 @@ They are not required for the first login, but the corresponding features will n
 See `deploy/README.md`.
 
 ## Resetting a Demo or Test System
+
+This is also how you clear the demo data a fresh install ships with (see "The
+install contains demo data" above).
 
 To remove operational records while retaining configuration:
 

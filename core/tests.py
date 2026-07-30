@@ -8774,3 +8774,139 @@ def test_unit_templates_are_templates_not_baked_for_one_box():
     assert not unsubstituted, (
         f'unit templates reference no __APP__ placeholder: {unsubstituted}'
     )
+
+
+# ══ seed_demo_data — fake demo/evaluation data ══════════════════════════════
+
+@pytest.mark.django_db
+def test_seed_demo_data_creates_a_coherent_workflow(settings):
+    """One command must replace SETUP.md §10's 8-step manual checklist, and the
+    result has to exercise the actual spine — a converted ticket with a work order
+    carrying priced lines — not just isolated rows."""
+    from django.core.management import call_command
+    from core.models import Client, Contract, Device, LineItem, Sale
+    settings.DEBUG = True
+
+    call_command('seed_demo_data', verbosity=0)
+
+    real = Client.objects.filter(is_unsorted=False)   # the system Unsorted bucket
+    assert real.filter(client_type='business').count() == 2   # is residential-typed
+    assert real.filter(client_type='residential').count() == 1
+    # The spine: a ticket converted to a work order.
+    wo = WorkOrder.objects.get(ticket__isnull=False)
+    assert wo.ticket.status == 'converted'
+    assert wo.line_items_total > 0
+    # A standalone WO too — work does not always arrive as a ticket.
+    assert WorkOrder.objects.filter(ticket__isnull=True).exists()
+    # Managed lane and counter lane both represented.
+    assert Contract.objects.filter(status='active').exists()
+    assert Sale.objects.filter(client__isnull=True).exists()
+    # The encrypted-credential path is exercised.
+    assert Device.objects.exclude(device_password='').exists()
+    assert LineItem.objects.filter(kind='part').exists()
+
+
+@pytest.mark.django_db
+def test_seed_demo_data_refuses_on_a_production_install(settings):
+    """DEBUG=False means this looks like a real install. Fake client records mixed
+    into a real client list have to be cleaned up by hand, so refuse."""
+    from django.core.management import call_command
+    from django.core.management.base import CommandError
+    from core.models import Client
+    settings.DEBUG = False
+
+    with pytest.raises(CommandError, match='DEBUG=False'):
+        call_command('seed_demo_data', verbosity=0)
+    assert not Client.objects.filter(is_unsorted=False).exists()
+
+
+@pytest.mark.django_db
+def test_seed_demo_data_refuses_when_clients_already_exist(settings, client_obj):
+    """Second guard, independent of DEBUG: never interleave demo records with data
+    that is already here. reset_operational_data is the way to clear a test box."""
+    from django.core.management import call_command
+    from django.core.management.base import CommandError
+    settings.DEBUG = True
+
+    with pytest.raises(CommandError, match='already exist'):
+        call_command('seed_demo_data', verbosity=0)
+
+
+@pytest.mark.django_db
+def test_seed_demo_data_force_overrides_both_guards(settings, client_obj):
+    """--force is the documented escape hatch for a box that genuinely is a test
+    box but does not look like one."""
+    from django.core.management import call_command
+    from core.models import Client
+    settings.DEBUG = False
+
+    call_command('seed_demo_data', '--force', verbosity=0)
+    assert Client.objects.count() > 1
+
+
+@pytest.mark.django_db
+def test_seeded_data_is_unmistakably_fake(settings):
+    """MB is public and this data lands on demo boxes other people see. The July
+    2026 hygiene pass had to scrub real prod IPs and a real name out of test
+    fixtures; this locks the conventions so it cannot happen again.
+
+    RFC 2606 reserves example.com/.org; 555 is reserved for fiction.
+    """
+    from django.core.management import call_command
+    from core.models import Client, Contact
+    settings.DEBUG = True
+    call_command('seed_demo_data', verbosity=0)
+
+    for email in list(Client.objects.exclude(email='').values_list('email', flat=True)) + \
+                 list(Contact.objects.exclude(email='').values_list('email', flat=True)):
+        assert email.endswith(('example.com', 'example.org')), email
+
+    for phone in list(Client.objects.exclude(phone='').values_list('phone', flat=True)) + \
+                 list(Contact.objects.exclude(phone='').values_list('phone', flat=True)):
+        assert '555' in phone, phone
+
+    # No real internal addresses may ever appear in seeded records.
+    blob = ' '.join(Client.objects.values_list('address_line1', flat=True))
+    assert '10.58.' not in blob
+
+
+@pytest.mark.django_db
+def test_seed_new_install_flag_waives_debug_but_not_existing_data(settings, client_obj):
+    """scripts/install.sh writes DEBUG=False, so it must waive that guard to seed a
+    fresh box at all. It must NOT waive the existing-clients guard: install.sh is
+    documented as safe to re-run over an existing install (it is the v0.4.52
+    recovery path), and a re-run on a live shop must never inject demo records into
+    real client data.
+    """
+    from django.core.management import call_command
+    from django.core.management.base import CommandError
+    from core.models import Client
+    settings.DEBUG = False
+
+    # A client already exists (client_obj) -> refuse, even with --new-install.
+    with pytest.raises(CommandError, match='already exist'):
+        call_command('seed_demo_data', '--new-install', verbosity=0)
+    # The system Unsorted bucket is migration-created and always present, so count
+    # real clients only — the same exclusion the command's own guard uses.
+    assert Client.objects.filter(is_unsorted=False).count() == 1
+
+    # Empty database + DEBUG=False -> the installer's case -> allowed.
+    Client.objects.filter(is_unsorted=False).delete()
+    call_command('seed_demo_data', '--new-install', verbosity=0)
+    assert Client.objects.filter(is_unsorted=False).count() == 3
+
+
+def test_installer_seeds_by_default_and_says_so():
+    """The installer must seed a fresh box, must offer an opt-out, must use
+    --new-install rather than --force (which would waive the existing-data guard),
+    and must TELL the user the data is fake and how to clear it. Silence here is
+    the failure mode: unexplained fake clients read as a botched import."""
+    from pathlib import Path
+    sh = (Path(__file__).resolve().parent.parent / 'scripts' / 'install.sh').read_text()
+
+    assert 'SEED_DEMO=1' in sh                      # default on
+    assert '--no-demo-data) SEED_DEMO=0' in sh      # opt-out exists
+    assert 'seed_demo_data --new-install' in sh     # correct flag
+    assert 'seed_demo_data --force' not in sh       # never the blanket bypass
+    assert 'DEMO DATA IS PRESENT' in sh             # user is told
+    assert 'reset_operational_data' in sh           # and told how to clear it

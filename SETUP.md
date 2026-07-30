@@ -189,9 +189,42 @@ Several functions depend on scheduled systemd timers, including:
 
 See `deploy/README.md` for timer installation and verification.
 
-## 10. Create Test Data
+## 10. Demo Data — Already There, and How to Remove It
 
-Before entering real client information, create enough fake data to test the main workflows:
+**If you used `scripts/install.sh`, your system already contains demo data.** It is
+seeded by default: two business clients, one residential, contacts, devices, an open
+ticket, a ticket converted to a work order with priced labour and parts, a managed
+contract, and a counter sale.
+
+**Every record is fake** — invented business names, `example.com` addresses, `555`
+phone numbers. It exists so you can walk the whole workflow before committing real
+information, and so a new install is something you can actually look at.
+
+**Remove it before you enter real client work:**
+
+```bash
+venv/bin/python manage.py reset_operational_data \
+    --confirm "DELETE ALL OPERATIONAL DATA"
+```
+
+Run it without `--confirm` first for a dry run. It removes operational records only
+— configuration, settings, roles, email templates, repair types and logins are all
+kept. Do not use `manage.py flush`, which also destroys configuration.
+
+Install with `--no-demo-data` if you would rather start empty. To add it to an
+install that started empty:
+
+```bash
+venv/bin/python manage.py seed_demo_data --new-install
+```
+
+That command refuses to run when the database already has client records, so it can
+never mix demo records into real data. `--force` overrides every guard and should
+not be used on a system holding real client information.
+
+### Walking the workflow by hand
+
+Whether you use the demo data or not, exercise these paths before going live:
 
 1. Create one residential client and one business client.
 2. Add at least one contact and device to each.
