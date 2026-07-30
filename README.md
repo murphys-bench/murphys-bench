@@ -195,6 +195,24 @@ The most important requirement is preserving `FIELD_ENCRYPTION_KEY`. Without tha
 
 Additional information is available in [deploy/README.md](deploy/README.md).
 
+## Versioning
+
+Murphy's Bench is a self-hosted application rather than a library, so "breaking" here does not
+mean a changed API. It means **an upgrade that is not automatic** — one needing a new `.env`
+key, a migration with manual steps, or a removed feature.
+
+- **Patch** (`0.9.0` → `0.9.1`) — bug fixes and internal changes. Update without reading.
+- **Minor** (`0.9.0` → `0.10.0`) — new capability, or a change that is not a clean upgrade.
+  Skim the changelog first.
+- **Major** — reserved. It will be a deliberate announcement, not a milestone reached by
+  accumulation.
+
+Note that the positions do not roll over: `0.9.9` is followed by `0.9.10`, not `1.0.0`.
+
+Releases through `v0.4.52` did not follow this. The number tracked infrastructure while most
+of the product shipped as patch releases, which is why `v0.9.0` follows `v0.4.52` directly.
+The [CHANGELOG](CHANGELOG.md) entry for `v0.9.0` has the detail.
+
 ## License
 
 Murphy's Bench is licensed under the GNU Affero General Public License v3.0. See [LICENSE](LICENSE).
