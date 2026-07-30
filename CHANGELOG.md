@@ -8,11 +8,20 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
-## Unreleased
+## v0.9.0 — 2026-07-30
 
 > **Read the "Changed" section before you upgrade.** This batch alters three
 > defaults, and one of them can affect an install that is reachable from the
 > internet.
+
+**On the version number.** This release jumps from 0.4.52 to 0.9.0. Nothing was
+skipped. The numbering had been tracking infrastructure rather than the product:
+the only minor bumps Murphy's Bench ever had were the in-app update button, the
+Django 5.2 upgrade and CSP, while Contracts and Assets, the SLA overhaul,
+Estimates, Sales, recurring billing, the POS Register, configurable backups and
+time tracking all shipped as patch releases. The number now reflects what is in
+the product. From here, a new capability or a change that isn't a clean upgrade
+bumps the minor; bug fixes bump the patch. See "Versioning" in the README.
 
 ### Security
 
