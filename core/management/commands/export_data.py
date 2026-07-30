@@ -152,7 +152,7 @@ class Command(BaseCommand):
             ))
         elif secret_cols:
             self.stdout.write(
-                f'(Encrypted fields redacted. Re-run with --include-secrets to include them.)'
+                '(Encrypted fields redacted. Re-run with --include-secrets to include them.)'
             )
 
     def _write_readme(self, stage, ts, exported, total_rows, with_secrets, media_note):

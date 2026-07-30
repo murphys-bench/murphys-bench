@@ -122,7 +122,7 @@ class Command(BaseCommand):
 
         # An open ticket that stays a ticket, and one converted to a work order,
         # which is the spine of the app.
-        open_ticket = factories.TicketFactory(
+        factories.TicketFactory(
             client=business_b, contact=contacts[1], device=devices[1])
 
         converted_ticket = factories.TicketFactory(

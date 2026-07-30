@@ -8,7 +8,6 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from encrypted_model_fields.fields import EncryptedCharField, EncryptedTextField
 from django.conf import settings as django_settings
 from django.core.files.storage import FileSystemStorage
-import uuid
 import os
 
 
@@ -956,7 +955,6 @@ class Ticket(models.Model):
 
     def get_linked_tickets(self):
         """Return all tickets linked to this one, regardless of link direction"""
-        from django.db.models import Q
         links_a = self.links_as_a.select_related('ticket_b', 'created_by').all()
         links_b = self.links_as_b.select_related('ticket_a', 'created_by').all()
         results = []
