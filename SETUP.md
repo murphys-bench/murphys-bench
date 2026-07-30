@@ -218,7 +218,9 @@ install that started empty:
 venv/bin/python manage.py seed_demo_data --new-install
 ```
 
-That command refuses to run when the database already has client records, so it can
+That command refuses to run once the installer has marked the system set up, and
+also whenever the database holds operational data of any kind — including
+clientless work such as counter sales, prospects and walk-in devices. So it can
 never mix demo records into real data. `--force` overrides every guard and should
 not be used on a system holding real client information.
 

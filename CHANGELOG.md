@@ -96,6 +96,25 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ### Fixed
 
+- **A walk-in-only shop could have demo data added to its live database.** The guard
+  that stops the installer seeding demonstration records into a working system only
+  asked whether any clients existed. Murphy's Bench supports work with no client
+  attached — counter sales, prospects, walk-in devices and work orders — so a shop
+  doing only over-the-counter business can genuinely have zero clients, and rerunning
+  the installer there would have added fake clients, tickets and work orders to real
+  data while the documentation promised it could not. The installer now marks a system
+  as set up when it finishes, and seeding refuses on any marked system regardless of
+  what the database contains. As a second layer it also refuses when operational data
+  of any kind is present, which covers systems installed before this change.
+
+- **The installer described genuine failures as "this install already has client
+  records".** All output from the seeding step was discarded and every failure was
+  reported with that one message, so a real problem — a missing encryption key, a
+  failed migration, a missing dependency — was announced as a harmless re-run and the
+  install carried on. Declining to seed and failing to seed are now separate outcomes:
+  a re-run says nothing changed, and an actual failure is reported as a failure with
+  the error kept intact.
+
 - **The installer reported failure on installs that were completely fine.** The check
   that confirms the web server can serve stylesheets ran immediately after reloading
   nginx. nginx finishes reloading in the background, so the check could be answered by

@@ -9344,14 +9344,92 @@ def test_seed_demo_data_refuses_on_a_production_install(settings):
 
 @pytest.mark.django_db
 def test_seed_demo_data_refuses_when_clients_already_exist(settings, client_obj):
-    """Second guard, independent of DEBUG: never interleave demo records with data
-    that is already here. reset_operational_data is the way to clear a test box."""
+    """Guard 3, independent of DEBUG: never interleave demo records with data that
+    is already here. reset_operational_data is the way to clear a test box.
+
+    Declining exits 3, not 1 — see the exit-code test below for why that matters.
+    """
     from django.core.management import call_command
-    from django.core.management.base import CommandError
     settings.DEBUG = True
 
-    with pytest.raises(CommandError, match='already exist'):
+    with pytest.raises(SystemExit) as exc:
         call_command('seed_demo_data', verbosity=0)
+    assert exc.value.code == 3
+
+
+@pytest.mark.django_db
+def test_seed_demo_data_refuses_on_a_clientless_shop_with_only_counter_sales(settings):
+    """THE regression test for the July 30 2026 review finding.
+
+    MB supports clientless work, so a shop doing only walk-in counter sales sits at
+    zero clients forever. The guard used to count Client alone, which meant an
+    installer re-run would cheerfully seed fake records straight into that shop's
+    live data while claiming it could not.
+    """
+    from django.core.management import call_command
+    from core.models import Client, Sale
+    settings.DEBUG = True
+
+    Sale.objects.create(client=None)
+    assert not Client.objects.filter(is_unsorted=False).exists()  # the old guard saw nothing
+
+    with pytest.raises(SystemExit) as exc:
+        call_command('seed_demo_data', '--new-install', verbosity=0)
+    assert exc.value.code == 3
+    assert not Client.objects.filter(is_unsorted=False).exists()
+
+
+@pytest.mark.django_db
+def test_seed_demo_data_refuses_once_the_install_is_marked_initialised(settings):
+    """Guard 2, and the only one that works on an EMPTY database — which is exactly
+    what a `--no-demo-data` install leaves behind. Without the marker, a re-run of
+    install.sh on such a shop would seed fake data into a deliberately empty box."""
+    from django.core.management import call_command
+    from core.models import Client
+    settings.DEBUG = True
+
+    call_command('mark_install_initialized', verbosity=0)
+
+    with pytest.raises(SystemExit) as exc:
+        call_command('seed_demo_data', '--new-install', verbosity=0)
+    assert exc.value.code == 3
+    assert not Client.objects.filter(is_unsorted=False).exists()
+
+
+@pytest.mark.django_db
+def test_seed_decline_and_seed_failure_are_distinguishable(settings):
+    """scripts/install.sh branches on this. A declined seed must exit 3 so it can be
+    reported as a harmless no-op, and a genuine failure must NOT — the installer
+    used to describe every nonzero exit as "already has client records", which was
+    a false statement printed to the user whenever seeding actually broke."""
+    from django.core.management import call_command
+    from django.core.management.base import CommandError
+
+    settings.DEBUG = True
+    call_command('mark_install_initialized', verbosity=0)
+    with pytest.raises(SystemExit) as declined:
+        call_command('seed_demo_data', '--new-install', verbosity=0)
+    assert declined.value.code == 3
+
+    # A real error (here: a production-shaped install with no waiver) is a
+    # CommandError, which manage.py exits 1 on — never mistaken for a re-run.
+    settings.DEBUG = False
+    with pytest.raises(CommandError):
+        call_command('seed_demo_data', verbosity=0)
+
+
+@pytest.mark.django_db
+def test_mark_install_initialized_is_idempotent():
+    """A re-run of install.sh must not move the date — the first stamp is the truth."""
+    from django.core.management import call_command
+    from core.models import SiteSettings
+
+    call_command('mark_install_initialized', verbosity=0)
+    first = SiteSettings.get().install_initialized_at
+    assert first is not None
+
+    call_command('mark_install_initialized', verbosity=0)
+    assert SiteSettings.get().install_initialized_at == first
 
 
 @pytest.mark.django_db
@@ -9395,19 +9473,19 @@ def test_seeded_data_is_unmistakably_fake(settings):
 @pytest.mark.django_db
 def test_seed_new_install_flag_waives_debug_but_not_existing_data(settings, client_obj):
     """scripts/install.sh writes DEBUG=False, so it must waive that guard to seed a
-    fresh box at all. It must NOT waive the existing-clients guard: install.sh is
+    fresh box at all. It must NOT waive the existing-data guard: install.sh is
     documented as safe to re-run over an existing install (it is the v0.4.52
     recovery path), and a re-run on a live shop must never inject demo records into
     real client data.
     """
     from django.core.management import call_command
-    from django.core.management.base import CommandError
     from core.models import Client
     settings.DEBUG = False
 
     # A client already exists (client_obj) -> refuse, even with --new-install.
-    with pytest.raises(CommandError, match='already exist'):
+    with pytest.raises(SystemExit) as exc:
         call_command('seed_demo_data', '--new-install', verbosity=0)
+    assert exc.value.code == 3
     # The system Unsorted bucket is migration-created and always present, so count
     # real clients only — the same exclusion the command's own guard uses.
     assert Client.objects.filter(is_unsorted=False).count() == 1
