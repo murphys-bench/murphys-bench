@@ -10,7 +10,108 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+> **Read the "Changed" section before you upgrade.** This batch alters three
+> defaults, and one of them can affect an install that is reachable from the
+> internet.
+
+### Security
+
+- **A technician could read every stored device password in the shop.** Revealing a
+  device credential checked that you were assigned to the ticket or work order the
+  reveal came from, but never checked that the job had anything to do with the device
+  being requested. Anyone assigned to a single job could read the credentials of any
+  device by asking for it with their own job attached, and the access log recorded the
+  disclosure against that unrelated job. The job must now belong to the device.
+  If you have more than one technician, treat this as the reason to upgrade.
+
+- **Any signed-in user could change shop configuration.** The Settings page was
+  restricted to administrators, but 22 of the actions behind it were not, so a
+  technician could add, edit or delete knowledge-base categories, repair types,
+  canned responses and checklist items, and silently add a client's address to the
+  never-send email list, by using the action directly. All of `/settings/` is now
+  administrator-only, and a test walks every settings route on every change so a new
+  one cannot be added without a gate. The one deliberate exception is reading a shared
+  shop credential from the vault, which stays available to technicians who hold that
+  permission.
+
+- **"Send a test email" would mail anyone, from your mail server.** The test accepted
+  any address and sent to it using your shop's saved SMTP credentials, so any
+  signed-in user could send mail as your business and put your domain's sending
+  reputation at risk. The test now goes to your own address, the recipient field is
+  gone, and connection errors are written to the log instead of shown in the browser,
+  where they exposed your mail server's hostname and sometimes its login name.
+
+- **Django admin did not ask for a two-factor code.** "Require Two-Factor
+  Authentication" governed the application but not the admin back end, which checked
+  only a password, so a staff account that had never completed two-factor setup could
+  still use it. Admin can read decrypted credentials and rewrite any record, so it now
+  requires a verified code **regardless of that setting**. See "Changed" below.
+
+### Changed
+
+- **Django admin now always requires a two-factor code.** This is not governed by the
+  "Require Two-Factor Authentication" setting, deliberately: the admin back end holds
+  the keys to everything. If you reach `/admin/` without having set up an
+  authenticator, you are sent to the setup page rather than bounced in a loop.
+  **If you lose your authenticator entirely**, recover on the server with
+  `venv/bin/python manage.py reset_mfa <username>`, which clears the device so you can
+  enrol again and records who did it. Generate backup codes before you need them, from
+  Settings, Access & Security, Account Security.
+
+- **Two-factor backup codes are administrator-only, and now actually enforced.** The
+  documentation has claimed this since backup codes were added; the code never did it,
+  and any user with an authenticator could generate their own. Employees now have a
+  read-only **My Security** page showing their own two-factor status, and nothing from
+  the admin back end. A technician who loses their authenticator is reset by an
+  administrator, which leaves a record.
+
+- **The Content-Security-Policy is now enforced, not just reported.** It shipped in
+  report-only mode and nothing in the installer or the sample configuration ever
+  turned it on, so on every install except the author's it was logging violations and
+  preventing nothing. If a deployment genuinely breaks, set `CSP_REPORT_ONLY=True` in
+  `.env` to return to reporting, and please report what broke.
+
+- **⚠ Murphy's Bench no longer trusts `X-Forwarded-Proto` and `X-Forwarded-Host`
+  unless you opt in.** These headers can be set by anyone who can reach the
+  application's port directly, and trusting them unconditionally meant an install
+  without a sanitising proxy in front would believe an attacker-supplied hostname and
+  build it into links in outbound email.
+
+  **If you run Murphy's Bench behind Cloudflare, nginx, Caddy or any other proxy that
+  terminates HTTPS, add `TRUST_PROXY_HEADERS=True` to `.env` when you upgrade.**
+  Without it the application will treat requests as plain HTTP, which can break secure
+  cookies and produce `http://` links. A plain-HTTP install on a local network needs
+  no change. See `docs/deployment-tls.md`.
+
+- **A new install now starts with sample data.** Two clients, contacts, devices,
+  tickets, a work order with priced labour, a managed contract and a counter sale, so
+  you can see how the parts fit together instead of facing an empty database and a
+  checklist. Every record is obviously fake. Clear it all before entering real work
+  with `manage.py reset_operational_data --confirm "DELETE ALL OPERATIONAL DATA"`,
+  which keeps your settings. Install with `--no-demo-data` to start empty.
+
 ### Fixed
+
+- **The installer reported failure on installs that were completely fine.** The check
+  that confirms the web server can serve stylesheets ran immediately after reloading
+  nginx. nginx finishes reloading in the background, so the check could be answered by
+  the old configuration and report `INSTALL FAILED: nginx returned HTTP 404` on a
+  healthy box, while the same request succeeded moments later. It now waits for an
+  answer instead of asking once, and its error messages distinguish a permissions
+  problem from a configuration problem instead of guessing at permissions every time.
+  Introduced in v0.4.52; if you saw that message, your install was probably fine.
+
+- **The installer could report success over an application that was not running.**
+  Stylesheets are served by nginx directly from disk, so that check passed even when
+  the application itself was returning errors to every request, and the installer went
+  on to print "Murphy's Bench is running at ...". It now restarts the application and
+  confirms the application itself answers. The restart also means re-running the
+  installer picks up a changed service definition rather than leaving the old process
+  running against it.
+
+- **A dead database query on every work order edit**, left behind when automatic
+  ticket closing was removed in June. No behaviour change; it simply stops happening.
+
 - **INSTALL.md contradicted itself about where Murphy's Bench goes.** The quick install
   cloned into whatever directory you were in, while the manual instructions and the sample
   service file hardcoded `/opt/murphys-bench`. A tester installed to their home directory,
