@@ -8914,6 +8914,26 @@ def _ci_workflow():
             / '.github' / 'workflows' / 'ci.yml').read_text()
 
 
+def test_ci_keeps_the_status_check_name_branch_protection_requires():
+    """main's branch protection requires a status check named exactly "test".
+
+    Turning the single `test` job into a matrix renamed its contexts to
+    "test (3.12)" / "test (3.14)", so a check named "test" would never report again
+    and every future PR would be silently unmergeable through the normal path — a
+    gate quietly broken by the change meant to strengthen it. An aggregate job named
+    "test" preserves the contract: green only when lint and every matrix leg passed.
+
+    If the required check is ever renamed in branch protection, update this test with
+    it — do not delete it.
+    """
+    ci = _ci_workflow()
+    assert '\n  test:\n' in ci, 'a job named exactly "test" must exist'
+    assert 'needs: [lint, suite]' in ci
+    # It must actually fail when a dependency failed, not just run after it.
+    assert 'needs.suite.result' in ci and 'needs.lint.result' in ci
+    assert 'if: always()' in ci, 'must run even when a dependency failed, to report red'
+
+
 def test_ci_tests_every_supported_python_runtime():
     """MB claims support for Ubuntu 24.04 (Python 3.12, what prod runs) AND 26.04
     (Python 3.14, what the installer targets and mb-test runs). CI tested only 3.12,

@@ -52,7 +52,7 @@ jobs:
         # mistake again, and it teaches people to ignore CI output.
         run: flake8 --select=F,E9 --show-source core/ murphys_bench/ accounts/
 
-  test:
+  suite:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false          # one version failing must not hide the other's result
@@ -152,3 +152,27 @@ jobs:
         # gate — a signal for choosing what to test next.
         if: always()
         run: python -m coverage report --sort=cover | head -20
+
+  test:
+    # ⚠ THE NAME MATTERS. main's branch protection requires a status check called
+    # exactly "test". Turning the old single `test` job into a matrix renamed its
+    # contexts to "test (3.12)" / "test (3.14)", which means a check named "test"
+    # would never report again and EVERY future PR would be silently unmergeable
+    # through the normal path — a gate quietly broken by a change meant to
+    # strengthen it. (enforce_admins is false, so an admin merge would still get
+    # through; relying on that is exactly the wrong answer.)
+    #
+    # This aggregate keeps that contract: one context named "test", green only when
+    # the lint job and every matrix leg passed. Adding a runtime to the matrix needs
+    # no branch-protection change, and a failing leg cannot be mistaken for a pass.
+    needs: [lint, suite]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require lint and every matrix leg to have passed
+        run: |
+          echo "lint:  ${{ needs.lint.result }}"
+          echo "suite: ${{ needs.suite.result }}"
+          [ "${{ needs.lint.result }}"  = "success" ] || { echo "lint did not pass";  exit 1; }
+          [ "${{ needs.suite.result }}" = "success" ] || { echo "suite did not pass"; exit 1; }
+          echo "all required jobs passed"
