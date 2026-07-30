@@ -8868,3 +8868,45 @@ def test_seeded_data_is_unmistakably_fake(settings):
     # No real internal addresses may ever appear in seeded records.
     blob = ' '.join(Client.objects.values_list('address_line1', flat=True))
     assert '10.58.' not in blob
+
+
+@pytest.mark.django_db
+def test_seed_new_install_flag_waives_debug_but_not_existing_data(settings, client_obj):
+    """scripts/install.sh writes DEBUG=False, so it must waive that guard to seed a
+    fresh box at all. It must NOT waive the existing-clients guard: install.sh is
+    documented as safe to re-run over an existing install (it is the v0.4.52
+    recovery path), and a re-run on a live shop must never inject demo records into
+    real client data.
+    """
+    from django.core.management import call_command
+    from django.core.management.base import CommandError
+    from core.models import Client
+    settings.DEBUG = False
+
+    # A client already exists (client_obj) -> refuse, even with --new-install.
+    with pytest.raises(CommandError, match='already exist'):
+        call_command('seed_demo_data', '--new-install', verbosity=0)
+    # The system Unsorted bucket is migration-created and always present, so count
+    # real clients only — the same exclusion the command's own guard uses.
+    assert Client.objects.filter(is_unsorted=False).count() == 1
+
+    # Empty database + DEBUG=False -> the installer's case -> allowed.
+    Client.objects.filter(is_unsorted=False).delete()
+    call_command('seed_demo_data', '--new-install', verbosity=0)
+    assert Client.objects.filter(is_unsorted=False).count() == 3
+
+
+def test_installer_seeds_by_default_and_says_so():
+    """The installer must seed a fresh box, must offer an opt-out, must use
+    --new-install rather than --force (which would waive the existing-data guard),
+    and must TELL the user the data is fake and how to clear it. Silence here is
+    the failure mode: unexplained fake clients read as a botched import."""
+    from pathlib import Path
+    sh = (Path(__file__).resolve().parent.parent / 'scripts' / 'install.sh').read_text()
+
+    assert 'SEED_DEMO=1' in sh                      # default on
+    assert '--no-demo-data) SEED_DEMO=0' in sh      # opt-out exists
+    assert 'seed_demo_data --new-install' in sh     # correct flag
+    assert 'seed_demo_data --force' not in sh       # never the blanket bypass
+    assert 'DEMO DATA IS PRESENT' in sh             # user is told
+    assert 'reset_operational_data' in sh           # and told how to clear it

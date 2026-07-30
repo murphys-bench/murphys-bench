@@ -39,10 +39,16 @@ class Command(BaseCommand):
             help='Seed even when DEBUG=False or clients already exist. '
                  'Never use this on a production install.',
         )
+        parser.add_argument(
+            '--new-install', action='store_true',
+            help="For scripts/install.sh. Skips the DEBUG=False check ONLY — the "
+                 "existing-clients check still applies, so re-running the installer "
+                 "on a live shop cannot inject demo data.",
+        )
 
     def handle(self, *args, **options):
         force = options['force']
-        self._check_safe(force)
+        self._check_safe(force, options['new_install'])
 
         with transaction.atomic():
             summary = self._seed()
@@ -56,14 +62,20 @@ class Command(BaseCommand):
             '  manage.py reset_operational_data --confirm "DELETE ALL OPERATIONAL DATA"\n'
         )
 
-    def _check_safe(self, force):
+    def _check_safe(self, force, new_install=False):
         """Fail loud rather than quietly seeding something real."""
         if force:
             self.stdout.write(self.style.WARNING(
                 '--force: skipping the production and existing-data guards.'))
             return
 
-        if not settings.DEBUG:
+        # ⚠ --new-install deliberately relaxes ONLY the DEBUG check, never the
+        # existing-clients check. scripts/install.sh writes DEBUG=False, so it needs
+        # the first waived to seed a fresh box at all — but install.sh is documented
+        # as safe to re-run over an existing install (it is the v0.4.52 recovery
+        # path), and a re-run on a live shop must not inject demo records into real
+        # client data. The second guard is what makes that impossible.
+        if not settings.DEBUG and not new_install:
             raise CommandError(
                 'Refusing to seed: DEBUG=False, which means this looks like a real\n'
                 'install. Demo data mixed into real client records has to be cleaned\n'

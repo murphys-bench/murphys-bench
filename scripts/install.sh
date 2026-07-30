@@ -29,6 +29,9 @@
 #                          and will fail or fight your actual setup otherwise)
 #                      If none of that describes you, leave this off — it's what gets
 #                      you to a working login page without hand-editing config files.
+#   --no-demo-data    start with an empty database. By default a fresh install is
+#                      seeded with obviously-fake demo data (see below) so the app
+#                      is usable immediately; pass this if you'd rather begin empty.
 #   --skip-tests      don't run the pytest smoke check at the end
 #   --noinput         non-interactive: skip the createsuperuser prompt
 #   ALLOWED_HOSTS=..  comma list for .env (default: localhost,127.0.0.1, plus this
@@ -44,12 +47,13 @@ VENV="$APP/venv/bin"
 RUN_USER="$(id -un)"
 RUN_GROUP="$(id -gn)"
 
-SKIP_APT=0; SKIP_WEB=0; SKIP_TESTS=0; NOINPUT=0
+SKIP_APT=0; SKIP_WEB=0; SKIP_TESTS=0; NOINPUT=0; SEED_DEMO=1
 for a in "$@"; do
   case "$a" in
     --skip-apt) SKIP_APT=1 ;;
     --skip-web) SKIP_WEB=1 ;;
     --skip-tests) SKIP_TESTS=1 ;;
+    --no-demo-data) SEED_DEMO=0 ;;
     --noinput) NOINPUT=1 ;;
     *) echo "install: unknown arg '$a'" >&2; exit 2 ;;
   esac
@@ -213,6 +217,32 @@ else
     log "superuser already exists — skipping createsuperuser"
 fi
 
+# 8b) Demo data (default on; --no-demo-data to start empty).
+#
+# A fresh install used to come up with an empty database and an 8-step manual
+# checklist in SETUP.md, which is a poor first experience and made it impossible to
+# tell whether the app actually WORKS rather than merely starts.
+#
+# ⚠ --new-install, NOT --force. install.sh writes DEBUG=False, which the command
+# refuses to seed over, so one guard has to be waived. --new-install waives ONLY
+# that one and keeps the existing-clients guard, because this script is documented
+# as safe to re-run over an existing install — re-running it on a live shop must
+# never inject demo records into real client data. On a re-run the command declines
+# and we carry on; that is the intended outcome, not a failure.
+if [ "$SEED_DEMO" = 1 ]; then
+    log "seeding demo data (fake clients/tickets/work orders; --no-demo-data to skip)..."
+    if "$VENV/python" manage.py seed_demo_data --new-install >/dev/null 2>&1; then
+        SEEDED=1
+        log "demo data created — every record is fake; clear it before real work (see the note at the end)"
+    else
+        SEEDED=0
+        log "demo data not added (this install already has client records) — nothing changed"
+    fi
+else
+    SEEDED=0
+    log "skipping demo data (--no-demo-data)"
+fi
+
 # 9) Smoke checks.
 log "running deploy check (HTTPS warnings are expected on a plain-HTTP box)..."
 "$VENV/python" manage.py check || fail "manage.py check failed"
@@ -315,6 +345,30 @@ $(date '+%F %T') install: DONE
   manager NOW (also save SECRET_KEY).
 
 DONE
+
+# Demo data is load-bearing information, not a footnote: someone who does not know
+# these records are fake could mistake them for a botched import, and someone who
+# does not know how to clear them could start entering real work alongside them.
+if [ "$SEEDED" = 1 ]; then
+    cat <<DEMO
+
+DEMO DATA IS PRESENT
+  This install was seeded with sample records so you can try the app straight
+  away: clients, contacts, devices, tickets, work orders, a managed contract and
+  a counter sale.
+
+  EVERY ONE IS FAKE. Invented business names, example.com addresses, 555 phone
+  numbers. Nothing here belongs to a real customer.
+
+  Clear it ALL before you enter real client work:
+    cd $APP && venv/bin/python manage.py reset_operational_data \\
+        --confirm "DELETE ALL OPERATIONAL DATA"
+
+  That removes operational records only — your settings, roles, email templates,
+  repair types and logins are all kept. Install with --no-demo-data next time to
+  start empty.
+DEMO
+fi
 if [ "$SKIP_WEB" = 0 ]; then
     cat <<DONE2
 Murphy's Bench is running at:
