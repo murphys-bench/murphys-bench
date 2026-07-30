@@ -36,7 +36,16 @@
             <ul x-show="open" x-cloak class="divide-y divide-gray-100 border-t border-gray-100">
                 {% for key, label in group_tabs %}
                 <li>
-                    {% if key == 'users' %}
+                    {% if key == 'account_security' %}
+                    {% comment %}
+                    Links out to the two_factor page, like Users and Roles below.
+                    Lives in the admin section because backup codes are admin-only.
+                    {% endcomment %}
+                    <a href="{% url 'two_factor:profile' %}"
+                       class="block px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                        {{ label }}
+                    </a>
+                    {% elif key == 'users' %}
                     <a href="{% url 'core:user_list' %}"
                        class="block px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
                         {{ label }}
@@ -272,12 +281,18 @@
             <!-- Test outbound (outside form so submit doesn't interfere) -->
             <div class="mt-4 pt-4 border-t border-gray-100">
                 <p class="text-sm font-medium text-gray-700 mb-2">Send a test email</p>
+                {% comment %}
+                The recipient is fixed server-side (your own address, else the From
+                address). It is NOT a field: an arbitrary-recipient test sends through
+                the shop's SMTP credentials, which is a relay. See EmailTestOutboundView.
+                {% endcomment %}
+                <p class="text-xs text-gray-500 mb-2">
+                    Sends to
+                    <span class="font-medium">{{ request.user.email|default:settings.email_from|default:settings.email_username|default:"— no address on file —" }}</span>.
+                </p>
                 <div class="flex items-center gap-2">
-                    <input type="email" id="test-outbound-to" name="to" placeholder="Recipient address…"
-                           class="text-sm border border-gray-300 rounded px-2 py-1.5 w-64 focus:outline-none focus:ring-1 focus:ring-blue-500">
                     <button type="button"
                             hx-post="{% url 'core:settings_test_outbound' %}"
-                            hx-include="#test-outbound-to"
                             hx-target="#outbound-test-result"
                             hx-swap="innerHTML"
                             class="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 border border-gray-300 whitespace-nowrap">

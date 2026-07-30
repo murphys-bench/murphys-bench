@@ -199,6 +199,9 @@ urlpatterns = [
     path('contacts/<int:pk>/set-primary/', views.ContactSetPrimaryView.as_view(), name='contact_set_primary'),
 
     # Native Settings UI
+    # An employee's own 2FA status. Separate from the admin Account Security page
+    # (two_factor:profile), which carries backup codes and Disable 2FA.
+    path('my-security/', views.MySecurityView.as_view(), name='my_security'),
     path('settings/', views.SettingsView.as_view(), name='settings'),
     path('settings/test-outbound-email/', views.EmailTestOutboundView.as_view(), name='settings_test_outbound'),
     path('settings/suppressed-addresses/add/', views.SuppressedAddressAddView.as_view(), name='suppressed_address_add'),
@@ -236,7 +239,10 @@ urlpatterns = [
     path('settings/canned-responses/new/', views.CannedResponseCreateView.as_view(), name='cr_create'),
     path('settings/canned-responses/<int:pk>/edit/', views.CannedResponseUpdateView.as_view(), name='cr_update'),
     path('settings/canned-responses/<int:pk>/delete/', views.CannedResponseDeleteView.as_view(), name='cr_delete'),
-    path('settings/canned-responses/picker/', views.CannedResponsePickerView.as_view(), name='cr_picker'),
+    # NOT under settings/ on purpose: this read-only picker is fetched from the
+    # work order page by ordinary techs, while every settings/ route is admin-only
+    # (SettingsAdminMixin). Keeping it here preserves that invariant with no exceptions.
+    path('canned-responses/picker/', views.CannedResponsePickerView.as_view(), name='cr_picker'),
 
     # Products & Services catalog (top-level; replaces Settings → Quick Labor)
     path('catalog/', views.CatalogListView.as_view(), name='catalog_list'),

@@ -11,7 +11,7 @@
             Your account is now protected with two-factor authentication.
             You'll be asked for a code from your authenticator app on each sign-in.
         </p>
-        <a href="{% url 'two_factor:profile' %}"
+        <a href="{% if is_admin %}{% url 'two_factor:profile' %}{% else %}{% url 'core:my_security' %}{% endif %}"
            class="inline-block px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">
             Back to Account Security
         </a>

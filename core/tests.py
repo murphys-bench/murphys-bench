@@ -8,6 +8,7 @@ Run with:  venv/bin/python -m pytest
 """
 import json
 import logging
+import re
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -8770,6 +8771,533 @@ def test_unit_templates_are_templates_not_baked_for_one_box():
     )
 
 
+# ══ Security review July 2026: three P0 authorization defects ═══════════════
+#
+# All three were real server-side defects found by an external repository review
+# and confirmed against the code before fixing. Each test below fails on the
+# pre-fix code. See docs/ for the review write-up.
+
+
+# ── P0-1: credential reveal must be bound to the REQUESTED device ───────────
+
+@pytest.mark.django_db
+def test_device_cred_job_from_another_device_cannot_reveal(client, client_obj, cred_device, cred_tech):
+    """THE defect: assignment to Job A must not unlock Device B.
+
+    The reveal gate authorized on assignment to the job id supplied by the browser,
+    and only loaded the requested device afterwards, without ever checking the two
+    were related. So a tech assigned to any single work order could read every
+    device password in the shop by passing their own WO id with someone else's
+    device. Pre-fix this returned 200 and the plaintext secret.
+    """
+    from core.models import DeviceCredentialAccessLog
+    other_device = Device.objects.create(client=client_obj, name='Someone Elses PC',
+                                         device_password='secret-b')
+    # The tech is legitimately assigned to a job — but on a DIFFERENT device.
+    own_wo = WorkOrder.objects.create(client=client_obj, device=cred_device,
+                                      assigned_to=cred_tech)
+
+    client.force_login(cred_tech)
+    resp = client.get(reverse('core:device_cred_reveal', args=[other_device.pk, 'password']),
+                      {'wo': own_wo.pk})
+
+    assert resp.status_code == 403
+    assert b'secret-b' not in resp.content
+    # And nothing may be logged against the unrelated job.
+    assert not DeviceCredentialAccessLog.objects.filter(device=other_device).exists()
+
+
+@pytest.mark.django_db
+def test_device_cred_ticket_from_another_device_cannot_reveal(client, client_obj, cred_device, cred_tech):
+    """Same defect via the ?ticket= path — both job types carry a device FK."""
+    other_device = Device.objects.create(client=client_obj, name='Other PC',
+                                         device_password='secret-c')
+    own_ticket = Ticket.objects.create(client=client_obj, subject='S', description='D',
+                                       device=cred_device, assigned_to=cred_tech)
+
+    client.force_login(cred_tech)
+    resp = client.get(reverse('core:device_cred_reveal', args=[other_device.pk, 'password']),
+                      {'ticket': own_ticket.pk})
+
+    assert resp.status_code == 403
+    assert b'secret-c' not in resp.content
+
+
+@pytest.mark.django_db
+def test_device_cred_write_logs_only_matching_job_context(client, client_obj, cred_device, cred_tech):
+    """The write path shares _job_context, so an unrelated job id must not be
+    recorded as the context for an edit either — the audit log is the whole
+    accountability story for writes, so it must not be forgeable."""
+    from core.models import DeviceCredentialAccessLog
+    unrelated_wo = WorkOrder.objects.create(client=client_obj, assigned_to=cred_tech)
+
+    client.force_login(cred_tech)
+    resp = client.post(reverse('core:device_cred_update', args=[cred_device.pk]),
+                       {'device_username': 'u', 'device_password': 'p',
+                        'credential_notes': '', 'wo': unrelated_wo.pk})
+
+    assert resp.status_code == 200  # write is deliberately not assignment-gated
+    log = DeviceCredentialAccessLog.objects.get(device=cred_device, action='edited')
+    assert log.work_order_id is None
+
+
+# ── P0-2: every /settings/ route is admin-only ──────────────────────────────
+
+@pytest.mark.django_db
+def test_every_settings_route_is_admin_only(client, db):
+    """Enumerates the URLconf and fails on ANY settings route a non-admin reaches.
+
+    This is the real guard, not the individual mixin additions: 22 directly-routable
+    mutation views under /settings/ had drifted to LoginRequired-only while the
+    Settings page itself was gated, so denying the page secured nothing. A
+    per-view judgement call is what allowed the drift, so the invariant is the
+    whole prefix. A new settings route cannot silently forget the gate.
+
+    Genuinely tech-facing endpoints must live OUTSIDE settings/ rather than being
+    excepted here — the canned-response picker was moved out for exactly this.
+    """
+    from django.urls import get_resolver
+    from core.models import Role
+
+    role = Role.objects.create(name='PlainTechRoutes')  # no can_manage_settings
+    tech = User.objects.create_user(username='routetech', password='x', role_obj=role)
+    client.force_login(tech)
+
+    checked, failures = 0, []
+    for pattern in get_resolver().url_patterns:
+        for sub in getattr(pattern, 'url_patterns', [pattern]):
+            route = str(sub.pattern)
+            if not route.startswith('settings/'):
+                continue
+            # Build a concrete URL: substitute 1 for every int converter.
+            url = '/' + re.sub(r'<(int|str):[a-z_]+>', '1', route)
+            if '<' in url:
+                continue
+            checked += 1
+            for method in ('get', 'post'):
+                resp = getattr(client, method)(url)
+                # 403 = gate fired. 404/405 = route exists but not reachable this
+                # way, which is fine. Anything 2xx/3xx means a tech got through.
+                if resp.status_code not in (403, 404, 405):
+                    failures.append(f'{method.upper()} {url} -> {resp.status_code}')
+
+    assert checked >= 50, f'enumeration found only {checked} settings routes'
+    assert not failures, 'non-admin reached settings routes:\n' + '\n'.join(failures)
+
+
+@pytest.mark.django_db
+def test_settings_routes_still_work_for_admin(client, admin_user):
+    """The gate must not have locked admins out of their own settings page."""
+    client.force_login(admin_user)
+    assert client.get('/settings/').status_code == 200
+
+
+@pytest.mark.django_db
+def test_canned_response_picker_still_reachable_by_tech(client, db):
+    """Moved OUT of settings/ deliberately: it is fetched from the work order page
+    by ordinary techs. Blanket-gating the whole prefix would have broken the bench."""
+    from core.models import Role
+    role = Role.objects.create(name='PickerTech')
+    tech = User.objects.create_user(username='pickertech', password='x', role_obj=role)
+    client.force_login(tech)
+    resp = client.get(reverse('core:cr_picker'), {'stream': 'customer'})
+    assert resp.status_code == 200
+
+
+# ── P0-3: Django admin requires a verified OTP session ──────────────────────
+
+@pytest.mark.django_db
+def test_admin_denied_to_authenticated_unverified_superuser(client, admin_user):
+    """Password-only staff session must not reach admin. Pre-fix this was a 200:
+    the MFA middleware exempted /admin/ and stock admin auth checks no OTP."""
+    client.force_login(admin_user)
+    resp = client.get('/admin/')
+    # Denied at the index, and the whole chain must end at enrolment rather than
+    # rendering any admin page or looping.
+    assert resp.status_code == 302
+    chain = client.get('/admin/', follow=True)
+    final_url = chain.redirect_chain[-1][0]
+    assert 'two_factor/setup' in final_url, chain.redirect_chain
+    assert b'<div id="content-main">' not in chain.content
+
+
+@pytest.mark.django_db
+def test_admin_allowed_for_otp_verified_superuser(client, admin_user):
+    """A verified session gets in — the gate checks verification, not just staff."""
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    TOTPDevice.objects.create(user=admin_user, name='d', confirmed=True)
+    client.force_login(admin_user)
+    session = client.session
+    session['otp_device_id'] = str(TOTPDevice.objects.get(user=admin_user).persistent_id)
+    session.save()
+    resp = client.get('/admin/')
+    assert resp.status_code == 200
+
+
+@pytest.mark.django_db
+def test_admin_otp_required_even_when_site_mfa_disabled(client, admin_user):
+    """UNCONDITIONAL by decision (Mike, July 29 2026): admin can rewrite any record
+    and read the decrypted credential vault, so it is gated regardless of the
+    site-wide require_mfa toggle. require_mfa governs the app; this governs the keys."""
+    site = SiteSettings.get()
+    site.require_mfa = False
+    site.save()
+    client.force_login(admin_user)
+    assert client.get('/admin/').status_code == 302
+
+
+@pytest.mark.django_db
+def test_unenrolled_superuser_is_routed_to_setup_not_a_loop(client, admin_user):
+    """THE lockout trap. Upstream AdminSiteOTPRequired sends an unverified user to
+    LOGIN_REDIRECT_URL; for a superuser with NO device that is a silent bounce
+    between /admin/ and / with no way to enrol — the same failure shape as the
+    July 2026 setup-wizard bug. They must land on the enrolment wizard."""
+    client.force_login(admin_user)
+    resp = client.get('/admin/login/')
+    assert resp.status_code == 302
+    assert 'two_factor/setup' in resp['Location']
+
+
+# ── Email test views: relay removal + no reflected input ────────────────────
+
+@pytest.mark.django_db
+def test_outbound_email_test_ignores_browser_supplied_recipient(client, admin_user, monkeypatch):
+    """The relay. This view used to mail ANY address the browser supplied using the
+    shop's stored SMTP credentials, so any logged-in user could send as the shop and
+    burn its domain reputation. The recipient is now derived server-side and the
+    request body is not consulted at all."""
+    admin_user.email = 'owner@example.com'
+    admin_user.save()
+    site = SiteSettings.get()
+    site.email_host, site.email_username = 'smtp.example.com', 'user'
+    site.save()
+
+    sent_to = {}
+
+    class FakeSMTP:
+        def __init__(self, *a, **kw): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def starttls(self, **kw): pass
+        def login(self, *a): pass
+        def sendmail(self, frm, to, msg): sent_to['to'] = to
+
+    monkeypatch.setattr('smtplib.SMTP', FakeSMTP)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:settings_test_outbound'),
+                       {'to': 'attacker@evil.example'})
+
+    assert resp.status_code == 200
+    assert sent_to['to'] == ['owner@example.com']
+    assert 'evil.example' not in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_outbound_email_test_does_not_leak_smtp_error(client, admin_user, monkeypatch):
+    """Failure text used to be echoed to the browser; SMTP errors routinely carry the
+    server banner, software version and sometimes the login name."""
+    admin_user.email = 'owner@example.com'
+    admin_user.save()
+    site = SiteSettings.get()
+    site.email_host, site.email_username = 'smtp.example.com', 'user'
+    site.save()
+
+    def boom(*a, **kw):
+        raise Exception('535 mail.internal.example: auth failed for user svc-mailer')
+
+    monkeypatch.setattr('smtplib.SMTP', boom)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:settings_test_outbound'))
+    body = resp.content.decode()
+
+    assert resp.status_code == 200
+    assert 'svc-mailer' not in body
+    assert 'mail.internal.example' not in body
+
+
+@pytest.mark.django_db
+def test_email_test_views_are_admin_only(client, db):
+    """Both were LoginRequired-only, so any tech could trigger them."""
+    from core.models import Role
+    role = Role.objects.create(name='MailTech')
+    tech = User.objects.create_user(username='mailtech', password='x', role_obj=role)
+    client.force_login(tech)
+    assert client.post(reverse('core:settings_test_outbound')).status_code == 403
+    assert client.post(reverse('core:settings_test_inbound')).status_code == 403
+
+
+@pytest.mark.django_db
+def test_account_security_is_linked_from_the_admin_settings_nav(client, admin_user):
+    """Backup codes must be reachable — but from the admin section, not the sidebar.
+
+    The page had been dropped from the sidebar in the session-20 nav redesign and
+    was linked from exactly one sentence of body text on /users/, so there was no
+    discoverable way to generate MFA backup codes at all. That is load-bearing now
+    that Django admin requires OTP. Placement is Settings → Access & Security
+    (Mike, July 29 2026): backup codes are an administrative capability.
+    """
+    client.force_login(admin_user)
+    resp = client.get('/settings/?tab=security')
+    assert resp.status_code == 200
+    assert reverse('two_factor:profile').encode() in resp.content
+
+
+@pytest.mark.django_db
+def test_account_security_is_not_in_the_sidebar(client, client_obj, admin_user):
+    """Deliberately absent from the sidebar — it belongs to the admin section."""
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:dashboard'))
+    assert resp.status_code == 200
+    assert reverse('two_factor:profile').encode() not in resp.content
+
+
+@pytest.mark.django_db
+def test_backup_tokens_denied_to_non_admin(client, db):
+    """No employee generates their own backup codes (Mike, July 29 2026).
+
+    Pre-fix ANY user with a confirmed device got 200 here, despite CLAUDE.md having
+    claimed "backup codes for admin only" since Batch 8 — a documented control that
+    was never implemented. Self-service codes would also route around the
+    accountability of an admin reset, which writes an MFAResetLog entry.
+
+    Guards the URL override in murphys_bench/urls.py: if that route stops being
+    registered ahead of two_factor's own urlpatterns, upstream's ungated view
+    silently takes over and this test fails.
+    """
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    from core.models import Role
+    role = Role.objects.create(name='BackupTech')
+    tech = User.objects.create_user(username='backuptech', password='x', role_obj=role)
+    device = TOTPDevice.objects.create(user=tech, name='d', confirmed=True)
+
+    client.force_login(tech)
+    session = client.session
+    session['otp_device_id'] = str(device.persistent_id)
+    session.save()
+
+    for method in ('get', 'post'):
+        resp = getattr(client, method)(reverse('two_factor:backup_tokens'))
+        assert resp.status_code == 403, f'{method} returned {resp.status_code}'
+
+
+@pytest.mark.django_db
+def test_backup_tokens_allowed_for_admin(client, admin_user):
+    """The admin path must still work — this is the recovery capability itself."""
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    device = TOTPDevice.objects.create(user=admin_user, name='d', confirmed=True)
+    client.force_login(admin_user)
+    session = client.session
+    session['otp_device_id'] = str(device.persistent_id)
+    session.save()
+    assert client.get(reverse('two_factor:backup_tokens')).status_code == 200
+
+
+# NOTE: the old test_backup_tokens_button_hidden_from_non_admin was removed here,
+# superseded by test_two_factor_profile_and_disable_are_admin_only below: the whole
+# profile page is now 403 for employees, so there is no page on which to hide a
+# button. The template guard is kept as defence in depth, not as the gate.
+
+
+# ── Employees see nothing from the admin back end (Mike, July 29 2026) ──────
+
+@pytest.fixture
+def enrolled_tech(db):
+    """A non-admin with a confirmed authenticator and a verified session."""
+    from core.models import Role
+    role = Role.objects.create(name='SecTech')
+    return User.objects.create_user(username='sectech', password='x', role_obj=role)
+
+
+def _verify(client, user):
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    device = TOTPDevice.objects.create(user=user, name='Authenticator', confirmed=True)
+    client.force_login(user)
+    session = client.session
+    session['otp_device_id'] = str(device.persistent_id)
+    session.save()
+    return device
+
+
+@pytest.mark.django_db
+def test_two_factor_profile_and_disable_are_admin_only(client, enrolled_tech):
+    """The stock two_factor profile page is an admin-section page: it carries backup
+    codes and Disable 2FA. Employees must not reach it at all — they get
+    core:my_security. Guards the URL overrides in murphys_bench/urls.py; if those
+    stop being registered ahead of two_factor's include, upstream's ungated views
+    silently take over and this fails."""
+    _verify(client, enrolled_tech)
+    assert client.get(reverse('two_factor:profile')).status_code == 403
+    assert client.get(reverse('two_factor:disable')).status_code == 403
+
+
+@pytest.mark.django_db
+def test_admin_can_still_reach_account_security(client, admin_user):
+    _verify(client, admin_user)
+    assert client.get(reverse('two_factor:profile')).status_code == 200
+
+
+@pytest.mark.django_db
+def test_employee_security_page_shows_status_without_admin_controls(client, enrolled_tech):
+    """My Security reports state and offers nothing administrative: no backup codes,
+    no disable. Recovery is an admin reset, which leaves an MFAResetLog entry."""
+    _verify(client, enrolled_tech)
+    resp = client.get(reverse('core:my_security'))
+    body = resp.content.decode()
+    assert resp.status_code == 200
+    assert 'Two-factor authentication is on' in body
+    assert reverse('two_factor:backup_tokens') not in body
+    assert reverse('two_factor:disable') not in body
+    assert reverse('two_factor:profile') not in body
+
+
+@pytest.mark.django_db
+def test_employee_security_page_offers_setup_when_unenrolled(client, enrolled_tech):
+    client.force_login(enrolled_tech)
+    resp = client.get(reverse('core:my_security'))
+    assert resp.status_code == 200
+    assert 'not set up' in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_sidebar_shows_my_security_to_employees_only(client, client_obj, enrolled_tech, admin_user):
+    """Employees get My Security in the sidebar; admins use Settings → Account
+    Security, so the sidebar entry would be a second door to a different page."""
+    _verify(client, enrolled_tech)
+    tech_body = client.get(reverse('core:dashboard')).content.decode()
+    assert reverse('core:my_security') in tech_body
+
+    client.logout()
+    _verify(client, admin_user)
+    admin_body = client.get(reverse('core:dashboard')).content.decode()
+    assert reverse('core:my_security') not in admin_body
+
+
+@pytest.mark.django_db
+def test_admin_otp_lockout_recovery_drill(client):
+    """END-TO-END: lose the authenticator, get locked out of /admin/, recover.
+
+    Kept as a test rather than a one-off script because this is the ONLY way back
+    into an OTP-required admin, so it has to keep working. Proves the full path
+    Mike approved on July 29 2026 before the unconditional admin-OTP gate shipped.
+    """
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    from django_otp import devices_for_user
+    from core.models import MFAResetLog
+    from django.core.management import call_command
+
+    admin = User.objects.create_user(username='drilladmin', password='x',
+                                     is_staff=True, is_superuser=True)
+
+    # 1. Enrolled and OTP-verified: admin works.
+    device = TOTPDevice.objects.create(user=admin, name='Bitwarden', confirmed=True)
+    client.force_login(admin)
+    session = client.session
+    session['otp_device_id'] = str(device.persistent_id)
+    session.save()
+    assert client.get('/admin/').status_code == 200
+
+    # 2. Authenticator lost — the device row still exists, but no session can be
+    #    verified against it. Admin is closed.
+    client.logout()
+    client.force_login(admin)  # password-only
+    assert client.get('/admin/').status_code == 302
+
+    # 3. No self-rescue: backup codes need a verified session too.
+    assert client.get(reverse('two_factor:backup_tokens')).status_code == 302
+
+    # 4. The recovery: the real management command, run on the box. Clears devices
+    #    and writes an audit record stamped with the shell identity.
+    before = MFAResetLog.objects.count()
+    call_command('reset_mfa', 'drilladmin', '--note', 'drill: lost authenticator')
+    assert list(devices_for_user(admin)) == []
+    assert MFAResetLog.objects.count() == before + 1
+    assert MFAResetLog.objects.latest('id').source == 'cli'
+
+    # 5. With no device, /admin/ now routes to ENROLMENT rather than looping.
+    client.logout()
+    client.force_login(admin)
+    resp = client.get('/admin/login/')
+    assert resp.status_code == 302
+    assert 'two_factor/setup' in resp['Location']
+
+    # 6. Re-enrol -> access restored.
+    new_device = TOTPDevice.objects.create(user=admin, name='Bitwarden (new)', confirmed=True)
+    client.logout()
+    client.force_login(admin)
+    session = client.session
+    session['otp_device_id'] = str(new_device.persistent_id)
+    session.save()
+    assert client.get('/admin/').status_code == 200
+
+
+# ── Shipped security defaults (July 2026 review, slice 2) ───────────────────
+#
+# These assert what a STRANGER gets after scripts/install.sh, not what the
+# author's two boxes have in their .env. Both of these were correct in the
+# author's deployment and wrong as shipped defaults, which is the whole finding.
+
+def test_csp_ships_enforcing_not_report_only():
+    """CSP defaulted to report-only, so it enforced nothing on every install except
+    the two whose .env said otherwise — the author's. A header that protects only
+    its author is not a shipped control."""
+    from django.conf import settings
+    assert settings.CSP_REPORT_ONLY is False
+    assert "default-src 'self'" in settings.CSP_POLICY
+    assert "frame-ancestors 'none'" in settings.CSP_POLICY
+
+
+def test_proxy_header_trust_is_off_by_default():
+    """X-Forwarded-Proto/Host are forgeable by anyone who can reach the app port.
+    Trusting them unconditionally let an unproxied deployment believe an
+    attacker-supplied Host, poisoning absolute URLs in outbound email."""
+    from django.conf import settings
+    assert settings.TRUST_PROXY_HEADERS is False
+    assert getattr(settings, 'SECURE_PROXY_SSL_HEADER', None) is None
+    assert getattr(settings, 'USE_X_FORWARDED_HOST', False) is False
+
+
+def test_installer_writes_both_security_defaults_explicitly():
+    """The installer must state these in the generated .env rather than leaning on a
+    settings default a later release could change underneath an existing install —
+    the same reasoning as the explicit cookie flags already there."""
+    from pathlib import Path
+    installer = (Path(__file__).resolve().parent.parent / 'scripts' / 'install.sh').read_text()
+    assert 'TRUST_PROXY_HEADERS=False' in installer
+    assert 'CSP_REPORT_ONLY' in installer
+
+
+def test_installer_http_checks_retry_and_verify_the_app_not_just_static():
+    """The installer's own success checks must not lie, and must not lie flakily.
+
+    Two defects, both found by rebuilding mb-test from the current installer:
+
+    1. The v0.4.52 static probe curled once, immediately after `systemctl reload
+       nginx`. That reload returns when the signal is sent; nginx drains old workers
+       asynchronously, so the probe can be answered by a worker still holding the
+       old config. On a real install it duly reported "INSTALL FAILED ... HTTP 404"
+       while the identical request returned 200 moments later. An intermittent false
+       failure is worse than no check: it teaches people to ignore the installer.
+
+    2. /static/ is an nginx alias served straight off disk, so that probe passes
+       with gunicorn completely dead — verified on the box, static 200 / app 502.
+       That is how a re-run printed DONE and "running at ..." over an app returning
+       502 to every request.
+    """
+    from pathlib import Path
+    sh = (Path(__file__).resolve().parent.parent / 'scripts' / 'install.sh').read_text()
+
+    # A retrying probe helper exists and the static check goes through it.
+    assert 'http_probe()' in sh
+    assert 'code="$(http_probe' in sh
+    # The app itself is verified through nginx, not only static files.
+    assert "http_probe \"http://127.0.0.1/\" '2*|3*'" in sh
+    # And the app is restarted first: `enable --now` does not restart a running
+    # service, so a re-run that changed the unit would leave the old process bound.
+    assert 'systemctl restart murphys-bench' in sh
+    # 403 and 404 must not share one guess-the-cause message.
+    assert 'static_probe_hint' in sh
+    # No single-shot curl left behind that could race a reload.
+    assert "code=\"$(curl -s -o /dev/null -w '%{http_code}' \"http://127.0.0.1/static" not in sh
 # ══ seed_demo_data — fake demo/evaluation data ══════════════════════════════
 
 @pytest.mark.django_db

@@ -530,3 +530,52 @@ class ContactPhoneAdmin(admin.ModelAdmin):
     list_display = ['contact', 'number', 'phone_type']
     list_filter = ['phone_type']
     search_fields = ['contact__first_name', 'contact__last_name', 'number']
+
+
+# ─── Django admin requires OTP, unconditionally ──────────────────────────────
+#
+# Django admin can rewrite any record and read the decrypted credential vault, so
+# it is gated on a verified second factor REGARDLESS of the site-wide require_mfa
+# setting. That is deliberate and not a workflow opinion: require_mfa governs the
+# app, this governs the keys to it.
+#
+# The defect this closes: MFAEnforcementMiddleware exempted /admin/ with the note
+# "Django admin handles its own auth", but stock admin auth is password-only. So a
+# staff session that had never passed OTP could use admin while the Settings page
+# reported MFA as required site-wide. The setting did not mean what it said.
+#
+# ⚠ WHY login() IS OVERRIDDEN — do not simplify this to plain AdminSiteOTPRequired.
+# Upstream's login() redirects to LOGIN_REDIRECT_URL. For a superuser who is already
+# authenticated but has NO TOTP device, has_permission() is False forever, so /admin/
+# bounces to '/' and offers no way to enrol: a silent redirect loop with no
+# explanation. That is the same failure shape as the July 2026 setup-wizard bug.
+# Unenrolled users are sent to the enrolment wizard; enrolled-but-unverified users
+# are sent back through login to complete OTP.
+#
+# Break-glass if a shop locks itself out entirely (documented in the release notes):
+#   python manage.py reset_mfa <username>
+# run on the box, which clears devices for re-enrolment and stamps the shell
+# identity into MFAResetLog.
+from django_otp import devices_for_user
+from django.shortcuts import redirect
+from two_factor.admin import AdminSiteOTPRequiredMixin
+
+
+class OTPRequiredAdminSite(AdminSiteOTPRequiredMixin, admin.AdminSite):
+    """Admin site that requires a verified OTP session, with a working way out."""
+
+    def login(self, request, extra_context=None):
+        user = request.user
+        if user.is_authenticated:
+            if not list(devices_for_user(user)):
+                # Nothing to verify against yet — send them to enrol rather than
+                # bouncing them off a login page they are already past.
+                return redirect('/account/two_factor/setup/')
+            # Has a device, session not verified — complete OTP at login.
+            return redirect('/account/login/')
+        return super().login(request, extra_context)
+
+
+# Re-class the default site so every already-registered ModelAdmin is covered.
+# Registering a fresh AdminSite instance would silently leave them behind.
+admin.site.__class__ = OTPRequiredAdminSite

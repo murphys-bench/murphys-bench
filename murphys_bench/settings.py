@@ -252,12 +252,27 @@ AUTO_RESOLVE_TICKET_ON_WO_CLOSE = config('AUTO_RESOLVE_TICKET_ON_WO_CLOSE', defa
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@murphys-bench.local')
 SERVER_EMAIL = config('SERVER_EMAIL', default='noreply@murphys-bench.local')
 
+# ── Reverse-proxy trust — OPT-IN ────────────────────────────────────────────
+# MB never terminates TLS; it runs behind a proxy (Cloudflare, nginx, Caddy). When
+# it does, Django has to trust X-Forwarded-Proto to know the original request was
+# HTTPS, and X-Forwarded-Host to build correct absolute URLs.
+#
+# ⚠ THIS IS OPT-IN, and must stay opt-in. These headers are trivially forged by
+# whoever can reach the app directly. Trusting them unconditionally means any
+# deployment where the app port is reachable without a sanitizing proxy in front
+# will believe an attacker-supplied Host — which poisons absolute URLs in emails
+# and password-reset style links. It was unconditional until the July 2026 review;
+# that was safe for the author's own nginx deployment and unsafe as a shipped
+# default for everyone else.
+#
+# Set TRUST_PROXY_HEADERS=True ONLY when a reverse proxy you control sits in front
+# and overwrites (not appends to) these headers. See docs/deployment-tls.md.
+TRUST_PROXY_HEADERS = config('TRUST_PROXY_HEADERS', default=False, cast=bool)
+if TRUST_PROXY_HEADERS:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    USE_X_FORWARDED_HOST = True
+
 # Security Settings
-# When behind Cloudflare Tunnel, Cloudflare terminates SSL and proxies over HTTP internally.
-# This tells Django to trust the X-Forwarded-Proto header from the proxy so it knows
-# the original request was HTTPS.
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-USE_X_FORWARDED_HOST = True
 
 if not DEBUG:
     SECURE_BROWSER_XSS_FILTER = True
@@ -296,8 +311,12 @@ CSRF_COOKIE_HTTPONLY = True
 # and inline event handlers. The real hardening is in the other directives —
 # default-src/connect-src 'self' (an injected script can't exfiltrate cross-origin),
 # frame-ancestors 'none' (clickjacking), object-src 'none', base-uri/form-action 'self'.
-# Ships REPORT-ONLY by default (reports to /csp-report/, enforces nothing); flip
-# CSP_REPORT_ONLY=False in .env per box once validated. Set CSP_POLICY='' to disable.
+# SHIPS ENFORCING. It used to default to report-only, which meant it enforced
+# nothing on every install except the two boxes whose .env said otherwise — the
+# author's. A security header that protects only its author is not a shipped
+# control. The policy has been validated in production since v0.4.0.
+# Escape hatch if a deployment genuinely breaks: CSP_REPORT_ONLY=True in .env
+# (violations still report to /csp-report/), or CSP_POLICY='' to disable outright.
 CSP_POLICY = config('CSP_POLICY', default=(
     "default-src 'self'; "
     "script-src 'self' 'unsafe-eval' 'unsafe-inline'; "
@@ -310,7 +329,7 @@ CSP_POLICY = config('CSP_POLICY', default=(
     "form-action 'self'; "
     "frame-ancestors 'none'"
 ))
-CSP_REPORT_ONLY = config('CSP_REPORT_ONLY', default=True, cast=bool)
+CSP_REPORT_ONLY = config('CSP_REPORT_ONLY', default=False, cast=bool)
 
 # ── Login brute-force protection (django-axes) ──────────────────────────────
 AXES_FAILURE_LIMIT = config('AXES_FAILURE_LIMIT', default=5, cast=int)

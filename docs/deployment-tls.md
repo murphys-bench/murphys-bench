@@ -20,9 +20,20 @@ server). The proxy is the public-facing piece that:
 
 MB is **already built for this**:
 
-- It trusts the proxy's `X-Forwarded-Proto` header (`SECURE_PROXY_SSL_HEADER`),
-  so it knows when the original request was HTTPS even though the proxy→MB hop is
-  plain HTTP on the same host/network.
+- It can trust the proxy's `X-Forwarded-Proto` and `X-Forwarded-Host` headers, so
+  it knows when the original request was HTTPS even though the proxy→MB hop is
+  plain HTTP on the same host/network. **You must opt in** by setting
+  `TRUST_PROXY_HEADERS=True` in `.env`.
+
+  > **Why opt-in, and why it matters.** Those headers are just request headers:
+  > anyone who can reach MB's port directly can send whatever they like. If MB
+  > trusted them unconditionally, an attacker could tell it "this request arrived
+  > over HTTPS at the hostname of my choosing", which corrupts the absolute URLs MB
+  > builds into outbound email and links. Only turn this on when a proxy **you
+  > control** sits in front and **overwrites** these headers rather than passing
+  > through whatever the client sent — and make sure MB's own port is not reachable
+  > from outside that proxy. MB trusted these unconditionally before July 2026,
+  > which was safe behind the author's nginx and wrong as a shipped default.
 - The hostname is configured via two environment settings — `ALLOWED_HOSTS` and
   `CSRF_TRUSTED_ORIGINS` — so MB works under whatever domain your proxy serves.
 - The secure-cookie / HSTS / SSL-redirect flags are **environment toggles**

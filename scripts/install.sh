@@ -62,6 +62,70 @@ done
 log()  { echo "$(date '+%F %T') install: $*"; }
 fail() { echo "INSTALL FAILED: $*" >&2; exit 1; }
 
+# Poll a URL until it answers as expected, then echo the final status code.
+#
+# ⚠ EVERY post-reload HTTP check MUST go through this. `systemctl reload nginx`
+# returns when the signal is sent, not when the new config is serving — nginx
+# drains old workers asynchronously, so an immediate probe can be answered by a
+# worker still holding the previous config. The v0.4.52 static check probed once
+# with no retry and duly failed a perfectly correct install with HTTP 404, while
+# the identical request returned 200 moments later.
+#
+#   $1 url   $2 expected code, or a case glob like '2*|3*'   $3 optional Host header
+http_probe() {
+    _url="$1"; _want="$2"; _host="${3:-}"; _code=000
+    for _i in $(seq 1 15); do
+        # No `|| echo 000` here: curl -w already prints 000 when it cannot connect,
+        # so appending another produced the nonsense code "000000" in the failure
+        # message. Normalise an empty result instead.
+        if [ -n "$_host" ]; then
+            _code="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $_host" "$_url" 2>/dev/null || true)"
+        else
+            _code="$(curl -s -o /dev/null -w '%{http_code}' "$_url" 2>/dev/null || true)"
+        fi
+        [ -n "$_code" ] || _code=000
+        # shellcheck disable=SC2254
+        case "$_code" in $_want) echo "$_code"; return 0 ;; esac
+        sleep 1
+    done
+    echo "$_code"
+}
+
+# 403 and 404 have different causes and sending someone after the wrong one wastes
+# their evening. The original message assumed permissions for every failure.
+static_probe_hint() {
+    case "$1" in
+        403) cat <<'HINT'
+  nginx found the file but is not allowed to read it, so the login page would
+  render as unstyled HTML with no logo. A directory above the app denies access
+  to the www-data user — Ubuntu home directories have been mode 750 since 21.04,
+  which bites any install under /home.
+  Check with:  sudo -u www-data stat STATICDIR
+HINT
+        ;;
+        404) cat <<'HINT'
+  nginx is running but has no route to that file — this is a config or path
+  problem, NOT permissions. Confirm the site is the enabled one and its
+  /static/ alias points at this install:
+    sudo nginx -T | grep -A2 'location /static/'
+HINT
+        ;;
+        000) cat <<'HINT'
+  nginx did not answer at all on 127.0.0.1:80. Is it running, and is anything
+  else already bound to port 80?
+    sudo systemctl status nginx
+    sudo ss -ltnp | grep :80
+HINT
+        ;;
+        *) cat <<'HINT'
+  nginx answered with an unexpected status for a plain static file. Check its
+  error log:
+    sudo tail -20 /var/log/nginx/error.log
+HINT
+        ;;
+    esac
+}
+
 # NOTE: the working directory you ran this from is irrelevant — the script cd's to
 # its own parent (see APP above). So "run it from the repo root" is useless advice
 # and sent at least one tester chasing a directory problem that didn't exist. Say
@@ -187,6 +251,17 @@ SESSION_COOKIE_SECURE=False
 CSRF_COOKIE_SECURE=False
 SECURE_HSTS_SECONDS=0
 # CSRF_TRUSTED_ORIGINS=https://your.hostname
+
+# Reverse-proxy trust — OFF, matching this direct-access LAN install.
+# X-Forwarded-Proto / X-Forwarded-Host are forgeable by anyone who can reach the
+# app port directly, so MB does not trust them unless you say so. Turn this ON
+# only when a proxy YOU control (Cloudflare Tunnel, nginx, Caddy) sits in front
+# and overwrites those headers. See docs/deployment-tls.md.
+TRUST_PROXY_HEADERS=False
+
+# Content-Security-Policy is ENFORCING by default (settings.py). Nothing to set
+# here. If a deployment genuinely breaks, set CSP_REPORT_ONLY=True to fall back to
+# report-only (violations still log to /csp-report/) and report the breakage.
 ENVEOF
     chmod 600 .env
     log ".env created (chmod 600)"
@@ -320,16 +395,43 @@ NGINXEOF
     # Prove it rather than assume it. This is the exact check that would have
     # caught the unstyled-login bug before a tester ever saw it: ask nginx for a
     # real static file the way a browser does.
+    #
+    # ⚠ MUST RETRY. `systemctl reload nginx` returns as soon as the signal is sent;
+    # nginx reloads workers ASYNCHRONOUSLY and old workers keep serving the OLD
+    # config until they drain. Probing immediately races that, and this check did
+    # exactly that from v0.4.52 until it lost the race on a real install: a correct
+    # box reported "INSTALL FAILED ... HTTP 404" and the same request returned 200
+    # moments later. An intermittent false failure is worse than no check — it
+    # teaches people the installer is flaky and to ignore what it says.
     probe="$(ls "$APP"/staticfiles/css/*.css 2>/dev/null | head -1 || true)"
     [ -n "$probe" ] || fail "collectstatic produced no CSS in $APP/staticfiles/css — the UI would render unstyled"
-    code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1/static/css/$(basename "$probe")" || echo 000)"
+    code="$(http_probe "http://127.0.0.1/static/css/$(basename "$probe")" 200)"
     [ "$code" = "200" ] || fail "nginx returned HTTP $code for /static/css/$(basename "$probe")
-
-  The app is installed but the web server cannot read its stylesheets, so the
-  login page would render as unstyled HTML with no logo. Usually this means a
-  directory above $APP denies access to the www-data user.
-  Check with:  sudo -u www-data stat $APP/staticfiles"
+$(static_probe_hint "$code" | sed "s|STATICDIR|$APP/staticfiles|")"
     log "static files verified served by nginx (HTTP 200)"
+
+    # And prove the APP itself answers, not just files nginx reads off disk.
+    # /static/ is an alias served straight from the filesystem, so the check above
+    # passes even when gunicorn is dead — which is how a re-run once printed DONE
+    # and "Murphy's Bench is running at ..." over an app returning 502 to every
+    # request. Restart first: `systemctl enable --now` does NOT restart an
+    # already-running service, so a re-run that changed the unit would otherwise
+    # leave the old process bound to the old socket while nginx talks to the new one.
+    log "restarting the app so it picks up the installed unit..."
+    sudo systemctl restart murphys-bench || fail "could not restart murphys-bench — see: journalctl -u murphys-bench"
+    app_host="$(grep '^ALLOWED_HOSTS=' .env 2>/dev/null | cut -d= -f2- | cut -d, -f1)"
+    app_code="$(http_probe "http://127.0.0.1/" '2*|3*' "${app_host:-localhost}")"
+    case "$app_code" in
+        2*|3*) log "app verified reachable through nginx (HTTP $app_code)" ;;
+        *) fail "the app is not answering through nginx (HTTP $app_code).
+
+  Static files are served by nginx straight off disk, so a stylesheet loading
+  proves nothing about the application itself. Something is wrong between nginx
+  and gunicorn. Check, in this order:
+    sudo systemctl status murphys-bench
+    journalctl -u murphys-bench -n 40
+    sudo tail -20 /var/log/nginx/error.log" ;;
+    esac
 else
     log "skipping web server setup (--skip-web) — app layer only"
 fi

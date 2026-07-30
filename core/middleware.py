@@ -5,7 +5,12 @@ from django.shortcuts import redirect
 _EXEMPT_PREFIXES = (
     '/account/',       # all two_factor auth/setup URLs
     '/accounts/',      # logout
-    '/admin/',         # Django admin handles its own auth
+    # ⚠ '/admin/' IS DELIBERATELY NOT EXEMPT. It used to be, with the note "Django
+    # admin handles its own auth" — but stock admin auth is password-only, so a
+    # staff session that never passed OTP could use admin while this very setting
+    # claimed MFA was required site-wide. Admin is now an OTP-required site in its
+    # own right (core.admin.OTPRequiredAdminSite); this middleware covering it too
+    # is intentional belt-and-braces, not redundancy to be tidied away.
     '/static/',
     '/media/',
     '/csp-report/',    # browser-posted CSP violation reports (unauthenticated)
