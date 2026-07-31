@@ -97,19 +97,19 @@ Log rotation is installed for you by `scripts/install.sh` (via
 one silently rotates nothing, which is how every box but the author's ended up
 with an unbounded gunicorn log.
 
-Install the OnFailure→ticket handler and the disk check:
+The OnFailure→ticket handler is **installed for you** by `scripts/install.sh`
+(via `scripts/install_units.sh`): the alert unit is rendered from its template and
+the `.service.d/onfailure.conf` drop-ins are written for the backup, inbound-email
+and SLA jobs. Nothing to paste. This README used to carry those commands as a
+manual step, which meant that on every box but the author's, MB's self-monitoring
+— the feature whose whole purpose is to make silent failures visible — was itself
+silently absent.
+
+Only the disk-space check is optional, because it needs notifications configured
+first or it just fails loudly:
 
 ```bash
-scripts/install_units.sh --with-disk-check    # renders + enables the disk check + alert unit
-for u in murphys-bench-backup murphys-bench-fetch-email murphys-bench-sla-check; do
-  sudo mkdir -p /etc/systemd/system/$u.service.d
-  sudo tee /etc/systemd/system/$u.service.d/onfailure.conf >/dev/null <<'DROPIN'
-[Unit]
-OnFailure=murphys-bench-alert@%N.service
-DROPIN
-done
-sudo systemctl daemon-reload
-sudo systemctl enable --now murphys-bench-disk-check.timer
+scripts/install_units.sh --with-disk-check
 ```
 
 ### Backup dead-man's-switch (healthchecks.io)
@@ -169,9 +169,15 @@ Lets an admin trigger `update.sh` from the web UI instead of SSHing in. A web
 request can't restart its own gunicorn, so the page drops a trigger file that a
 systemd **path unit** watches; the path unit launches a **one-shot service**
 (running as the app user, outside gunicorn's cgroup) that runs `update.sh` and
-records status for the page to poll. No extra sudo — the app only writes a file,
-and the one-shot reuses the already-NOPASSWD `systemctl restart` inside
-`update.sh`.
+records status for the page to poll. The app itself gains no privilege — it only
+writes a file. The one-shot reuses the NOPASSWD rule `scripts/install.sh` writes
+to `/etc/sudoers.d/murphys-bench`, which covers `restart`, **`stop`, `start`**,
+`status` and `is-active` of this one service.
+
+`stop` and `start` are not optional: when an update fails, rollback runs
+`restore.sh`, which stops the service, restores the database and starts it again.
+A rule covering only `restart` lets an update finish but leaves a FAILED update
+unable to undo itself, stranding old code on an already-migrated database.
 
 Files: `murphys-bench-update.path` (watches `logs/update-trigger`),
 `murphys-bench-update.service` (runs `scripts/run_update.sh`).

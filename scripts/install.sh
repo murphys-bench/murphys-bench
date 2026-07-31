@@ -406,7 +406,35 @@ either drop --skip-apt so this script installs it, or pass --skip-web to wire up
     # So the installer grants the narrowest set that lets an update both finish AND
     # undo itself: this user, this one service, these five verbs. Not general sudo.
     log "granting passwordless restart of murphys-bench (sudo)..."
-    SYSTEMCTL="$(command -v systemctl)"
+    # ⚠ The path in a sudoers rule IS the grant. Taking it from `command -v` means
+    # whatever `systemctl` happens to be first on PATH gets written into a NOPASSWD
+    # line — so a writable directory earlier in the installer's PATH would hand root
+    # execution of an attacker-controlled binary to this user, permanently. Resolve
+    # to a known system path and refuse anything that isn't root-owned and
+    # non-writable by anyone else.
+    SYSTEMCTL=""
+    for cand in /usr/bin/systemctl /bin/systemctl; do
+        [ -x "$cand" ] || continue
+        # Follow symlinks: /bin is usually a link to /usr/bin, and the grant must
+        # name what actually executes.
+        real="$(readlink -f "$cand" 2>/dev/null || echo "$cand")"
+        owner="$(stat -c '%U' "$real" 2>/dev/null || echo '?')"
+        mode="$(stat -c '%a' "$real" 2>/dev/null || echo '777')"
+        if [ "$owner" != "root" ]; then
+            fail "$real is owned by '$owner', not root. Refusing to write a sudoers rule
+  naming a binary someone other than root can replace."
+        fi
+        # Reject group- or world-writable (any of the last two digits allowing write).
+        case "$mode" in
+            *[2367]?|*?[2367]) fail "$real is group- or world-writable (mode $mode).
+  Refusing to write a sudoers rule naming it." ;;
+        esac
+        SYSTEMCTL="$real"
+        break
+    done
+    [ -n "$SYSTEMCTL" ] || fail "no systemctl found at /usr/bin/systemctl or /bin/systemctl.
+  This installer targets systemd on the Debian/Ubuntu family; pass --skip-web to
+  wire up your own process manager instead."
     sudoers_tmp="$(mktemp)"
     cat > "$sudoers_tmp" <<SUDOEOF
 # Murphy's Bench — written by scripts/install.sh. Lets the app user control ONLY

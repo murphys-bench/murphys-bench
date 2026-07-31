@@ -73,42 +73,48 @@ command -v git >/dev/null || fail "git not installed"
 # cost of saying no is an update that didn't start. -n means "fail rather than
 # prompt", which is the condition the systemd one-shot behind the in-app Update
 # button always runs under.
-# ⚠ DO NOT "simplify" this back to `sudo -n -l <cmd>`. That was the first version
-# of this check and it is a FALSE PASS: `sudo -l` answers "may this user run it",
-# which is TRUE for a command permitted *with* a password. On any box where the
-# app user is in the sudo group — essentially every real install — it returned
-# success whether or not the NOPASSWD rule existed. Proven on a clean-room box:
-# `sudo -n -l /usr/bin/cat /etc/shadow` passes too.
-#
-# The only honest test is to run something privileged and read sudo's own refusal.
-# `is-active` changes nothing; its own exit code is ignored (non-zero for a merely
-# stopped service is not a permissions problem) and only sudo's stderr decides.
-#
 # One exception, at the bottom: a human running this by hand from a terminal CAN
 # supply a password. We take it once, up front, so the rollback path never stalls
 # on a prompt halfway through a restore.
-SYSTEMCTL="$(command -v systemctl || echo /usr/bin/systemctl)"
+#
+# The path is pinned, not taken from PATH: it is compared against the sudoers grant
+# scripts/install.sh wrote, and a PATH-derived path would not match it.
+SYSTEMCTL=/usr/bin/systemctl
+[ -x "$SYSTEMCTL" ] || SYSTEMCTL=/bin/systemctl
 
-# 0 = sudo permitted it; 1 = sudo REFUSED (would need a password or a terminal).
-sudo_permits() {
-    local err
-    err="$(sudo -n "$@" 2>&1 >/dev/null || true)"
-    printf '%s' "$err" | grep -qiE 'password is required|terminal is required' && return 1
-    return 0
+# ⚠ DO NOT decide this by matching sudo's refusal text. Round 1 of this fix used
+# `sudo -n -l`, which is a false pass (it answers "permitted", true even when a
+# password is required). Round 2 read sudo's stderr prose, which an outside review
+# correctly called fragile: the wording varies by sudo version and is localized, so
+# a non-English box would silently pass.
+#
+# This asks a question with a machine-checkable answer instead. sudo writes its
+# refusal to STDERR, so if it refuses, stdout is empty. `systemctl is-active`
+# prints a fixed, unlocalized enum. Seeing one of those words means the command
+# actually ran with privilege; anything else means it did not. No prose is parsed.
+sudo_can_control_service() {
+    local out
+    out="$(LC_ALL=C sudo -n "$SYSTEMCTL" is-active murphys-bench 2>/dev/null || true)"
+    case "$out" in
+        active|inactive|failed|activating|deactivating|reloading|unknown) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
-# Every verb the update AND its rollback depend on must be covered. Checking only
-# restart is how the first version of this fix shipped a rule that let an update
-# finish but left restore.sh — which stops and starts the service — unable to run.
-# `sudo -l` is used ONLY to read the policy text, never as the pass/fail signal.
+# Each verb the ROLLBACK needs, not just the one the update needs.
+#
+# Grepping a flattened `sudo -l` could match a verb from one rule against the
+# NOPASSWD of another, so this matches within a single line and against the full
+# resolved binary path. It is a secondary check: the authority for stop/start is
+# the rollback drill, which actually runs them.
 missing_verbs=""
-policy="$(sudo -n -l 2>/dev/null | tr '\n' ' ' || true)"
+policy="$(LC_ALL=C sudo -n -l 2>/dev/null || true)"
 for verb in restart stop start; do
-    printf '%s' "$policy" | grep -q "NOPASSWD.*systemctl $verb murphys-bench" \
+    printf '%s\n' "$policy" | grep -F 'NOPASSWD' | grep -qF "$SYSTEMCTL $verb murphys-bench" \
         || missing_verbs="$missing_verbs $verb"
 done
 
-if ! sudo_permits "$SYSTEMCTL" is-active murphys-bench || [ -n "$missing_verbs" ]; then
+if ! sudo_can_control_service || [ -n "$missing_verbs" ]; then
     if [ -t 0 ]; then
         log "this box lacks the passwordless service-control rule (missing:${missing_verbs:- none});
        asking for your password once so the update (and any rollback) can control

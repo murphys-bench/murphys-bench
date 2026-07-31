@@ -240,22 +240,24 @@ head_ "The app can restart itself without a terminal"
 # is missing. That cache is the difference between testing the rule and testing
 # nothing.
 sudo -k
-SYSTEMCTL="$(command -v systemctl || echo /usr/bin/systemctl)"
+SYSTEMCTL=/usr/bin/systemctl
+[ -x "$SYSTEMCTL" ] || SYSTEMCTL=/bin/systemctl
 
-# ⚠ This check used `sudo -n -l <cmd>` and was a FALSE PASS. `sudo -l` answers
-# "may this user run it", which is true for a command permitted WITH a password,
-# so on any box where the app user has ordinary sudo it passed whether or not the
-# NOPASSWD rule existed. It only appeared to work in CI because that job strips
-# the runner's sudo entirely, leaving no entry at all. On a real shop box — and on
-# the clean-room VMs — it reported success over a broken install.
-sudo_permits() {
-    local err
-    err="$(sudo -n "$@" 2>&1 >/dev/null || true)"
-    printf '%s' "$err" | grep -qiE 'password is required|terminal is required' && return 1
-    return 0
+# ⚠ Two earlier versions of this check were unsound. `sudo -n -l` is a false pass
+# (it answers "permitted", true even when a password is required). Matching sudo's
+# stderr prose is locale- and version-dependent. This runs the granted command and
+# looks for ITS output: sudo's refusal goes to stderr, so a refusal leaves stdout
+# empty, and `systemctl is-active` prints a fixed unlocalized enum.
+sudo_can_control_service() {
+    local out
+    out="$(LC_ALL=C sudo -n "$SYSTEMCTL" is-active murphys-bench 2>/dev/null || true)"
+    case "$out" in
+        active|inactive|failed|activating|deactivating|reloading|unknown) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
-if sudo_permits "$SYSTEMCTL" is-active murphys-bench; then
+if sudo_can_control_service; then
     ok "the app user can control its own service without a password"
 else
     bad "NO passwordless service control for $(id -un). The in-app Update button
@@ -268,9 +270,11 @@ fi
 # alone lets an update succeed while leaving restore.sh unable to run — which is
 # precisely the state the first version of this fix shipped in.
 missing_verbs=""
-policy="$(sudo -n -l 2>/dev/null | tr '\n' ' ' || true)"
+policy="$(LC_ALL=C sudo -n -l 2>/dev/null || true)"
 for verb in restart stop start; do
-    printf '%s' "$policy" | grep -q "NOPASSWD.*systemctl $verb murphys-bench" \
+    # Matched within a SINGLE line and against the full resolved path, so a verb
+    # from one rule cannot be paired with the NOPASSWD of another.
+    printf '%s\n' "$policy" | grep -F 'NOPASSWD' | grep -qF "$SYSTEMCTL $verb murphys-bench" \
         || missing_verbs="$missing_verbs $verb"
 done
 if [ -z "$missing_verbs" ]; then
@@ -300,6 +304,16 @@ else
     rm -f "$drill_tarball"
     if "$APP/scripts/mb_backup.sh" --staging-only "$drill_tarball" >/dev/null 2>&1 \
        && [ -f "$drill_tarball" ]; then
+        # A drill that only proves restore.sh EXITS 0 proves the privileges, not
+        # the rollback. Real rollback runs after a failed migration has already
+        # changed the database, and the thing that matters is that those changes
+        # are gone afterwards. So: write a sentinel row AFTER the snapshot, and
+        # require the restore to have removed it.
+        sentinel="ROLLBACK-DRILL-SENTINEL-$$"
+        "$APP/venv/bin/python" "$APP/manage.py" shell -c "
+from core.models import Client
+Client.objects.create(name='$sentinel')
+" >/dev/null 2>&1 || bad "could not write the rollback sentinel — drill is inconclusive"
         sudo -k
         if setsid env RESTORE_YES=1 "$APP/scripts/restore.sh" "$drill_tarball" \
              </dev/null >"$APP/logs/rollback-drill.log" 2>&1; then
@@ -309,6 +323,26 @@ else
         against an already-migrated database. Last lines:
 $(tail -12 "$APP/logs/rollback-drill.log" 2>/dev/null | sed 's/^/        /')"
         fi
+        # The sentinel was created after the snapshot, so a real rollback must have
+        # erased it. If it survived, restore.sh ran and reported success without
+        # actually reverting the database — the failure mode that matters most.
+        if "$APP/venv/bin/python" "$APP/manage.py" shell -c "
+from core.models import Client
+import sys
+sys.exit(1 if Client.objects.filter(name='$sentinel').exists() else 0)
+" >/dev/null 2>&1; then
+            ok "rollback reverted a post-snapshot database change (sentinel gone)"
+        else
+            bad "ROLLBACK DID NOT REVERT THE DATABASE. A row written after the snapshot
+        survived the restore, so a failed migration's changes would survive too.
+        Leftover marker: $sentinel"
+            # Don't leave the marker behind on a box someone keeps using.
+            "$APP/venv/bin/python" "$APP/manage.py" shell -c "
+from core.models import Client
+Client.objects.filter(name='$sentinel').delete()
+" >/dev/null 2>&1 || true
+        fi
+
         # restore.sh restarts the service itself; confirm the app really came back.
         rb_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
                   -H "Host: $(grep '^ALLOWED_HOSTS=' "$APP/.env" | cut -d= -f2- | cut -d, -f1)" \
