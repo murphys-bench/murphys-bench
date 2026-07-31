@@ -24,11 +24,22 @@ the Unreleased entries move under that version and prod gets a single update.
   migrations had already been applied to.
 
   `scripts/install.sh` now writes `/etc/sudoers.d/murphys-bench`, granting the app
-  user a passwordless restart/stop/start/status of that one service and nothing
-  else. The rule is validated with `visudo` before it is installed. `update.sh`
-  checks for it up front and refuses to start an update it could not finish or
-  undo, changing nothing. **An existing install gets the rule by re-running
-  `scripts/install.sh` once, from a terminal.**
+  user passwordless `restart`, `stop`, `start`, `status` and `is-active` of that
+  one service and nothing else. `stop` and `start` are there because rollback needs
+  them; a rule covering only the restart lets an update finish but leaves a failed
+  update unable to undo itself. The rule is validated with `visudo` before it is
+  installed. `update.sh` checks every one of those verbs up front and refuses to
+  start an update it could not finish or undo, changing nothing. **An existing
+  install gets the rule by re-running `scripts/install.sh` once, from a terminal.**
+
+  Two rounds were needed here, and the first was wrong in a way worth recording.
+  It granted only the restart, and an earlier draft of this changelog claimed it
+  granted stop and start when it did not. Worse, the check written to verify it
+  used `sudo -n -l`, which asks whether a command is *permitted* — true for a
+  command permitted with a password — so on any box where the app user has
+  ordinary sudo it reported success whether or not the rule existed at all. Both
+  were caught by an outside review, not by us. The check now runs a privileged
+  command and reads sudo's own refusal.
 
 - **A failed update kept reporting failure forever, even on a box that had since
   been updated successfully by hand.** Nothing but the update runner ever wrote the
@@ -49,6 +60,12 @@ the Unreleased entries move under that version and prod gets a single update.
   systemd units, and its syntax is verified at install time.
 
 ### Changed
+
+- **The release gate now exercises rollback, not just a successful update.**
+  A green update says nothing about the path that runs when one fails, which is
+  the moment it matters and the moment a tester actually hit. The gate now drives
+  `restore.sh` — the real rollback — with no cached password and no controlling
+  terminal, and confirms the app comes back healthy afterwards.
 
 - **The release gate now runs an update instead of inspecting one.**
   `scripts/verify_install.sh` used to check that the in-app Update button was
