@@ -177,15 +177,93 @@ $(printf '%s' "$log_tail" | sed 's/^/        /')"
 esac
 rm -f "$APP/logs/backup-trigger"
 
-head_ "In-app Update is wired (not executed)"
-# Deliberately not run — an update on a verification box proves little and
-# rewrites the checkout under us. Assert the machinery exists and is armed.
+head_ "In-app Update is wired"
 if systemctl is-active --quiet murphys-bench-update.path \
    && [ -x "$APP/scripts/run_update.sh" ] \
    && systemctl cat murphys-bench-update.service 2>/dev/null | grep -q "ExecStart=$APP/scripts/run_update.sh"; then
     ok "update path unit armed and pointing at this install"
 else
     bad "in-app Update would spin forever — path unit or run_update.sh not wired"
+fi
+
+head_ "The app can restart itself without a terminal"
+# The single check that would have caught the July 30 tester failure.
+#
+# update.sh ends in `sudo systemctl restart murphys-bench`, and rollback's
+# restore.sh stops and starts the service too. Both run inside a systemd one-shot
+# with NO TERMINAL when the update comes from the in-app button, so sudo cannot
+# prompt. On every box where that rule had not been added by hand, the update
+# failed at the restart AND the rollback failed at the stop, leaving old code on a
+# migrated database.
+#
+# `sudo -k` first: this script may run right after install.sh, whose interactive
+# sudo left a cached credential that would make this pass on a box where the rule
+# is missing. That cache is the difference between testing the rule and testing
+# nothing.
+sudo -k
+SYSTEMCTL="$(command -v systemctl || echo /usr/bin/systemctl)"
+if sudo -n -l "$SYSTEMCTL" restart murphys-bench >/dev/null 2>&1; then
+    ok "passwordless restart of murphys-bench is granted (sudoers rule present)"
+else
+    bad "NO passwordless restart for $(id -un). The in-app Update button cannot
+        finish (restart fails) and cannot safely undo itself (rollback's restore
+        cannot stop the service). Expected /etc/sudoers.d/murphys-bench from
+        scripts/install.sh.  Check: sudo -l | grep murphys-bench"
+fi
+
+head_ "In-app Update actually runs, end to end"
+# EXECUTED, not inspected. The previous version of this gate checked only that
+# the wiring existed and said an update "proves little" here. It proved the one
+# thing that mattered and we didn't run it: a box can have every unit armed and
+# still be unable to complete an update. Assert the outcome, not the plumbing.
+#
+# Re-deploying the tag the box is already on is the right test: it runs the whole
+# script — snapshot, pip, migrate, CSS, collectstatic, RESTART, health check —
+# and lands where it started, so the checkout is not left somewhere unexpected.
+if [ "${SKIP_UPDATE_RUN:-0}" = 1 ]; then
+    echo "  SKIP  update run disabled by SKIP_UPDATE_RUN=1"
+else
+    rm -f "$APP/logs/update-status.json"
+    before_head="$(git -C "$APP" rev-parse HEAD)"
+    touch "$APP/logs/update-trigger"
+    ustate=""
+    for _ in $(seq 1 150); do
+        ustate="$("$APP/venv/bin/python" -c "import json;print(json.load(open('$APP/logs/update-status.json')).get('state',''))" 2>/dev/null || true)"
+        case "$ustate" in succeeded|failed) break ;; esac
+        sleep 2
+    done
+    utail="$(tail -25 "$APP/logs/update.log" 2>/dev/null || true)"
+    case "${ustate:-}" in
+        succeeded)
+            ok "in-app Update ran to completion and the app came back healthy"
+            # A success that reported success is not enough: confirm the app is
+            # actually answering after its own restart.
+            ucode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                     -H "Host: $(grep '^ALLOWED_HOSTS=' "$APP/.env" | cut -d= -f2- | cut -d, -f1)" \
+                     http://127.0.0.1/ || echo 000)"
+            case "$ucode" in
+                2*|3*) ok "app answering after the update's own restart (HTTP $ucode)" ;;
+                *)     bad "update reported success but the app returns HTTP $ucode" ;;
+            esac ;;
+        failed)
+            bad "in-app Update RAN AND FAILED. This is what a tester gets when they
+        click the button. Last lines of $APP/logs/update.log:
+$(printf '%s' "$utail" | sed 's/^/        /')" ;;
+        *)
+            bad "in-app Update never reached a terminal state after 300s (stuck at
+        '${ustate:-queued}') — the button would spin forever.
+        Check: systemctl status murphys-bench-update.path murphys-bench-update.service" ;;
+    esac
+    rm -f "$APP/logs/update-trigger"
+    # An update deploys the latest RELEASE TAG. On a box checked out somewhere
+    # else (a branch under test, an untagged commit) that legitimately moves HEAD,
+    # and leaving the verifier's checkout silently moved is its own trap.
+    after_head="$(git -C "$APP" rev-parse HEAD)"
+    if [ "$before_head" != "$after_head" ]; then
+        echo "  NOTE: the update moved this checkout from ${before_head:0:8} to ${after_head:0:8}
+        (it deploys the latest release tag). That is the real behaviour, not a
+        fault. Re-run install.sh if you need the box back on the earlier commit."
+    fi
 fi
 
 printf '\n== Result: %d passed, %d failed\n' "$PASS" "$FAIL"

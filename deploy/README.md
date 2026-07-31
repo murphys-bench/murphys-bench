@@ -91,11 +91,15 @@ instead of email because the box can't send system mail. App 500s also auto-open
 a ticket (`core.log_handlers.SystemAlertHandler` on the `django.request` logger,
 production only — wired in `settings.LOGGING`).
 
-Install the log rotation, the OnFailure→ticket handler, and the disk check:
+Log rotation is installed for you by `scripts/install.sh` (via
+`scripts/install_units.sh`), rendered for this install's real path and user.
+**Do not `sudo cp` it out of `deploy/`** — that file is a template, and a copied
+one silently rotates nothing, which is how every box but the author's ended up
+with an unbounded gunicorn log.
+
+Install the OnFailure→ticket handler and the disk check:
 
 ```bash
-sudo apt install -y logrotate     # not present on minimal Ubuntu installs
-sudo cp "$(pwd)/deploy/logrotate-murphys-bench" /etc/logrotate.d/murphys-bench
 scripts/install_units.sh --with-disk-check    # renders + enables the disk check + alert unit
 for u in murphys-bench-backup murphys-bench-fetch-email murphys-bench-sla-check; do
   sudo mkdir -p /etc/systemd/system/$u.service.d

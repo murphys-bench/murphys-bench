@@ -1,13 +1,22 @@
 # Murphy's Bench log rotation.
-# Install:  sudo cp deploy/logrotate-murphys-bench /etc/logrotate.d/murphys-bench
 #
-# Rotates the Gunicorn access/error logs and the backup log. The Django app log
-# (logs/murphys_bench.log) self-rotates via a RotatingFileHandler in settings.py,
-# so it is deliberately NOT listed here (don't double-rotate it).
+# A TEMPLATE, like the systemd units beside it: __APP__, __RUN_USER__ and
+# __RUN_GROUP__ are substituted for this install by scripts/install_units.sh,
+# which writes the result to /etc/logrotate.d/murphys-bench.
+#
+# It used to hardcode the author's own install path and username, and to be
+# installed only by a copy-paste command in deploy/README.md. So on every box but
+# that one, nothing rotated: the gunicorn access log grew without limit, silently,
+# exactly like the systemd units did before July 28. NEVER `sudo cp` this file.
+#
+# Rotates the Gunicorn access/error logs, the backup log and the update log. The
+# Django app log (logs/murphys_bench.log) self-rotates via a RotatingFileHandler
+# in settings.py, so it is deliberately NOT listed here (don't double-rotate it).
 # copytruncate is used so Gunicorn keeps writing to the same fd without a restart.
-/opt/murphys-bench/logs/gunicorn-access.log
-/opt/murphys-bench/logs/gunicorn-error.log
-/opt/murphys-bench/logs/backup.log {
+__APP__/logs/gunicorn-access.log
+__APP__/logs/gunicorn-error.log
+__APP__/logs/backup.log
+__APP__/logs/update.log {
     weekly
     rotate 8
     maxsize 50M
@@ -16,5 +25,5 @@
     compress
     delaycompress
     copytruncate
-    su scs-tech scs-tech
+    su __RUN_USER__ __RUN_GROUP__
 }

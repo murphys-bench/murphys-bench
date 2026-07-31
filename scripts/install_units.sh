@@ -97,6 +97,35 @@ for u in "${UNITS[@]}"; do
     fi
 done
 
+# Log rotation is part of the deployment layer too, and was missing from it for
+# the same reason the units were: deploy/README.md told a human to `sudo cp` a
+# file that hardcoded one box's path and username. Every other install rotated
+# nothing and grew a gunicorn access log forever. Rendered from the same template
+# mechanism as the units, so it can never drift from this install's real path.
+if command -v logrotate >/dev/null; then
+    lr_src="$APP/deploy/logrotate-murphys-bench"
+    if [ -f "$lr_src" ]; then
+        sed -e "s|__APP__|$APP|g" \
+            -e "s|__RUN_USER__|$RUN_USER|g" \
+            -e "s|__RUN_GROUP__|$RUN_GROUP|g" "$lr_src" \
+          | sudo tee /etc/logrotate.d/murphys-bench >/dev/null \
+          || fail "could not write /etc/logrotate.d/murphys-bench"
+        # logrotate SKIPS a config it considers unsafe, and does it quietly.
+        sudo chmod 0644 /etc/logrotate.d/murphys-bench
+        # Parse it now rather than discovering a syntax error weeks later, when a
+        # log that should have rotated has quietly filled the disk instead.
+        if sudo logrotate -d /etc/logrotate.d/murphys-bench >/dev/null 2>&1; then
+            log "log rotation installed (/etc/logrotate.d/murphys-bench)"
+        else
+            fail "the rendered logrotate config is invalid — logs would never rotate.
+  Inspect: sudo logrotate -d /etc/logrotate.d/murphys-bench"
+        fi
+    fi
+else
+    log "logrotate not installed — MB's gunicorn/backup/update logs will NOT be rotated.
+       Install it (apt install logrotate) and re-run this script."
+fi
+
 sudo systemctl daemon-reload || fail "systemctl daemon-reload failed"
 
 for u in "${ENABLE[@]}"; do

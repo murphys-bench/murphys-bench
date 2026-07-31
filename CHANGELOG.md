@@ -8,6 +8,62 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Fixed
+
+- **The in-app Update button could not work on any install but the author's, and
+  a failed update left the box in a bad state.** `update.sh` restarts the service
+  with `sudo systemctl restart`, and the automatic rollback's restore stops and
+  starts it too. Both need root. Run from an SSH session sudo prompts and a human
+  answers; run from the in-app button there is no terminal, so sudo fails with "a
+  terminal is required to authenticate". The rule that makes it work had been added
+  BY HAND, months ago, on the three boxes we test on, and the installer never wrote
+  it. So on a tester's machine the update failed at the restart, then the rollback
+  failed at the stop, leaving the OLD code running against a database the NEW
+  migrations had already been applied to.
+
+  `scripts/install.sh` now writes `/etc/sudoers.d/murphys-bench`, granting the app
+  user a passwordless restart/stop/start/status of that one service and nothing
+  else. The rule is validated with `visudo` before it is installed. `update.sh`
+  checks for it up front and refuses to start an update it could not finish or
+  undo, changing nothing. **An existing install gets the rule by re-running
+  `scripts/install.sh` once, from a terminal.**
+
+- **A failed update kept reporting failure forever, even on a box that had since
+  been updated successfully by hand.** Nothing but the update runner ever wrote the
+  status file, so the red banner outlived the state it described. A result is now
+  suppressed once the installed version no longer matches it; the log stays
+  reachable.
+
+- **`ALLOWED_HOSTS` picked one address at random on a box with more than one
+  network interface.** The installer took the first address `hostname -I` printed,
+  which on a machine running Tailscale or a second adapter is not the address the
+  shop browses to. That box then rejected its own LAN address, and the update's
+  health probe checked a host nobody uses. Every local address is now listed.
+
+- **Log rotation was never installed on any box but the author's.** The logrotate
+  config hardcoded one install path and username and was applied by a copy-paste
+  command in `deploy/README.md`, so elsewhere the gunicorn access log grew without
+  limit. It is now a template rendered by `scripts/install_units.sh`, like the
+  systemd units, and its syntax is verified at install time.
+
+### Changed
+
+- **The release gate now runs an update instead of inspecting one.**
+  `scripts/verify_install.sh` used to check that the in-app Update button was
+  wired, with a comment saying that actually running an update "proves little" on
+  a verification box. It proved the one thing that mattered. The gate now drives
+  the real trigger file, waits for the update to finish, and fails the release if
+  it does not come back healthy. It also asserts passwordless restart directly.
+
+- **A new `clean-room` CI job installs Murphy's Bench on a bare machine and runs
+  that gate on every push.** It removes the runner's blanket passwordless sudo
+  after installing, keeping only what the installer itself granted, so the job runs
+  under the same privileges a real shop box has. Without that step it would pass on
+  a build that grants nothing — a green light for exactly the defect it exists to
+  catch.
+
 ## v0.9.0 — 2026-07-30
 
 > **Read the "Changed" section before you upgrade.** This batch alters three

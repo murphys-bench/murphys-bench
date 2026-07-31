@@ -1,0 +1,87 @@
+name: Clean-room install
+
+# Installs Murphy's Bench onto a bare machine with scripts/install.sh and then
+# runs scripts/verify_install.sh against it — the deployment layer, which pytest
+# cannot see at all. pytest runs Django in-process and knows nothing about
+# systemd, nginx, sudo, or file permissions, so everything past that boundary was
+# only ever checked by hand, on boxes that had been set up by hand. Twice now
+# that gap has been closed by an outside tester finding the bug for us.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY THIS WORKFLOW REMOVES ITS OWN SUDO ACCESS
+#
+# A GitHub runner gives its user blanket passwordless sudo for everything. A real
+# shop box does not: there, the app user can only do what /etc/sudoers.d grants
+# it. Running this workflow as-is would therefore pass on a build where the
+# installer grants nothing at all — every sudo call succeeding for a reason no
+# tester's machine shares. That is not a weaker test, it is a test that reports
+# green on the exact defect it exists to catch.
+#
+# So the job installs first (as a human with a password would), then strips the
+# runner's blanket rule, leaving ONLY whatever /etc/sudoers.d file the installer
+# itself wrote. Everything after that point runs under the same privileges a
+# tester's box has, which is the only condition under which a pass means anything.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  clean-room:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          # install.sh and update.sh both resolve versions with `git describe`,
+          # and the in-app update deploys the latest RELEASE TAG. A shallow
+          # checkout has no tags, so the update under test would have nothing to
+          # deploy and the run would prove nothing.
+          fetch-depth: 0
+
+      - name: Install onto this machine the way a shop owner does
+        # NOT at /opt/murphys-bench: a path under the login user's home is the
+        # layout that has broken before (mode-750 home directories make static
+        # files unreadable to nginx), so it is the layout worth testing.
+        run: |
+          set -euo pipefail
+          cp -a "$GITHUB_WORKSPACE" "$HOME/murphys-bench"
+          cd "$HOME/murphys-bench"
+          scripts/install.sh --noinput --no-demo-data --skip-tests
+
+      - name: Drop this runner's blanket sudo, keeping only what the installer granted
+        # After this step the user's ONLY privileges are the ones scripts/install.sh
+        # created. If it granted nothing, the verification below fails — which is
+        # the whole point.
+        run: |
+          set -euo pipefail
+          sudo rm -f /etc/sudoers.d/runner /etc/sudoers.d/99-runner /etc/sudoers.d/90-cloud-init-users
+          sudo sed -i 's/^%sudo.*NOPASSWD.*$/%sudo ALL=(ALL:ALL) ALL/' /etc/sudoers
+          sudo sed -i 's/^%admin.*NOPASSWD.*$/%admin ALL=(ALL) ALL/' /etc/sudoers
+          echo "Remaining privileges for $(id -un):"
+          sudo -n -l || true
+          # Fail loudly if the strip did not take: a still-omnipotent user would
+          # make every check below meaningless, and a meaningless green is how
+          # this class of bug reaches a tester.
+          if sudo -n true 2>/dev/null; then
+            echo "::error::blanket passwordless sudo is STILL active — this job cannot verify anything"
+            exit 1
+          fi
+
+      - name: Verify the install (the release gate)
+        run: |
+          cd "$HOME/murphys-bench"
+          scripts/verify_install.sh
+
+      - name: Show what failed
+        if: failure()
+        run: |
+          cd "$HOME/murphys-bench" || exit 0
+          echo "=== update.log ==="; tail -60 logs/update.log 2>/dev/null || true
+          echo "=== update-status.json ==="; cat logs/update-status.json 2>/dev/null || true
+          echo "=== sudoers drop-in ==="; sudo cat /etc/sudoers.d/murphys-bench 2>/dev/null || echo "(absent)"
+          echo "=== service ==="; systemctl status murphys-bench --no-pager -l 2>/dev/null || true
+          journalctl -u murphys-bench -n 40 --no-pager 2>/dev/null || true

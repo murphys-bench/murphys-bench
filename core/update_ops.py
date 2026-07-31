@@ -104,10 +104,30 @@ def is_update_available() -> bool:
 
 
 def read_status() -> dict:
-    """Last-known update status. Returns {'state': 'idle'} when absent/corrupt."""
+    """Last-known update status. Returns {'state': 'idle'} when absent/corrupt.
+
+    Terminal results also carry ``stale``: True once the box has MOVED OFF the
+    version that result describes. Nothing but ``run_update.sh`` ever writes this
+    file, so a failed run's banner otherwise sits there for good — including on a
+    box whose owner then updated by hand and is now, correctly, on the newer
+    version. A tester hit exactly that: a red "last update failed, rolled back"
+    banner on a box that was running the new release perfectly well. A status
+    report that outlives the thing it reports on is worse than none.
+
+    A genuine failure rolls back, so the box ends where it started and
+    ``from_version`` still matches — those stay visible. Only a result the
+    filesystem has since contradicted is marked stale.
+    """
     try:
         data = json.loads(status_path().read_text())
         if isinstance(data, dict) and data.get('state'):
+            if data['state'] in ('succeeded', 'failed'):
+                # Where the box should be if this result still describes it: a
+                # success left it on the target, a failure rolled it back to
+                # where it started.
+                expected = (data.get('target') if data['state'] == 'succeeded'
+                            else data.get('from_version')) or ''
+                data['stale'] = bool(expected) and expected != current_version()
             return data
     except Exception:
         pass

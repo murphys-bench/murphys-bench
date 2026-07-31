@@ -2805,6 +2805,64 @@ def test_update_status_fragment_renders_states(client, admin_user, settings, tmp
     assert needle in resp.content.decode().lower()
 
 
+
+# ── Update card: a result that no longer describes the box goes quiet ────────
+# A tester updated by hand after the in-app update failed, and was left staring
+# at a red "last update failed" banner on a box that was running the new release
+# correctly. Nothing but run_update.sh writes that file, so it never aged out.
+
+@pytest.mark.django_db
+def test_failed_status_is_stale_once_the_box_has_moved_on(client, admin_user, settings, tmp_path, monkeypatch):
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'failed', 'from_version': 'v0.4.52', 'target': 'v0.9.0',
+        'log_tail': 'sudo: A terminal is required to authenticate',
+    }))
+    # The box was updated by hand afterwards and is now on the newer version.
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.9.0')
+    assert update_ops.read_status()['stale'] is True
+
+    client.force_login(admin_user)
+    body = client.get(reverse('core:update_status')).content.decode()
+    assert 'was automatically rolled back' not in body
+    # The log stays reachable — hiding the banner must not destroy the evidence.
+    assert 'earlier update attempt' in body.lower()
+
+
+@pytest.mark.django_db
+def test_genuine_failure_still_reports_because_rollback_returns_the_box(settings, tmp_path, monkeypatch):
+    """A real failure rolls back, so the box ends on from_version and the banner
+    must stay. The staleness rule must not swallow live failures."""
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'failed', 'from_version': 'v0.4.52', 'target': 'v0.9.0',
+    }))
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.4.52')
+    assert update_ops.read_status()['stale'] is False
+
+
+@pytest.mark.django_db
+def test_success_banner_stays_while_the_box_is_on_the_version_it_installed(settings, tmp_path, monkeypatch):
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'succeeded', 'from_version': 'v0.4.52', 'target': 'v0.9.0',
+    }))
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.9.0')
+    assert update_ops.read_status()['stale'] is False
+    # ...and goes quiet once the box has moved past it again.
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.9.1')
+    assert update_ops.read_status()['stale'] is True
+
+
 # ── Update card: "View changelog" link + changelog view ─────────────────────
 
 def test_changelog_for_version_extracts_just_that_section(monkeypatch):
@@ -8768,6 +8826,37 @@ def test_unit_templates_are_templates_not_baked_for_one_box():
     assert not baked, f'unit templates carry a baked-in path/user: {baked}'
     assert not unsubstituted, (
         f'unit templates reference no __APP__ placeholder: {unsubstituted}'
+    )
+
+
+def test_every_installed_config_in_deploy_is_a_template():
+    """The check above only looked at *.service|timer|path, so a config with no
+    such extension could still ship hardcoded — and one did. The logrotate config
+    named the author's path and username and was installed by a copy-paste line in
+    deploy/README.md, so on every other box the gunicorn logs never rotated.
+    Silent, unbounded, and invisible to a check that only knew about unit files.
+
+    Scan everything installed from deploy/ instead of an extension whitelist.
+    """
+    deploy = _repo_root() / 'deploy'
+    offenders = []
+    for path in sorted(deploy.rglob('*')):
+        if not path.is_file() or path.suffix == '.md':
+            continue
+        # deploy/demo/ records how the retired demo box was built by hand. It is
+        # reference material — nothing installs from it — so its literal values
+        # are the point, not a defect.
+        if 'demo' in path.relative_to(deploy).parts:
+            continue
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            if line.lstrip().startswith('#'):
+                continue
+            if '/opt/murphys-bench' in line or 'scs-tech' in line:
+                offenders.append(f'{path.relative_to(deploy)}:{lineno}')
+
+    assert not offenders, (
+        'a file installed from deploy/ hardcodes the author\'s install path or '
+        'user instead of using __APP__/__RUN_USER__:\n  ' + '\n  '.join(offenders)
     )
 
 

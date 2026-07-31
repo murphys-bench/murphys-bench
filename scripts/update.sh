@@ -59,6 +59,50 @@ rollback() {
 [ -f manage.py ] || fail "no manage.py in $APP — wrong directory?"
 command -v git >/dev/null || fail "git not installed"
 
+# 0) PRE-FLIGHT: never begin an update we cannot finish OR undo.
+#
+# Both the finish (step 7, restart) and the undo (rollback → restore.sh, which
+# stops and starts the service) need root. If that isn't available without a
+# password, the failure does not land at step 7 where it looks survivable — it
+# lands twice: the restart fails, auto-rollback starts, and then restore.sh
+# cannot stop the service either. The box is left on the OLD code with the NEW
+# migrations already applied to its database, printing MANUAL RECOVERY NEEDED at
+# someone who did nothing but click a button. A tester hit exactly this.
+#
+# Checked here, before the snapshot and before a single change, where the only
+# cost of saying no is an update that didn't start. -n means "fail rather than
+# prompt", which is the condition the systemd one-shot behind the in-app Update
+# button always runs under.
+# `sudo -l <command>` ASKS whether the command is permitted instead of running
+# it, so this cannot restart anything as a side effect, and -n makes it answer
+# without a prompt. Testing by actually running `systemctl is-active` would be
+# wrong: that exits non-zero for a stopped service too, so a merely-stopped app
+# would read as a permissions failure.
+#
+# One exception, at the bottom: a human running this by hand from a terminal CAN
+# supply a password. We take it once, up front, so the rollback path never stalls
+# on a prompt halfway through a restore.
+SYSTEMCTL="$(command -v systemctl || echo /usr/bin/systemctl)"
+if ! sudo -n -l "$SYSTEMCTL" restart murphys-bench >/dev/null 2>&1; then
+    if [ -t 0 ]; then
+        log "this box has no passwordless restart rule; asking for your password once
+       so the update (and any rollback) can restart the service without stalling.
+       Run 'scripts/install.sh' to install the rule and stop being asked."
+        sudo -v || fail "could not authenticate — nothing has been changed"
+    else
+        fail "this box cannot restart Murphy's Bench without a password, so an update
+  could neither finish nor safely roll back. NOTHING HAS BEEN CHANGED.
+
+  Fix it once, then update again:
+    cd $APP && scripts/install.sh
+
+  (That writes /etc/sudoers.d/murphys-bench, granting this user a passwordless
+  restart of this one service and nothing else. It will ask for your password
+  once, which is why it must be run from a terminal rather than the in-app
+  Update button.)"
+    fi
+fi
+
 # Parse args: one optional ref + an optional --no-rollback flag, any order.
 REF=""
 NO_ROLLBACK=0
