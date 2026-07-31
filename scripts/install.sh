@@ -29,9 +29,9 @@
 #                          and will fail or fight your actual setup otherwise)
 #                      If none of that describes you, leave this off — it's what gets
 #                      you to a working login page without hand-editing config files.
-#                      ⚠ WHAT YOU GIVE UP: this flag also skips every systemd unit and
-#                      the sudoers rule, because both describe a service this install
-#                      does not create. So on a --skip-web box there are NO scheduled
+#                      ⚠ WHAT YOU GIVE UP: this flag also skips ALL of MB's systemd
+#                      deployment wiring and the sudoers rule — not only the parts that
+#                      need the web service. So on a --skip-web box there are NO scheduled
 #                      backups, NO inbound-email polling, NO SLA checks, and the in-app
 #                      "Back up now" and "Update" buttons cannot work, and MB's
 #                      logrotate config is not installed. You own all of that, INCLUDING
@@ -583,9 +583,13 @@ else
     # manager) has no way to know that decision also turned off backups.
     log "skipping web server setup (--skip-web) — app layer only"
     cat >&2 <<'SKIPWEB'
-install: ⚠ --skip-web also skipped the SYSTEMD UNITS and the sudoers rule.
-install:   That is deliberate: both name a murphys-bench service this run did not
-install:   create. The consequences are real and silent, so read them:
+install: ⚠ --skip-web also skipped ALL of MB's systemd wiring and the sudoers rule.
+install:   That is a deliberate all-or-nothing policy, not a technical necessity. Only
+install:   the gunicorn unit, the Update button's path unit and the sudoers rule need
+install:   the service this run did not create; the backup, email and SLA jobs and the
+install:   Back up now button only run scripts and would have worked here. This
+install:   installer has no supported way to wire a subset, so it wires none and hands
+install:   you the whole deployment layer. The consequences are real and silent:
 install:     - NO scheduled backups          (murphys-bench-backup.timer)
 install:     - NO inbound email fetching     (murphys-bench-fetch-email.timer)
 install:     - NO SLA overdue checks         (murphys-bench-sla-check.timer)
@@ -676,13 +680,27 @@ without --skip-web if this box turns out to be a normal systemd+nginx host.
   - The in-app "Back up now" and "Update" buttons CANNOT work here. They write
     a trigger file that a systemd .path unit is supposed to act on; there is no
     such unit on this box, so the buttons spin and nothing happens.
-  - No sudoers rule was written, because it names a service this run did not
-    create.
+  - No sudoers rule was written. That one genuinely does depend on the service
+    this run did not create.
   - Log rotation is NOT installed. /etc/logrotate.d/murphys-bench comes from the
     same skipped step, so the gunicorn access/error logs, the backup log and the
     update log will grow without limit unless you rotate them yourself. (The
     Django app log self-rotates and is not affected.)
   The buttons remain visible in the UI. Nothing monitors any of this.
+
+  To be straight about WHY all of it is skipped: it is one policy, not one reason.
+  Only three of these genuinely depend on a murphys-bench service this run did not
+  create — the gunicorn unit itself, the Update button's path unit (its updater ends
+  in 'systemctl restart murphys-bench'), and the sudoers rule. The rest would have
+  worked here: the backup, inbound-email and SLA jobs only run scripts, and the
+  Back up now button's one-shot uses no sudo at all. This installer has no supported
+  way to wire a subset, so it wires none. To run those jobs on a custom host,
+  schedule them yourself (your own systemd units, or cron) against:
+    scripts/backup_scheduler.sh
+    venv/bin/python manage.py fetch_inbound_email
+    venv/bin/python manage.py check_sla_overdue
+  and if you want the in-app Back up now button, install a path unit of your own
+  watching logs/backup-trigger that runs scripts/run_backup.sh.
 
   ⚠ scripts/update.sh is NOT a safe update path on this box. It is written for
   the standard install: it checks and uses passwordless control of a

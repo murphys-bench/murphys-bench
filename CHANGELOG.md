@@ -81,8 +81,12 @@ the Unreleased entries move under that version and prod gets a single update.
   inbound email polling, no SLA checks, and its **Back up now** and **Update**
   buttons write a trigger file that nothing on the box consumes. The buttons stay
   visible and nothing reports any of it. That is the same shape as the defect this
-  release fixes, one flag away. Skipping those things is correct — they describe a
-  service the run did not create — so the fix is disclosure, not behaviour: the
+  release fixes, one flag away. Skipping them stays correct as an all-or-nothing
+  policy — there is no supported way to wire a subset — so the fix is disclosure,
+  not behaviour, and the disclosure now says which parts genuinely need the missing
+  service (only the gunicorn unit, the Update button's path unit and the sudoers rule)
+  and which would have worked anyway (the backup, email and SLA jobs, and the Back up
+  now one-shot, which uses no sudo), with the commands to run them yourself. The
   installer now warns at the moment it skips them and again in its closing summary,
   naming each capability lost and who is now responsible for it, and the flag's
   documentation in `INSTALL.md` says the same. That list also includes log rotation:

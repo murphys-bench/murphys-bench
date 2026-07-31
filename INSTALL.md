@@ -30,9 +30,14 @@ scripts/install.sh --skip-web
 
 That installs and initializes the application but leaves the Gunicorn, reverse-proxy, and TLS configuration to you.
 
-> **`--skip-web` turns off more than the web server.** It also skips every systemd
-> unit and the sudoers rule, because both describe a service that install does not
-> create. On a `--skip-web` box:
+> **`--skip-web` turns off more than the web server.** It also skips *all* of Murphy's
+> Bench's systemd deployment wiring and the sudoers rule. That is an all-or-nothing
+> policy rather than a technical necessity. Only the Gunicorn unit, the **Update**
+> button's path unit and the sudoers rule depend on a `murphys-bench` service the run
+> does not create; the backup, inbound-email and SLA jobs only run scripts, and the
+> **Back up now** one-shot uses no sudo, so all four would have worked here. The
+> installer has no supported way to wire a subset, so it wires none. On a `--skip-web`
+> box:
 >
 > - scheduled backups, inbound email fetching and SLA checks do **not** run;
 > - the in-app **Back up now** and **Update** buttons **cannot** work — they write a
@@ -43,7 +48,9 @@ That installs and initializes the application but leaves the Gunicorn, reverse-p
 > - the buttons stay visible in the UI, and nothing reports any of this as missing.
 >
 > You are responsible for running, backing up, rotating the logs of, and updating the
-> application.
+> application. If you want the three schedulable jobs on a custom host, wire them
+> yourself (your own systemd units, or cron) against `scripts/backup_scheduler.sh`,
+> `manage.py fetch_inbound_email` and `manage.py check_sla_overdue`.
 >
 > **Use your own update process.** `scripts/update.sh` is built for the standard
 > systemd + nginx install: it checks and uses passwordless control of a
