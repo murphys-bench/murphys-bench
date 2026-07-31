@@ -52,6 +52,26 @@ jobs:
           cd "$HOME/murphys-bench"
           scripts/install.sh --noinput --no-demo-data --skip-tests
 
+      - name: Rehearse the repair an already-broken install has to perform
+        # A tester who installed before this fix does NOT get a fresh box: they
+        # get theirs, missing the sudoers rule and the logrotate config, and the
+        # only thing we tell them to run is scripts/install.sh. That is a
+        # DIFFERENT code path from a first install, and telling someone to run a
+        # repair we have never executed is how the last two rounds of this went.
+        #
+        # So: break the box the way theirs is broken, then repair it with exactly
+        # the command they will be given. Everything after this point verifies the
+        # REPAIRED box, not the freshly-installed one.
+        run: |
+          set -euo pipefail
+          sudo rm -f /etc/sudoers.d/murphys-bench /etc/logrotate.d/murphys-bench
+          cd "$HOME/murphys-bench"
+          scripts/install.sh --noinput --no-demo-data --skip-tests --skip-apt
+          # Fail here rather than let a missing repair surface as a confusing
+          # verification failure three steps later.
+          test -f /etc/sudoers.d/murphys-bench || { echo "::error::the repair did not write the sudoers rule"; exit 1; }
+          test -f /etc/logrotate.d/murphys-bench || { echo "::error::the repair did not write the logrotate config"; exit 1; }
+
       - name: Drop this runner's blanket sudo, keeping only what the installer granted
         # After this step the user's ONLY privileges are the ones scripts/install.sh
         # created. If it granted nothing, the verification below fails — which is
