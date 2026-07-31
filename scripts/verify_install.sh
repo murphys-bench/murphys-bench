@@ -475,8 +475,12 @@ else
     #    command blocks only — older entries are a historical record and were
     #    correct for the boxes they were written for, and the prose in this block
     #    mentions `git pull` on purpose to explain why it is absent.
+    #    The blockquote marker is stripped BEFORE fence detection, so this reads
+    #    both `> ```bash` (the current shape) and a plain ```bash block. Keying on
+    #    the quoted form alone would have made the check pass the moment someone
+    #    unquoted the block — coupling the gate to formatting rather than content.
     active_cmds="$(awk '/^## /{n++} n==1' "$APP/CHANGELOG.md" \
-        | awk '/^> ?```/{f=!f; next} f')"
+        | awk '{sub(/^> ?/, "")} /^```/{f=!f; next} f')"
     if [ -z "$active_cmds" ]; then
         # Most releases install cleanly through the button and carry no manual
         # block. Absence is normal and must NOT fail the gate — an earlier draft
