@@ -19,7 +19,10 @@ LOG="$APP/logs/update.log"
 TRIGGER="$APP/logs/update-trigger"
 
 FROM="$(git describe --tags --always 2>/dev/null || echo unknown)"
-TO="$(git tag -l 'v*' --sort=-v:refname 2>/dev/null | head -1)"
+# Strict vX.Y.Z only — a prerelease tag outranks its own release under -v:refname
+# (v0.10.0-rc1 sorts above v0.10.0), and this value is what the UI reports as the
+# target of the update. Must match update.sh's TARGET and update_ops.
+TO="$(git tag -l 'v*' --sort=-v:refname 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
 STARTED="$(date -u +%FT%T%z)"
 
 # emit_status STATE [EXIT_CODE] — writes update-status.json (JSON-safe via python,

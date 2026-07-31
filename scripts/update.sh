@@ -188,7 +188,13 @@ if [ -n "$REF" ]; then
         TARGET="$REF"
     fi
 else
-    TARGET="$(git tag -l 'v*' | sort -V | tail -1)"
+    # ONLY strict vX.Y.Z release tags. Both `sort -V` and git's own `-v:refname`
+    # rank a prerelease ABOVE the release it precedes: with v0.10.0 and
+    # v0.10.0-rc1 both present, each of them picks v0.10.0-rc1. Since this is what
+    # the in-app Update button deploys, pushing a single release-candidate tag
+    # would hand every install in the field a prerelease as "the latest release",
+    # and a pushed tag cannot be withdrawn once boxes have seen it.
+    TARGET="$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
     [ -n "$TARGET" ] || fail "no release tags exist yet. Create one with scripts/release.sh \
 (on your dev machine, after CI is green), or pass an explicit ref to deploy untagged \
 code, e.g.: scripts/update.sh main"

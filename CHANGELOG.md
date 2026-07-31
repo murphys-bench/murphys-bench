@@ -23,7 +23,7 @@ the Unreleased entries move under that version and prod gets a single update.
 > ```bash
 > cd ~/murphys-bench      # or wherever it is installed
 > git fetch --all --tags
-> git checkout --detach "$(git tag -l 'v*' --sort=-v:refname | head -1)"
+> git checkout --detach "$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
 > scripts/install.sh
 > ```
 >
@@ -37,6 +37,19 @@ the Unreleased entries move under that version and prod gets a single update.
 > updater now refuses up front and changes nothing rather than half-updating.
 
 ### Fixed
+
+- **A single release-candidate tag would have made every install offer and deploy a
+  prerelease as the latest release.** Git's version sort ranks a prerelease *above*
+  the release it precedes: with `v0.10.0` and `v0.10.0-rc1` both present, both
+  `git tag --sort=-v:refname` and `sort -V` pick the release candidate — and with a
+  `v1.0.0-beta` present, they pick that. Every place that decides "what is the newest
+  release" used one of those unfiltered: the in-app Update button's target, the
+  version the Updates page advertises, the updater's own default, the clean-room
+  gate, and the recovery command printed in this changelog. So tagging one RC would
+  have pushed a prerelease onto every box that pressed Update, and a tag cannot be
+  withdrawn once boxes have fetched it. Nothing had gone wrong only because no
+  prerelease tag had ever been cut. All five now accept strictly `vX.Y.Z`, with a
+  test that fails if any one of them drifts back.
 
 - **The in-app Update button could not work on any install but the author's, and
   a failed update left the box in a bad state.** `update.sh` restarts the service
