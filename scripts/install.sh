@@ -587,7 +587,7 @@ install: ⚠ --skip-web also skipped ALL of MB's systemd wiring and the sudoers 
 install:   That is a deliberate all-or-nothing policy, not a technical necessity. Only
 install:   the gunicorn unit, the Update button's path unit and the sudoers rule need
 install:   the service this run did not create; the backup, email and SLA jobs and the
-install:   Back up now button only run scripts and would have worked here. This
+install:   Back up now one-shot only run scripts and do NOT depend on it. This
 install:   installer has no supported way to wire a subset, so it wires none and hands
 install:   you the whole deployment layer. The consequences are real and silent:
 install:     - NO scheduled backups          (murphys-bench-backup.timer)
@@ -691,16 +691,23 @@ without --skip-web if this box turns out to be a normal systemd+nginx host.
   To be straight about WHY all of it is skipped: it is one policy, not one reason.
   Only three of these genuinely depend on a murphys-bench service this run did not
   create — the gunicorn unit itself, the Update button's path unit (its updater ends
-  in 'systemctl restart murphys-bench'), and the sudoers rule. The rest would have
-  worked here: the backup, inbound-email and SLA jobs only run scripts, and the
-  Back up now button's one-shot uses no sudo at all. This installer has no supported
-  way to wire a subset, so it wires none. To run those jobs on a custom host,
-  schedule them yourself (your own systemd units, or cron) against:
-    scripts/backup_scheduler.sh
-    venv/bin/python manage.py fetch_inbound_email
-    venv/bin/python manage.py check_sla_overdue
-  and if you want the in-app Back up now button, install a path unit of your own
-  watching logs/backup-trigger that runs scripts/run_backup.sh.
+  in 'systemctl restart murphys-bench'), and the sudoers rule. The other script
+  bodies do NOT depend on that service: the backup, inbound-email and SLA jobs just
+  run scripts, and the Back up now one-shot uses no sudo at all. Whether you can
+  schedule them depends on what this host runs, which is your call, not this
+  installer's — it has no supported way to wire a subset, so it wires none.
+
+  To run those jobs yourself, use these ABSOLUTE paths, as $RUN_USER, with the
+  working directory set to $APP (cron and hand-written units do NOT inherit it,
+  and a relative path here is a job that silently never runs):
+    $APP/scripts/backup_scheduler.sh
+    $APP/venv/bin/python $APP/manage.py fetch_inbound_email
+    $APP/venv/bin/python $APP/manage.py check_sla_overdue
+
+  For the in-app Back up now button, watch this file:
+    $APP/logs/backup-trigger
+  and on it appearing, run:
+    $APP/scripts/run_backup.sh
 
   ⚠ scripts/update.sh is NOT a safe update path on this box. It is written for
   the standard install: it checks and uses passwordless control of a

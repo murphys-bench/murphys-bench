@@ -35,7 +35,9 @@ That installs and initializes the application but leaves the Gunicorn, reverse-p
 > policy rather than a technical necessity. Only the Gunicorn unit, the **Update**
 > button's path unit and the sudoers rule depend on a `murphys-bench` service the run
 > does not create; the backup, inbound-email and SLA jobs only run scripts, and the
-> **Back up now** one-shot uses no sudo, so all four would have worked here. The
+> **Back up now** one-shot uses no sudo, so none of those four script bodies depends
+> on the missing service — whether you can schedule them depends on what your host
+> runs. The
 > installer has no supported way to wire a subset, so it wires none. On a `--skip-web`
 > box:
 >
@@ -49,8 +51,12 @@ That installs and initializes the application but leaves the Gunicorn, reverse-p
 >
 > You are responsible for running, backing up, rotating the logs of, and updating the
 > application. If you want the three schedulable jobs on a custom host, wire them
-> yourself (your own systemd units, or cron) against `scripts/backup_scheduler.sh`,
-> `manage.py fetch_inbound_email` and `manage.py check_sla_overdue`.
+> yourself against `scripts/backup_scheduler.sh`, `manage.py fetch_inbound_email` and
+> `manage.py check_sla_overdue` — **using absolute paths under your install directory
+> and running with that directory as the working directory.** Cron jobs and
+> hand-written units do not inherit it, and a relative path there is a job that
+> silently never runs. The installer prints the exact absolute commands for your
+> install at the end of a `--skip-web` run.
 >
 > **Use your own update process.** `scripts/update.sh` is built for the standard
 > systemd + nginx install: it checks and uses passwordless control of a

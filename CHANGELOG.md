@@ -86,7 +86,10 @@ the Unreleased entries move under that version and prod gets a single update.
   not behaviour, and the disclosure now says which parts genuinely need the missing
   service (only the gunicorn unit, the Update button's path unit and the sudoers rule)
   and which would have worked anyway (the backup, email and SLA jobs, and the Back up
-  now one-shot, which uses no sudo), with the commands to run them yourself. The
+  now one-shot, which uses no sudo), with the ABSOLUTE commands to run them yourself
+  — printed with this install's real paths, because relative ones work when pasted
+  into a shell and fail silently in cron or a hand-written unit, which is the same
+  never-runs shape the warning exists to prevent. The
   installer now warns at the moment it skips them and again in its closing summary,
   naming each capability lost and who is now responsible for it, and the flag's
   documentation in `INSTALL.md` says the same. That list also includes log rotation:
