@@ -152,7 +152,8 @@ fi
 command -v git >/dev/null || fail "git not installed"
 if [ "$SKIP_APT" = 0 ]; then
     command -v apt-get >/dev/null || fail "this installer targets the apt (Debian/Ubuntu) family; \
-on another distro install python3/venv/pip/nginx/git/logrotate yourself and re-run with --skip-apt"
+on another distro install python3/venv/pip/git/logrotate/curl and WeasyPrint's pango stack \
+yourself (plus nginx ONLY if you are not passing --skip-web) and re-run with --skip-apt"
 fi
 PYBIN="$(command -v python3 || true)"
 [ -n "$PYBIN" ] || fail "python3 not found"
@@ -176,9 +177,29 @@ if [ "$SKIP_APT" = 0 ]; then
     sudo apt-get update -qq || fail "apt update failed"
     # The libpango/cairo/ft2 stack + fonts are WeasyPrint's runtime deps (PDF
     # generation for repair reports and quotes); they pull cairo/glib/harfbuzz.
-    sudo apt-get install -y -qq python3 python3-venv python3-pip nginx git logrotate curl \
-        libpango-1.0-0 libpangocairo-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core rclone \
-        || fail "apt install failed"
+    #
+    # nginx is NOT in this list unconditionally, and that is the point: this block
+    # is gated on --skip-apt, so before this it ran even under --skip-web — the one
+    # flag whose entire promise is "don't touch gunicorn/nginx/systemd". Ubuntu's
+    # nginx package starts and enables itself, so a --skip-web install ended up with
+    # an active, enabled nginx serving the default welcome page on port 80. On a box
+    # running its own Caddy/Traefik — a documented reason to pass the flag — that is
+    # a competing web server contending for the port the operator chose to manage
+    # themselves. Found by running the installer on a clean VM, not by reading it:
+    # five rounds of review of this same file did not surface it.
+    #
+    # Array form, not a string: word-splitting an unquoted list is how a package
+    # name with a space silently becomes two wrong ones.
+    pkgs=(
+        python3 python3-venv python3-pip git logrotate curl
+        libpango-1.0-0 libpangocairo-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
+        rclone
+    )
+    # Only the standard, web-managed install has any use for it.
+    if [ "$SKIP_WEB" = 0 ]; then
+        pkgs+=(nginx)
+    fi
+    sudo apt-get install -y -qq "${pkgs[@]}" || fail "apt install failed"
 else
     log "skipping apt (--skip-apt)"
 fi

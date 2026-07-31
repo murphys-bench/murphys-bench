@@ -8875,6 +8875,35 @@ def _repo_root():
     return Path(__file__).resolve().parent.parent
 
 
+# ── --skip-web must not install a web server ────────────────────────────────
+# The apt block is gated on --skip-apt, so `nginx` sitting in its package list ran
+# even under --skip-web — whose whole promise is "don't touch gunicorn/nginx/
+# systemd". Ubuntu's nginx package starts and enables itself, so such an install
+# ended up with an active nginx on port 80, contending with whatever proxy the
+# operator passed the flag to keep. Found by running the installer on a clean VM;
+# reading the file five times did not surface it.
+#
+# Asserted structurally: nginx may only be added to the package list inside a
+# SKIP_WEB branch. Wording and package order can change freely.
+
+def test_skip_web_does_not_install_a_web_server():
+    src = (_repo_root() / 'scripts' / 'install.sh').read_text()
+    start = src.index('    pkgs=(')
+    end = src.index('apt install failed', start)
+    block = src[start:end]
+
+    base, conditional = block.split('if [ "$SKIP_WEB" = 0 ]; then', 1)
+    for server in ('nginx', 'apache2', 'caddy', 'lighttpd'):
+        assert server not in base, (
+            f'{server} is in the unconditional package list, so --skip-web would '
+            'install a web server it promises not to touch'
+        )
+    assert 'nginx' in conditional, (
+        'nginx is no longer installed for a standard install either — the normal '
+        'path needs it'
+    )
+
+
 def test_no_script_hardcodes_the_authors_install_path_or_user():
     """Executable lines in scripts/ must not name /opt/murphys-bench or scs-tech.
 
