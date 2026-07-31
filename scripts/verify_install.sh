@@ -33,6 +33,23 @@ APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$APP"
 
 PASS=0; FAIL=0
+
+# The in-app Update check below deploys the latest RELEASE TAG, which moves this
+# checkout off whatever is being verified. Anything reading a file AFTER that
+# point sees the previous release, not the code under test — and a check that
+# reads the wrong tree reports a vacuous pass rather than a failure. That is
+# exactly what happened on the first real run of the recovery-instruction
+# section: three of its checks passed against a tag that does not contain the
+# things they check.
+#
+# So the files whose CONTENT is under test are snapshotted here, at the commit
+# the gate was started on, and the checks read the snapshot.
+GATE_HEAD="$(git -C "$APP" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+GATE_SRC="$(mktemp -d)"
+trap 'rm -rf "$GATE_SRC"' EXIT
+cp "$APP/CHANGELOG.md" "$GATE_SRC/CHANGELOG.md" 2>/dev/null || true
+mkdir -p "$GATE_SRC/tpl"
+cp "$APP/core/templates/core/partials/update_status.html" "$GATE_SRC/tpl/" 2>/dev/null || true
 ok()   { printf '  \033[32mPASS\033[0m  %s\n' "$1"; PASS=$((PASS+1)); }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; FAIL=$((FAIL+1)); }
 head_() { printf '\n== %s\n' "$1"; }
@@ -433,6 +450,18 @@ if git -C "$APP" symbolic-ref -q HEAD >/dev/null; then
 else
     ok "checkout is detached — the shape the in-app Update produces"
 
+    now_head="$(git -C "$APP" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    if [ "$now_head" != "$GATE_HEAD" ]; then
+        echo "  NOTE: the in-app Update moved this checkout from $GATE_HEAD to $now_head,
+        so the text below is read from a snapshot taken at $GATE_HEAD — the code
+        actually under test — not from the tree as it stands now."
+    fi
+    if [ ! -s "$GATE_SRC/CHANGELOG.md" ] || [ ! -s "$GATE_SRC/tpl/update_status.html" ]; then
+        bad "could not snapshot CHANGELOG.md and the update-status template at gate
+        start, so the recovery instructions below would be checked against the
+        wrong tree — which reports a vacuous pass, not a failure"
+    fi
+
     # 1) Prove the trap is real here rather than assuming it.
     if git -C "$APP" pull >/dev/null 2>&1; then
         bad "expected 'git pull' to fail on a detached checkout but it succeeded —
@@ -447,7 +476,7 @@ else
     #    `git pull` to explain why it is absent. Matching prose would make this
     #    check depend on comment wording, which is how it would rot.
     offenders="$(grep -n '<pre[^>]*>[^<]*git pull' \
-         "$APP/core/templates/core/partials/update_status.html" \
+         "$GATE_SRC/tpl/update_status.html" \
          2>/dev/null || true)"
     if [ -n "$offenders" ]; then
         bad "the stranded-update banner tells a user to run 'git pull', which fails here:"
@@ -479,7 +508,7 @@ else
     #    both `> ```bash` (the current shape) and a plain ```bash block. Keying on
     #    the quoted form alone would have made the check pass the moment someone
     #    unquoted the block — coupling the gate to formatting rather than content.
-    active_cmds="$(awk '/^## /{n++} n==1' "$APP/CHANGELOG.md" \
+    active_cmds="$(awk '/^## /{n++} n==1' "$GATE_SRC/CHANGELOG.md" \
         | awk '{sub(/^> ?/, "")} /^```/{f=!f; next} f')"
     #    ONE derivation of "the git commands a user would actually execute", used
     #    by every assertion below AND by the probe. Previously the prerequisite
