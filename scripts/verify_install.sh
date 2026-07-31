@@ -481,20 +481,29 @@ else
     #    unquoted the block — coupling the gate to formatting rather than content.
     active_cmds="$(awk '/^## /{n++} n==1' "$APP/CHANGELOG.md" \
         | awk '{sub(/^> ?/, "")} /^```/{f=!f; next} f')"
+    #    ONE derivation of "the git commands a user would actually execute", used
+    #    by every assertion below AND by the probe. Previously the prerequisite
+    #    checks grepped the raw block while the probe ran only `git` lines, so a
+    #    commented-out or echoed `git fetch` satisfied the prerequisite without
+    #    ever running — the check's subject and its measurement drifting apart
+    #    again, one level down. Leading whitespace is stripped here too, so an
+    #    indented command is treated the same by both.
+    exec_cmds="$(printf '%s\n' "$active_cmds" | sed 's/^[[:space:]]*//' | grep '^git ' || true)"
     if [ -z "$active_cmds" ]; then
         # Most releases install cleanly through the button and carry no manual
         # block. Absence is normal and must NOT fail the gate — an earlier draft
         # of this check did, which would have failed every ordinary release.
         echo "  NOTE: the newest CHANGELOG entry has no command block, so there are no
         manual install instructions to verify. Normal for a clean upgrade."
-    elif printf '%s' "$active_cmds" | grep -q 'git pull'; then
+    elif printf '%s' "$exec_cmds" | grep -q '^git pull'; then
         bad "the newest CHANGELOG entry tells the user to run 'git pull', which fails
         on a box that has taken an update (this checkout is proof)"
-    elif printf '%s' "$active_cmds" | grep -q '^[^#]*git ' \
-      && ! printf '%s' "$active_cmds" | grep -q 'git fetch --all --tags'; then
-        bad "the newest CHANGELOG entry does git work without 'git fetch --all --tags',
-        so a box with stale refs would not see the release it is being told to install"
-    elif printf '%s' "$active_cmds" | grep -q '^[^#]*git '; then
+    elif [ -n "$exec_cmds" ] \
+      && ! printf '%s' "$exec_cmds" | grep -q '^git fetch --all --tags'; then
+        bad "the newest CHANGELOG entry does no EXECUTABLE 'git fetch --all --tags'
+        (a commented-out or echoed one does not count), so a box with stale refs
+        would not see the release it is being told to install"
+    elif [ -n "$exec_cmds" ]; then
         # RUN the documented git sequence in a disposable clone and assert where it
         # LANDS. Every previous version of this check tested a proxy: that the text
         # contained a string, then that the first checkout target named the newest
@@ -522,11 +531,9 @@ else
             # is distinguishable from one that arrives at the newest.
             git -C "$probe/repo" checkout --quiet --detach "$base" 2>/dev/null
             while IFS= read -r line; do
-                case "$line" in
-                    git\ *) ( cd "$probe/repo" && eval "$line" ) >/dev/null 2>&1 || true ;;
-                esac
+                ( cd "$probe/repo" && eval "$line" ) >/dev/null 2>&1 || true
             done <<PROBE_EOF
-$active_cmds
+$exec_cmds
 PROBE_EOF
             landed="$(git -C "$probe/repo" describe --tags --always 2>/dev/null || true)"
             if [ "$landed" = "$want" ]; then
