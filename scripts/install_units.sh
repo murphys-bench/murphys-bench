@@ -17,9 +17,11 @@
 # unit file. Re-running just re-renders and reloads.
 #
 # Usage: scripts/install_units.sh [--with-disk-check]
-#   --with-disk-check   also install the disk-space check + its failure-alert
-#                       unit. Off by default: it needs send_alert configured
-#                       (Settings -> Notifications) or it just fails loudly.
+#   --with-disk-check   also install the disk-space check. Off by default: it
+#                       needs send_alert configured (Settings -> Notifications)
+#                       or it just fails loudly. The failure-alert unit itself is
+#                       now ALWAYS installed and wired to the scheduled jobs — a
+#                       backup that fails silently is the thing it exists to stop.
 set -euo pipefail
 
 APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -49,6 +51,7 @@ equivalents for your init system using deploy/ as the reference."
 # deliberately has no privilege to enable a systemd unit itself.
 UNITS=(
     murphys-bench.service              # gunicorn
+    'murphys-bench-alert@.service'     # turns a failed job into a System Alert ticket
     murphys-bench-update.path          # in-app Update button
     murphys-bench-update.service
     murphys-bench-backup-now.path      # in-app "Back up now" button
@@ -63,7 +66,6 @@ UNITS=(
 [ "$WITH_DISK_CHECK" = 1 ] && UNITS+=(
     murphys-bench-disk-check.timer
     murphys-bench-disk-check.service
-    'murphys-bench-alert@.service'
 )
 
 # Units systemd should actually start. Plain .service units named by a .path or
@@ -125,6 +127,26 @@ else
     log "logrotate not installed — MB's gunicorn/backup/update logs will NOT be rotated.
        Install it (apt install logrotate) and re-run this script."
 fi
+
+# Failure reporting for the scheduled jobs.
+#
+# Installing the alert unit is not enough: a job only reports its own failure if
+# it carries OnFailure=. That wiring was a copy-paste block in deploy/README.md,
+# so on every box but the author's, MB's self-monitoring — the feature whose
+# entire purpose is to make silent failures visible — was itself silently absent.
+# A nightly backup could fail forever and say nothing.
+#
+# %N expands to the failed unit's name, so one template serves every job.
+for u in murphys-bench-backup murphys-bench-fetch-email murphys-bench-sla-check; do
+    sudo mkdir -p "$UNIT_DIR/$u.service.d" || fail "could not create $UNIT_DIR/$u.service.d"
+    sudo tee "$UNIT_DIR/$u.service.d/onfailure.conf" >/dev/null <<'DROPIN' || fail "could not write the $u failure hook"
+# Written by scripts/install_units.sh. A failure here opens a System Alert
+# ticket (admin-visible only) rather than passing silently.
+[Unit]
+OnFailure=murphys-bench-alert@%N.service
+DROPIN
+done
+log "failure alerts wired for the backup, inbound-email and SLA jobs"
 
 sudo systemctl daemon-reload || fail "systemctl daemon-reload failed"
 

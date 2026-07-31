@@ -177,6 +177,45 @@ $(printf '%s' "$log_tail" | sed 's/^/        /')"
 esac
 rm -f "$APP/logs/backup-trigger"
 
+head_ "A failed job actually reports itself"
+# MB's self-monitoring turns a failed job into a System Alert ticket. Installing
+# the alert unit is not enough — a job only reports failure if it carries
+# OnFailure=, and that wiring lived in a copy-paste block in deploy/README.md, so
+# on every box but the author's the whole feature was silently absent. A nightly
+# backup could fail forever and say nothing, which is the exact opposite of what
+# it was built for.
+#
+# Two halves, both required: systemd must SHOW the hook on the real units, and
+# the alert must actually produce a ticket when it runs.
+missing_hook=()
+for u in murphys-bench-backup murphys-bench-fetch-email murphys-bench-sla-check; do
+    systemctl show -p OnFailure --value "$u.service" 2>/dev/null \
+        | grep -q 'murphys-bench-alert@' || missing_hook+=("$u")
+done
+if [ "${#missing_hook[@]}" -eq 0 ]; then
+    ok "scheduled jobs are wired to report their own failure (${#missing_hook[@]} missing)"
+else
+    bad "these jobs would fail SILENTLY — no OnFailure hook: ${missing_hook[*]}
+        Nothing would open a ticket when a backup fails."
+fi
+
+# Fire the alert path for real and confirm a ticket lands. Uses a clearly-marked
+# subject so it is obvious in the ticket list that this came from the verifier.
+alert_subject="Install verification: alert delivery test"
+"$APP/venv/bin/python" "$APP/manage.py" send_alert "$alert_subject" \
+    "Written by scripts/verify_install.sh to prove failure alerts reach the app. Safe to close." \
+    >/dev/null 2>&1 || true
+if "$APP/venv/bin/python" "$APP/manage.py" shell -c "
+from core.models import Ticket
+import sys
+sys.exit(0 if Ticket.objects.filter(subject='$alert_subject', source='system').exists() else 1)
+" >/dev/null 2>&1; then
+    ok "a fired alert reached the app and opened a System Alert ticket"
+else
+    bad "firing an alert produced NO ticket — a failed job would report nothing.
+        Check: $APP/venv/bin/python manage.py send_alert 'test' 'test'"
+fi
+
 head_ "In-app Update is wired"
 if systemctl is-active --quiet murphys-bench-update.path \
    && [ -x "$APP/scripts/run_update.sh" ] \
