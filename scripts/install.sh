@@ -386,45 +386,7 @@ either drop --skip-apt so this script installs it, or pass --skip-web to wire up
     log "installing systemd units (sudo)..."
     "$APP/scripts/install_units.sh" || fail "installing systemd units failed"
 
-    # The in-app Update button restarts the app, and a restart needs root.
-    #
-    # update.sh ends with `sudo systemctl restart murphys-bench`. Run from an SSH
-    # session that works: sudo prompts, a human types a password. Run from the
-    # in-app button it does NOT: the systemd one-shot behind that button has no
-    # terminal, so sudo fails with "a terminal is required to authenticate", the
-    # update rolls back, and the button can never succeed. That was true on every
-    # install except the three boxes where this rule had been added BY HAND, months
-    # earlier, which is why it survived to a tester. An installed feature that only
-    # works on the author's own machines is a broken feature.
-    #
-    # So the installer grants it, scoped to the narrowest thing that works: this
-    # user, this one service, these three verbs. Not general sudo.
-    log "granting passwordless restart of murphys-bench (sudo)..."
-    SYSTEMCTL="$(command -v systemctl)"
-    sudoers_tmp="$(mktemp)"
-    cat > "$sudoers_tmp" <<SUDOEOF
-# Murphy's Bench — written by scripts/install.sh. Lets the app user restart ONLY
-# its own service without a password, which is what the in-app Update button
-# needs (it runs with no terminal, so sudo cannot prompt). Nothing else is
-# granted: not shutdown, not other units, not root shells.
-${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} restart murphys-bench, ${SYSTEMCTL} status murphys-bench, ${SYSTEMCTL} is-active murphys-bench
-SUDOEOF
-    # NEVER install an unvalidated sudoers file — a syntax error in /etc/sudoers.d
-    # can break sudo for every user on the box, including the one holding the only
-    # way to fix it. visudo -c parses it exactly as sudo will.
-    if command -v visudo >/dev/null; then
-        visudo -cqf "$sudoers_tmp" \
-            || { rm -f "$sudoers_tmp"; fail "generated sudoers rule failed validation — nothing was installed"; }
-    else
-        rm -f "$sudoers_tmp"
-        fail "visudo not found, so the sudoers rule cannot be safely validated.
-  Install the 'sudo' package, or add this line yourself with 'sudo visudo -f /etc/sudoers.d/murphys-bench':
-    ${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} restart murphys-bench"
-    fi
-    sudo install -m 0440 -o root -g root "$sudoers_tmp" /etc/sudoers.d/murphys-bench \
-        || { rm -f "$sudoers_tmp"; fail "could not install /etc/sudoers.d/murphys-bench"; }
-    rm -f "$sudoers_tmp"
-
+    # [TEMPORARY REGRESSION: sudoers grant removed to prove the gate catches it]
     # Proof that the rule works comes later, at the restart step, which is
     # deliberately run the same no-terminal way the in-app button runs it.
 
