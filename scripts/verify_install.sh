@@ -491,10 +491,39 @@ else
         bad "the newest CHANGELOG entry tells the user to run 'git pull', which fails
         on a box that has taken an update (this checkout is proof)"
     elif printf '%s' "$active_cmds" | grep -q '^[^#]*git ' \
-      && { ! printf '%s' "$active_cmds" | grep -q 'git fetch --all --tags' \
-        || ! printf '%s' "$active_cmds" | grep -q 'git checkout --detach'; }; then
-        bad "the newest CHANGELOG entry's commands are not detached-safe — expected
-        'git fetch --all --tags' and a 'git checkout --detach' of the newest tag"
+      && ! printf '%s' "$active_cmds" | grep -q 'git fetch --all --tags'; then
+        bad "the newest CHANGELOG entry does git work without 'git fetch --all --tags',
+        so a box with stale refs would not see the release it is being told to install"
+    elif printf '%s' "$active_cmds" | grep -q '^[^#]*git '; then
+        # RESOLVE the checkout target rather than matching more strings. A bare
+        # `git checkout --detach` contains the expected prefix, exits 0, and leaves
+        # the box on the version it was already on — a superficially successful
+        # command that installs nothing. String matching cannot tell that apart
+        # from a correct instruction, which is the same subject-vs-measurement
+        # drift this whole section exists to catch.
+        #
+        # This evaluates an expression taken from CHANGELOG.md. That file is repo
+        # content, reviewed like code, and this gate only ever runs on a throwaway
+        # verification box — but it is an execution boundary and should stay a
+        # deliberate one. The eval is confined to producing a tag NAME; nothing
+        # else from the document is run.
+        target="$(printf '%s\n' "$active_cmds" | grep -m1 'git checkout --detach' \
+                  | sed 's/.*git checkout --detach//; s/^[[:space:]]*//; s/[[:space:]]*$//')"
+        if [ -z "$target" ]; then
+            bad "the newest CHANGELOG entry says 'git checkout --detach' with NO target.
+        That exits 0 and leaves the box exactly where it was, so a user would run
+        the whole sequence and still not have the release."
+        else
+            want="$(git -C "$APP" tag -l 'v*' --sort=-v:refname | head -1)"
+            got="$(cd "$APP" && eval "printf '%s' $target" 2>/dev/null || true)"
+            if [ -n "$got" ] && [ "$got" = "$want" ]; then
+                ok "the release note's checkout resolves to the newest release ($got)"
+            else
+                bad "the newest CHANGELOG entry's checkout target resolves to '${got:-<nothing>}',
+        not the newest release tag ('$want') — following it would install the wrong
+        version, or none"
+            fi
+        fi
     else
         ok "the newest release note's commands are detached-safe"
     fi
