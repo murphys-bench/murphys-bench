@@ -95,9 +95,16 @@ SYSTEMCTL=/usr/bin/systemctl
 sudo_can_control_service() {
     local out
     out="$(LC_ALL=C sudo -n "$SYSTEMCTL" is-active murphys-bench 2>/dev/null || true)"
+    # Deliberately NOT an enum of systemd states. Round 3 of this review pointed
+    # out that an enumeration is a false-FAIL waiting to happen: systemd can add a
+    # state word (it has before) and a box running it would be told, wrongly, that
+    # it has no privilege. What actually matters is only whether systemctl ran at
+    # all. sudo writes its refusal to stderr, so a refusal leaves stdout EMPTY;
+    # any single lowercase word means the command executed with privilege.
     case "$out" in
-        active|inactive|failed|activating|deactivating|reloading|unknown) return 0 ;;
-        *) return 1 ;;
+        '') return 1 ;;
+        *[!a-z-]*) return 1 ;;
+        *) return 0 ;;
     esac
 }
 
@@ -255,7 +262,8 @@ deploy_layer_warning
 "$VENV/python" manage.py render_backup_config >/dev/null 2>&1 || log "render_backup_config skipped (non-fatal)"
 
 # 7) Restart the app.
-sudo systemctl restart murphys-bench || rollback "service restart failed"
+# Absolute path, matching the sudoers grant — see the pre-flight note above.
+sudo "$SYSTEMCTL" restart murphys-bench || rollback "service restart failed"
 
 # 8) Health check — poll until the app finishes warming up after the restart, then
 #    confirm it answers. We probe nginx on :80 (works whether gunicorn is on a unix

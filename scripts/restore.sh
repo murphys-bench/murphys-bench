@@ -18,6 +18,16 @@
 # update.sh's rollback path).
 set -euo pipefail
 
+# ⚠ Use the SAME absolute path the sudoers rule names. A bare `sudo systemctl`
+# is resolved by sudo's own secure_path, which is not guaranteed to land on the
+# path the grant was written for — so the gate could prove the grant for one
+# binary while production depended on a lookup finding another. That is the exact
+# PATH-derived-privilege gap this change exists to close; leaving it in the real
+# commands while fixing it only in the checks would be closing half of it.
+SYSTEMCTL=/usr/bin/systemctl
+[ -x "$SYSTEMCTL" ] || SYSTEMCTL=/bin/systemctl
+
+
 APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$APP"
 
@@ -71,7 +81,7 @@ fi
 
 # 4) Stop the app so nothing writes during the swap.
 log "stopping murphys-bench..."
-sudo systemctl stop murphys-bench || fail "could not stop the service"
+sudo "$SYSTEMCTL" stop murphys-bench || fail "could not stop the service"
 
 # 5) Preserve the CURRENT state so this restore is itself reversible.
 TS="$(date +%Y%m%d-%H%M%S)"
@@ -103,7 +113,7 @@ fi
 
 # 7) Restart and health-check (same logic as update.sh: real Host header, 2xx/3xx = alive).
 log "starting murphys-bench..."
-sudo systemctl start murphys-bench || fail "service start failed (current state preserved in $SAFE)"
+sudo "$SYSTEMCTL" start murphys-bench || fail "service start failed (current state preserved in $SAFE)"
 
 PROBE_HOST="$(grep -E '^ALLOWED_HOSTS=' .env 2>/dev/null | cut -d= -f2- | cut -d, -f1)"
 PROBE_HOST="${PROBE_HOST:-127.0.0.1}"

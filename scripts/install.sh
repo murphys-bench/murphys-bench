@@ -542,7 +542,7 @@ $(static_probe_hint "$code" | sed "s|STATICDIR|$APP/staticfiles|")"
     # button cannot work. That is precisely how this shipped.
     log "restarting the app so it picks up the installed unit..."
     sudo -k
-    sudo -n systemctl restart murphys-bench || fail "could not restart murphys-bench WITHOUT a password prompt.
+    sudo -n "$SYSTEMCTL" restart murphys-bench || fail "could not restart murphys-bench WITHOUT a password prompt.
 
   The service may be fine; what failed is passwordless restart for $RUN_USER.
   The in-app Update button runs with no terminal, so it cannot answer a password
