@@ -58,9 +58,18 @@ jobs:
         # the whole point.
         run: |
           set -euo pipefail
-          sudo rm -f /etc/sudoers.d/runner /etc/sudoers.d/99-runner /etc/sudoers.d/90-cloud-init-users
-          sudo sed -i 's/^%sudo.*NOPASSWD.*$/%sudo ALL=(ALL:ALL) ALL/' /etc/sudoers
-          sudo sed -i 's/^%admin.*NOPASSWD.*$/%admin ALL=(ALL) ALL/' /etc/sudoers
+          # ONE root shell for the whole strip. Doing these as separate `sudo`
+          # calls does not work: the first one removes the very rule that
+          # authorises the second, so the step dies half-stripped.
+          sudo bash -euc '
+            rm -f /etc/sudoers.d/runner /etc/sudoers.d/99-runner /etc/sudoers.d/90-cloud-init-users
+            sed -i "s/^%sudo.*NOPASSWD.*$/%sudo ALL=(ALL:ALL) ALL/" /etc/sudoers
+            sed -i "s/^%admin.*NOPASSWD.*$/%admin ALL=(ALL) ALL/" /etc/sudoers
+            visudo -c >/dev/null
+          '
+          # Drop any cached credential from the sudo calls above, or the check
+          # below would pass on the cache rather than on the rules.
+          sudo -k
           echo "Remaining privileges for $(id -un):"
           sudo -n -l || true
           # Fail loudly if the strip did not take: a still-omnipotent user would
@@ -82,6 +91,6 @@ jobs:
           cd "$HOME/murphys-bench" || exit 0
           echo "=== update.log ==="; tail -60 logs/update.log 2>/dev/null || true
           echo "=== update-status.json ==="; cat logs/update-status.json 2>/dev/null || true
-          echo "=== sudoers drop-in ==="; sudo cat /etc/sudoers.d/murphys-bench 2>/dev/null || echo "(absent)"
+          echo "=== sudoers drop-in ==="; sudo -n cat /etc/sudoers.d/murphys-bench 2>/dev/null || echo "(absent or unreadable — blanket sudo is gone by this point, which is intended)"
           echo "=== service ==="; systemctl status murphys-bench --no-pager -l 2>/dev/null || true
           journalctl -u murphys-bench -n 40 --no-pager 2>/dev/null || true
