@@ -495,35 +495,49 @@ else
         bad "the newest CHANGELOG entry does git work without 'git fetch --all --tags',
         so a box with stale refs would not see the release it is being told to install"
     elif printf '%s' "$active_cmds" | grep -q '^[^#]*git '; then
-        # RESOLVE the checkout target rather than matching more strings. A bare
-        # `git checkout --detach` contains the expected prefix, exits 0, and leaves
-        # the box on the version it was already on — a superficially successful
-        # command that installs nothing. String matching cannot tell that apart
-        # from a correct instruction, which is the same subject-vs-measurement
-        # drift this whole section exists to catch.
+        # RUN the documented git sequence in a disposable clone and assert where it
+        # LANDS. Every previous version of this check tested a proxy: that the text
+        # contained a string, then that the first checkout target named the newest
+        # tag. Each proxy was defeated by something that satisfied it while leaving
+        # the user on the wrong version — a bare `--detach`, then a correct checkout
+        # followed by a second one to an older tag. The claim a user depends on is
+        # "following this whole block leaves the tree on the release before
+        # install.sh runs", so that is what is measured here instead of a proxy.
         #
-        # This evaluates an expression taken from CHANGELOG.md. That file is repo
-        # content, reviewed like code, and this gate only ever runs on a throwaway
-        # verification box — but it is an execution boundary and should stay a
-        # deliberate one. The eval is confined to producing a tag NAME; nothing
-        # else from the document is run.
-        target="$(printf '%s\n' "$active_cmds" | grep -m1 'git checkout --detach' \
-                  | sed 's/.*git checkout --detach//; s/^[[:space:]]*//; s/[[:space:]]*$//')"
-        if [ -z "$target" ]; then
-            bad "the newest CHANGELOG entry says 'git checkout --detach' with NO target.
-        That exits 0 and leaves the box exactly where it was, so a user would run
-        the whole sequence and still not have the release."
+        # EXECUTION BOUNDARY, deliberate and narrow: only lines beginning with
+        # `git` are run, only inside a throwaway clone in a temp dir, and
+        # scripts/install.sh is NOT run here (the rest of this gate performs a real
+        # install). Anything else in the block is ignored rather than executed.
+        want="$(git -C "$APP" tag -l 'v*' --sort=-v:refname | head -1)"
+        base="$(git -C "$APP" tag -l 'v*' --sort=v:refname | head -1)"
+        probe="$(mktemp -d)"
+        if [ -z "$want" ] || [ -z "$base" ] || [ "$want" = "$base" ]; then
+            echo "  NOTE: fewer than two release tags on this box, so 'the commands moved
+        the tree' cannot be told apart from 'they did nothing'. Skipping."
+        elif ! git clone --quiet "$APP" "$probe/repo" 2>/dev/null; then
+            bad "could not clone this install into a temp dir, so the release note's
+        commands could not be verified by running them"
         else
-            want="$(git -C "$APP" tag -l 'v*' --sort=-v:refname | head -1)"
-            got="$(cd "$APP" && eval "printf '%s' $target" 2>/dev/null || true)"
-            if [ -n "$got" ] && [ "$got" = "$want" ]; then
-                ok "the release note's checkout resolves to the newest release ($got)"
+            # Start the probe on the OLDEST release, so a block that does nothing
+            # is distinguishable from one that arrives at the newest.
+            git -C "$probe/repo" checkout --quiet --detach "$base" 2>/dev/null
+            while IFS= read -r line; do
+                case "$line" in
+                    git\ *) ( cd "$probe/repo" && eval "$line" ) >/dev/null 2>&1 || true ;;
+                esac
+            done <<PROBE_EOF
+$active_cmds
+PROBE_EOF
+            landed="$(git -C "$probe/repo" describe --tags --always 2>/dev/null || true)"
+            if [ "$landed" = "$want" ]; then
+                ok "running the release note's commands lands the tree on $want"
             else
-                bad "the newest CHANGELOG entry's checkout target resolves to '${got:-<nothing>}',
-        not the newest release tag ('$want') — following it would install the wrong
-        version, or none"
+                bad "running the release note's commands left the tree on '${landed:-<unknown>}',
+        not the newest release ('$want'). A user following them would install the
+        wrong version, or none."
             fi
         fi
+        rm -rf "$probe"
     else
         ok "the newest release note's commands are detached-safe"
     fi
