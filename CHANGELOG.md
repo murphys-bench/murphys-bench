@@ -8,6 +8,120 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+> ## ⚠ Do not use the in-app Update button to install this release
+>
+> If you are on v0.9.0 or earlier, your box does not have the service-control
+> rule this release adds — that is the bug being fixed. The Update button runs the
+> updater you already have, which does not know that, so it will start, fail at the
+> restart, fail again trying to roll back, and print MANUAL RECOVERY NEEDED. That
+> is exactly what a tester hit, and it is reproducible.
+>
+> Install this one from a terminal instead:
+>
+> ```bash
+> cd ~/murphys-bench      # or wherever it is installed
+> git fetch --all --tags
+> git checkout --detach "$(git tag -l 'v*' --sort=-v:refname | head -1)"
+> scripts/install.sh
+> ```
+>
+> (If you have ever used the Update button, your checkout is detached from any
+> branch — that is how the updater deploys a release — so `git pull` will refuse
+> with "You are not currently on a branch". The commands above work either way.)
+>
+> It asks for your password once, is safe to run over an existing install, and
+> keeps your data and settings. **After this, the Update button works normally and
+> you never need the manual steps again** — and if the rule is ever missing, the
+> updater now refuses up front and changes nothing rather than half-updating.
+
+### Fixed
+
+- **The in-app Update button could not work on any install but the author's, and
+  a failed update left the box in a bad state.** `update.sh` restarts the service
+  with `sudo systemctl restart`, and the automatic rollback's restore stops and
+  starts it too. Both need root. Run from an SSH session sudo prompts and a human
+  answers; run from the in-app button there is no terminal, so sudo fails with "a
+  terminal is required to authenticate". The rule that makes it work had been added
+  BY HAND, months ago, on the three boxes we test on, and the installer never wrote
+  it. So on a tester's machine the update failed at the restart, then the rollback
+  failed at the stop, leaving the OLD code running against a database the NEW
+  migrations had already been applied to.
+
+  `scripts/install.sh` now writes `/etc/sudoers.d/murphys-bench`, granting the app
+  user passwordless `restart`, `stop`, `start`, `status` and `is-active` of that
+  one service and nothing else. `stop` and `start` are there because rollback needs
+  them; a rule covering only the restart lets an update finish but leaves a failed
+  update unable to undo itself. The rule is validated with `visudo` before it is
+  installed. `update.sh` checks every one of those verbs up front and refuses to
+  start an update it could not finish or undo, changing nothing. **An existing
+  install gets the rule by re-running `scripts/install.sh` once, from a terminal.**
+
+  Two rounds were needed here, and the first was wrong in a way worth recording.
+  It granted only the restart, and an earlier draft of this changelog claimed it
+  granted stop and start when it did not. Worse, the check written to verify it
+  used `sudo -n -l`, which asks whether a command is *permitted* — true for a
+  command permitted with a password — so on any box where the app user has
+  ordinary sudo it reported success whether or not the rule existed at all. Both
+  were caught by an outside review, not by us. The check now runs a privileged
+  command and reads sudo's own refusal.
+
+- **A failed update kept reporting failure forever, even on a box that had since
+  been updated successfully by hand.** Nothing but the update runner ever wrote the
+  status file, so the red banner outlived the state it described. A result is now
+  suppressed once the installed version no longer matches it; the log stays
+  reachable.
+
+- **The Updates page went silent on exactly the box that most needed a warning.**
+  Suppressing a stale result (above) assumed a failed update always rolls back, so
+  the box returns to the version it started on. When the rollback fails too
+  ("MANUAL RECOVERY NEEDED"), the box is stranded on the new version it never
+  finished verifying — which looked like "moved on since", so the failure banner
+  was hidden, the log was collapsed and labelled as an earlier attempt, and the
+  page said "You're on the latest release." That is what the tester who reported
+  seeing no log was looking at. The update runner now records the updater's exit
+  code, which is the only thing that tells a failed-but-rolled-back update apart
+  from a failed rollback, and a stranded box gets an open log and an unmissable
+  banner naming the recovery command. **This precision applies to updates run on
+  this release or later** — a status file written by an older version carries no
+  exit code, and is still treated as stale rather than risking a false alarm on a
+  healthy box.
+
+- **`ALLOWED_HOSTS` picked one address at random on a box with more than one
+  network interface.** The installer took the first address `hostname -I` printed,
+  which on a machine running Tailscale or a second adapter is not the address the
+  shop browses to. That box then rejected its own LAN address, and the update's
+  health probe checked a host nobody uses. Every local address is now listed.
+
+- **Log rotation was never installed on any box but the author's.** The logrotate
+  config hardcoded one install path and username and was applied by a copy-paste
+  command in `deploy/README.md`, so elsewhere the gunicorn access log grew without
+  limit. It is now a template rendered by `scripts/install_units.sh`, like the
+  systemd units, and its syntax is verified at install time.
+
+### Changed
+
+- **The release gate now exercises rollback, not just a successful update.**
+  A green update says nothing about the path that runs when one fails, which is
+  the moment it matters and the moment a tester actually hit. The gate now drives
+  `restore.sh` — the real rollback — with no cached password and no controlling
+  terminal, and confirms the app comes back healthy afterwards.
+
+- **The release gate now runs an update instead of inspecting one.**
+  `scripts/verify_install.sh` used to check that the in-app Update button was
+  wired, with a comment saying that actually running an update "proves little" on
+  a verification box. It proved the one thing that mattered. The gate now drives
+  the real trigger file, waits for the update to finish, and fails the release if
+  it does not come back healthy. It also asserts passwordless restart directly.
+
+- **A new `clean-room` CI job installs Murphy's Bench on a bare machine and runs
+  that gate on every push.** It removes the runner's blanket passwordless sudo
+  after installing, keeping only what the installer itself granted, so the job runs
+  under the same privileges a real shop box has. Without that step it would pass on
+  a build that grants nothing — a green light for exactly the defect it exists to
+  catch.
+
 ## v0.9.0 — 2026-07-30
 
 > **Read the "Changed" section before you upgrade.** This batch alters three
@@ -183,6 +297,11 @@ bumps the minor; bug fixes bump the patch. See "Versioning" in the README.
   button.** On the version you are coming from, the updater is itself one of the broken
   scripts: outside `/opt` it dies looking for a directory that isn't there and leaves the
   request file behind, so the button spins forever. It works normally from this release on.
+
+  > Reading this later: `git pull` was right for the boxes this note was written for,
+  > because their updater died before it ever ran and their checkout was still on a
+  > branch. On a box that has since taken an update, the checkout is detached and
+  > `git pull` refuses — use the sequence in the newest release's note instead.
   `scripts/install.sh` is safe to re-run over an existing install and repairs both the
   missing services and the file permissions. Confirm with
   `systemctl list-units 'murphys-bench-*'`.

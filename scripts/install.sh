@@ -34,8 +34,9 @@
 #                      is usable immediately; pass this if you'd rather begin empty.
 #   --skip-tests      don't run the pytest smoke check at the end
 #   --noinput         non-interactive: skip the createsuperuser prompt
-#   ALLOWED_HOSTS=..  comma list for .env (default: localhost,127.0.0.1, plus this
-#                      box's LAN IP — auto-detected — unless you override it)
+#   ALLOWED_HOSTS=..  comma list for .env (default: localhost,127.0.0.1, plus every
+#                      address this box answers on — auto-detected — unless you
+#                      override it)
 #
 # Safe to re-run: an existing .env is never overwritten; deps/migrate/build/web
 # steps are idempotent (re-running just confirms/reloads).
@@ -158,7 +159,15 @@ PYBIN="$(command -v python3 || true)"
 PYVER="$("$PYBIN" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
 "$PYBIN" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,10) else 1)' \
     || fail "Python >= 3.10 required (found $PYVER)"
-LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+# EVERY local address, not just the first one. `hostname -I` lists all of them in
+# no guaranteed order, and taking [1] picked whichever interface the kernel
+# happened to list first — on a box running Tailscale or a second VirtualBox
+# adapter that is the 100.x/10.x address, not the LAN address the shop actually
+# browses to. The box then rejected its own LAN IP with a 400, and update.sh
+# health-probed a host nobody uses. Listing them all costs nothing: ALLOWED_HOSTS
+# is a name filter, not an access control (the network decides who can reach the
+# box), so naming every address the box answers on is correct, not permissive.
+LAN_IPS="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | grep -v '^$' | paste -sd, -)"
 log "python $PYVER OK"
 
 # 1) System packages.
@@ -224,7 +233,7 @@ else
     # Resolve defaults into plain vars first — apostrophes/spaces in a ${VAR:-default}
     # inside the heredoc break bash's ${...} parsing ("bad substitution").
     DEFAULT_HOSTS="localhost,127.0.0.1"
-    [ -n "$LAN_IP" ] && DEFAULT_HOSTS="${DEFAULT_HOSTS},${LAN_IP}"
+    [ -n "$LAN_IPS" ] && DEFAULT_HOSTS="${DEFAULT_HOSTS},${LAN_IPS}"
     ENV_HOSTS="${ALLOWED_HOSTS:-$DEFAULT_HOSTS}"
     ENV_STAMP="$(date '+%F %T')"
     cat > .env <<ENVEOF
@@ -377,6 +386,88 @@ either drop --skip-apt so this script installs it, or pass --skip-web to wire up
     log "installing systemd units (sudo)..."
     "$APP/scripts/install_units.sh" || fail "installing systemd units failed"
 
+    # The in-app Update button restarts the app, and a restart needs root.
+    #
+    # update.sh ends with `sudo systemctl restart murphys-bench`. Run from an SSH
+    # session that works: sudo prompts, a human types a password. Run from the
+    # in-app button it does NOT: the systemd one-shot behind that button has no
+    # terminal, so sudo fails with "a terminal is required to authenticate", the
+    # update rolls back, and the button can never succeed. That was true on every
+    # install except the three boxes where this rule had been added BY HAND, months
+    # earlier, which is why it survived to a tester. An installed feature that only
+    # works on the author's own machines is a broken feature.
+    #
+    # It is not only the restart. When an update fails, rollback runs restore.sh,
+    # which STOPS and STARTS the service. Granting restart alone leaves the recovery
+    # path just as broken as the thing it recovers from — the first version of this
+    # fix did exactly that, and the check written alongside it was blind to the gap
+    # because both came from the same wrong picture of what rollback does.
+    #
+    # So the installer grants the narrowest set that lets an update both finish AND
+    # undo itself: this user, this one service, these five verbs. Not general sudo.
+    log "granting passwordless restart of murphys-bench (sudo)..."
+    # ⚠ The path in a sudoers rule IS the grant. Taking it from `command -v` means
+    # whatever `systemctl` happens to be first on PATH gets written into a NOPASSWD
+    # line — so a writable directory earlier in the installer's PATH would hand root
+    # execution of an attacker-controlled binary to this user, permanently. Resolve
+    # to a known system path and refuse anything that isn't root-owned and
+    # non-writable by anyone else.
+    SYSTEMCTL=""
+    for cand in /usr/bin/systemctl /bin/systemctl; do
+        [ -x "$cand" ] || continue
+        # Follow symlinks: /bin is usually a link to /usr/bin, and the grant must
+        # name what actually executes.
+        real="$(readlink -f "$cand" 2>/dev/null || echo "$cand")"
+        owner="$(stat -c '%U' "$real" 2>/dev/null || echo '?')"
+        mode="$(stat -c '%a' "$real" 2>/dev/null || echo '777')"
+        if [ "$owner" != "root" ]; then
+            fail "$real is owned by '$owner', not root. Refusing to write a sudoers rule
+  naming a binary someone other than root can replace."
+        fi
+        # Reject group- or world-writable (any of the last two digits allowing write).
+        case "$mode" in
+            *[2367]?|*?[2367]) fail "$real is group- or world-writable (mode $mode).
+  Refusing to write a sudoers rule naming it." ;;
+        esac
+        SYSTEMCTL="$real"
+        break
+    done
+    [ -n "$SYSTEMCTL" ] || fail "no systemctl found at /usr/bin/systemctl or /bin/systemctl.
+  This installer targets systemd on the Debian/Ubuntu family; pass --skip-web to
+  wire up your own process manager instead."
+    sudoers_tmp="$(mktemp)"
+    cat > "$sudoers_tmp" <<SUDOEOF
+# Murphy's Bench — written by scripts/install.sh. Lets the app user control ONLY
+# its own service without a password, which is what the in-app Update button
+# needs (it runs with no terminal, so sudo cannot prompt).
+#
+# stop and start are here because they are NOT optional: when an update fails,
+# rollback runs restore.sh, which stops the service, restores the database, and
+# starts it again. Granting restart alone leaves the recovery path broken in
+# exactly the situation it exists for. Do not trim this list to "just restart".
+#
+# Nothing else is granted: not shutdown, not other units, not root shells.
+${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} restart murphys-bench, ${SYSTEMCTL} stop murphys-bench, ${SYSTEMCTL} start murphys-bench, ${SYSTEMCTL} status murphys-bench, ${SYSTEMCTL} is-active murphys-bench
+SUDOEOF
+    # NEVER install an unvalidated sudoers file — a syntax error in /etc/sudoers.d
+    # can break sudo for every user on the box, including the one holding the only
+    # way to fix it. visudo -c parses it exactly as sudo will.
+    if command -v visudo >/dev/null; then
+        visudo -cqf "$sudoers_tmp" \
+            || { rm -f "$sudoers_tmp"; fail "generated sudoers rule failed validation — nothing was installed"; }
+    else
+        rm -f "$sudoers_tmp"
+        fail "visudo not found, so the sudoers rule cannot be safely validated.
+  Install the 'sudo' package, or add this line yourself with 'sudo visudo -f /etc/sudoers.d/murphys-bench':
+    ${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} restart murphys-bench, ${SYSTEMCTL} stop murphys-bench, ${SYSTEMCTL} start murphys-bench"
+    fi
+    sudo install -m 0440 -o root -g root "$sudoers_tmp" /etc/sudoers.d/murphys-bench \
+        || { rm -f "$sudoers_tmp"; fail "could not install /etc/sudoers.d/murphys-bench"; }
+    rm -f "$sudoers_tmp"
+
+    # Proof that the rule works comes later, at the restart step, which is
+    # deliberately run the same no-terminal way the in-app button runs it.
+
     log "writing nginx site (sudo)..."
     sudo tee /etc/nginx/sites-available/murphys-bench >/dev/null <<NGINXEOF
 server {
@@ -440,8 +531,27 @@ $(static_probe_hint "$code" | sed "s|STATICDIR|$APP/staticfiles|")"
     # request. Restart first: `systemctl enable --now` does NOT restart an
     # already-running service, so a re-run that changed the unit would otherwise
     # leave the old process bound to the old socket while nginx talks to the new one.
+    # This restart is deliberately run the way the in-app Update button runs it,
+    # not the way a human at a terminal runs it:
+    #   sudo -k  drops any password this script's earlier sudo calls cached, so
+    #            what follows is authorised by the sudoers rule ALONE.
+    #   sudo -n  never prompts — it fails instead, exactly as it does inside the
+    #            systemd one-shot, which has no terminal to prompt on.
+    # Without the -k, the cached credential would let this succeed on a box where
+    # the rule is missing, and the installer would bless an install whose Update
+    # button cannot work. That is precisely how this shipped.
     log "restarting the app so it picks up the installed unit..."
-    sudo systemctl restart murphys-bench || fail "could not restart murphys-bench — see: journalctl -u murphys-bench"
+    sudo -k
+    sudo -n "$SYSTEMCTL" restart murphys-bench || fail "could not restart murphys-bench WITHOUT a password prompt.
+
+  The service may be fine; what failed is passwordless restart for $RUN_USER.
+  The in-app Update button runs with no terminal, so it cannot answer a password
+  prompt: it would fail at the restart and auto-roll-back, every time.
+
+  Expected /etc/sudoers.d/murphys-bench to grant it. Check:
+    sudo -l | grep murphys-bench
+    sudo cat /etc/sudoers.d/murphys-bench
+    journalctl -u murphys-bench -n 40"
     app_host="$(grep '^ALLOWED_HOSTS=' .env 2>/dev/null | cut -d= -f2- | cut -d, -f1)"
     app_code="$(http_probe "http://127.0.0.1/" '2*|3*' "${app_host:-localhost}")"
     case "$app_code" in
@@ -499,7 +609,14 @@ fi
 if [ "$SKIP_WEB" = 0 ]; then
     cat <<DONE2
 Murphy's Bench is running at:
-  http://${LAN_IP:-<this-box-s-LAN-IP>}/
+$(if [ -n "$LAN_IPS" ]; then
+      printf '%s\n' "$LAN_IPS" | tr ',' '\n' | sed 's|^|  http://|; s|$|/|'
+      printf '%s\n' "
+(If this box has more than one network interface, the address your shop reaches
+it on is the one on your own network.)"
+  else
+      echo "  http://<this-box-s-LAN-IP>/"
+  fi)
 
 Log in as the superuser you just created. This is plain HTTP on your local
 network — the same way MB's own production instance runs. Nothing further is

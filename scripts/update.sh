@@ -59,6 +59,90 @@ rollback() {
 [ -f manage.py ] || fail "no manage.py in $APP — wrong directory?"
 command -v git >/dev/null || fail "git not installed"
 
+# 0) PRE-FLIGHT: never begin an update we cannot finish OR undo.
+#
+# Both the finish (step 7, restart) and the undo (rollback → restore.sh, which
+# stops and starts the service) need root. If that isn't available without a
+# password, the failure does not land at step 7 where it looks survivable — it
+# lands twice: the restart fails, auto-rollback starts, and then restore.sh
+# cannot stop the service either. The box is left on the OLD code with the NEW
+# migrations already applied to its database, printing MANUAL RECOVERY NEEDED at
+# someone who did nothing but click a button. A tester hit exactly this.
+#
+# Checked here, before the snapshot and before a single change, where the only
+# cost of saying no is an update that didn't start. -n means "fail rather than
+# prompt", which is the condition the systemd one-shot behind the in-app Update
+# button always runs under.
+# One exception, at the bottom: a human running this by hand from a terminal CAN
+# supply a password. We take it once, up front, so the rollback path never stalls
+# on a prompt halfway through a restore.
+#
+# The path is pinned, not taken from PATH: it is compared against the sudoers grant
+# scripts/install.sh wrote, and a PATH-derived path would not match it.
+SYSTEMCTL=/usr/bin/systemctl
+[ -x "$SYSTEMCTL" ] || SYSTEMCTL=/bin/systemctl
+
+# ⚠ DO NOT decide this by matching sudo's refusal text. Round 1 of this fix used
+# `sudo -n -l`, which is a false pass (it answers "permitted", true even when a
+# password is required). Round 2 read sudo's stderr prose, which an outside review
+# correctly called fragile: the wording varies by sudo version and is localized, so
+# a non-English box would silently pass.
+#
+# This asks a question with a machine-checkable answer instead. sudo writes its
+# refusal to STDERR, so if it refuses, stdout is empty. `systemctl is-active`
+# prints a fixed, unlocalized enum. Seeing one of those words means the command
+# actually ran with privilege; anything else means it did not. No prose is parsed.
+sudo_can_control_service() {
+    local out
+    out="$(LC_ALL=C sudo -n "$SYSTEMCTL" is-active murphys-bench 2>/dev/null || true)"
+    # Deliberately NOT an enum of systemd states. Round 3 of this review pointed
+    # out that an enumeration is a false-FAIL waiting to happen: systemd can add a
+    # state word (it has before) and a box running it would be told, wrongly, that
+    # it has no privilege. What actually matters is only whether systemctl ran at
+    # all. sudo writes its refusal to stderr, so a refusal leaves stdout EMPTY;
+    # any single lowercase word means the command executed with privilege.
+    case "$out" in
+        '') return 1 ;;
+        *[!a-z-]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+# Each verb the ROLLBACK needs, not just the one the update needs.
+#
+# Grepping a flattened `sudo -l` could match a verb from one rule against the
+# NOPASSWD of another, so this matches within a single line and against the full
+# resolved binary path. It is a secondary check: the authority for stop/start is
+# the rollback drill, which actually runs them.
+missing_verbs=""
+policy="$(LC_ALL=C sudo -n -l 2>/dev/null || true)"
+for verb in restart stop start; do
+    printf '%s\n' "$policy" | grep -F 'NOPASSWD' | grep -qF "$SYSTEMCTL $verb murphys-bench" \
+        || missing_verbs="$missing_verbs $verb"
+done
+
+if ! sudo_can_control_service || [ -n "$missing_verbs" ]; then
+    if [ -t 0 ]; then
+        log "this box lacks the passwordless service-control rule (missing:${missing_verbs:- none});
+       asking for your password once so the update (and any rollback) can control
+       the service without stalling.
+       Run 'scripts/install.sh' to install the rule and stop being asked."
+        sudo -v || fail "could not authenticate — nothing has been changed"
+    else
+        fail "this box cannot control the Murphy's Bench service without a password,
+  so an update could neither finish nor safely roll back. NOTHING HAS BEEN CHANGED.
+  Missing verbs:${missing_verbs:- (the rule appears absent entirely)}
+
+  Fix it once, then update again:
+    cd $APP && scripts/install.sh
+
+  (That writes /etc/sudoers.d/murphys-bench, granting this user passwordless
+  restart/stop/start of this one service and nothing else. It will ask for your password
+  once, which is why it must be run from a terminal rather than the in-app
+  Update button.)"
+    fi
+fi
+
 # Parse args: one optional ref + an optional --no-rollback flag, any order.
 REF=""
 NO_ROLLBACK=0
@@ -178,7 +262,8 @@ deploy_layer_warning
 "$VENV/python" manage.py render_backup_config >/dev/null 2>&1 || log "render_backup_config skipped (non-fatal)"
 
 # 7) Restart the app.
-sudo systemctl restart murphys-bench || rollback "service restart failed"
+# Absolute path, matching the sudoers grant — see the pre-flight note above.
+sudo "$SYSTEMCTL" restart murphys-bench || rollback "service restart failed"
 
 # 8) Health check — poll until the app finishes warming up after the restart, then
 #    confirm it answers. We probe nginx on :80 (works whether gunicorn is on a unix

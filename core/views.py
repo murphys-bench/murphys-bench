@@ -236,6 +236,13 @@ def _scope_tickets_for(qs, user):
     """
     if _is_admin(user):
         return qs
+    # MB's own operational alerts (failed backup, disk pressure, unhandled 500)
+    # are written as tickets so they land somewhere already watched. They are NOT
+    # shop work. They arrive unassigned, which put them in the unclaimed pool
+    # below, so every technician saw "Backup failed: rclone auth error" in their
+    # queue and could claim, answer or close it — none of which a technician can
+    # act on, and closing one hides a real outage. Owner-facing only.
+    qs = qs.exclude(source='system')
     return qs.filter(
         Q(assigned_to=user)
         | Q(assigned_to__isnull=True)
@@ -407,7 +414,10 @@ class DashboardView(LoginRequiredMixin, View):
 
         # Backlog aging on unresolved tickets. Excludes 'converted' (those have a
         # live work order), matching the Reports backlog metric.
-        backlog_qs = Ticket.objects.exclude(status__in=Ticket.CLOSED_STATUSES).only('created_at')
+        backlog_qs = (
+            Ticket.objects.exclude(status__in=Ticket.CLOSED_STATUSES)
+            .exclude(source='system').only('created_at')
+        )
         buckets = {'lt1': 0, 'b1to3': 0, 'b3to7': 0, 'gt7': 0}
         for t in backlog_qs:
             age_days = (now - t.created_at).total_seconds() / 86400
@@ -4546,7 +4556,11 @@ class ReportsView(LoginRequiredMixin, View):
         # decided — it has been answered, or its deadline has already passed. A still-in-window,
         # unanswered ticket is set aside (its clock is still running; it hasn't failed yet).
         sla_now = timezone.now()
-        tickets_with_sla = tickets_in_range.filter(due_at__isnull=False)
+        # source='system' excluded: MB's own alert tickets are not shop work and
+        # carry no response SLA. New ones get no clock at all, but a box that ran
+        # an earlier release already has alerts with a due_at stamped, and those
+        # would sit in the denominator as permanent misses.
+        tickets_with_sla = tickets_in_range.exclude(source='system').filter(due_at__isnull=False)
         total_sla = tickets_with_sla.count()
         responded_on_time = tickets_with_sla.filter(
             first_responded_at__isnull=False,
@@ -4587,7 +4601,12 @@ class ReportsView(LoginRequiredMixin, View):
         # 6d. Backlog health — a live, forward-looking snapshot (NOT date-range
         # filtered; "how much is on the plate right now", not historical).
         now = timezone.now()
-        open_tickets_qs = Ticket.objects.exclude(status__in=Ticket.CLOSED_STATUSES).only('created_at')
+        # Excludes system alerts — backlog answers "what work is on the plate",
+        # and a failed backup is not work waiting on a technician.
+        open_tickets_qs = (
+            Ticket.objects.exclude(status__in=Ticket.CLOSED_STATUSES)
+            .exclude(source='system').only('created_at')
+        )
         backlog_open_count = 0
         backlog_buckets = {'lt_1d': 0, '1_3d': 0, '3_7d': 0, '7d_plus': 0}
         for t in open_tickets_qs:

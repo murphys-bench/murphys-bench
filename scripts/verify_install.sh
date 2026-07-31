@@ -33,6 +33,23 @@ APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$APP"
 
 PASS=0; FAIL=0
+
+# The in-app Update check below deploys the latest RELEASE TAG, which moves this
+# checkout off whatever is being verified. Anything reading a file AFTER that
+# point sees the previous release, not the code under test — and a check that
+# reads the wrong tree reports a vacuous pass rather than a failure. That is
+# exactly what happened on the first real run of the recovery-instruction
+# section: three of its checks passed against a tag that does not contain the
+# things they check.
+#
+# So the files whose CONTENT is under test are snapshotted here, at the commit
+# the gate was started on, and the checks read the snapshot.
+GATE_HEAD="$(git -C "$APP" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+GATE_SRC="$(mktemp -d)"
+trap 'rm -rf "$GATE_SRC"' EXIT
+cp "$APP/CHANGELOG.md" "$GATE_SRC/CHANGELOG.md" 2>/dev/null || true
+mkdir -p "$GATE_SRC/tpl"
+cp "$APP/core/templates/core/partials/update_status.html" "$GATE_SRC/tpl/" 2>/dev/null || true
 ok()   { printf '  \033[32mPASS\033[0m  %s\n' "$1"; PASS=$((PASS+1)); }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; FAIL=$((FAIL+1)); }
 head_() { printf '\n== %s\n' "$1"; }
@@ -177,15 +194,397 @@ $(printf '%s' "$log_tail" | sed 's/^/        /')"
 esac
 rm -f "$APP/logs/backup-trigger"
 
-head_ "In-app Update is wired (not executed)"
-# Deliberately not run — an update on a verification box proves little and
-# rewrites the checkout under us. Assert the machinery exists and is armed.
+head_ "A failed job actually reports itself"
+# MB's self-monitoring turns a failed job into a System Alert ticket. Installing
+# the alert unit is not enough — a job only reports failure if it carries
+# OnFailure=, and that wiring lived in a copy-paste block in deploy/README.md, so
+# on every box but the author's the whole feature was silently absent. A nightly
+# backup could fail forever and say nothing, which is the exact opposite of what
+# it was built for.
+#
+# Two halves, both required: systemd must SHOW the hook on the real units, and
+# the alert must actually produce a ticket when it runs.
+missing_hook=()
+for u in murphys-bench-backup murphys-bench-fetch-email murphys-bench-sla-check; do
+    systemctl show -p OnFailure --value "$u.service" 2>/dev/null \
+        | grep -q 'murphys-bench-alert@' || missing_hook+=("$u")
+done
+if [ "${#missing_hook[@]}" -eq 0 ]; then
+    ok "scheduled jobs are wired to report their own failure (${#missing_hook[@]} missing)"
+else
+    bad "these jobs would fail SILENTLY — no OnFailure hook: ${missing_hook[*]}
+        Nothing would open a ticket when a backup fails."
+fi
+
+# Fire the alert path for real and confirm a ticket lands. Uses a clearly-marked
+# subject so it is obvious in the ticket list that this came from the verifier.
+alert_subject="Install verification: alert delivery test"
+"$APP/venv/bin/python" "$APP/manage.py" send_alert "$alert_subject" \
+    "Written by scripts/verify_install.sh to prove failure alerts reach the app. Safe to close." \
+    >/dev/null 2>&1 || true
+if "$APP/venv/bin/python" "$APP/manage.py" shell -c "
+from core.models import Ticket
+import sys
+sys.exit(0 if Ticket.objects.filter(subject='$alert_subject', source='system').exists() else 1)
+" >/dev/null 2>&1; then
+    ok "a fired alert reached the app and opened a System Alert ticket"
+else
+    bad "firing an alert produced NO ticket — a failed job would report nothing.
+        Check: $APP/venv/bin/python manage.py send_alert 'test' 'test'"
+fi
+
+head_ "In-app Update is wired"
 if systemctl is-active --quiet murphys-bench-update.path \
    && [ -x "$APP/scripts/run_update.sh" ] \
    && systemctl cat murphys-bench-update.service 2>/dev/null | grep -q "ExecStart=$APP/scripts/run_update.sh"; then
     ok "update path unit armed and pointing at this install"
 else
     bad "in-app Update would spin forever — path unit or run_update.sh not wired"
+fi
+
+head_ "The app can restart itself without a terminal"
+# The single check that would have caught the July 30 tester failure.
+#
+# update.sh ends in `sudo systemctl restart murphys-bench`, and rollback's
+# restore.sh stops and starts the service too. Both run inside a systemd one-shot
+# with NO TERMINAL when the update comes from the in-app button, so sudo cannot
+# prompt. On every box where that rule had not been added by hand, the update
+# failed at the restart AND the rollback failed at the stop, leaving old code on a
+# migrated database.
+#
+# `sudo -k` first: this script may run right after install.sh, whose interactive
+# sudo left a cached credential that would make this pass on a box where the rule
+# is missing. That cache is the difference between testing the rule and testing
+# nothing.
+sudo -k
+SYSTEMCTL=/usr/bin/systemctl
+[ -x "$SYSTEMCTL" ] || SYSTEMCTL=/bin/systemctl
+
+# ⚠ Two earlier versions of this check were unsound. `sudo -n -l` is a false pass
+# (it answers "permitted", true even when a password is required). Matching sudo's
+# stderr prose is locale- and version-dependent. This runs the granted command and
+# looks for ITS output: sudo's refusal goes to stderr, so a refusal leaves stdout
+# empty, and `systemctl is-active` prints a fixed unlocalized enum.
+sudo_can_control_service() {
+    local out
+    out="$(LC_ALL=C sudo -n "$SYSTEMCTL" is-active murphys-bench 2>/dev/null || true)"
+    # Deliberately NOT an enum of systemd states. Round 3 of this review pointed
+    # out that an enumeration is a false-FAIL waiting to happen: systemd can add a
+    # state word (it has before) and a box running it would be told, wrongly, that
+    # it has no privilege. What actually matters is only whether systemctl ran at
+    # all. sudo writes its refusal to stderr, so a refusal leaves stdout EMPTY;
+    # any single lowercase word means the command executed with privilege.
+    case "$out" in
+        '') return 1 ;;
+        *[!a-z-]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+if sudo_can_control_service; then
+    ok "the app user can control its own service without a password"
+else
+    bad "NO passwordless service control for $(id -un). The in-app Update button
+        cannot finish (restart fails) and cannot undo itself (rollback's restore
+        cannot stop the service). Expected /etc/sudoers.d/murphys-bench from
+        scripts/install.sh.  Check: sudo -l | grep murphys-bench"
+fi
+
+# Each verb rollback needs, not just the one the update needs. Granting restart
+# alone lets an update succeed while leaving restore.sh unable to run — which is
+# precisely the state the first version of this fix shipped in.
+missing_verbs=""
+policy="$(LC_ALL=C sudo -n -l 2>/dev/null || true)"
+for verb in restart stop start; do
+    # Matched within a SINGLE line and against the full resolved path, so a verb
+    # from one rule cannot be paired with the NOPASSWD of another.
+    printf '%s\n' "$policy" | grep -F 'NOPASSWD' | grep -qF "$SYSTEMCTL $verb murphys-bench" \
+        || missing_verbs="$missing_verbs $verb"
+done
+if [ -z "$missing_verbs" ]; then
+    ok "every verb the update AND its rollback need is granted (restart, stop, start)"
+else
+    bad "the sudoers rule is MISSING:${missing_verbs}
+        An update could still finish, but a FAILED update could not roll back —
+        leaving old code against an already-migrated database."
+fi
+
+head_ "Rollback can actually run with no terminal"
+# The update path and the ROLLBACK path are different code with different
+# privileges, and only one of them was ever tested. A green update proves nothing
+# about what happens when one fails — which is the moment a user actually needs it
+# to work, and the moment a tester hit.
+#
+# restore.sh IS the rollback: it stops the service, restores the database, starts
+# it again and health-checks. Drive it exactly as the in-app one-shot would:
+#   sudo -k   no cached password to lean on
+#   setsid    no controlling terminal, so sudo cannot prompt
+#   </dev/null nothing to read a password from
+# If this passes, a failed update can undo itself on this box.
+if [ "${SKIP_ROLLBACK_DRILL:-0}" = 1 ]; then
+    echo "  SKIP  rollback drill disabled by SKIP_ROLLBACK_DRILL=1"
+else
+    drill_tarball="$APP/backups/verify-rollback-drill.tar.gz"
+    rm -f "$drill_tarball"
+    if "$APP/scripts/mb_backup.sh" --staging-only "$drill_tarball" >/dev/null 2>&1 \
+       && [ -f "$drill_tarball" ]; then
+        # A drill that only proves restore.sh EXITS 0 proves the privileges, not
+        # the rollback. Real rollback runs after a failed migration has already
+        # changed the database, and the thing that matters is that those changes
+        # are gone afterwards. So: write a sentinel row AFTER the snapshot, and
+        # require the restore to have removed it.
+        sentinel="ROLLBACK-DRILL-SENTINEL-$$"
+        "$APP/venv/bin/python" "$APP/manage.py" shell -c "
+from core.models import Client
+Client.objects.create(name='$sentinel')
+" >/dev/null 2>&1 || bad "could not write the rollback sentinel — drill is inconclusive"
+        sudo -k
+        if setsid env RESTORE_YES=1 "$APP/scripts/restore.sh" "$drill_tarball" \
+             </dev/null >"$APP/logs/rollback-drill.log" 2>&1; then
+            ok "rollback (restore.sh) completed with no terminal and no cached password"
+        else
+            bad "ROLLBACK CANNOT RUN on this box. A failed update would leave old code
+        against an already-migrated database. Last lines:
+$(tail -12 "$APP/logs/rollback-drill.log" 2>/dev/null | sed 's/^/        /')"
+        fi
+        # The sentinel was created after the snapshot, so a real rollback must have
+        # erased it. If it survived, restore.sh ran and reported success without
+        # actually reverting the database — the failure mode that matters most.
+        if "$APP/venv/bin/python" "$APP/manage.py" shell -c "
+from core.models import Client
+import sys
+sys.exit(1 if Client.objects.filter(name='$sentinel').exists() else 0)
+" >/dev/null 2>&1; then
+            ok "rollback reverted a post-snapshot database change (sentinel gone)"
+        else
+            bad "ROLLBACK DID NOT REVERT THE DATABASE. A row written after the snapshot
+        survived the restore, so a failed migration's changes would survive too.
+        Leftover marker: $sentinel"
+            # Don't leave the marker behind on a box someone keeps using.
+            "$APP/venv/bin/python" "$APP/manage.py" shell -c "
+from core.models import Client
+Client.objects.filter(name='$sentinel').delete()
+" >/dev/null 2>&1 || true
+        fi
+
+        # restore.sh restarts the service itself; confirm the app really came back.
+        rb_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                  -H "Host: $(grep '^ALLOWED_HOSTS=' "$APP/.env" | cut -d= -f2- | cut -d, -f1)" \
+                  http://127.0.0.1/ || echo 000)"
+        case "$rb_code" in
+            2*|3*) ok "app healthy after the rollback drill (HTTP $rb_code)" ;;
+            *)     bad "app returns HTTP $rb_code after the rollback drill" ;;
+        esac
+    else
+        bad "could not build a drill snapshot, so rollback is UNVERIFIED on this box"
+    fi
+    rm -f "$drill_tarball"
+fi
+
+head_ "In-app Update actually runs, end to end"
+# EXECUTED, not inspected. The previous version of this gate checked only that
+# the wiring existed and said an update "proves little" here. It proved the one
+# thing that mattered and we didn't run it: a box can have every unit armed and
+# still be unable to complete an update. Assert the outcome, not the plumbing.
+#
+# Re-deploying the tag the box is already on is the right test: it runs the whole
+# script — snapshot, pip, migrate, CSS, collectstatic, RESTART, health check —
+# and lands where it started, so the checkout is not left somewhere unexpected.
+if [ "${SKIP_UPDATE_RUN:-0}" = 1 ]; then
+    echo "  SKIP  update run disabled by SKIP_UPDATE_RUN=1"
+else
+    rm -f "$APP/logs/update-status.json"
+    before_head="$(git -C "$APP" rev-parse HEAD)"
+    touch "$APP/logs/update-trigger"
+    ustate=""
+    for _ in $(seq 1 150); do
+        ustate="$("$APP/venv/bin/python" -c "import json;print(json.load(open('$APP/logs/update-status.json')).get('state',''))" 2>/dev/null || true)"
+        case "$ustate" in succeeded|failed) break ;; esac
+        sleep 2
+    done
+    utail="$(tail -25 "$APP/logs/update.log" 2>/dev/null || true)"
+    case "${ustate:-}" in
+        succeeded)
+            ok "in-app Update ran to completion and the app came back healthy"
+            # A success that reported success is not enough: confirm the app is
+            # actually answering after its own restart.
+            ucode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                     -H "Host: $(grep '^ALLOWED_HOSTS=' "$APP/.env" | cut -d= -f2- | cut -d, -f1)" \
+                     http://127.0.0.1/ || echo 000)"
+            case "$ucode" in
+                2*|3*) ok "app answering after the update's own restart (HTTP $ucode)" ;;
+                *)     bad "update reported success but the app returns HTTP $ucode" ;;
+            esac ;;
+        failed)
+            bad "in-app Update RAN AND FAILED. This is what a tester gets when they
+        click the button. Last lines of $APP/logs/update.log:
+$(printf '%s' "$utail" | sed 's/^/        /')" ;;
+        *)
+            bad "in-app Update never reached a terminal state after 300s (stuck at
+        '${ustate:-queued}') — the button would spin forever.
+        Check: systemctl status murphys-bench-update.path murphys-bench-update.service" ;;
+    esac
+    rm -f "$APP/logs/update-trigger"
+    # An update deploys the latest RELEASE TAG. On a box checked out somewhere
+    # else (a branch under test, an untagged commit) that legitimately moves HEAD,
+    # and leaving the verifier's checkout silently moved is its own trap.
+    after_head="$(git -C "$APP" rev-parse HEAD)"
+    if [ "$before_head" != "$after_head" ]; then
+        echo "  NOTE: the update moved this checkout from ${before_head:0:8} to ${after_head:0:8}
+        (it deploys the latest release tag). That is the real behaviour, not a
+        fault. Re-run install.sh if you need the box back on the earlier commit."
+    fi
+fi
+
+head_ "Recovery instructions we print actually run on this box"
+# WHY: update.sh deploys with `git checkout --detach`, so every box that has ever
+# taken an update is on a detached HEAD, where `git pull` exits 1 with "You are
+# not currently on a branch". Both the stranded-update banner and the release
+# note tell a user with a broken box what to run — and until an outside reviewer
+# caught it, both said `git pull`. Nothing would have failed if that stayed
+# wrong: it is text, and no test renders a terminal. This check does, on the box
+# whose checkout shape the updater actually produces.
+if git -C "$APP" symbolic-ref -q HEAD >/dev/null; then
+    echo "  NOTE: this checkout is on a branch, so it is not the shape the in-app
+        Update leaves behind. Run this gate after an update for the check with teeth."
+else
+    ok "checkout is detached — the shape the in-app Update produces"
+
+    now_head="$(git -C "$APP" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    if [ "$now_head" != "$GATE_HEAD" ]; then
+        echo "  NOTE: the in-app Update moved this checkout from $GATE_HEAD to $now_head,
+        so the text below is read from a snapshot taken at $GATE_HEAD — the code
+        actually under test — not from the tree as it stands now."
+    fi
+    if [ ! -s "$GATE_SRC/CHANGELOG.md" ] || [ ! -s "$GATE_SRC/tpl/update_status.html" ]; then
+        bad "could not snapshot CHANGELOG.md and the update-status template at gate
+        start, so the recovery instructions below would be checked against the
+        wrong tree — which reports a vacuous pass, not a failure"
+    fi
+
+    # 1) Prove the trap is real here rather than assuming it.
+    if git -C "$APP" pull >/dev/null 2>&1; then
+        bad "expected 'git pull' to fail on a detached checkout but it succeeded —
+        the reasoning behind the recovery instructions no longer holds; re-check them"
+    else
+        ok "'git pull' does fail here, so no user-facing recovery text may use it"
+    fi
+
+    # 2) No shipped recovery instruction may tell the user to run it. Scoped to
+    #    the <pre> block — the command the user is actually shown — rather than
+    #    the whole file, because the surrounding comment deliberately discusses
+    #    `git pull` to explain why it is absent. Matching prose would make this
+    #    check depend on comment wording, which is how it would rot.
+    offenders="$(grep -n '<pre[^>]*>[^<]*git pull' \
+         "$GATE_SRC/tpl/update_status.html" \
+         2>/dev/null || true)"
+    if [ -n "$offenders" ]; then
+        bad "the stranded-update banner tells a user to run 'git pull', which fails here:"
+        printf '%s\n' "$offenders" | sed 's/^/        /'
+    else
+        ok "the stranded-update banner does not hand the user a command that fails"
+    fi
+
+    # 3) The alternative we DO print has to work. Fetch is safe; resolving the
+    #    newest tag is the part that picks what install.sh would then build.
+    if git -C "$APP" fetch --all --tags --quiet >/dev/null 2>&1 \
+       && newest="$(git -C "$APP" tag -l 'v*' --sort=-v:refname | head -1)" \
+       && [ -n "$newest" ] \
+       && git -C "$APP" rev-parse --verify --quiet "$newest^{commit}" >/dev/null; then
+        ok "the documented recovery resolves a release to install ($newest)"
+    else
+        bad "the documented recovery cannot resolve a release tag on this box —
+        'git fetch --all --tags' then checkout of the newest v* tag would fail"
+    fi
+
+    # 4) The release note is the OTHER surface that hands a user a command, and
+    #    round 5's bug was in both. Checked here rather than in pytest because it
+    #    is the same class: text asserting a fact about a machine. Scoped
+    #    deliberately to the ACTIVE (top-most) release block and to its fenced
+    #    command blocks only — older entries are a historical record and were
+    #    correct for the boxes they were written for, and the prose in this block
+    #    mentions `git pull` on purpose to explain why it is absent.
+    #    The blockquote marker is stripped BEFORE fence detection, so this reads
+    #    both `> ```bash` (the current shape) and a plain ```bash block. Keying on
+    #    the quoted form alone would have made the check pass the moment someone
+    #    unquoted the block — coupling the gate to formatting rather than content.
+    active_cmds="$(awk '/^## /{n++} n==1' "$GATE_SRC/CHANGELOG.md" \
+        | awk '{sub(/^> ?/, "")} /^```/{f=!f; next} f')"
+    #    ONE derivation of "the git commands a user would actually execute", used
+    #    by every assertion below AND by the probe. Previously the prerequisite
+    #    checks grepped the raw block while the probe ran only `git` lines, so a
+    #    commented-out or echoed `git fetch` satisfied the prerequisite without
+    #    ever running — the check's subject and its measurement drifting apart
+    #    again, one level down. Leading whitespace is stripped here too, so an
+    #    indented command is treated the same by both.
+    exec_cmds="$(printf '%s\n' "$active_cmds" | sed 's/^[[:space:]]*//' | grep '^git ' || true)"
+    if [ -z "$active_cmds" ]; then
+        # Most releases install cleanly through the button and carry no manual
+        # block. Absence is normal and must NOT fail the gate — an earlier draft
+        # of this check did, which would have failed every ordinary release.
+        echo "  NOTE: the newest CHANGELOG entry has no command block, so there are no
+        manual install instructions to verify. Normal for a clean upgrade."
+    elif printf '%s' "$exec_cmds" | grep -q '^git pull'; then
+        bad "the newest CHANGELOG entry tells the user to run 'git pull', which fails
+        on a box that has taken an update (this checkout is proof)"
+    elif [ -n "$exec_cmds" ] \
+      && ! printf '%s' "$exec_cmds" | grep -q '^git fetch --all --tags'; then
+        bad "the newest CHANGELOG entry does no EXECUTABLE 'git fetch --all --tags'
+        (a commented-out or echoed one does not count), so a box with stale refs
+        would not see the release it is being told to install"
+    elif [ -n "$exec_cmds" ]; then
+        # RUN the documented git sequence in a disposable clone and assert where it
+        # LANDS. Every previous version of this check tested a proxy: that the text
+        # contained a string, then that the first checkout target named the newest
+        # tag. Each proxy was defeated by something that satisfied it while leaving
+        # the user on the wrong version — a bare `--detach`, then a correct checkout
+        # followed by a second one to an older tag. The claim a user depends on is
+        # "following this whole block leaves the tree on the release before
+        # install.sh runs", so that is what is measured here instead of a proxy.
+        #
+        # EXECUTION BOUNDARY, deliberate and narrow: only lines beginning with
+        # `git` are run, only inside a throwaway clone in a temp dir, and
+        # scripts/install.sh is NOT run here (the rest of this gate performs a real
+        # install). Anything else in the block is ignored rather than executed.
+        want="$(git -C "$APP" tag -l 'v*' --sort=-v:refname | head -1)"
+        base="$(git -C "$APP" tag -l 'v*' --sort=v:refname | head -1)"
+        probe="$(mktemp -d)"
+        if [ -z "$want" ] || [ -z "$base" ] || [ "$want" = "$base" ]; then
+            echo "  NOTE: fewer than two release tags on this box, so 'the commands moved
+        the tree' cannot be told apart from 'they did nothing'. Skipping."
+        elif ! git clone --quiet "$APP" "$probe/repo" 2>/dev/null; then
+            bad "could not clone this install into a temp dir, so the release note's
+        commands could not be verified by running them"
+        else
+            # Start the probe on the OLDEST release, so a block that does nothing
+            # is distinguishable from one that arrives at the newest.
+            git -C "$probe/repo" checkout --quiet --detach "$base" 2>/dev/null
+            while IFS= read -r line; do
+                ( cd "$probe/repo" && eval "$line" ) >/dev/null 2>&1 || true
+            done <<PROBE_EOF
+$exec_cmds
+PROBE_EOF
+            landed="$(git -C "$probe/repo" describe --tags --always 2>/dev/null || true)"
+            if [ "$landed" = "$want" ]; then
+                ok "running the release note's commands lands the tree on $want"
+            else
+                bad "running the release note's commands left the tree on '${landed:-<unknown>}',
+        not the newest release ('$want'). A user following them would install the
+        wrong version, or none."
+            fi
+        fi
+        rm -rf "$probe"
+    else
+        ok "the newest release note's commands are detached-safe"
+    fi
+
+    # 5) install.sh is what both recovery paths end in.
+    if [ -x "$APP/scripts/install.sh" ]; then
+        ok "scripts/install.sh is present and executable (both recovery paths end here)"
+    else
+        bad "scripts/install.sh is missing or not executable — every recovery
+        instruction we print ends in it"
+    fi
 fi
 
 printf '\n== Result: %d passed, %d failed\n' "$PASS" "$FAIL"

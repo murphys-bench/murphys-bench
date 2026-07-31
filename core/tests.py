@@ -2805,6 +2805,168 @@ def test_update_status_fragment_renders_states(client, admin_user, settings, tmp
     assert needle in resp.content.decode().lower()
 
 
+
+# ── Update card: a result that no longer describes the box goes quiet ────────
+# A tester updated by hand after the in-app update failed, and was left staring
+# at a red "last update failed" banner on a box that was running the new release
+# correctly. Nothing but run_update.sh writes that file, so it never aged out.
+
+@pytest.mark.django_db
+def test_failed_status_is_stale_once_the_box_has_moved_on(client, admin_user, settings, tmp_path, monkeypatch):
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'failed', 'from_version': 'v0.4.52', 'target': 'v0.9.0',
+        'log_tail': 'sudo: A terminal is required to authenticate',
+    }))
+    # The box was updated by hand afterwards and is now on the newer version.
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.9.0')
+    assert update_ops.read_status()['stale'] is True
+
+    client.force_login(admin_user)
+    body = client.get(reverse('core:update_status')).content.decode()
+    assert 'was automatically rolled back' not in body
+    # The log stays reachable — hiding the banner must not destroy the evidence.
+    assert 'earlier update attempt' in body.lower()
+
+
+@pytest.mark.django_db
+def test_genuine_failure_still_reports_because_rollback_returns_the_box(settings, tmp_path, monkeypatch):
+    """A real failure rolls back, so the box ends on from_version and the banner
+    must stay. The staleness rule must not swallow live failures."""
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'failed', 'from_version': 'v0.4.52', 'target': 'v0.9.0',
+    }))
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.4.52')
+    assert update_ops.read_status()['stale'] is False
+
+
+# ── Update card: a failed rollback must SHOUT, not go quiet ─────────────────
+# The staleness rule assumes a failed update rolls back, so the box returns to
+# from_version. When the rollback ITSELF fails ("MANUAL RECOVERY NEEDED") the box
+# is stranded on the target, staleness fires, and the UI hides the failure banner
+# and mislabels the log — on the one box that most needs to be told. A tester hit
+# exactly this and reported seeing no log.
+
+@pytest.mark.django_db
+def test_rc2_is_stranded_even_though_the_box_is_on_the_target(settings, tmp_path, monkeypatch):
+    """update.sh exit 2 = manual_abort: the rollback itself failed."""
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'failed', 'from_version': 'v0.9.0', 'target': 'v0.10.0',
+        'exit_code': 2,
+    }))
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.10.0')
+    status = update_ops.read_status()
+    assert status['stranded'] is True
+    assert status['stale'] is False
+
+
+@pytest.mark.django_db
+def test_rc1_is_not_stranded(settings, tmp_path, monkeypatch):
+    """exit 1 = the update failed but the rollback returned the box."""
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'failed', 'from_version': 'v0.9.0', 'target': 'v0.10.0',
+        'exit_code': 1,
+    }))
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.9.0')
+    status = update_ops.read_status()
+    assert status['stranded'] is False
+    assert status['stale'] is False
+
+
+@pytest.mark.django_db
+def test_legacy_status_without_exit_code_on_the_target_is_stale(settings, tmp_path, monkeypatch):
+    """Written before this release: no exit code, so the old rule applies. This
+    deliberately stays quiet on a genuinely stranded OLD box rather than
+    reintroducing the false alarm on a healthy hand-updated one."""
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'failed', 'from_version': 'v0.9.0', 'target': 'v0.10.0',
+    }))
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.10.0')
+    status = update_ops.read_status()
+    assert status['stranded'] is False
+    assert status['stale'] is True
+
+
+@pytest.mark.django_db
+def test_legacy_status_without_exit_code_that_rolled_back_still_reports(settings, tmp_path, monkeypatch):
+    """The common legacy case: rollback worked, box is back on from_version.
+    The failure banner must still show."""
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'failed', 'from_version': 'v0.9.0', 'target': 'v0.10.0',
+    }))
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.9.0')
+    status = update_ops.read_status()
+    assert status['stranded'] is False
+    assert status['stale'] is False
+
+
+@pytest.mark.django_db
+def test_stranded_box_gets_a_loud_banner_and_an_open_log(client, admin_user, settings, tmp_path, monkeypatch):
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'failed', 'from_version': 'v0.9.0', 'target': 'v0.10.0',
+        'exit_code': 2,
+        'log_tail': 'MANUAL RECOVERY NEEDED - the app may be down',
+    }))
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.10.0')
+    client.force_login(admin_user)
+    body = client.get(reverse('core:update_status')).content.decode()
+    # It must say the rollback failed, name the risk, and give the fix.
+    assert 'could not be rolled back' in body.lower()
+    assert 'scripts/install.sh' in body
+    # ...and NOT `git pull`: update.sh deploys with `git checkout --detach`, so the
+    # box is on a detached HEAD where `git pull` exits 1. Handing a broken-box owner
+    # a command that stops immediately is what an outside reviewer caught here.
+    assert 'git pull' not in re.sub(r'<!--.*?-->', '', body, flags=re.S).split('<pre')[1]
+    # The log must be visible, not collapsed behind "an earlier attempt".
+    assert 'earlier update attempt' not in body.lower()
+    assert '<details class="mt-3" open>' in body
+    # And it must not reassure.
+    assert "you're on the latest release" not in body.lower()
+
+
+@pytest.mark.django_db
+def test_success_banner_stays_while_the_box_is_on_the_version_it_installed(settings, tmp_path, monkeypatch):
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'succeeded', 'from_version': 'v0.4.52', 'target': 'v0.9.0',
+    }))
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.9.0')
+    assert update_ops.read_status()['stale'] is False
+    # ...and goes quiet once the box has moved past it again.
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.9.1')
+    assert update_ops.read_status()['stale'] is True
+
+
 # ── Update card: "View changelog" link + changelog view ─────────────────────
 
 def test_changelog_for_version_extracts_just_that_section(monkeypatch):
@@ -8768,6 +8930,89 @@ def test_unit_templates_are_templates_not_baked_for_one_box():
     assert not baked, f'unit templates carry a baked-in path/user: {baked}'
     assert not unsubstituted, (
         f'unit templates reference no __APP__ placeholder: {unsubstituted}'
+    )
+
+
+
+# ── System alerts are the owner's, not the technicians' ─────────────────────
+# MB writes its own operational failures (failed backup, disk pressure, an
+# unhandled 500) into itself as tickets, so they land somewhere already watched.
+# They arrived unassigned, which put them in the unclaimed pool every technician
+# sees, on a client whose default type gave them a response SLA. So a Level-1 got
+# "Backup failed" in their queue with a clock ticking on it, could close it, and
+# the miss counted against the shop's own SLA compliance figure.
+
+@pytest.mark.django_db
+def test_system_alert_is_invisible_to_a_technician(client, django_user_model):
+    from core.system_alerts import create_system_alert
+    alert = create_system_alert('Backup failed: rclone auth error')
+
+    tech = django_user_model.objects.create_user(
+        username='l1tech', password='x' * 14, is_staff=False,
+    )
+    client.force_login(tech)
+
+    listing = client.get(reverse('core:ticket_list'))
+    assert alert.ticket_number not in listing.content.decode()
+    # And not reachable by guessing the URL either.
+    assert client.get(reverse('core:ticket_detail', args=[alert.pk])).status_code == 404
+
+
+@pytest.mark.django_db
+def test_system_alert_is_still_visible_to_an_admin(client, admin_user):
+    from core.system_alerts import create_system_alert
+    alert = create_system_alert('Disk nearly full on /')
+    client.force_login(admin_user)
+    assert client.get(reverse('core:ticket_detail', args=[alert.pk])).status_code == 200
+
+
+@pytest.mark.django_db
+def test_system_alert_gets_no_sla_clock_even_when_a_default_is_set():
+    """The System Alerts client is created with the default client_type
+    ('residential'), so before this fix a configured residential default stamped
+    a due_at on every alert and the alert went overdue on its own."""
+    from core.models import SLAPlan, SiteSettings
+    from core.system_alerts import create_system_alert
+
+    plan = SLAPlan.objects.create(name='Residential 24h', grace_period_hours=24)
+    site = SiteSettings.get()
+    site.default_residential_sla = plan
+    site.save()
+
+    alert = create_system_alert('Backup failed: destination unreachable')
+    assert alert.due_at is None
+    assert alert.sla_plan is None
+    assert alert.is_overdue is False
+
+
+def test_every_installed_config_in_deploy_is_a_template():
+    """The check above only looked at *.service|timer|path, so a config with no
+    such extension could still ship hardcoded — and one did. The logrotate config
+    named the author's path and username and was installed by a copy-paste line in
+    deploy/README.md, so on every other box the gunicorn logs never rotated.
+    Silent, unbounded, and invisible to a check that only knew about unit files.
+
+    Scan everything installed from deploy/ instead of an extension whitelist.
+    """
+    deploy = _repo_root() / 'deploy'
+    offenders = []
+    for path in sorted(deploy.rglob('*')):
+        if not path.is_file() or path.suffix == '.md':
+            continue
+        # deploy/demo/ records how the retired demo box was built by hand. It is
+        # reference material — nothing installs from it — so its literal values
+        # are the point, not a defect.
+        if 'demo' in path.relative_to(deploy).parts:
+            continue
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            if line.lstrip().startswith('#'):
+                continue
+            if '/opt/murphys-bench' in line or 'scs-tech' in line:
+                offenders.append(f'{path.relative_to(deploy)}:{lineno}')
+
+    assert not offenders, (
+        'a file installed from deploy/ hardcodes the author\'s install path or '
+        'user instead of using __APP__/__RUN_USER__:\n  ' + '\n  '.join(offenders)
     )
 
 
