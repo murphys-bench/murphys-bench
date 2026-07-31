@@ -10,6 +10,27 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+> ## ⚠ Do not use the in-app Update button to install this release
+>
+> If you are on v0.9.0 or earlier, your box does not have the service-control
+> rule this release adds — that is the bug being fixed. The Update button runs the
+> updater you already have, which does not know that, so it will start, fail at the
+> restart, fail again trying to roll back, and print MANUAL RECOVERY NEEDED. That
+> is exactly what a tester hit, and it is reproducible.
+>
+> Install this one from a terminal instead:
+>
+> ```bash
+> cd ~/murphys-bench      # or wherever it is installed
+> git pull
+> scripts/install.sh
+> ```
+>
+> It asks for your password once, is safe to run over an existing install, and
+> keeps your data and settings. **After this, the Update button works normally and
+> you never need the manual steps again** — and if the rule is ever missing, the
+> updater now refuses up front and changes nothing rather than half-updating.
+
 ### Fixed
 
 - **The in-app Update button could not work on any install but the author's, and
