@@ -30,6 +30,24 @@ scripts/install.sh --skip-web
 
 That installs and initializes the application but leaves the Gunicorn, reverse-proxy, and TLS configuration to you.
 
+> **`--skip-web` turns off more than the web server.** It also skips every systemd
+> unit and the sudoers rule, because both describe a service that install does not
+> create. On a `--skip-web` box:
+>
+> - scheduled backups, inbound email fetching and SLA checks do **not** run;
+> - the in-app **Back up now** and **Update** buttons **cannot** work — they write a
+>   trigger file that a systemd path unit is meant to act on, and no such unit exists;
+> - the buttons stay visible in the UI, and nothing reports any of this as missing.
+>
+> You are responsible for running, backing up and updating the application. Running
+> `scripts/update.sh` by hand still works, and refuses up front without changing
+> anything if the box cannot control its own service — but its suggested fix
+> ("re-run `scripts/install.sh`") is written for an ordinary box and would set up
+> nginx and Gunicorn here.
+>
+> If you passed `--skip-web` by mistake on a normal systemd + nginx host, re-run
+> `scripts/install.sh` without it. That is safe over an existing install.
+
 ## Supported Installation
 
 The standard installer assumes:

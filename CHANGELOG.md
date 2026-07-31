@@ -73,6 +73,20 @@ the Unreleased entries move under that version and prod gets a single update.
   suppressed once the installed version no longer matches it; the log stays
   reachable.
 
+- **`--skip-web` silently turned off backups, email fetching, SLA checks and both
+  in-app buttons, and said nothing.** The flag is documented as "don't touch
+  gunicorn/nginx/systemd", and people pass it for good reasons — an existing nginx,
+  their own reverse proxy, a non-systemd host. But it also skips every systemd unit
+  and the sudoers rule, so a `--skip-web` install has no scheduled backups, no
+  inbound email polling, no SLA checks, and its **Back up now** and **Update**
+  buttons write a trigger file that nothing on the box consumes. The buttons stay
+  visible and nothing reports any of it. That is the same shape as the defect this
+  release fixes, one flag away. Skipping those things is correct — they describe a
+  service the run did not create — so the fix is disclosure, not behaviour: the
+  installer now warns at the moment it skips them and again in its closing summary,
+  naming each capability lost and who is now responsible for it, and the flag's
+  documentation in `INSTALL.md` says the same.
+
 - **The Updates page went silent on exactly the box that most needed a warning.**
   Suppressing a stale result (above) assumed a failed update always rolls back, so
   the box returns to the version it started on. When the rollback fails too

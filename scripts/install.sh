@@ -29,6 +29,12 @@
 #                          and will fail or fight your actual setup otherwise)
 #                      If none of that describes you, leave this off — it's what gets
 #                      you to a working login page without hand-editing config files.
+#                      ⚠ WHAT YOU GIVE UP: this flag also skips every systemd unit and
+#                      the sudoers rule, because both describe a service this install
+#                      does not create. So on a --skip-web box there are NO scheduled
+#                      backups, NO inbound-email polling, NO SLA checks, and the in-app
+#                      "Back up now" and "Update" buttons cannot work. You own all of
+#                      that. See the notes the installer prints at the end.
 #   --no-demo-data    start with an empty database. By default a fresh install is
 #                      seeded with obviously-fake demo data (see below) so the app
 #                      is usable immediately; pass this if you'd rather begin empty.
@@ -566,7 +572,25 @@ $(static_probe_hint "$code" | sed "s|STATICDIR|$APP/staticfiles|")"
     sudo tail -20 /var/log/nginx/error.log" ;;
     esac
 else
+    # Say what this costs AT THE MOMENT IT HAPPENS, not only in the closing summary.
+    # The whole class of defect this installer keeps hitting is a capability that is
+    # silently absent: the UI still offers the button, the button still writes its
+    # trigger file, and nothing consumes it — forever, with no error anywhere. Someone
+    # who passes this flag for a legitimate reason (their own nginx, their own process
+    # manager) has no way to know that decision also turned off backups.
     log "skipping web server setup (--skip-web) — app layer only"
+    cat >&2 <<'SKIPWEB'
+install: ⚠ --skip-web also skipped the SYSTEMD UNITS and the sudoers rule.
+install:   That is deliberate: both name a murphys-bench service this run did not
+install:   create. The consequences are real and silent, so read them:
+install:     - NO scheduled backups          (murphys-bench-backup.timer)
+install:     - NO inbound email fetching     (murphys-bench-fetch-email.timer)
+install:     - NO SLA overdue checks         (murphys-bench-sla-check.timer)
+install:     - the in-app "Back up now" and "Update" buttons CANNOT work; they
+install:       write a trigger file that nothing on this box consumes
+install:   The buttons stay visible in the UI. Nothing will report these as missing.
+install:   You are now responsible for running the app, backing it up, and updating it.
+SKIPWEB
 fi
 
 # 11) Done.
@@ -639,5 +663,27 @@ else
 Web server setup was skipped (--skip-web). The app layer is ready at $APP —
 wire up your own process manager and reverse proxy to reach it, or re-run
 without --skip-web if this box turns out to be a normal systemd+nginx host.
+
+⚠ WHAT THIS INSTALL DOES NOT HAVE, and will never tell you about again:
+  - Scheduled backups, inbound email fetching and SLA checks are NOT running.
+    Those are systemd timers, and --skip-web installed no units.
+  - The in-app "Back up now" and "Update" buttons CANNOT work here. They write
+    a trigger file that a systemd .path unit is supposed to act on; there is no
+    such unit on this box, so the buttons spin and nothing happens.
+  - No sudoers rule was written, because it names a service this run did not
+    create.
+  The buttons remain visible in the UI. Nothing monitors any of this.
+
+  You own updates and backups on this box. Update with your own tooling, or run
+  scripts/update.sh by hand from a terminal — it refuses up front, changing
+  nothing, if this box cannot control its own service. Note that its suggested
+  fix is "re-run scripts/install.sh", which is written for an ordinary box and
+  WOULD set up nginx and gunicorn here. On a deliberate --skip-web install,
+  restart the service yourself with whatever manages it.
+
+  If this box IS a normal systemd + nginx host and you passed --skip-web by
+  mistake, the fix is to re-run the installer without it:
+    cd $APP && scripts/install.sh
+  That is safe over an existing install and keeps your data and settings.
 DONE3
 fi
