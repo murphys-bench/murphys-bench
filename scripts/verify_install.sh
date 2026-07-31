@@ -241,13 +241,86 @@ head_ "The app can restart itself without a terminal"
 # nothing.
 sudo -k
 SYSTEMCTL="$(command -v systemctl || echo /usr/bin/systemctl)"
-if sudo -n -l "$SYSTEMCTL" restart murphys-bench >/dev/null 2>&1; then
-    ok "passwordless restart of murphys-bench is granted (sudoers rule present)"
+
+# ⚠ This check used `sudo -n -l <cmd>` and was a FALSE PASS. `sudo -l` answers
+# "may this user run it", which is true for a command permitted WITH a password,
+# so on any box where the app user has ordinary sudo it passed whether or not the
+# NOPASSWD rule existed. It only appeared to work in CI because that job strips
+# the runner's sudo entirely, leaving no entry at all. On a real shop box — and on
+# the clean-room VMs — it reported success over a broken install.
+sudo_permits() {
+    local err
+    err="$(sudo -n "$@" 2>&1 >/dev/null || true)"
+    printf '%s' "$err" | grep -qiE 'password is required|terminal is required' && return 1
+    return 0
+}
+
+if sudo_permits "$SYSTEMCTL" is-active murphys-bench; then
+    ok "the app user can control its own service without a password"
 else
-    bad "NO passwordless restart for $(id -un). The in-app Update button cannot
-        finish (restart fails) and cannot safely undo itself (rollback's restore
+    bad "NO passwordless service control for $(id -un). The in-app Update button
+        cannot finish (restart fails) and cannot undo itself (rollback's restore
         cannot stop the service). Expected /etc/sudoers.d/murphys-bench from
         scripts/install.sh.  Check: sudo -l | grep murphys-bench"
+fi
+
+# Each verb rollback needs, not just the one the update needs. Granting restart
+# alone lets an update succeed while leaving restore.sh unable to run — which is
+# precisely the state the first version of this fix shipped in.
+missing_verbs=""
+policy="$(sudo -n -l 2>/dev/null | tr '\n' ' ' || true)"
+for verb in restart stop start; do
+    printf '%s' "$policy" | grep -q "NOPASSWD.*systemctl $verb murphys-bench" \
+        || missing_verbs="$missing_verbs $verb"
+done
+if [ -z "$missing_verbs" ]; then
+    ok "every verb the update AND its rollback need is granted (restart, stop, start)"
+else
+    bad "the sudoers rule is MISSING:${missing_verbs}
+        An update could still finish, but a FAILED update could not roll back —
+        leaving old code against an already-migrated database."
+fi
+
+head_ "Rollback can actually run with no terminal"
+# The update path and the ROLLBACK path are different code with different
+# privileges, and only one of them was ever tested. A green update proves nothing
+# about what happens when one fails — which is the moment a user actually needs it
+# to work, and the moment a tester hit.
+#
+# restore.sh IS the rollback: it stops the service, restores the database, starts
+# it again and health-checks. Drive it exactly as the in-app one-shot would:
+#   sudo -k   no cached password to lean on
+#   setsid    no controlling terminal, so sudo cannot prompt
+#   </dev/null nothing to read a password from
+# If this passes, a failed update can undo itself on this box.
+if [ "${SKIP_ROLLBACK_DRILL:-0}" = 1 ]; then
+    echo "  SKIP  rollback drill disabled by SKIP_ROLLBACK_DRILL=1"
+else
+    drill_tarball="$APP/backups/verify-rollback-drill.tar.gz"
+    rm -f "$drill_tarball"
+    if "$APP/scripts/mb_backup.sh" --staging-only "$drill_tarball" >/dev/null 2>&1 \
+       && [ -f "$drill_tarball" ]; then
+        sudo -k
+        if setsid env RESTORE_YES=1 "$APP/scripts/restore.sh" "$drill_tarball" \
+             </dev/null >"$APP/logs/rollback-drill.log" 2>&1; then
+            ok "rollback (restore.sh) completed with no terminal and no cached password"
+        else
+            bad "ROLLBACK CANNOT RUN on this box. A failed update would leave old code
+        against an already-migrated database. Last lines:
+$(tail -12 "$APP/logs/rollback-drill.log" 2>/dev/null | sed 's/^/        /')"
+        fi
+        # restore.sh restarts the service itself; confirm the app really came back.
+        rb_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                  -H "Host: $(grep '^ALLOWED_HOSTS=' "$APP/.env" | cut -d= -f2- | cut -d, -f1)" \
+                  http://127.0.0.1/ || echo 000)"
+        case "$rb_code" in
+            2*|3*) ok "app healthy after the rollback drill (HTTP $rb_code)" ;;
+            *)     bad "app returns HTTP $rb_code after the rollback drill" ;;
+        esac
+    else
+        bad "could not build a drill snapshot, so rollback is UNVERIFIED on this box"
+    fi
+    rm -f "$drill_tarball"
 fi
 
 head_ "In-app Update actually runs, end to end"

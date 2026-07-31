@@ -397,17 +397,29 @@ either drop --skip-apt so this script installs it, or pass --skip-web to wire up
     # earlier, which is why it survived to a tester. An installed feature that only
     # works on the author's own machines is a broken feature.
     #
-    # So the installer grants it, scoped to the narrowest thing that works: this
-    # user, this one service, these three verbs. Not general sudo.
+    # It is not only the restart. When an update fails, rollback runs restore.sh,
+    # which STOPS and STARTS the service. Granting restart alone leaves the recovery
+    # path just as broken as the thing it recovers from — the first version of this
+    # fix did exactly that, and the check written alongside it was blind to the gap
+    # because both came from the same wrong picture of what rollback does.
+    #
+    # So the installer grants the narrowest set that lets an update both finish AND
+    # undo itself: this user, this one service, these five verbs. Not general sudo.
     log "granting passwordless restart of murphys-bench (sudo)..."
     SYSTEMCTL="$(command -v systemctl)"
     sudoers_tmp="$(mktemp)"
     cat > "$sudoers_tmp" <<SUDOEOF
-# Murphy's Bench — written by scripts/install.sh. Lets the app user restart ONLY
+# Murphy's Bench — written by scripts/install.sh. Lets the app user control ONLY
 # its own service without a password, which is what the in-app Update button
-# needs (it runs with no terminal, so sudo cannot prompt). Nothing else is
-# granted: not shutdown, not other units, not root shells.
-${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} restart murphys-bench, ${SYSTEMCTL} status murphys-bench, ${SYSTEMCTL} is-active murphys-bench
+# needs (it runs with no terminal, so sudo cannot prompt).
+#
+# stop and start are here because they are NOT optional: when an update fails,
+# rollback runs restore.sh, which stops the service, restores the database, and
+# starts it again. Granting restart alone leaves the recovery path broken in
+# exactly the situation it exists for. Do not trim this list to "just restart".
+#
+# Nothing else is granted: not shutdown, not other units, not root shells.
+${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} restart murphys-bench, ${SYSTEMCTL} stop murphys-bench, ${SYSTEMCTL} start murphys-bench, ${SYSTEMCTL} status murphys-bench, ${SYSTEMCTL} is-active murphys-bench
 SUDOEOF
     # NEVER install an unvalidated sudoers file — a syntax error in /etc/sudoers.d
     # can break sudo for every user on the box, including the one holding the only
@@ -419,7 +431,7 @@ SUDOEOF
         rm -f "$sudoers_tmp"
         fail "visudo not found, so the sudoers rule cannot be safely validated.
   Install the 'sudo' package, or add this line yourself with 'sudo visudo -f /etc/sudoers.d/murphys-bench':
-    ${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} restart murphys-bench"
+    ${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} restart murphys-bench, ${SYSTEMCTL} stop murphys-bench, ${SYSTEMCTL} start murphys-bench"
     fi
     sudo install -m 0440 -o root -g root "$sudoers_tmp" /etc/sudoers.d/murphys-bench \
         || { rm -f "$sudoers_tmp"; fail "could not install /etc/sudoers.d/murphys-bench"; }

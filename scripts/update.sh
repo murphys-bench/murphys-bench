@@ -73,31 +73,58 @@ command -v git >/dev/null || fail "git not installed"
 # cost of saying no is an update that didn't start. -n means "fail rather than
 # prompt", which is the condition the systemd one-shot behind the in-app Update
 # button always runs under.
-# `sudo -l <command>` ASKS whether the command is permitted instead of running
-# it, so this cannot restart anything as a side effect, and -n makes it answer
-# without a prompt. Testing by actually running `systemctl is-active` would be
-# wrong: that exits non-zero for a stopped service too, so a merely-stopped app
-# would read as a permissions failure.
+# ⚠ DO NOT "simplify" this back to `sudo -n -l <cmd>`. That was the first version
+# of this check and it is a FALSE PASS: `sudo -l` answers "may this user run it",
+# which is TRUE for a command permitted *with* a password. On any box where the
+# app user is in the sudo group — essentially every real install — it returned
+# success whether or not the NOPASSWD rule existed. Proven on a clean-room box:
+# `sudo -n -l /usr/bin/cat /etc/shadow` passes too.
+#
+# The only honest test is to run something privileged and read sudo's own refusal.
+# `is-active` changes nothing; its own exit code is ignored (non-zero for a merely
+# stopped service is not a permissions problem) and only sudo's stderr decides.
 #
 # One exception, at the bottom: a human running this by hand from a terminal CAN
 # supply a password. We take it once, up front, so the rollback path never stalls
 # on a prompt halfway through a restore.
 SYSTEMCTL="$(command -v systemctl || echo /usr/bin/systemctl)"
-if ! sudo -n -l "$SYSTEMCTL" restart murphys-bench >/dev/null 2>&1; then
+
+# 0 = sudo permitted it; 1 = sudo REFUSED (would need a password or a terminal).
+sudo_permits() {
+    local err
+    err="$(sudo -n "$@" 2>&1 >/dev/null || true)"
+    printf '%s' "$err" | grep -qiE 'password is required|terminal is required' && return 1
+    return 0
+}
+
+# Every verb the update AND its rollback depend on must be covered. Checking only
+# restart is how the first version of this fix shipped a rule that let an update
+# finish but left restore.sh — which stops and starts the service — unable to run.
+# `sudo -l` is used ONLY to read the policy text, never as the pass/fail signal.
+missing_verbs=""
+policy="$(sudo -n -l 2>/dev/null | tr '\n' ' ' || true)"
+for verb in restart stop start; do
+    printf '%s' "$policy" | grep -q "NOPASSWD.*systemctl $verb murphys-bench" \
+        || missing_verbs="$missing_verbs $verb"
+done
+
+if ! sudo_permits "$SYSTEMCTL" is-active murphys-bench || [ -n "$missing_verbs" ]; then
     if [ -t 0 ]; then
-        log "this box has no passwordless restart rule; asking for your password once
-       so the update (and any rollback) can restart the service without stalling.
+        log "this box lacks the passwordless service-control rule (missing:${missing_verbs:- none});
+       asking for your password once so the update (and any rollback) can control
+       the service without stalling.
        Run 'scripts/install.sh' to install the rule and stop being asked."
         sudo -v || fail "could not authenticate — nothing has been changed"
     else
-        fail "this box cannot restart Murphy's Bench without a password, so an update
-  could neither finish nor safely roll back. NOTHING HAS BEEN CHANGED.
+        fail "this box cannot control the Murphy's Bench service without a password,
+  so an update could neither finish nor safely roll back. NOTHING HAS BEEN CHANGED.
+  Missing verbs:${missing_verbs:- (the rule appears absent entirely)}
 
   Fix it once, then update again:
     cd $APP && scripts/install.sh
 
-  (That writes /etc/sudoers.d/murphys-bench, granting this user a passwordless
-  restart of this one service and nothing else. It will ask for your password
+  (That writes /etc/sudoers.d/murphys-bench, granting this user passwordless
+  restart/stop/start of this one service and nothing else. It will ask for your password
   once, which is why it must be run from a terminal rather than the in-app
   Update button.)"
     fi
