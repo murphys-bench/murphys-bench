@@ -68,6 +68,21 @@ the Unreleased entries move under that version and prod gets a single update.
   suppressed once the installed version no longer matches it; the log stays
   reachable.
 
+- **The Updates page went silent on exactly the box that most needed a warning.**
+  Suppressing a stale result (above) assumed a failed update always rolls back, so
+  the box returns to the version it started on. When the rollback fails too
+  ("MANUAL RECOVERY NEEDED"), the box is stranded on the new version it never
+  finished verifying — which looked like "moved on since", so the failure banner
+  was hidden, the log was collapsed and labelled as an earlier attempt, and the
+  page said "You're on the latest release." That is what the tester who reported
+  seeing no log was looking at. The update runner now records the updater's exit
+  code, which is the only thing that tells a failed-but-rolled-back update apart
+  from a failed rollback, and a stranded box gets an open log and an unmissable
+  banner naming the recovery command. **This precision applies to updates run on
+  this release or later** — a status file written by an older version carries no
+  exit code, and is still treated as stale rather than risking a false alarm on a
+  healthy box.
+
 - **`ALLOWED_HOSTS` picked one address at random on a box with more than one
   network interface.** The installer took the first address `hostname -I` printed,
   which on a machine running Tailscale or a second adapter is not the address the

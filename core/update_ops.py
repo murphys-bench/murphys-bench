@@ -117,17 +117,37 @@ def read_status() -> dict:
     A genuine failure rolls back, so the box ends where it started and
     ``from_version`` still matches — those stay visible. Only a result the
     filesystem has since contradicted is marked stale.
+
+    ``stranded`` is the case that assumption misses: the update failed AND the
+    rollback failed too ("MANUAL RECOVERY NEEDED"), leaving the box sitting on
+    the TARGET it never verified. That box has moved off ``from_version``, so the
+    staleness rule fired and hid the failure banner on the one install that most
+    needed to be told — a tester hit exactly that and reported seeing no log.
+    A stranded result is never stale: it describes the box precisely.
+
+    Stranded is keyed on ``exit_code``, which ``run_update.sh`` records: 2 is
+    ``update.sh``'s manual_abort (the rollback failed), 1 is a failure that
+    rolled back. It is NOT inferred from the version landing on the target,
+    because that is indistinguishable from a box whose rollback worked and whose
+    owner then updated by hand — the exact false alarm the staleness rule exists
+    to prevent. Status files written before this release carry no exit code, so
+    they fall back to the old staleness rule: precise stranded detection applies
+    only to updates run on this release or later.
     """
     try:
         data = json.loads(status_path().read_text())
         if isinstance(data, dict) and data.get('state'):
             if data['state'] in ('succeeded', 'failed'):
+                current = current_version()
+                data['stranded'] = (data['state'] == 'failed'
+                                    and data.get('exit_code') == 2)
                 # Where the box should be if this result still describes it: a
                 # success left it on the target, a failure rolled it back to
                 # where it started.
                 expected = (data.get('target') if data['state'] == 'succeeded'
                             else data.get('from_version')) or ''
-                data['stale'] = bool(expected) and expected != current_version()
+                data['stale'] = (not data['stranded']
+                                 and bool(expected) and expected != current)
             return data
     except Exception:
         pass

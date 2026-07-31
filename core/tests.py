@@ -2847,6 +2847,106 @@ def test_genuine_failure_still_reports_because_rollback_returns_the_box(settings
     assert update_ops.read_status()['stale'] is False
 
 
+# ── Update card: a failed rollback must SHOUT, not go quiet ─────────────────
+# The staleness rule assumes a failed update rolls back, so the box returns to
+# from_version. When the rollback ITSELF fails ("MANUAL RECOVERY NEEDED") the box
+# is stranded on the target, staleness fires, and the UI hides the failure banner
+# and mislabels the log — on the one box that most needs to be told. A tester hit
+# exactly this and reported seeing no log.
+
+@pytest.mark.django_db
+def test_rc2_is_stranded_even_though_the_box_is_on_the_target(settings, tmp_path, monkeypatch):
+    """update.sh exit 2 = manual_abort: the rollback itself failed."""
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'failed', 'from_version': 'v0.9.0', 'target': 'v0.10.0',
+        'exit_code': 2,
+    }))
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.10.0')
+    status = update_ops.read_status()
+    assert status['stranded'] is True
+    assert status['stale'] is False
+
+
+@pytest.mark.django_db
+def test_rc1_is_not_stranded(settings, tmp_path, monkeypatch):
+    """exit 1 = the update failed but the rollback returned the box."""
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'failed', 'from_version': 'v0.9.0', 'target': 'v0.10.0',
+        'exit_code': 1,
+    }))
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.9.0')
+    status = update_ops.read_status()
+    assert status['stranded'] is False
+    assert status['stale'] is False
+
+
+@pytest.mark.django_db
+def test_legacy_status_without_exit_code_on_the_target_is_stale(settings, tmp_path, monkeypatch):
+    """Written before this release: no exit code, so the old rule applies. This
+    deliberately stays quiet on a genuinely stranded OLD box rather than
+    reintroducing the false alarm on a healthy hand-updated one."""
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'failed', 'from_version': 'v0.9.0', 'target': 'v0.10.0',
+    }))
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.10.0')
+    status = update_ops.read_status()
+    assert status['stranded'] is False
+    assert status['stale'] is True
+
+
+@pytest.mark.django_db
+def test_legacy_status_without_exit_code_that_rolled_back_still_reports(settings, tmp_path, monkeypatch):
+    """The common legacy case: rollback worked, box is back on from_version.
+    The failure banner must still show."""
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'failed', 'from_version': 'v0.9.0', 'target': 'v0.10.0',
+    }))
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.9.0')
+    status = update_ops.read_status()
+    assert status['stranded'] is False
+    assert status['stale'] is False
+
+
+@pytest.mark.django_db
+def test_stranded_box_gets_a_loud_banner_and_an_open_log(client, admin_user, settings, tmp_path, monkeypatch):
+    import json
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'failed', 'from_version': 'v0.9.0', 'target': 'v0.10.0',
+        'exit_code': 2,
+        'log_tail': 'MANUAL RECOVERY NEEDED - the app may be down',
+    }))
+    monkeypatch.setattr(update_ops, 'current_version', lambda: 'v0.10.0')
+    client.force_login(admin_user)
+    body = client.get(reverse('core:update_status')).content.decode()
+    # It must say the rollback failed, name the risk, and give the fix.
+    assert 'could not be rolled back' in body.lower()
+    assert 'scripts/install.sh' in body
+    # The log must be visible, not collapsed behind "an earlier attempt".
+    assert 'earlier update attempt' not in body.lower()
+    assert '<details class="mt-3" open>' in body
+    # And it must not reassure.
+    assert "you're on the latest release" not in body.lower()
+
+
 @pytest.mark.django_db
 def test_success_banner_stays_while_the_box_is_on_the_version_it_installed(settings, tmp_path, monkeypatch):
     import json
