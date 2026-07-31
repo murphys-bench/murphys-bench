@@ -69,8 +69,13 @@ jobs:
           scripts/install.sh --noinput --no-demo-data --skip-tests --skip-apt
           # Fail here rather than let a missing repair surface as a confusing
           # verification failure three steps later.
-          test -f /etc/sudoers.d/murphys-bench || { echo "::error::the repair did not write the sudoers rule"; exit 1; }
-          test -f /etc/logrotate.d/murphys-bench || { echo "::error::the repair did not write the logrotate config"; exit 1; }
+          #
+          # `sudo test`, not `test`: /etc/sudoers.d is mode 0750 root:root, so an
+          # unprivileged stat inside it fails whether or not the file is there.
+          # A plain `test -f` reports "the repair did not run" on a box where it
+          # ran perfectly — a false failure, which is worse than no check.
+          sudo test -f /etc/sudoers.d/murphys-bench || { echo "::error::the repair did not write the sudoers rule"; exit 1; }
+          sudo test -f /etc/logrotate.d/murphys-bench || { echo "::error::the repair did not write the logrotate config"; exit 1; }
 
       - name: Drop this runner's blanket sudo, keeping only what the installer granted
         # After this step the user's ONLY privileges are the ones scripts/install.sh
