@@ -8911,8 +8911,13 @@ def test_skip_web_hand_wiring_commands_are_absolute():
     # own working directory, so a relative path after it resolves correctly. The
     # invariant being protected is about commands handed to a SCHEDULER, which
     # supplies no working directory of its own.
+    # Includes the WATCHED PATH, not only executables: the Back up now advice names
+    # a trigger file for a path unit to watch, and `logs/backup-trigger` relative
+    # would watch the wrong place — the same silent never-fires failure as a
+    # relative ExecStart. The reviewer spotted that this guard did not cover it.
     examples = [ln.strip() for ln in out.splitlines()
-                if ln.startswith('    ') and ('.sh' in ln or 'manage.py' in ln)]
+                if ln.startswith('    ')
+                and ('.sh' in ln or 'manage.py' in ln or 'trigger' in ln)]
     examples = [ln for ln in examples
                 if not (ln.startswith('cd ') and '&&' in ln)]
     assert examples, 'no command examples found in the --skip-web summary'

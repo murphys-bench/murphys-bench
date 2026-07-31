@@ -85,8 +85,10 @@ the Unreleased entries move under that version and prod gets a single update.
   policy — there is no supported way to wire a subset — so the fix is disclosure,
   not behaviour, and the disclosure now says which parts genuinely need the missing
   service (only the gunicorn unit, the Update button's path unit and the sudoers rule)
-  and which would have worked anyway (the backup, email and SLA jobs, and the Back up
-  now one-shot, which uses no sudo), with the ABSOLUTE commands to run them yourself
+  and which do not depend on that service (the backup, email and SLA script bodies,
+  and the Back up now one-shot, which uses no sudo — whether they can be scheduled
+  depends on the host, since `--skip-web` is also for boxes with no systemd at all),
+  with the ABSOLUTE commands to run them yourself
   — printed with this install's real paths, because relative ones work when pasted
   into a shell and fail silently in cron or a hand-written unit, which is the same
   never-runs shape the warning exists to prevent. The
