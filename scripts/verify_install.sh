@@ -468,7 +468,34 @@ else
         'git fetch --all --tags' then checkout of the newest v* tag would fail"
     fi
 
-    # 4) install.sh is what both recovery paths end in.
+    # 4) The release note is the OTHER surface that hands a user a command, and
+    #    round 5's bug was in both. Checked here rather than in pytest because it
+    #    is the same class: text asserting a fact about a machine. Scoped
+    #    deliberately to the ACTIVE (top-most) release block and to its fenced
+    #    command blocks only — older entries are a historical record and were
+    #    correct for the boxes they were written for, and the prose in this block
+    #    mentions `git pull` on purpose to explain why it is absent.
+    active_cmds="$(awk '/^## /{n++} n==1' "$APP/CHANGELOG.md" \
+        | awk '/^> ?```/{f=!f; next} f')"
+    if [ -z "$active_cmds" ]; then
+        # Most releases install cleanly through the button and carry no manual
+        # block. Absence is normal and must NOT fail the gate — an earlier draft
+        # of this check did, which would have failed every ordinary release.
+        echo "  NOTE: the newest CHANGELOG entry has no command block, so there are no
+        manual install instructions to verify. Normal for a clean upgrade."
+    elif printf '%s' "$active_cmds" | grep -q 'git pull'; then
+        bad "the newest CHANGELOG entry tells the user to run 'git pull', which fails
+        on a box that has taken an update (this checkout is proof)"
+    elif printf '%s' "$active_cmds" | grep -q '^[^#]*git ' \
+      && { ! printf '%s' "$active_cmds" | grep -q 'git fetch --all --tags' \
+        || ! printf '%s' "$active_cmds" | grep -q 'git checkout --detach'; }; then
+        bad "the newest CHANGELOG entry's commands are not detached-safe — expected
+        'git fetch --all --tags' and a 'git checkout --detach' of the newest tag"
+    else
+        ok "the newest release note's commands are detached-safe"
+    fi
+
+    # 5) install.sh is what both recovery paths end in.
     if [ -x "$APP/scripts/install.sh" ]; then
         ok "scripts/install.sh is present and executable (both recovery paths end here)"
     else

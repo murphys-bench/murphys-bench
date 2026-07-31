@@ -297,6 +297,11 @@ bumps the minor; bug fixes bump the patch. See "Versioning" in the README.
   button.** On the version you are coming from, the updater is itself one of the broken
   scripts: outside `/opt` it dies looking for a directory that isn't there and leaves the
   request file behind, so the button spins forever. It works normally from this release on.
+
+  > Reading this later: `git pull` was right for the boxes this note was written for,
+  > because their updater died before it ever ran and their checkout was still on a
+  > branch. On a box that has since taken an update, the checkout is detached and
+  > `git pull` refuses — use the sequence in the newest release's note instead.
   `scripts/install.sh` is safe to re-run over an existing install and repairs both the
   missing services and the file permissions. Confirm with
   `systemctl list-units 'murphys-bench-*'`.
