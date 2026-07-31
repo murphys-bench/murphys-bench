@@ -85,7 +85,12 @@ the Unreleased entries move under that version and prod gets a single update.
   service the run did not create — so the fix is disclosure, not behaviour: the
   installer now warns at the moment it skips them and again in its closing summary,
   naming each capability lost and who is now responsible for it, and the flag's
-  documentation in `INSTALL.md` says the same.
+  documentation in `INSTALL.md` says the same. That list also includes log rotation:
+  `/etc/logrotate.d/murphys-bench` is written by the same skipped step, so those logs
+  would otherwise grow without limit, silently. And it says plainly that
+  `scripts/update.sh` is **not** a safe update path on such a box — it is written for
+  the standard systemd + nginx contract, and run from a terminal it does not refuse,
+  it asks for a password and continues.
 
 - **The Updates page went silent on exactly the box that most needed a warning.**
   Suppressing a stale result (above) assumed a failed update always rolls back, so

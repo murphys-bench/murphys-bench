@@ -33,8 +33,11 @@
 #                      the sudoers rule, because both describe a service this install
 #                      does not create. So on a --skip-web box there are NO scheduled
 #                      backups, NO inbound-email polling, NO SLA checks, and the in-app
-#                      "Back up now" and "Update" buttons cannot work. You own all of
-#                      that. See the notes the installer prints at the end.
+#                      "Back up now" and "Update" buttons cannot work, and MB's
+#                      logrotate config is not installed. You own all of that, INCLUDING
+#                      updates — scripts/update.sh is written for the standard
+#                      systemd+nginx contract and is not a safe update path here.
+#                      See the notes the installer prints at the end.
 #   --no-demo-data    start with an empty database. By default a fresh install is
 #                      seeded with obviously-fake demo data (see below) so the app
 #                      is usable immediately; pass this if you'd rather begin empty.
@@ -588,8 +591,11 @@ install:     - NO inbound email fetching     (murphys-bench-fetch-email.timer)
 install:     - NO SLA overdue checks         (murphys-bench-sla-check.timer)
 install:     - the in-app "Back up now" and "Update" buttons CANNOT work; they
 install:       write a trigger file that nothing on this box consumes
+install:     - NO log rotation for the gunicorn access/error, backup and update logs
+install:       (/etc/logrotate.d/murphys-bench is written by the same skipped step)
 install:   The buttons stay visible in the UI. Nothing will report these as missing.
-install:   You are now responsible for running the app, backing it up, and updating it.
+install:   You are now responsible for running the app, backing it up, rotating its
+install:   logs, and updating it with your own tooling.
 SKIPWEB
 fi
 
@@ -672,14 +678,22 @@ without --skip-web if this box turns out to be a normal systemd+nginx host.
     such unit on this box, so the buttons spin and nothing happens.
   - No sudoers rule was written, because it names a service this run did not
     create.
+  - Log rotation is NOT installed. /etc/logrotate.d/murphys-bench comes from the
+    same skipped step, so the gunicorn access/error logs, the backup log and the
+    update log will grow without limit unless you rotate them yourself. (The
+    Django app log self-rotates and is not affected.)
   The buttons remain visible in the UI. Nothing monitors any of this.
 
-  You own updates and backups on this box. Update with your own tooling, or run
-  scripts/update.sh by hand from a terminal — it refuses up front, changing
-  nothing, if this box cannot control its own service. Note that its suggested
-  fix is "re-run scripts/install.sh", which is written for an ordinary box and
-  WOULD set up nginx and gunicorn here. On a deliberate --skip-web install,
-  restart the service yourself with whatever manages it.
+  ⚠ scripts/update.sh is NOT a safe update path on this box. It is written for
+  the standard install: it checks and uses passwordless control of a
+  murphys-bench systemd service, restarts that service, health-checks the app at
+  http://127.0.0.1/ through nginx, and rolls back via restore.sh, which stops and
+  starts that same service. Run from a terminal it does NOT refuse — it asks for
+  your password and CONTINUES — so on a box without that contract it can change
+  the checkout and then fail at the restart or the health check, with a rollback
+  that hits the same missing service. Use your own deployment process instead.
+  scripts/update.sh is only appropriate here if you have deliberately provided
+  the same service-control and localhost health-check contract yourself.
 
   If this box IS a normal systemd + nginx host and you passed --skip-web by
   mistake, the fix is to re-run the installer without it:

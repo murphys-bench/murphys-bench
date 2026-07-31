@@ -37,13 +37,23 @@ That installs and initializes the application but leaves the Gunicorn, reverse-p
 > - scheduled backups, inbound email fetching and SLA checks do **not** run;
 > - the in-app **Back up now** and **Update** buttons **cannot** work — they write a
 >   trigger file that a systemd path unit is meant to act on, and no such unit exists;
+> - log rotation is **not** installed — `/etc/logrotate.d/murphys-bench` comes from
+>   the same skipped step, so the Gunicorn access/error, backup and update logs grow
+>   without limit unless you rotate them yourself;
 > - the buttons stay visible in the UI, and nothing reports any of this as missing.
 >
-> You are responsible for running, backing up and updating the application. Running
-> `scripts/update.sh` by hand still works, and refuses up front without changing
-> anything if the box cannot control its own service — but its suggested fix
-> ("re-run `scripts/install.sh`") is written for an ordinary box and would set up
-> nginx and Gunicorn here.
+> You are responsible for running, backing up, rotating the logs of, and updating the
+> application.
+>
+> **Use your own update process.** `scripts/update.sh` is built for the standard
+> systemd + nginx install: it checks and uses passwordless control of a
+> `murphys-bench` service, restarts it, health-checks the app at `http://127.0.0.1/`
+> through nginx, and rolls back via `restore.sh`, which stops and starts that same
+> service. Run from a terminal it does **not** refuse — it asks for your password and
+> continues — so on a box without that contract it can change the checkout and then
+> fail at the restart or health check, with a rollback that hits the same missing
+> service. It is only appropriate on a `--skip-web` box if you have deliberately
+> provided that same contract yourself.
 >
 > If you passed `--skip-web` by mistake on a normal systemd + nginx host, re-run
 > `scripts/install.sh` without it. That is safe over an existing install.
