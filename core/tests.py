@@ -2940,6 +2940,10 @@ def test_stranded_box_gets_a_loud_banner_and_an_open_log(client, admin_user, set
     # It must say the rollback failed, name the risk, and give the fix.
     assert 'could not be rolled back' in body.lower()
     assert 'scripts/install.sh' in body
+    # ...and NOT `git pull`: update.sh deploys with `git checkout --detach`, so the
+    # box is on a detached HEAD where `git pull` exits 1. Handing a broken-box owner
+    # a command that stops immediately is what an outside reviewer caught here.
+    assert 'git pull' not in re.sub(r'<!--.*?-->', '', body, flags=re.S).split('<pre')[1]
     # The log must be visible, not collapsed behind "an earlier attempt".
     assert 'earlier update attempt' not in body.lower()
     assert '<details class="mt-3" open>' in body

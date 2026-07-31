@@ -22,9 +22,14 @@ the Unreleased entries move under that version and prod gets a single update.
 >
 > ```bash
 > cd ~/murphys-bench      # or wherever it is installed
-> git pull
+> git fetch --all --tags
+> git checkout --detach "$(git tag -l 'v*' --sort=-v:refname | head -1)"
 > scripts/install.sh
 > ```
+>
+> (If you have ever used the Update button, your checkout is detached from any
+> branch — that is how the updater deploys a release — so `git pull` will refuse
+> with "You are not currently on a branch". The commands above work either way.)
 >
 > It asks for your password once, is safe to run over an existing install, and
 > keeps your data and settings. **After this, the Update button works normally and

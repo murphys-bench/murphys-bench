@@ -419,6 +419,64 @@ $(printf '%s' "$utail" | sed 's/^/        /')" ;;
     fi
 fi
 
+head_ "Recovery instructions we print actually run on this box"
+# WHY: update.sh deploys with `git checkout --detach`, so every box that has ever
+# taken an update is on a detached HEAD, where `git pull` exits 1 with "You are
+# not currently on a branch". Both the stranded-update banner and the release
+# note tell a user with a broken box what to run — and until an outside reviewer
+# caught it, both said `git pull`. Nothing would have failed if that stayed
+# wrong: it is text, and no test renders a terminal. This check does, on the box
+# whose checkout shape the updater actually produces.
+if git -C "$APP" symbolic-ref -q HEAD >/dev/null; then
+    echo "  NOTE: this checkout is on a branch, so it is not the shape the in-app
+        Update leaves behind. Run this gate after an update for the check with teeth."
+else
+    ok "checkout is detached — the shape the in-app Update produces"
+
+    # 1) Prove the trap is real here rather than assuming it.
+    if git -C "$APP" pull >/dev/null 2>&1; then
+        bad "expected 'git pull' to fail on a detached checkout but it succeeded —
+        the reasoning behind the recovery instructions no longer holds; re-check them"
+    else
+        ok "'git pull' does fail here, so no user-facing recovery text may use it"
+    fi
+
+    # 2) No shipped recovery instruction may tell the user to run it. Scoped to
+    #    the <pre> block — the command the user is actually shown — rather than
+    #    the whole file, because the surrounding comment deliberately discusses
+    #    `git pull` to explain why it is absent. Matching prose would make this
+    #    check depend on comment wording, which is how it would rot.
+    offenders="$(grep -n '<pre[^>]*>[^<]*git pull' \
+         "$APP/core/templates/core/partials/update_status.html" \
+         2>/dev/null || true)"
+    if [ -n "$offenders" ]; then
+        bad "the stranded-update banner tells a user to run 'git pull', which fails here:"
+        printf '%s\n' "$offenders" | sed 's/^/        /'
+    else
+        ok "the stranded-update banner does not hand the user a command that fails"
+    fi
+
+    # 3) The alternative we DO print has to work. Fetch is safe; resolving the
+    #    newest tag is the part that picks what install.sh would then build.
+    if git -C "$APP" fetch --all --tags --quiet >/dev/null 2>&1 \
+       && newest="$(git -C "$APP" tag -l 'v*' --sort=-v:refname | head -1)" \
+       && [ -n "$newest" ] \
+       && git -C "$APP" rev-parse --verify --quiet "$newest^{commit}" >/dev/null; then
+        ok "the documented recovery resolves a release to install ($newest)"
+    else
+        bad "the documented recovery cannot resolve a release tag on this box —
+        'git fetch --all --tags' then checkout of the newest v* tag would fail"
+    fi
+
+    # 4) install.sh is what both recovery paths end in.
+    if [ -x "$APP/scripts/install.sh" ]; then
+        ok "scripts/install.sh is present and executable (both recovery paths end here)"
+    else
+        bad "scripts/install.sh is missing or not executable — every recovery
+        instruction we print ends in it"
+    fi
+fi
+
 printf '\n== Result: %d passed, %d failed\n' "$PASS" "$FAIL"
 if [ "$FAIL" -gt 0 ]; then
     printf '\nDO NOT RELEASE. A failure here is a defect an outside user hits on install.\n'

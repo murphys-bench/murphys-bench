@@ -40,8 +40,18 @@ is queued/running it polls itself every 3s; terminal states stop polling.
         verifying, and the service may not be running the code you see here. Do not press
         Update again.
       </p>
-      <p class="mt-2">Recover from a terminal on this machine:</p>
-      <pre class="mt-1 text-xs bg-gray-900 text-gray-100 rounded-md p-3 overflow-x-auto">git pull &amp;&amp; scripts/install.sh</pre>
+      <p class="mt-2">
+        The new code is already here — what failed is the install around it. Finish it
+        from a terminal on this machine, in the install directory:
+      </p>
+      {% comment %}
+      Deliberately NOT `git pull`. update.sh deploys with `git checkout --detach`, so
+      every box that has ever used this button is on a detached HEAD, where `git pull`
+      exits 1 with "You are not currently on a branch". install.sh does no git
+      operations at all — it installs whatever tree is present, which on a stranded box
+      is already the target. Nothing needs fetching here.
+      {% endcomment %}
+      <pre class="mt-1 text-xs bg-gray-900 text-gray-100 rounded-md p-3 overflow-x-auto">scripts/install.sh</pre>
       <p class="mt-2">The log below is from this failure.</p>
     </div>
   {% elif update_status.stale %}
