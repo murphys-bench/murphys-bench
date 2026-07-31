@@ -839,6 +839,14 @@ class Ticket(models.Model):
         the matching default isn't configured (tickets stay clock-less, same
         as today, until an admin sets one).
         """
+        # MB's own alerts are not customer work and have no response SLA. The
+        # "System Alerts" client is created with the model default client_type,
+        # 'residential', so on any shop that had set a residential default every
+        # failed backup got a 24-hour response clock, turned red when nobody
+        # "answered" it, and counted as a miss in the SLA compliance report. Our
+        # monitoring degraded the metric it exists to protect.
+        if self.source == 'system':
+            return
         site = SiteSettings.get()
         plan = (
             site.default_business_sla if self.client.client_type == 'business'

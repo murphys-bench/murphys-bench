@@ -8829,6 +8829,58 @@ def test_unit_templates_are_templates_not_baked_for_one_box():
     )
 
 
+
+# ── System alerts are the owner's, not the technicians' ─────────────────────
+# MB writes its own operational failures (failed backup, disk pressure, an
+# unhandled 500) into itself as tickets, so they land somewhere already watched.
+# They arrived unassigned, which put them in the unclaimed pool every technician
+# sees, on a client whose default type gave them a response SLA. So a Level-1 got
+# "Backup failed" in their queue with a clock ticking on it, could close it, and
+# the miss counted against the shop's own SLA compliance figure.
+
+@pytest.mark.django_db
+def test_system_alert_is_invisible_to_a_technician(client, django_user_model):
+    from core.system_alerts import create_system_alert
+    alert = create_system_alert('Backup failed: rclone auth error')
+
+    tech = django_user_model.objects.create_user(
+        username='l1tech', password='x' * 14, is_staff=False,
+    )
+    client.force_login(tech)
+
+    listing = client.get(reverse('core:ticket_list'))
+    assert alert.ticket_number not in listing.content.decode()
+    # And not reachable by guessing the URL either.
+    assert client.get(reverse('core:ticket_detail', args=[alert.pk])).status_code == 404
+
+
+@pytest.mark.django_db
+def test_system_alert_is_still_visible_to_an_admin(client, admin_user):
+    from core.system_alerts import create_system_alert
+    alert = create_system_alert('Disk nearly full on /')
+    client.force_login(admin_user)
+    assert client.get(reverse('core:ticket_detail', args=[alert.pk])).status_code == 200
+
+
+@pytest.mark.django_db
+def test_system_alert_gets_no_sla_clock_even_when_a_default_is_set():
+    """The System Alerts client is created with the default client_type
+    ('residential'), so before this fix a configured residential default stamped
+    a due_at on every alert and the alert went overdue on its own."""
+    from core.models import SLAPlan, SiteSettings
+    from core.system_alerts import create_system_alert
+
+    plan = SLAPlan.objects.create(name='Residential 24h', grace_period_hours=24)
+    site = SiteSettings.get()
+    site.default_residential_sla = plan
+    site.save()
+
+    alert = create_system_alert('Backup failed: destination unreachable')
+    assert alert.due_at is None
+    assert alert.sla_plan is None
+    assert alert.is_overdue is False
+
+
 def test_every_installed_config_in_deploy_is_a_template():
     """The check above only looked at *.service|timer|path, so a config with no
     such extension could still ship hardcoded — and one did. The logrotate config
