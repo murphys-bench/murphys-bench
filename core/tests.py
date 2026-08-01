@@ -2806,6 +2806,119 @@ def test_update_status_fragment_renders_states(client, admin_user, settings, tmp
 
 
 
+# ── Release-tag selection: a prerelease must never look like the latest release ──
+# Git's version sort ranks a prerelease ABOVE the release it precedes: with v0.10.0
+# and v0.10.0-rc1 both present, `--sort=-v:refname` and `sort -V` both pick the RC.
+# Every "what is the newest release" site used one of those unfiltered, so pushing a
+# single RC tag would have made every install in the field offer AND INSTALL a
+# prerelease as the latest release — and a pushed tag cannot be withdrawn once boxes
+# have fetched it. Found while about to push exactly such a tag.
+
+_TAG_LISTING = "\n".join([
+    'v1.0.0-beta',      # what -v:refname puts first, unfiltered
+    'v0.10.0-rc1',
+    'v0.10.0',          # the real answer
+    'v0.9.10',
+    'v0.9.0',
+])
+
+
+@pytest.mark.django_db
+def test_available_version_ignores_prerelease_tags(monkeypatch):
+    from core import update_ops
+    monkeypatch.setattr(update_ops, '_git', lambda *a: _TAG_LISTING)
+    assert update_ops.available_version() == 'v0.10.0'
+
+
+@pytest.mark.django_db
+def test_update_is_not_offered_for_a_prerelease(monkeypatch):
+    """The button must not light up because someone tagged a release candidate."""
+    from core import update_ops
+    monkeypatch.setattr(update_ops, '_git', lambda *a: _TAG_LISTING)
+    monkeypatch.setattr(update_ops, 'current_tag', lambda: 'v0.10.0')
+    assert update_ops.is_update_available() is False
+
+
+@pytest.mark.django_db
+def test_a_real_newer_release_is_still_offered(monkeypatch):
+    """The filter must not swallow genuine releases — including the non-rolling
+    scheme, where v0.9.10 is newer than v0.9.9 but older than v0.10.0."""
+    from core import update_ops
+    monkeypatch.setattr(update_ops, '_git', lambda *a: _TAG_LISTING)
+    monkeypatch.setattr(update_ops, 'current_tag', lambda: 'v0.9.10')
+    assert update_ops.is_update_available() is True
+    assert update_ops.available_version() == 'v0.10.0'
+
+
+def test_default_target_line_survives_a_prerelease_only_repo():
+    """EXECUTE update.sh's default-target line under its real shell flags.
+
+    The filter that excludes prereleases is a `grep`, and grep exits 1 when it
+    matches nothing — which is precisely the "only prerelease tags exist" case.
+    update.sh runs under `set -euo pipefail`, so without a guard the script dies at
+    the assignment and the explanatory failure on the NEXT line never runs. It
+    still fails closed, but the operator loses the one message written to explain
+    this exact situation.
+
+    The structural test above cannot see this: the pipeline looks correct. Only
+    running it under the script's own flags does.
+    """
+    import subprocess, tempfile, os
+    src = (_repo_root() / 'scripts' / 'update.sh').read_text()
+    line = next(ln.strip() for ln in src.splitlines()
+                if ln.strip().startswith('TARGET="$(git tag -l'))
+
+    with tempfile.TemporaryDirectory() as d:
+        run = lambda *c: subprocess.run(c, cwd=d, capture_output=True, text=True)
+        run('git', 'init', '-q', '.')
+        run('git', 'config', 'user.email', 't@t')
+        run('git', 'config', 'user.name', 't')
+        open(os.path.join(d, 'f'), 'w').write('x')
+        run('git', 'add', 'f')
+        run('git', 'commit', '-qm', 'x')
+        # ONLY prereleases — no strict vX.Y.Z tag anywhere.
+        for tag in ('v1.0.0-beta', 'v0.10.0-rc1'):
+            run('git', 'tag', tag)
+
+        script = f'set -euo pipefail\n{line}\n[ -n "$TARGET" ] || {{ echo REACHED_DIAGNOSTIC; exit 3; }}\necho "PICKED=$TARGET"\n'
+        out = subprocess.run(['bash', '-c', script], cwd=d,
+                             capture_output=True, text=True)
+
+    assert 'REACHED_DIAGNOSTIC' in out.stdout, (
+        'update.sh dies at the tag-selection assignment when only prerelease tags '
+        'exist, so its "no release tags exist yet" message never prints. '
+        f'stdout={out.stdout!r} rc={out.returncode}'
+    )
+    assert 'PICKED=' not in out.stdout, 'a prerelease was selected as the target'
+
+
+def test_every_newest_release_tag_site_filters_prereleases():
+    """update.sh, run_update.sh, verify_install.sh and the documented recovery
+    command each pick "the newest tag" independently. If one drifts, the UI offers
+    one version and the updater installs another. This is the check that would have
+    caught the original defect in any of them."""
+    root = _repo_root()
+    targets = [
+        root / 'scripts' / 'update.sh',
+        root / 'scripts' / 'run_update.sh',
+        root / 'scripts' / 'verify_install.sh',
+        root / 'CHANGELOG.md',
+    ]
+    offenders = []
+    for f in targets:
+        for i, line in enumerate(f.read_text().splitlines(), 1):
+            if line.lstrip().startswith('#') or line.lstrip().startswith('>' ) and 'git tag' not in line:
+                continue
+            if 'git tag -l' not in line:
+                continue
+            if 'v[0-9]' not in line:
+                offenders.append(f'{f.name}:{i}: {line.strip()}')
+    assert not offenders, (
+        'these pick a newest tag without excluding prereleases, so an RC tag would '
+        f'be treated as the latest release: {offenders}'
+    )
+
+
 # ── Update card: a result that no longer describes the box goes quiet ────────
 # A tester updated by hand after the in-app update failed, and was left staring
 # at a red "last update failed" banner on a box that was running the new release

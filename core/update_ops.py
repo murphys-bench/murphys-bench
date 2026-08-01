@@ -12,6 +12,7 @@ files. No sudo, no shell — git runs via list-form ``subprocess`` args with
 ``cwd=BASE_DIR``.
 """
 import json
+import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,10 +72,27 @@ def current_tag() -> str:
     return _git('describe', '--tags', '--abbrev=0', '--match', 'v*')
 
 
+#: A release tag is exactly vX.Y.Z. Anything else — v0.10.0-rc1, v1.0.0-beta — is
+#: NOT a release, and must never be offered as one. Git's version sort ranks a
+#: prerelease ABOVE the release it precedes, so an unfiltered "newest tag" would
+#: make one pushed RC tag look like the latest release to every install.
+_RELEASE_TAG_RE = re.compile(r'^v\d+\.\d+\.\d+$')
+
+
 def available_version() -> str:
-    """Newest local release tag ('' if no tags). Reflects the last fetch."""
+    """Newest local RELEASE tag ('' if none). Reflects the last fetch.
+
+    Prereleases are excluded deliberately — see ``_RELEASE_TAG_RE``. Kept in step
+    with ``scripts/update.sh`` and ``scripts/run_update.sh``, which apply the same
+    rule; if they disagree, the UI offers one version and the updater installs
+    another.
+    """
     out = _git('tag', '-l', 'v*', '--sort=-v:refname')
-    return out.splitlines()[0].strip() if out else ''
+    for line in out.splitlines():
+        tag = line.strip()
+        if _RELEASE_TAG_RE.match(tag):
+            return tag
+    return ''
 
 
 def fetch_tags() -> bool:

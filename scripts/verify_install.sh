@@ -488,7 +488,7 @@ else
     # 3) The alternative we DO print has to work. Fetch is safe; resolving the
     #    newest tag is the part that picks what install.sh would then build.
     if git -C "$APP" fetch --all --tags --quiet >/dev/null 2>&1 \
-       && newest="$(git -C "$APP" tag -l 'v*' --sort=-v:refname | head -1)" \
+       && newest="$(git -C "$APP" tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)" \
        && [ -n "$newest" ] \
        && git -C "$APP" rev-parse --verify --quiet "$newest^{commit}" >/dev/null; then
         ok "the documented recovery resolves a release to install ($newest)"
@@ -546,7 +546,7 @@ else
         # `git` are run, only inside a throwaway clone in a temp dir, and
         # scripts/install.sh is NOT run here (the rest of this gate performs a real
         # install). Anything else in the block is ignored rather than executed.
-        want="$(git -C "$APP" tag -l 'v*' --sort=-v:refname | head -1)"
+        want="$(git -C "$APP" tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
         base="$(git -C "$APP" tag -l 'v*' --sort=v:refname | head -1)"
         probe="$(mktemp -d)"
         if [ -z "$want" ] || [ -z "$base" ] || [ "$want" = "$base" ]; then
