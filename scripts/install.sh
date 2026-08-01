@@ -29,6 +29,15 @@
 #                          and will fail or fight your actual setup otherwise)
 #                      If none of that describes you, leave this off — it's what gets
 #                      you to a working login page without hand-editing config files.
+#                      ⚠ WHAT YOU GIVE UP: this flag also skips ALL of MB's systemd
+#                      deployment wiring and the sudoers rule — not only the parts that
+#                      need the web service. So on a --skip-web box there are NO scheduled
+#                      backups, NO inbound-email polling, NO SLA checks, and the in-app
+#                      "Back up now" and "Update" buttons cannot work, and MB's
+#                      logrotate config is not installed. You own all of that, INCLUDING
+#                      updates — scripts/update.sh is written for the standard
+#                      systemd+nginx contract and is not a safe update path here.
+#                      See the notes the installer prints at the end.
 #   --no-demo-data    start with an empty database. By default a fresh install is
 #                      seeded with obviously-fake demo data (see below) so the app
 #                      is usable immediately; pass this if you'd rather begin empty.
@@ -587,7 +596,32 @@ $(static_probe_hint "$code" | sed "s|STATICDIR|$APP/staticfiles|")"
     sudo tail -20 /var/log/nginx/error.log" ;;
     esac
 else
+    # Say what this costs AT THE MOMENT IT HAPPENS, not only in the closing summary.
+    # The whole class of defect this installer keeps hitting is a capability that is
+    # silently absent: the UI still offers the button, the button still writes its
+    # trigger file, and nothing consumes it — forever, with no error anywhere. Someone
+    # who passes this flag for a legitimate reason (their own nginx, their own process
+    # manager) has no way to know that decision also turned off backups.
     log "skipping web server setup (--skip-web) — app layer only"
+    cat >&2 <<'SKIPWEB'
+install: ⚠ --skip-web also skipped ALL of MB's systemd wiring and the sudoers rule.
+install:   That is a deliberate all-or-nothing policy, not a technical necessity. Only
+install:   the gunicorn unit, the Update button's path unit and the sudoers rule need
+install:   the service this run did not create; the backup, email and SLA jobs and the
+install:   Back up now one-shot only run scripts and do NOT depend on it. This
+install:   installer has no supported way to wire a subset, so it wires none and hands
+install:   you the whole deployment layer. The consequences are real and silent:
+install:     - NO scheduled backups          (murphys-bench-backup.timer)
+install:     - NO inbound email fetching     (murphys-bench-fetch-email.timer)
+install:     - NO SLA overdue checks         (murphys-bench-sla-check.timer)
+install:     - the in-app "Back up now" and "Update" buttons CANNOT work; they
+install:       write a trigger file that nothing on this box consumes
+install:     - NO log rotation for the gunicorn access/error, backup and update logs
+install:       (/etc/logrotate.d/murphys-bench is written by the same skipped step)
+install:   The buttons stay visible in the UI. Nothing will report these as missing.
+install:   You are now responsible for running the app, backing it up, rotating its
+install:   logs, and updating it with your own tooling.
+SKIPWEB
 fi
 
 # 11) Done.
@@ -660,5 +694,56 @@ else
 Web server setup was skipped (--skip-web). The app layer is ready at $APP —
 wire up your own process manager and reverse proxy to reach it, or re-run
 without --skip-web if this box turns out to be a normal systemd+nginx host.
+
+⚠ WHAT THIS INSTALL DOES NOT HAVE, and will never tell you about again:
+  - Scheduled backups, inbound email fetching and SLA checks are NOT running.
+    Those are systemd timers, and --skip-web installed no units.
+  - The in-app "Back up now" and "Update" buttons CANNOT work here. They write
+    a trigger file that a systemd .path unit is supposed to act on; there is no
+    such unit on this box, so the buttons spin and nothing happens.
+  - No sudoers rule was written. That one genuinely does depend on the service
+    this run did not create.
+  - Log rotation is NOT installed. /etc/logrotate.d/murphys-bench comes from the
+    same skipped step, so the gunicorn access/error logs, the backup log and the
+    update log will grow without limit unless you rotate them yourself. (The
+    Django app log self-rotates and is not affected.)
+  The buttons remain visible in the UI. Nothing monitors any of this.
+
+  To be straight about WHY all of it is skipped: it is one policy, not one reason.
+  Only three of these genuinely depend on a murphys-bench service this run did not
+  create — the gunicorn unit itself, the Update button's path unit (its updater ends
+  in 'systemctl restart murphys-bench'), and the sudoers rule. The other script
+  bodies do NOT depend on that service: the backup, inbound-email and SLA jobs just
+  run scripts, and the Back up now one-shot uses no sudo at all. Whether you can
+  schedule them depends on what this host runs, which is your call, not this
+  installer's — it has no supported way to wire a subset, so it wires none.
+
+  To run those jobs yourself, use these ABSOLUTE paths, as $RUN_USER, with the
+  working directory set to $APP (cron and hand-written units do NOT inherit it,
+  and a relative path here is a job that silently never runs):
+    $APP/scripts/backup_scheduler.sh
+    $APP/venv/bin/python $APP/manage.py fetch_inbound_email
+    $APP/venv/bin/python $APP/manage.py check_sla_overdue
+
+  For the in-app Back up now button, watch this file:
+    $APP/logs/backup-trigger
+  and on it appearing, run:
+    $APP/scripts/run_backup.sh
+
+  ⚠ scripts/update.sh is NOT a safe update path on this box. It is written for
+  the standard install: it checks and uses passwordless control of a
+  murphys-bench systemd service, restarts that service, health-checks the app at
+  http://127.0.0.1/ through nginx, and rolls back via restore.sh, which stops and
+  starts that same service. Run from a terminal it does NOT refuse — it asks for
+  your password and CONTINUES — so on a box without that contract it can change
+  the checkout and then fail at the restart or the health check, with a rollback
+  that hits the same missing service. Use your own deployment process instead.
+  scripts/update.sh is only appropriate here if you have deliberately provided
+  the same service-control and localhost health-check contract yourself.
+
+  If this box IS a normal systemd + nginx host and you passed --skip-web by
+  mistake, the fix is to re-run the installer without it:
+    cd $APP && scripts/install.sh
+  That is safe over an existing install and keeps your data and settings.
 DONE3
 fi

@@ -30,6 +30,47 @@ scripts/install.sh --skip-web
 
 That installs and initializes the application but leaves the Gunicorn, reverse-proxy, and TLS configuration to you.
 
+> **`--skip-web` turns off more than the web server.** It also skips *all* of Murphy's
+> Bench's systemd deployment wiring and the sudoers rule. That is an all-or-nothing
+> policy rather than a technical necessity. Only the Gunicorn unit, the **Update**
+> button's path unit and the sudoers rule depend on a `murphys-bench` service the run
+> does not create; the backup, inbound-email and SLA jobs only run scripts, and the
+> **Back up now** one-shot uses no sudo, so none of those four script bodies depends
+> on the missing service — whether you can schedule them depends on what your host
+> runs. The
+> installer has no supported way to wire a subset, so it wires none. On a `--skip-web`
+> box:
+>
+> - scheduled backups, inbound email fetching and SLA checks do **not** run;
+> - the in-app **Back up now** and **Update** buttons **cannot** work — they write a
+>   trigger file that a systemd path unit is meant to act on, and no such unit exists;
+> - log rotation is **not** installed — `/etc/logrotate.d/murphys-bench` comes from
+>   the same skipped step, so the Gunicorn access/error, backup and update logs grow
+>   without limit unless you rotate them yourself;
+> - the buttons stay visible in the UI, and nothing reports any of this as missing.
+>
+> You are responsible for running, backing up, rotating the logs of, and updating the
+> application. If you want the three schedulable jobs on a custom host, wire them
+> yourself against `scripts/backup_scheduler.sh`, `manage.py fetch_inbound_email` and
+> `manage.py check_sla_overdue` — **using absolute paths under your install directory
+> and running with that directory as the working directory.** Cron jobs and
+> hand-written units do not inherit it, and a relative path there is a job that
+> silently never runs. The installer prints the exact absolute commands for your
+> install at the end of a `--skip-web` run.
+>
+> **Use your own update process.** `scripts/update.sh` is built for the standard
+> systemd + nginx install: it checks and uses passwordless control of a
+> `murphys-bench` service, restarts it, health-checks the app at `http://127.0.0.1/`
+> through nginx, and rolls back via `restore.sh`, which stops and starts that same
+> service. Run from a terminal it does **not** refuse — it asks for your password and
+> continues — so on a box without that contract it can change the checkout and then
+> fail at the restart or health check, with a rollback that hits the same missing
+> service. It is only appropriate on a `--skip-web` box if you have deliberately
+> provided that same contract yourself.
+>
+> If you passed `--skip-web` by mistake on a normal systemd + nginx host, re-run
+> `scripts/install.sh` without it. That is safe over an existing install.
+
 ## Supported Installation
 
 The standard installer assumes:
