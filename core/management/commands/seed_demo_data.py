@@ -39,33 +39,13 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from core import factories
-from core.models import (
-    Asset, Client, Contract, Device, Estimate, Invoice, LineItem, Prospect,
-    Sale, SiteSettings, Ticket, WorkOrder,
-)
+from core import factories, operational_data
+from core.models import Invoice, LineItem, SiteSettings, Ticket, WorkOrder
 
-# Every model whose existence means "this shop has done real work here". The
-# clientless ones (Sale, Prospect, Device, WorkOrder) are the reason this list
-# exists at all: a walk-in-only shop has none of the client-shaped records the
-# guard used to look for.
-#
-# ⚠ This list and reset_operational_data's deletion list are maintained
-# separately today. Merging them into one registry is an open follow-up (review
-# finding 6) — until then, a new operational model needs adding in both places.
-_OPERATIONAL_MODELS = (
-    # The Unsorted/Unverified bucket is created automatically for inbound triage,
-    # so it is never evidence that a human has used this install.
-    ('client(s)', Client.objects.filter(is_unsorted=False)),
-    ('ticket(s)', Ticket.objects.all()),
-    ('work order(s)', WorkOrder.objects.all()),
-    ('device(s)', Device.objects.all()),
-    ('sale(s)', Sale.objects.all()),
-    ('estimate(s)', Estimate.objects.all()),
-    ('prospect(s)', Prospect.objects.all()),
-    ('contract(s)', Contract.objects.all()),
-    ('asset(s)', Asset.objects.all()),
-)
+# Which models count as evidence of real use now comes from core.operational_data,
+# the single registry reset_operational_data also reads. The clientless ones (Sale,
+# Prospect, Device, WorkOrder) are why the check cannot just count clients: a
+# walk-in-only shop has none of the client-shaped records the guard used to want.
 
 # Exit code meaning "declined, nothing changed" — distinct from a real failure so
 # the installer can report the two differently instead of calling everything a
@@ -135,7 +115,7 @@ class Command(BaseCommand):
         # The fallback that covers every install predating the marker, and any box
         # whose marker was never stamped. Counts operational data of ANY shape, not
         # just clients — see the module docstring for why clients alone was wrong.
-        counts = [(label, qs.count()) for label, qs in _OPERATIONAL_MODELS]
+        counts = [(label, qs.count()) for label, qs in operational_data.evidence_querysets()]
         nonempty = [f'{count} {label}' for label, count in counts if count]
         if nonempty:
             self._decline('this install already holds ' + ', '.join(nonempty))

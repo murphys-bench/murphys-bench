@@ -8,6 +8,37 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Fixed
+
+- **A reset that failed partway through destroyed attachment files anyway.**
+  `reset_operational_data` promised a clean rollback on failure, and delivered it for the
+  database only: it deleted attachment files from storage inside its transaction, so a
+  failure further down restored the attachment rows while their files were already gone.
+  Files are now unlinked only after the transaction commits, and a file that cannot be
+  removed is reported instead of failing the wipe.
+- **An admin who manages settings by role, not by Django staff status, got a 403 on the
+  email suppression list.** Both suppressed-address views kept a redundant `is_staff` check
+  inside a view already gated on superuser-or-`can_manage_settings`, which quietly narrowed
+  those two routes to staff only while every neighbouring settings page worked.
+
+### Changed
+
+- **The settings-route guard now checks the gate structurally, not just the response code.**
+  It accepted 404 and 405 as proof the gate had fired, so a view that forgot the admin mixin
+  entirely still passed if its placeholder id happened to 404 or it only accepted the other
+  HTTP method. It now asserts each settings view actually carries the mixin, with the one
+  deliberate exception named in code. Verified by planting exactly that regression: the old
+  check passed it, the new one fails it.
+- **What counts as operational data is declared once.** `seed_demo_data` (which decides
+  whether a box is already in real use) and `reset_operational_data` (which decides what to
+  wipe) kept separate hand-maintained lists of the same thing, so adding a model meant
+  remembering two files with nothing failing if you only remembered one. Both now read a
+  single registry, and a new model fails the suite until it is classified — a seeder that
+  misses one injects demo records into a working shop, and a reset that misses one leaves
+  real records behind while reporting the box clean.
+
 ## v0.10.0 — 2026-07-31
 
 > ## ⚠ Do not use the in-app Update button to install this release
