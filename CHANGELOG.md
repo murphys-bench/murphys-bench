@@ -13,7 +13,7 @@ the Unreleased entries move under that version and prod gets a single update.
 > ## ⚠ Do not use the in-app Update button to install this release
 >
 > If you are on v0.9.0 or earlier, your box does not have the service-control
-> rule this release adds — that is the bug being fixed. The Update button runs the
+> rule this release adds, and that is the bug being fixed. The Update button runs the
 > updater you already have, which does not know that, so it will start, fail at the
 > restart, fail again trying to roll back, and print MANUAL RECOVERY NEEDED. That
 > is exactly what a tester hit, and it is reproducible.
@@ -28,12 +28,12 @@ the Unreleased entries move under that version and prod gets a single update.
 > ```
 >
 > (If you have ever used the Update button, your checkout is detached from any
-> branch — that is how the updater deploys a release — so `git pull` will refuse
+> branch, which is how the updater deploys a release, so `git pull` will refuse
 > with "You are not currently on a branch". The commands above work either way.)
 >
 > It asks for your password once, is safe to run over an existing install, and
 > keeps your data and settings. **After this, the Update button works normally and
-> you never need the manual steps again** — and if the rule is ever missing, the
+> you never need the manual steps again**. If the rule is ever missing, the
 > updater now refuses up front and changes nothing rather than half-updating.
 
 ### Fixed
@@ -41,7 +41,7 @@ the Unreleased entries move under that version and prod gets a single update.
 - **A single release-candidate tag would have made every install offer and deploy a
   prerelease as the latest release.** Git's version sort ranks a prerelease *above*
   the release it precedes: with `v0.10.0` and `v0.10.0-rc1` both present, both
-  `git tag --sort=-v:refname` and `sort -V` pick the release candidate — and with a
+  `git tag --sort=-v:refname` and `sort -V` pick the release candidate, and with a
   `v1.0.0-beta` present, they pick that. Every place that decides "what is the newest
   release" used one of those unfiltered: the in-app Update button's target, the
   version the Updates page advertises, the updater's own default, the clean-room
@@ -51,18 +51,18 @@ the Unreleased entries move under that version and prod gets a single update.
   prerelease tag had ever been cut. All five now accept strictly `vX.Y.Z`, with a
   test that fails if any one of them drifts back.
 
-- **`--skip-web` installed, started and enabled nginx — the one thing it promises not
+- **`--skip-web` installed, started and enabled nginx, the one thing it promises not
   to touch.** The flag is documented as "don't touch gunicorn/nginx/systemd", and the
   later web setup is correctly skipped. But `nginx` sat in the installer's apt package
   list, which is gated on `--skip-apt` and never on `--skip-web`, and Ubuntu's nginx
   package starts and enables itself. So a `--skip-web` box ended up with an active,
   enabled nginx serving the default welcome page on port 80. On a server already
-  running Caddy, Traefik or a hand-maintained proxy — a documented reason to pass the
-  flag — that is a competing web server contending for the port the operator chose to
-  manage themselves, and on a non-systemd host it installs both. nginx is now
+  running Caddy, Traefik or a hand-maintained proxy, which is a documented reason to
+  pass the flag, that is a competing web server contending for the port the operator
+  chose to manage themselves, and on a non-systemd host it installs both. nginx is now
   installed only for the standard, web-managed path. Existing nginx installs are never
   removed, stopped or reconfigured. **Found by running the installer on a clean
-  machine, not by reading it** — five rounds of review of this same file, by two
+  machine, not by reading it**. Five rounds of review of this same file, by two
   readers, did not surface it.
 
 - **The in-app Update button could not work on any install but the author's, and
@@ -88,8 +88,8 @@ the Unreleased entries move under that version and prod gets a single update.
   Two rounds were needed here, and the first was wrong in a way worth recording.
   It granted only the restart, and an earlier draft of this changelog claimed it
   granted stop and start when it did not. Worse, the check written to verify it
-  used `sudo -n -l`, which asks whether a command is *permitted* — true for a
-  command permitted with a password — so on any box where the app user has
+  used `sudo -n -l`, which asks whether a command is *permitted*. That is true for a
+  command permitted with a password, so on any box where the app user has
   ordinary sudo it reported success whether or not the rule existed at all. Both
   were caught by an outside review, not by us. The check now runs a privileged
   command and reads sudo's own refusal.
@@ -100,45 +100,45 @@ the Unreleased entries move under that version and prod gets a single update.
   suppressed once the installed version no longer matches it; the log stays
   reachable.
 
-- **`--skip-web` silently turned off backups, email fetching, SLA checks and both
-  in-app buttons, and said nothing.** The flag is documented as "don't touch
-  gunicorn/nginx/systemd", and people pass it for good reasons — an existing nginx,
-  their own reverse proxy, a non-systemd host. But it also skips every systemd unit
-  and the sudoers rule, so a `--skip-web` install has no scheduled backups, no
-  inbound email polling, no SLA checks, and its **Back up now** and **Update**
-  buttons write a trigger file that nothing on the box consumes. The buttons stay
-  visible and nothing reports any of it. That is the same shape as the defect this
-  release fixes, one flag away. Skipping them stays correct as an all-or-nothing
-  policy — there is no supported way to wire a subset — so the fix is disclosure,
-  not behaviour, and the disclosure now says which parts genuinely need the missing
-  service (only the gunicorn unit, the Update button's path unit and the sudoers rule)
-  and which do not depend on that service (the backup, email and SLA script bodies,
-  and the Back up now one-shot, which uses no sudo — whether they can be scheduled
-  depends on the host, since `--skip-web` is also for boxes with no systemd at all),
-  with the ABSOLUTE commands to run them yourself
-  — printed with this install's real paths, because relative ones work when pasted
-  into a shell and fail silently in cron or a hand-written unit, which is the same
-  never-runs shape the warning exists to prevent. The
-  installer now warns at the moment it skips them and again in its closing summary,
-  naming each capability lost and who is now responsible for it, and the flag's
-  documentation in `INSTALL.md` says the same. That list also includes log rotation:
-  `/etc/logrotate.d/murphys-bench` is written by the same skipped step, so those logs
-  would otherwise grow without limit, silently. And it says plainly that
-  `scripts/update.sh` is **not** a safe update path on such a box — it is written for
-  the standard systemd + nginx contract, and run from a terminal it does not refuse,
-  it asks for a password and continues.
+- **`--skip-web` silently turned off backups, email fetching, SLA checks, log
+  rotation and both in-app buttons, and said nothing.** People pass this flag for good
+  reasons: an existing nginx, their own reverse proxy, a host that is not on systemd.
+  It also skips every systemd unit, the sudoers rule and the logrotate config, so such
+  an install has no scheduled backups, no inbound email polling, no SLA checks, no log
+  rotation, and its **Back up now** and **Update** buttons write a trigger file that
+  nothing on the box consumes. The buttons stay visible and nothing reports any of it,
+  which is the same silently-absent shape as the defect this release fixes.
+
+  The behaviour is unchanged and the fix is disclosure. Skipping all of it is a policy
+  rather than a necessity, and the warning now says so honestly: only the gunicorn
+  unit, the Update button's path unit and the sudoers rule actually depend on the
+  service a `--skip-web` run does not create. The backup, email and SLA jobs are just
+  scripts, and the Back up now one-shot uses no sudo at all, so nothing about those
+  four needs the missing service. Whether they can be scheduled depends on the host,
+  since this flag is also for boxes with no systemd. There is no supported way to wire
+  a subset, so the installer wires none and hands over the whole deployment layer.
+
+  The installer now says all of that at the moment it skips them and again in its
+  closing summary, naming each capability lost and who owns it. It prints the commands
+  to schedule those jobs by hand, as **absolute paths for this install**, with the
+  working directory named: a relative path works when pasted into a shell and fails
+  silently in cron or a hand-written unit, which is the same never-runs failure the
+  warning exists to prevent. It also states plainly that `scripts/update.sh` is **not**
+  a safe update path on such a box. That script assumes the standard systemd and nginx
+  contract, and run from a terminal it does not refuse: it asks for a password and
+  continues. `INSTALL.md` carries the same detail.
 
 - **The Updates page could go silent on exactly the box that most needed a warning.**
   Suppressing a stale result (above) assumed a failed update always rolls back, so
   the box returns to the version it started on. When the rollback fails too
   ("MANUAL RECOVERY NEEDED"), the box is stranded on the new version it never
-  finished verifying — which looked like "moved on since", so the failure banner
+  finished verifying, which looked like "moved on since", so the failure banner
   was hidden, the log was collapsed and labelled as an earlier attempt, and the
   page said "You're on the latest release." The update runner now records the
   updater's exit code, which is the only thing that tells a failed-but-rolled-back
   update apart from a failed rollback, and a stranded box gets an open log and an
   unmissable banner naming the recovery command. **This precision applies to
-  updates run on this release or later** — a status file written by an older
+  updates run on this release or later**. A status file written by an older
   version carries no exit code, and is still treated as stale rather than risking a
   false alarm on a healthy box.
 
@@ -146,6 +146,18 @@ the Unreleased entries move under that version and prod gets a single update.
   suppression rule above was introduced in this same release and has never shipped,
   so no existing install has ever been affected by it. This entry describes a defect
   found and fixed before release, not one anybody experienced.
+
+- **Recovering a broken box left the alarm sounding on it forever.** The
+  stranded-update banner tells the operator to run `scripts/install.sh`. Doing so
+  repairs the box completely, and the banner stayed, because the update runner was the
+  only thing that ever wrote the status file and the installer never touched it. So
+  following the instruction produced a healthy machine still displaying "the app may
+  be down", inviting the recovery to be run again. A successful install now clears a
+  terminal update result, and only a terminal one: a queued or running update is left
+  alone, because that status belongs to an update happening right now. The file is
+  removed rather than rewritten as a success, since the installer performed no update;
+  `logs/update.log` is untouched, so the detail of what went wrong survives. Found by
+  walking the documented recovery on a real box, and confirmed there after the fix.
 
 - **`ALLOWED_HOSTS` picked one address at random on a box with more than one
   network interface.** The installer took the first address `hostname -I` printed,
@@ -164,7 +176,7 @@ the Unreleased entries move under that version and prod gets a single update.
 - **The release gate now exercises rollback, not just a successful update.**
   A green update says nothing about the path that runs when one fails, which is
   the moment it matters and the moment a tester actually hit. The gate now drives
-  `restore.sh` — the real rollback — with no cached password and no controlling
+  `restore.sh`, the real rollback, with no cached password and no controlling
   terminal, and confirms the app comes back healthy afterwards.
 
 - **The release gate now runs an update instead of inspecting one.**
@@ -178,7 +190,7 @@ the Unreleased entries move under that version and prod gets a single update.
   that gate on every push.** It removes the runner's blanket passwordless sudo
   after installing, keeping only what the installer itself granted, so the job runs
   under the same privileges a real shop box has. Without that step it would pass on
-  a build that grants nothing — a green light for exactly the defect it exists to
+  a build that grants nothing, a green light for exactly the defect it exists to
   catch.
 
 ## v0.9.0 — 2026-07-30
