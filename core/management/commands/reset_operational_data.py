@@ -32,6 +32,8 @@ To actually delete, pass the exact confirmation phrase:
     python manage.py reset_operational_data --confirm "DELETE ALL OPERATIONAL DATA"
 
 Everything runs inside a single transaction, so a failure rolls back cleanly.
+Attachment FILES are removed only after that transaction commits — otherwise a
+rollback would restore rows whose files had already been deleted from storage.
 NEVER use `manage.py flush` for this — that destroys configuration too.
 """
 from django.core.management.base import BaseCommand
@@ -55,49 +57,19 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         # Imported here so the module loads even if models move around.
-        from auditlog.models import LogEntry
-        from core.models import (
-            Client, Contact, Device, Ticket, WorkOrder, Mileage, Attachment,
-            CustomFieldValue, EmailSendLog, InboundEmailLog,
-            DeviceCredentialAccessLog, User,
-            # Added Jul 30 2026. Every one of these postdates this command, and
-            # none of them cascade reliably from Client: Sale.client and
-            # Prospect have no required client, Estimate can anchor to a Prospect
-            # instead, and PaymentChargeAttempt/Notification point at rows being
-            # deleted. Proven before fixing: a seeded install cleared with this
-            # command still held SALE-00001 and its priced line item, while the
-            # docs and the installer both said everything was gone.
-            Sale, Estimate, EstimateOption, Prospect, Asset, Contract,
-            PaymentChargeAttempt, Notification, LineItem,
-        )
+        from core.models import Attachment, User
+        from core import operational_data
 
         keep_users = {u.strip() for u in options['keep_users'].split(',') if u.strip()}
         users_to_delete = User.objects.filter(is_superuser=False).exclude(username__in=keep_users)
 
-        # Snapshot counts up front (used for both dry-run and the post-run report).
-        counts = {
-            'Clients': Client.objects.count(),
-            'Contacts': Contact.objects.count(),
-            'Devices': Device.objects.count(),
-            'Tickets': Ticket.objects.count(),
-            'Work Orders': WorkOrder.objects.count(),
-            'Mileage entries': Mileage.objects.count(),
-            'Attachments (+ files)': Attachment.objects.count(),
-            'Custom-field values': CustomFieldValue.objects.count(),
-            'Email send logs': EmailSendLog.objects.count(),
-            'Inbound email logs': InboundEmailLog.objects.count(),
-            'Audit-log entries': LogEntry.objects.count(),
-            'Device cred access logs': DeviceCredentialAccessLog.objects.count(),
-            'Sales (counter/recurring)': Sale.objects.count(),
-            'Estimates (+ options)': Estimate.objects.count(),
-            'Prospects': Prospect.objects.count(),
-            'Managed contracts': Contract.objects.count(),
-            'Managed assets': Asset.objects.count(),
-            'Card-charge attempts': PaymentChargeAttempt.objects.count(),
-            'Notifications': Notification.objects.count(),
-            'Priced line items': LineItem.objects.count(),
-            'Non-superuser users': users_to_delete.count(),
-        }
+        # What is operational, and the order it is safe to delete in, both come
+        # from core.operational_data — the same registry seed_demo_data reads to
+        # decide whether a box is already in real use. These were two separately
+        # hand-maintained lists, and adding a model meant remembering both files
+        # with nothing failing if you only remembered one.
+        counts = {label: qs.count() for label, qs in operational_data.count_entries()}
+        counts['Non-superuser users'] = users_to_delete.count()
 
         confirmed = options['confirm'] == CONFIRM_PHRASE
 
@@ -139,53 +111,43 @@ class Command(BaseCommand):
             ))
             return
 
+        # Attachment FILES are deleted only AFTER the transaction commits. Deleting
+        # them inside it was a one-way door in the middle of a reversible operation:
+        # a failure further down rolled the rows back, but the files were already
+        # gone from storage, leaving restored Attachment rows pointing at nothing.
+        # Collect the storage references now, wipe the rows in the transaction, and
+        # only unlink the files once the DB change is durable.
+        files_to_unlink = [
+            (att.file.storage, att.file.name)
+            for att in Attachment.objects.all()
+            if att.file
+        ]
+
         with transaction.atomic():
-            # Attachments: delete files from storage first, then the rows
-            # (GenericFK rows are not cascade-deleted, and files outlive rows).
-            for att in Attachment.objects.all():
-                try:
-                    if att.file:
-                        att.file.delete(save=False)
-                except Exception:
-                    pass  # missing file shouldn't block the wipe
-            Attachment.objects.all().delete()
-
-            # GenericFK / SET_NULL survivors that won't cascade from Client
-            CustomFieldValue.objects.all().delete()
-            EmailSendLog.objects.all().delete()
-            InboundEmailLog.objects.all().delete()
-            LogEntry.objects.all().delete()
-            DeviceCredentialAccessLog.objects.all().delete()
-            Mileage.objects.all().delete()
-
-            # WorkOrder.client and Device.client are SET_NULL (walk-in/anonymous
-            # support), so they no longer cascade-delete from Client — wipe them
-            # explicitly first, including walk-in rows that never had a client.
-            WorkOrder.objects.all().delete()
-            Device.objects.all().delete()
-
-            # Sales, Estimates and Prospects can exist with NO client at all (a
-            # walk-in counter sale, a lead that was never promoted), and an Estimate
-            # may anchor to a Prospect rather than a Client — so none of them can be
-            # relied on to cascade. Delete explicitly, children first.
-            PaymentChargeAttempt.objects.all().delete()
-            EstimateOption.objects.all().delete()
-            Estimate.objects.all().delete()
-            Sale.objects.all().delete()
-            Prospect.objects.all().delete()
-            Contract.objects.all().delete()
-            Asset.objects.all().delete()
-            Notification.objects.all().delete()
-
-            # LineItem is a GenericForeignKey host-agnostic row. Its hosts are gone
-            # by now, so anything left is an orphan by definition.
-            LineItem.objects.all().delete()
-
-            # Clients cascade to contacts, tickets, and everything else under them
-            Client.objects.all().delete()
+            # Ordered by the registry's delete_order: GenericFK and SET_NULL rows
+            # first (walk-in work orders, devices, counter sales and leads never
+            # cascade from Client), children before parents, Client last because it
+            # cascades to contacts, tickets and everything under them.
+            for _label, model in operational_data.deletion_plan():
+                model.objects.all().delete()
 
             # Non-superuser users last (their personal queues cascade with them)
             users_to_delete.delete()
+
+        # Committed. The rows are gone for good, so the files can go too. A file
+        # that is already missing must not stop the rest from being cleaned up.
+        orphaned_files = 0
+        for storage, name in files_to_unlink:
+            try:
+                storage.delete(name)
+            except Exception:
+                orphaned_files += 1
+
+        if orphaned_files:
+            self.stdout.write(self.style.WARNING(
+                f'{orphaned_files} attachment file(s) could not be deleted from storage '
+                'and may remain on disk. The database rows were removed.'
+            ))
 
         self.stdout.write(self.style.SUCCESS(
             'Done. Operational data wiped; configuration and superusers preserved.'

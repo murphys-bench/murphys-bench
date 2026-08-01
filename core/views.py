@@ -6711,8 +6711,6 @@ def _repair_types_context():
 
 class SuppressedAddressAddView(SettingsAdminMixin, View):
     def post(self, request):
-        if not request.user.is_staff:
-            return HttpResponse('Forbidden', status=403)
         email = request.POST.get('email', '').strip().lower()
         reason = request.POST.get('reason', '').strip()
         if email:
@@ -6722,8 +6720,6 @@ class SuppressedAddressAddView(SettingsAdminMixin, View):
 
 class SuppressedAddressDeleteView(SettingsAdminMixin, View):
     def post(self, request, pk):
-        if not request.user.is_staff:
-            return HttpResponse('Forbidden', status=403)
         SuppressedAddress.objects.filter(pk=pk).delete()
         return redirect(f"{reverse('core:settings')}?tab=outbound")
 

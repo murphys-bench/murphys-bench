@@ -247,6 +247,75 @@ def test_reset_can_keep_named_user(client_obj, admin_user):
     assert not User.objects.filter(pk=drop.pk).exists()
 
 
+@pytest.mark.django_db
+def test_reset_keeps_attachment_files_when_the_transaction_rolls_back(client_obj, admin_user):
+    """A rolled-back reset must not have already destroyed the files on disk.
+
+    The command deleted attachment files from storage INSIDE its transaction, so
+    a failure further down rolled the rows back and left restored Attachment rows
+    pointing at files that no longer existed. The rollback advertised in the
+    command's own docstring was therefore only true of the database. Files are
+    now unlinked after the commit.
+    """
+    from unittest.mock import patch
+    from django.core.files.base import ContentFile
+    from django.core.management import call_command
+    from core import operational_data
+    from core.models import Attachment, Ticket
+
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    att = Attachment.objects.create(
+        content_object=ticket,
+        file=ContentFile(b'real customer file', name='invoice.pdf'),
+        uploaded_by=admin_user,
+    )
+    storage, name = att.file.storage, att.file.name
+    assert storage.exists(name)
+
+    # Fail late: let the real plan run, then blow up before the commit.
+    real_plan = operational_data.deletion_plan
+
+    class Exploding:
+        class objects:
+            @staticmethod
+            def all():
+                raise RuntimeError('disk full partway through the wipe')
+
+    def failing_plan():
+        return list(real_plan()) + [('Exploding', Exploding)]
+
+    with patch.object(operational_data, 'deletion_plan', failing_plan):
+        with pytest.raises(RuntimeError):
+            call_command('reset_operational_data', confirm='DELETE ALL OPERATIONAL DATA')
+
+    # Rows rolled back...
+    assert Attachment.objects.filter(pk=att.pk).exists()
+    # ...and the file they point at is still there, which is the actual fix.
+    assert storage.exists(name), 'attachment file was destroyed by a rolled-back reset'
+
+
+@pytest.mark.django_db
+def test_reset_deletes_attachment_files_on_success(client_obj, admin_user):
+    """The happy path must still actually remove the files, not just the rows."""
+    from django.core.files.base import ContentFile
+    from django.core.management import call_command
+    from core.models import Attachment, Ticket
+
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    att = Attachment.objects.create(
+        content_object=ticket,
+        file=ContentFile(b'demo data', name='photo.jpg'),
+        uploaded_by=admin_user,
+    )
+    storage, name = att.file.storage, att.file.name
+    assert storage.exists(name)
+
+    call_command('reset_operational_data', confirm='DELETE ALL OPERATIONAL DATA')
+
+    assert Attachment.objects.count() == 0
+    assert not storage.exists(name), 'attachment file survived a successful reset'
+
+
 # ── Conversation view: quoted-reply folding ─────────────────────────────────
 
 def test_split_reply_quote_separates_new_text_from_quote():
@@ -9367,34 +9436,152 @@ def test_every_settings_route_is_admin_only(client, db):
 
     Genuinely tech-facing endpoints must live OUTSIDE settings/ rather than being
     excepted here — the canned-response picker was moved out for exactly this.
+
+    ⚠ The check is STRUCTURAL (does the view class carry the mixin), not merely a
+    response-code check. Accepting 404/405 as "gate fired" was a hole: a view that
+    forgot the mixin entirely still passed if its placeholder pk of 1 happened to
+    404, or if it only accepted the other HTTP method. The response codes are still
+    asserted as a second layer, but they can no longer stand in for the gate.
     """
     from django.urls import get_resolver
     from core.models import Role
+    from core.views import SettingsAdminMixin
+
+    # The ONE deliberate exception, documented on the view itself: revealing an org
+    # credential is flag-gated (can_view_credentials) rather than admin-only, so a
+    # tech can read a shared shop password and be logged doing it. Named here so
+    # adding a second exception is a visible edit, not a silent drift.
+    STRUCTURAL_EXCEPTIONS = {'core:cred_reveal'}
 
     role = Role.objects.create(name='PlainTechRoutes')  # no can_manage_settings
     tech = User.objects.create_user(username='routetech', password='x', role_obj=role)
     client.force_login(tech)
 
-    checked, failures = 0, []
+    checked, failures, ungated = 0, [], []
     for pattern in get_resolver().url_patterns:
         for sub in getattr(pattern, 'url_patterns', [pattern]):
             route = str(sub.pattern)
             if not route.startswith('settings/'):
                 continue
-            # Build a concrete URL: substitute 1 for every int converter.
+            checked += 1
+
+            # Structural: the view class itself must carry the gate.
+            name = f'core:{sub.name}' if sub.name else str(sub.pattern)
+            view_class = getattr(sub.callback, 'view_class', None)
+            if name not in STRUCTURAL_EXCEPTIONS:
+                if view_class is None:
+                    ungated.append(f'{name} ({route}) is not a class-based view')
+                elif not issubclass(view_class, SettingsAdminMixin):
+                    ungated.append(f'{name} ({route}) -> {view_class.__name__} '
+                                   'does not inherit SettingsAdminMixin')
+
+            # Behavioural second layer: a tech must not actually get through.
             url = '/' + re.sub(r'<(int|str):[a-z_]+>', '1', route)
             if '<' in url:
                 continue
-            checked += 1
             for method in ('get', 'post'):
                 resp = getattr(client, method)(url)
                 # 403 = gate fired. 404/405 = route exists but not reachable this
-                # way, which is fine. Anything 2xx/3xx means a tech got through.
+                # way. Anything 2xx/3xx means a tech got through.
                 if resp.status_code not in (403, 404, 405):
                     failures.append(f'{method.upper()} {url} -> {resp.status_code}')
 
     assert checked >= 50, f'enumeration found only {checked} settings routes'
+    assert not ungated, 'settings routes missing SettingsAdminMixin:\n' + '\n'.join(ungated)
     assert not failures, 'non-admin reached settings routes:\n' + '\n'.join(failures)
+
+
+@pytest.mark.django_db
+def test_settings_admin_without_is_staff_can_manage_suppressed_addresses(client, db):
+    """A can_manage_settings admin must not be blocked by a leftover is_staff check.
+
+    Both suppressed-address views kept a hand-rolled `is_staff` check inside a
+    SettingsAdminMixin view. The mixin authorizes superuser OR the role flag, so
+    the inner check silently narrowed those two routes to Django-staff only: a
+    shop that delegates settings to a non-staff role admin got a 403 on the email
+    suppression list alone, with every neighbouring settings page working.
+    """
+    from core.models import Role, SuppressedAddress
+
+    role = Role.objects.create(name='SettingsAdmin', can_manage_settings=True)
+    admin = User.objects.create_user(username='rolesadmin', password='x', role_obj=role)
+    assert not admin.is_staff  # the whole point of the case
+    client.force_login(admin)
+
+    resp = client.post(reverse('core:suppressed_address_add'),
+                       {'email': 'noisy@example.com', 'reason': 'bounces'})
+    assert resp.status_code == 302
+    entry = SuppressedAddress.objects.get(email='noisy@example.com')
+
+    resp = client.post(reverse('core:suppressed_address_delete', args=[entry.pk]))
+    assert resp.status_code == 302
+    assert not SuppressedAddress.objects.filter(pk=entry.pk).exists()
+
+
+# ── Operational-data registry ───────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_operational_registry_classifies_every_model(db):
+    """Every core model must be classified as operational or explicitly not.
+
+    This is the forcing function that makes core.operational_data a registry
+    rather than a third hand-maintained list. seed_demo_data and
+    reset_operational_data used to keep separate lists of what counts as
+    operational data; adding a model meant remembering two files, and nothing
+    failed if you only remembered one. The consequences were asymmetric and both
+    bad: a seeder that misses a model injects demo records into a working shop,
+    and a reset that misses one leaves real records behind while telling the user
+    the box is clean.
+
+    So a new model now fails this test until someone decides which it is. Adding
+    it to NON_OPERATIONAL with a reason is a perfectly good answer — the point is
+    that the decision is made and visible, not that everything gets wiped.
+    """
+    from django.apps import apps
+    from core import operational_data
+
+    registered = {e.model for e in operational_data.REGISTRY}
+    classified = registered | set(operational_data.NON_OPERATIONAL)
+
+    unclassified = [
+        f'core.{model.__name__}'
+        for model in apps.get_app_config('core').get_models()
+        if f'core.{model.__name__}' not in classified
+    ]
+
+    assert not unclassified, (
+        'These core models are in neither core.operational_data.REGISTRY nor '
+        'NON_OPERATIONAL, so seed_demo_data and reset_operational_data both '
+        'ignore them:\n  ' + '\n  '.join(sorted(unclassified))
+    )
+
+
+@pytest.mark.django_db
+def test_operational_registry_deletion_plan_is_resolvable_and_ordered(db):
+    """The deletion plan must resolve to real models in a stable order.
+
+    A typo'd dotted path would otherwise surface only when someone ran a real
+    reset on a real box, which is the worst possible time to find out.
+    """
+    from core import operational_data
+
+    plan = operational_data.deletion_plan()
+    assert plan, 'deletion plan is empty'
+
+    # Client deletes last among the registry entries: it cascades to contacts,
+    # tickets and everything under them, so anything that must be deleted
+    # explicitly has to go first.
+    labels = [label for label, _model in plan]
+    assert labels[-1] == 'Clients', f'Clients must delete last, got {labels[-1]}'
+
+    # Every entry resolves (raises LookupError otherwise) and is a real model.
+    for _label, model in plan:
+        assert hasattr(model, 'objects'), f'{model} is not a manager-bearing model'
+
+    # Nothing that only cascades should be in the plan.
+    planned = {m.__name__ for _l, m in plan}
+    assert 'Contact' not in planned, 'Contact cascades from Client, do not delete it explicitly'
+    assert 'Ticket' not in planned, 'Ticket cascades from Client, do not delete it explicitly'
 
 
 @pytest.mark.django_db
