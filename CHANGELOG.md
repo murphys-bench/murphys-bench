@@ -51,6 +51,20 @@ the Unreleased entries move under that version and prod gets a single update.
   prerelease tag had ever been cut. All five now accept strictly `vX.Y.Z`, with a
   test that fails if any one of them drifts back.
 
+- **`--skip-web` installed, started and enabled nginx — the one thing it promises not
+  to touch.** The flag is documented as "don't touch gunicorn/nginx/systemd", and the
+  later web setup is correctly skipped. But `nginx` sat in the installer's apt package
+  list, which is gated on `--skip-apt` and never on `--skip-web`, and Ubuntu's nginx
+  package starts and enables itself. So a `--skip-web` box ended up with an active,
+  enabled nginx serving the default welcome page on port 80. On a server already
+  running Caddy, Traefik or a hand-maintained proxy — a documented reason to pass the
+  flag — that is a competing web server contending for the port the operator chose to
+  manage themselves, and on a non-systemd host it installs both. nginx is now
+  installed only for the standard, web-managed path. Existing nginx installs are never
+  removed, stopped or reconfigured. **Found by running the installer on a clean
+  machine, not by reading it** — five rounds of review of this same file, by two
+  readers, did not surface it.
+
 - **The in-app Update button could not work on any install but the author's, and
   a failed update left the box in a bad state.** `update.sh` restarts the service
   with `sudo systemctl restart`, and the automatic rollback's restore stops and
@@ -85,6 +99,34 @@ the Unreleased entries move under that version and prod gets a single update.
   status file, so the red banner outlived the state it described. A result is now
   suppressed once the installed version no longer matches it; the log stays
   reachable.
+
+- **`--skip-web` silently turned off backups, email fetching, SLA checks and both
+  in-app buttons, and said nothing.** The flag is documented as "don't touch
+  gunicorn/nginx/systemd", and people pass it for good reasons — an existing nginx,
+  their own reverse proxy, a non-systemd host. But it also skips every systemd unit
+  and the sudoers rule, so a `--skip-web` install has no scheduled backups, no
+  inbound email polling, no SLA checks, and its **Back up now** and **Update**
+  buttons write a trigger file that nothing on the box consumes. The buttons stay
+  visible and nothing reports any of it. That is the same shape as the defect this
+  release fixes, one flag away. Skipping them stays correct as an all-or-nothing
+  policy — there is no supported way to wire a subset — so the fix is disclosure,
+  not behaviour, and the disclosure now says which parts genuinely need the missing
+  service (only the gunicorn unit, the Update button's path unit and the sudoers rule)
+  and which do not depend on that service (the backup, email and SLA script bodies,
+  and the Back up now one-shot, which uses no sudo — whether they can be scheduled
+  depends on the host, since `--skip-web` is also for boxes with no systemd at all),
+  with the ABSOLUTE commands to run them yourself
+  — printed with this install's real paths, because relative ones work when pasted
+  into a shell and fail silently in cron or a hand-written unit, which is the same
+  never-runs shape the warning exists to prevent. The
+  installer now warns at the moment it skips them and again in its closing summary,
+  naming each capability lost and who is now responsible for it, and the flag's
+  documentation in `INSTALL.md` says the same. That list also includes log rotation:
+  `/etc/logrotate.d/murphys-bench` is written by the same skipped step, so those logs
+  would otherwise grow without limit, silently. And it says plainly that
+  `scripts/update.sh` is **not** a safe update path on such a box — it is written for
+  the standard systemd + nginx contract, and run from a terminal it does not refuse,
+  it asks for a password and continues.
 
 - **The Updates page went silent on exactly the box that most needed a warning.**
   Suppressing a stale result (above) assumed a failed update always rolls back, so

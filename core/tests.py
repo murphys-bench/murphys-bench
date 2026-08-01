@@ -8946,6 +8946,100 @@ def _repo_root():
     return Path(__file__).resolve().parent.parent
 
 
+# ── --skip-web: the commands we print must be runnable where we tell people to run
+# them ─────────────────────────────────────────────────────────────────────────
+# A --skip-web install prints hand-wiring commands for the jobs it did not schedule.
+# The first version printed them RELATIVE ("venv/bin/python manage.py ..."), which
+# works when pasted into a shell sitting in the app directory and fails silently in
+# cron or a hand-written systemd unit, neither of which inherits that working
+# directory. That is the defect this whole warning exists to prevent, reproduced
+# inside the fix for it.
+#
+# Prose is deliberately NOT asserted here — a grep for wording rots the moment the
+# wording improves, which PR #65 demonstrated over six review rounds. What is
+# asserted is a structural invariant: every command example in that block is an
+# absolute path under the install directory.
+
+def _skip_web_summary(app='/opt/mb-test-render'):
+    """Render install.sh's --skip-web closing block with a known APP."""
+    import subprocess
+    src = (_repo_root() / 'scripts' / 'install.sh').read_text()
+    start = src.index('    cat <<DONE3')
+    body_start = src.index('\n', start) + 1
+    end = src.index('\nDONE3\n', body_start) + len('\nDONE3\n')
+    script = f'APP={app}\nRUN_USER=mb\n' + src[start:end]
+    return subprocess.run(['bash', '-c', script], capture_output=True, text=True).stdout
+
+
+def test_skip_web_hand_wiring_commands_are_absolute():
+    app = '/opt/mb-test-render'
+    out = _skip_web_summary(app)
+    assert out.strip(), 'the --skip-web closing summary rendered nothing'
+
+    # Command examples are the indented lines naming a script or manage.py.
+    #
+    # A `cd <app> && ...` recipe is EXEMPT and that is not a loophole: it sets its
+    # own working directory, so a relative path after it resolves correctly. The
+    # invariant being protected is about commands handed to a SCHEDULER, which
+    # supplies no working directory of its own.
+    # Includes the WATCHED PATH, not only executables: the Back up now advice names
+    # a trigger file for a path unit to watch, and `logs/backup-trigger` relative
+    # would watch the wrong place — the same silent never-fires failure as a
+    # relative ExecStart. The reviewer spotted that this guard did not cover it.
+    examples = [ln.strip() for ln in out.splitlines()
+                if ln.startswith('    ')
+                and ('.sh' in ln or 'manage.py' in ln or 'trigger' in ln)]
+    examples = [ln for ln in examples
+                if not (ln.startswith('cd ') and '&&' in ln)]
+    assert examples, 'no command examples found in the --skip-web summary'
+
+    relative = [ln for ln in examples
+                if not all(tok.startswith(app) for tok in ln.split()
+                           if '/' in tok and not tok.startswith('-'))]
+    assert not relative, (
+        'these --skip-web instructions use relative paths, so they fail in cron or a '
+        f'hand-written unit: {relative}'
+    )
+
+
+def test_skip_web_summary_names_the_working_directory():
+    """Absolute paths alone are not enough — the trigger-watching advice and any
+    job a reader adapts still need the app dir as the working directory."""
+    app = '/opt/mb-test-render'
+    out = _skip_web_summary(app)
+    assert 'working directory' in out.lower()
+    assert app in out
+
+
+# ── --skip-web must not install a web server ────────────────────────────────
+# The apt block is gated on --skip-apt, so `nginx` sitting in its package list ran
+# even under --skip-web — whose whole promise is "don't touch gunicorn/nginx/
+# systemd". Ubuntu's nginx package starts and enables itself, so such an install
+# ended up with an active nginx on port 80, contending with whatever proxy the
+# operator passed the flag to keep. Found by running the installer on a clean VM;
+# reading the file five times did not surface it.
+#
+# Asserted structurally: nginx may only be added to the package list inside a
+# SKIP_WEB branch. Wording and package order can change freely.
+
+def test_skip_web_does_not_install_a_web_server():
+    src = (_repo_root() / 'scripts' / 'install.sh').read_text()
+    start = src.index('    pkgs=(')
+    end = src.index('apt install failed', start)
+    block = src[start:end]
+
+    base, conditional = block.split('if [ "$SKIP_WEB" = 0 ]; then', 1)
+    for server in ('nginx', 'apache2', 'caddy', 'lighttpd'):
+        assert server not in base, (
+            f'{server} is in the unconditional package list, so --skip-web would '
+            'install a web server it promises not to touch'
+        )
+    assert 'nginx' in conditional, (
+        'nginx is no longer installed for a standard install either — the normal '
+        'path needs it'
+    )
+
+
 def test_no_script_hardcodes_the_authors_install_path_or_user():
     """Executable lines in scripts/ must not name /opt/murphys-bench or scs-tech.
 
