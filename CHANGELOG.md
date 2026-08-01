@@ -38,6 +38,20 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ### Fixed
 
+- **`--skip-web` installed, started and enabled nginx — the one thing it promises not
+  to touch.** The flag is documented as "don't touch gunicorn/nginx/systemd", and the
+  later web setup is correctly skipped. But `nginx` sat in the installer's apt package
+  list, which is gated on `--skip-apt` and never on `--skip-web`, and Ubuntu's nginx
+  package starts and enables itself. So a `--skip-web` box ended up with an active,
+  enabled nginx serving the default welcome page on port 80. On a server already
+  running Caddy, Traefik or a hand-maintained proxy — a documented reason to pass the
+  flag — that is a competing web server contending for the port the operator chose to
+  manage themselves, and on a non-systemd host it installs both. nginx is now
+  installed only for the standard, web-managed path. Existing nginx installs are never
+  removed, stopped or reconfigured. **Found by running the installer on a clean
+  machine, not by reading it** — five rounds of review of this same file, by two
+  readers, did not surface it.
+
 - **The in-app Update button could not work on any install but the author's, and
   a failed update left the box in a bad state.** `update.sh` restarts the service
   with `sudo systemctl restart`, and the automatic rollback's restore stops and
