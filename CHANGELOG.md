@@ -8,7 +8,7 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
-## v0.10.1 — 2026-08-01
+## Unreleased
 
 ### Added
 
@@ -37,6 +37,8 @@ the Unreleased entries move under that version and prod gets a single update.
     mismatched key does not break anything visibly: the app starts normally and every
     stored credential is quietly unreadable. The restore now reads one encrypted field and
     tells you plainly if it could not decrypt it.
+
+## v0.10.1 — 2026-08-01
 
 ### Fixed
 
