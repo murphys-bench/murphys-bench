@@ -624,7 +624,43 @@ install:   logs, and updating it with your own tooling.
 SKIPWEB
 fi
 
-# 11) Done.
+# 11) Everything above succeeded, so any recorded update RESULT is now history.
+#
+# This runs only here, past every `fail` in the script, because the point is that
+# the install completed — a half-finished run must leave the record alone.
+#
+# WHY IT EXISTS: the stranded-update banner tells an operator to run this script.
+# They did, their box recovered fully — and the banner stayed, because
+# run_update.sh is the only writer of update-status.json and nothing ever cleared
+# it. So the one instruction we give a broken box left a permanent red "the app
+# may be down" warning on a healthy one, inviting them to run the recovery again.
+# Found by actually walking the release-note recovery on a real machine.
+#
+# The staleness rule cannot cover this: a stranded result is deliberately exempt
+# from it, because a stranded box genuinely IS on the target. So the successful
+# install is the observed recovery event, and the honest thing to key on.
+#
+# DELETED, not rewritten as "succeeded": this script did not perform an update,
+# and claiming one would be a different lie. read_status() then reports idle and
+# the card shows no banner. logs/update.log is untouched, so the detail of what
+# went wrong survives for a support conversation.
+#
+# Only terminal states are cleared. A `queued` or `running` file means a real
+# update is in flight right now, and removing it would strand the UI polling
+# forever with nothing to poll.
+STATUS_FILE="$APP/logs/update-status.json"
+if [ -f "$STATUS_FILE" ]; then
+    state="$("$VENV/python" -c "import json,sys;print(json.load(open(sys.argv[1])).get('state',''))" "$STATUS_FILE" 2>/dev/null || true)"
+    case "$state" in
+        succeeded|failed)
+            rm -f "$STATUS_FILE"
+            log "cleared the previous update result ($state) — this install supersedes it" ;;
+        queued|running)
+            log "leaving the in-flight update status ($state) alone" ;;
+    esac
+fi
+
+# 12) Done.
 cat <<DONE
 
 $(date '+%F %T') install: DONE

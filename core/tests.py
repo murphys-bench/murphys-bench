@@ -9064,6 +9064,66 @@ def test_skip_web_summary_names_the_working_directory():
 # Asserted structurally: nginx may only be added to the package list inside a
 # SKIP_WEB branch. Wording and package order can change freely.
 
+# ── A successful install clears a stale update RESULT ───────────────────────
+# The stranded-update banner tells the operator to run scripts/install.sh. They
+# did, on a real box; it recovered fully; and the banner stayed, because
+# run_update.sh is the only writer of update-status.json and nothing cleared it.
+# A permanent "the app may be down" warning on a healthy machine, inviting the
+# recovery to be run again.
+#
+# Exercised by RUNNING the installer's clearing block, not by inspecting it — the
+# defect it fixes was invisible to inspection for exactly that reason.
+
+def _run_install_clear_block(state, exit_code=None):
+    """Run install.sh's status-clearing block against a status file in `state`.
+
+    Returns (file_still_exists, stdout).
+    """
+    import subprocess, tempfile, json, os, sys
+    src = (_repo_root() / 'scripts' / 'install.sh').read_text()
+    start = src.index('STATUS_FILE="$APP/logs/update-status.json"')
+    end = src.index('\n# 12) Done.', start)
+    block = src[start:end]
+
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, 'logs'))
+        payload = {'state': state, 'from_version': 'v0.10.0', 'target': 'v0.10.1',
+                   'log_tail': 'MANUAL RECOVERY NEEDED'}
+        if exit_code is not None:
+            payload['exit_code'] = exit_code
+        status = os.path.join(d, 'logs', 'update-status.json')
+        with open(status, 'w') as f:
+            json.dump(payload, f)
+        script = (f'APP={d}\nVENV={os.path.dirname(sys.executable)}\n'
+                  'log() { echo "$*"; }\n' + block)
+        out = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+        return os.path.exists(status), out.stdout
+
+
+def test_successful_install_clears_a_stranded_failed_result():
+    """The exact state the live rehearsal left behind: failed, exit_code 2."""
+    exists, out = _run_install_clear_block('failed', exit_code=2)
+    assert not exists, (
+        'a stranded failed/exit_code:2 result survived a successful install, so the '
+        'banner telling the operator to run it would never go away'
+    )
+    assert 'cleared' in out
+
+
+def test_successful_install_clears_a_succeeded_result():
+    exists, _ = _run_install_clear_block('succeeded')
+    assert not exists
+
+
+def test_successful_install_leaves_an_in_flight_update_alone():
+    """queued/running means an update is happening right now — removing the file
+    would leave the polling UI with nothing to poll."""
+    for state in ('queued', 'running'):
+        exists, out = _run_install_clear_block(state)
+        assert exists, f'{state} status was deleted; an in-flight update would lose its UI'
+        assert 'leaving' in out
+
+
 def test_skip_web_does_not_install_a_web_server():
     src = (_repo_root() / 'scripts' / 'install.sh').read_text()
     start = src.index('    pkgs=(')
