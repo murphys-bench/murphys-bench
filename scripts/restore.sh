@@ -35,10 +35,16 @@ log()  { echo "$(date '+%F %T') restore: $*"; }
 fail() { echo "RESTORE FAILED: $*" >&2; exit 1; }
 
 ARCHIVE="${1:-}"
-WITH_ENV=0
-[ "${2:-}" = "--with-env" ] && WITH_ENV=1
+# WITH_ENV: 1 = restore the bundled .env, 0 = keep the live one, auto = decide below.
+WITH_ENV=auto
+case "${2:-}" in
+    --with-env)    WITH_ENV=1 ;;
+    --keep-env)    WITH_ENV=0 ;;
+    '')            ;;
+    *)             fail "unknown option: $2" ;;
+esac
 
-[ -n "$ARCHIVE" ] || fail "usage: scripts/restore.sh <backup.tar.gz> [--with-env]"
+[ -n "$ARCHIVE" ] || fail "usage: scripts/restore.sh <backup.tar.gz> [--with-env|--keep-env]"
 [ -f "$ARCHIVE" ]  || fail "no such tarball: $ARCHIVE"
 [ -f manage.py ]   || fail "no manage.py in $APP — wrong directory?"
 
@@ -103,7 +109,23 @@ log "database restored"
 if [ -d "$WORK/protected" ]; then rm -rf "$APP/protected"; cp -a "$WORK/protected" "$APP/protected"; log "protected/ restored"; fi
 if [ -d "$WORK/media" ];     then rm -rf "$APP/media";     cp -a "$WORK/media"     "$APP/media";     log "media/ restored";     fi
 
-#    .env only on explicit request.
+#    .env: automatic unless the caller forced it either way.
+#
+#    Rebuilding on a fresh box has no live .env, so the bundled one is the only
+#    key that can decrypt what was just restored — requiring a flag there meant a
+#    disaster recovery failed on a forgotten argument. Rolling back on the SAME
+#    box is the opposite: the live .env is current and overwriting it with an old
+#    one would replace working secrets. So "automatic" means adopt the bundled
+#    .env only when there is nothing to lose, never silently over a live file.
+if [ "$WITH_ENV" = auto ]; then
+    if [ ! -f "$APP/.env" ] && [ -f "$WORK/.env" ]; then
+        WITH_ENV=1
+        log "no live .env on this box — using the one bundled in the archive (fresh-box restore)"
+    else
+        WITH_ENV=0
+    fi
+fi
+
 if [ "$WITH_ENV" = 1 ]; then
     [ -f "$WORK/.env" ] || fail "--with-env given but no .env in archive (current state preserved in $SAFE)"
     cp -p "$WORK/.env" "$APP/.env"
@@ -140,9 +162,53 @@ echo "⚠ ENCRYPTION KEY CHECK"
 echo "  Encrypted fields (device/org credentials, the Invoice Ninja token, mailbox"
 echo "  passwords) only decrypt if FIELD_ENCRYPTION_KEY in .env MATCHES the key that was"
 echo "  in use when this backup was taken."
-if [ "$WITH_ENV" = 1 ]; then
-    echo "  You restored the bundled .env, so the key matches this backup."
-else
-    echo "  You kept the live .env. If credentials now look garbled, restore the matching"
-    echo "  key from Bitwarden, or re-run with --with-env to use the bundled .env."
-fi
+
+# Actually TEST it rather than telling the user to watch for garbled credentials.
+# A wrong key does not break the app — it comes up fine and every secret is
+# quietly unreadable, which is exactly the kind of thing nobody notices until
+# they need a password. Reads one populated encrypted field and reports.
+KEYCHECK="$("$APP/venv/bin/python" - <<'PY' 2>/dev/null || echo 'error'
+import os, django
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'murphys_bench.settings')
+django.setup()
+from core.models import Device, OrgCredential, SiteSettings
+
+def probe():
+    for qs, field in (
+        (Device.objects.exclude(device_password=''), 'device_password'),
+        (OrgCredential.objects.exclude(password=''), 'password'),
+        (SiteSettings.objects.exclude(email_password=''), 'email_password'),
+    ):
+        try:
+            row = qs.first()
+        except Exception:
+            return 'fail'
+        if row is None:
+            continue
+        try:
+            getattr(row, field)      # decryption happens on attribute access
+            return 'ok'
+        except Exception:
+            return 'fail'
+    return 'none'
+
+print(probe())
+PY
+)"
+
+case "$KEYCHECK" in
+    ok)   echo "  ✅ Checked: an encrypted field decrypted cleanly — the key matches this backup." ;;
+    none) echo "  ℹ No encrypted values are stored yet, so there was nothing to check." ;;
+    *)    echo
+          echo "  ⛔ ENCRYPTED DATA WILL NOT DECRYPT WITH THE CURRENT KEY."
+          echo "     The restore itself succeeded and the app is running, but every stored"
+          echo "     credential is unreadable: device and org passwords, the Invoice Ninja"
+          echo "     token, mailbox passwords."
+          echo "     Fix: put the FIELD_ENCRYPTION_KEY that was in use when this backup was"
+          echo "     taken into .env (Bitwarden), or re-run with --with-env to use the .env"
+          echo "     bundled in the archive. Then restart: sudo $SYSTEMCTL restart murphys-bench"
+          # Deliberately NOT a failure exit: the data IS restored and re-running
+          # would not help. Undoing a good restore over a key problem would be
+          # the worse outcome, so this is reported loudly and left to the operator.
+          ;;
+esac

@@ -7009,6 +7009,70 @@ class BackupRunView(SettingsAdminMixin, View):
         return render(request, 'core/partials/backup_status.html', _backup_status_context())
 
 
+def _restore_status_context():
+    from . import restore_ops
+    return {'restore_status': restore_ops.read_status(),
+            'restore_running': restore_ops.is_running()}
+
+
+class RestoreArchivesView(SettingsAdminMixin, View):
+    """HTMX: list restorable archives. Deliberately lazy-loaded behind a button
+    rather than rendered with the Settings page, because listing a destination
+    means an rclone round trip to a NAS or S3 — putting that on every Settings
+    page load would make an unrelated page slow, or hang it when the destination
+    is unreachable."""
+
+    def get(self, request):
+        from . import restore_ops
+        site = SiteSettings.get()
+        archives, errors = restore_ops.list_archives(site)
+        return render(request, 'core/partials/restore_archives.html',
+                      {'archives': archives, 'archive_errors': errors,
+                       **_restore_status_context()})
+
+
+class RestoreStatusView(SettingsAdminMixin, View):
+    """HTMX-polled fragment for an in-progress or finished restore.
+
+    ⚠ The app is STOPPED partway through a restore, so this poll will fail for a
+    few seconds mid-run. That is expected, not an error: the status lives in a
+    file written by the out-of-band one-shot, so it survives the restart and the
+    panel picks up again once gunicorn is back.
+    """
+
+    def get(self, request):
+        return render(request, 'core/partials/restore_status.html',
+                      _restore_status_context())
+
+
+class RestoreRunView(SettingsAdminMixin, View):
+    """Queue an out-of-band restore of a chosen archive. Admin only.
+
+    The restore itself runs via a systemd .path unit: scripts/restore.sh stops
+    the service, and a gunicorn worker cannot stop the server running it. The
+    archive name is validated in restore_ops before it is written to the trigger
+    and again in the wrapper — it ends up in a shell script, so a bare backup
+    filename is the only thing either will accept.
+    """
+
+    def post(self, request):
+        from . import restore_ops
+        source = request.POST.get('source', '')
+        archive = request.POST.get('archive', '')
+        try:
+            restore_ops.request_restore(source, archive)
+        except ValueError as exc:
+            messages.error(request, f'Restore not started: {exc}')
+        else:
+            messages.warning(
+                request,
+                f'Restoring from {archive}. Murphy\'s Bench will stop and restart '
+                'during this, so the page may be briefly unreachable.'
+            )
+        return render(request, 'core/partials/restore_status.html',
+                      _restore_status_context())
+
+
 class SettingsView(SettingsAdminMixin, View):
     """Native settings UI — admin/can_manage_settings only.
 

@@ -9548,6 +9548,232 @@ def test_settings_admin_without_is_staff_can_manage_suppressed_addresses(client,
     assert not SuppressedAddress.objects.filter(pk=entry.pk).exists()
 
 
+# ── In-app restore ──────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize('name', [
+    '../../etc/passwd',
+    'backups/../../../etc/shadow',
+    '/etc/passwd',
+    'mb-backup-20260801-120000.tar.gz; rm -rf /',
+    'mb-backup-$(whoami).tar.gz',
+    'mb-backup-20260801-120000.tar.gz ',
+    'evil.tar.gz',
+    'mb-backup-2026-08-01.tar.gz',
+    '',
+])
+def test_restore_refuses_anything_that_is_not_a_bare_archive_name(name):
+    """The archive name reaches a shell script, so the boundary must be strict.
+
+    An admin who can reach the restore view can already replace the database, so
+    this is not about privilege — it is about not letting a filename become an
+    arbitrary path or a second command.
+    """
+    from core import restore_ops
+    assert not restore_ops.is_valid_archive_name(name), f'accepted {name!r}'
+
+
+@pytest.mark.parametrize('name', [
+    'mb-backup-20260801-120000.tar.gz',
+    'preupdate-20260731-235959.tar.gz',
+])
+def test_restore_accepts_real_archive_names(name):
+    from core import restore_ops
+    assert restore_ops.is_valid_archive_name(name)
+
+
+@pytest.mark.django_db
+def test_restore_request_writes_trigger_and_rejects_bad_input(tmp_path, settings, admin_user):
+    """A valid request drops the trigger the .path unit watches; a bad one does not.
+
+    The trigger must be written LAST — its appearance is what starts the one-shot,
+    so a half-written request must never be able to fire one.
+    """
+    from unittest.mock import patch
+    from core import restore_ops
+
+    logs = tmp_path / 'logs'
+    logs.mkdir()
+    with patch.object(restore_ops.backup_ops, '_logs_dir', lambda: logs):
+        with pytest.raises(ValueError):
+            restore_ops.request_restore('offsite', '../../etc/passwd')
+        assert not restore_ops.trigger_path().exists(), 'a refused request still armed the trigger'
+
+        with pytest.raises(ValueError):
+            restore_ops.request_restore('somewhere-else', 'mb-backup-20260801-120000.tar.gz')
+        assert not restore_ops.trigger_path().exists()
+
+        restore_ops.request_restore('offsite', 'mb-backup-20260801-120000.tar.gz')
+        payload = json.loads(restore_ops.trigger_path().read_text())
+        assert payload == {'source': 'offsite', 'archive': 'mb-backup-20260801-120000.tar.gz'}
+        assert restore_ops.is_running()
+
+        # No second restore may be queued on top of a running one.
+        with pytest.raises(ValueError):
+            restore_ops.request_restore('local', 'mb-backup-20260801-130000.tar.gz')
+
+
+@pytest.mark.django_db
+def test_restore_refuses_a_submission_with_nothing_selected(client, admin_user, tmp_path):
+    """The disabled button is client-side only; the server must refuse too.
+
+    Choosing and restoring are two separate acts, so "restore" with no selection
+    is a real submission shape (JS off, a stale fragment, a crafted POST) and it
+    must not fall through to some default archive.
+    """
+    from unittest.mock import patch
+    from core import restore_ops
+
+    logs = tmp_path / 'logs'
+    logs.mkdir()
+    client.force_login(admin_user)
+    with patch.object(restore_ops.backup_ops, '_logs_dir', lambda: logs):
+        resp = client.post(reverse('core:restore_run'), {'source': '', 'archive': ''})
+        assert resp.status_code == 200
+        assert not restore_ops.trigger_path().exists()
+
+
+def test_restore_reads_the_backup_time_from_the_name_not_the_file():
+    """The user needs "how much work am I about to lose?", and a copy to a NAS or
+    S3 rewrites mtime — so the timestamp must come from the name mb_backup.sh
+    baked in."""
+    from core import restore_ops
+
+    dt = restore_ops.taken_at('mb-backup-20260801-184430.tar.gz')
+    assert dt is not None
+    assert (dt.year, dt.month, dt.day, dt.hour, dt.minute) == (2026, 8, 1, 18, 44)
+
+    assert restore_ops.taken_at('preupdate-20260731-235959.tar.gz') is not None
+    # Unparseable must degrade to None, never raise into the list view.
+    assert restore_ops.taken_at('mb-backup-20261301-999999.tar.gz') is None
+    assert restore_ops.taken_at('nonsense') is None
+    assert restore_ops.taken_at('') is None
+
+
+def test_restore_ui_separates_choosing_from_restoring():
+    """A per-row Restore button made picking the wrong backup and running it the
+    same click, on rows that are near-identical timestamps."""
+    from pathlib import Path
+    tpl = (Path(__file__).resolve().parent / 'templates' / 'core' / 'partials'
+           / 'restore_archives.html').read_text()
+
+    # Selection is its own control, and the action button is gated on it.
+    assert 'type="radio"' in tpl
+    assert ':disabled="!chosen' in tpl
+    # The confirmation names the chosen backup rather than asking a generic question.
+    assert 'chosenLabel' in tpl
+    # And the consequence is stated, including that it is not a one-click undo.
+    assert 'will be gone' in tpl
+    assert 'pre-restore' in tpl
+
+
+@pytest.mark.django_db
+def test_restore_views_are_admin_only(client, db):
+    """All three restore routes live under settings/ and must be gated."""
+    from core.models import Role
+
+    role = Role.objects.create(name='PlainTechRestore')  # no can_manage_settings
+    tech = User.objects.create_user(username='restoretech', password='x', role_obj=role)
+    client.force_login(tech)
+
+    assert client.get(reverse('core:restore_archives')).status_code == 403
+    assert client.get(reverse('core:restore_status')).status_code == 403
+    assert client.post(reverse('core:restore_run'),
+                       {'source': 'local',
+                        'archive': 'mb-backup-20260801-120000.tar.gz'}).status_code == 403
+
+
+@pytest.mark.django_db
+def test_restore_run_rejects_a_forged_archive_name_from_the_browser(client, admin_user, tmp_path):
+    """A crafted POST must not arm the trigger, and must say so rather than 500."""
+    from unittest.mock import patch
+    from core import restore_ops
+
+    logs = tmp_path / 'logs'
+    logs.mkdir()
+    client.force_login(admin_user)
+    with patch.object(restore_ops.backup_ops, '_logs_dir', lambda: logs):
+        resp = client.post(reverse('core:restore_run'),
+                           {'source': 'local', 'archive': '../../../etc/passwd'})
+        assert resp.status_code == 200
+        assert not restore_ops.trigger_path().exists()
+
+
+@pytest.mark.django_db
+def test_restore_archive_list_survives_an_unreachable_destination(tmp_path):
+    """One dead remote must not hide the archives sitting on the other one.
+
+    A restore screen is used on the worst day; a destination being unreachable is
+    exactly when it must still show what it can and say what it could not read.
+    """
+    from unittest.mock import patch
+    from core import restore_ops
+    from core.models import SiteSettings
+
+    site = SiteSettings.get()
+    backups = tmp_path / 'backups'
+    backups.mkdir()
+    (backups / 'mb-backup-20260801-120000.tar.gz').write_bytes(b'x')
+    (backups / 'not-a-backup.txt').write_bytes(b'x')
+
+    with patch.object(restore_ops, 'backups_dir', lambda: backups), \
+         patch.object(restore_ops, '_list_remote',
+                      lambda s, source: ([], f'Could not list {source}: host is down')):
+        archives, errors = restore_ops.list_archives(site)
+
+    assert [a['name'] for a in archives] == ['mb-backup-20260801-120000.tar.gz']
+    assert len(errors) == 2 and all('host is down' in e for e in errors)
+
+
+def test_restore_script_env_handling_is_automatic_and_safe():
+    """--with-env must be automatic on a fresh box and NEVER silent on a live one.
+
+    Adopting the bundled .env unconditionally would overwrite working secrets on a
+    same-box rollback; requiring a flag meant a fresh-box disaster recovery failed
+    on a forgotten argument. So: adopt only when there is no live .env.
+    """
+    from pathlib import Path
+    sh = Path(__file__).resolve().parent.parent / 'scripts' / 'restore.sh'
+    text = sh.read_text()
+    assert 'WITH_ENV=auto' in text
+    assert '--keep-env' in text, 'no way to force keeping the live .env'
+    # The auto branch must require BOTH "no live .env" and "archive has one".
+    assert '[ ! -f "$APP/.env" ] && [ -f "$WORK/.env" ]' in text
+    # And it must actually verify the key rather than telling the user to watch
+    # for garbled credentials.
+    assert 'ENCRYPTED DATA WILL NOT DECRYPT' in text
+
+
+def test_restore_units_are_templates_and_registered():
+    """The units must ship as templates AND be installed and gated.
+
+    A unit that exists in deploy/ but is never installed is the exact defect that
+    left in-app buttons spinning forever on every box but the author's.
+    """
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+
+    for unit in ('murphys-bench-restore.path', 'murphys-bench-restore.service'):
+        text = (root / 'deploy' / unit).read_text()
+        assert '__APP__' in text, f'{unit} is not a template'
+        assert '/opt/murphys-bench' not in text, f'{unit} hardcodes the author path'
+
+    installer = (root / 'scripts' / 'install_units.sh').read_text()
+    assert 'murphys-bench-restore.path' in installer
+    assert 'murphys-bench-restore.service' in installer
+
+    gate = (root / 'scripts' / 'verify_install.sh').read_text()
+    assert 'murphys-bench-restore.path' in gate, 'the clean-room gate does not check the restore unit'
+
+
+def test_run_restore_wrapper_revalidates_the_archive_name():
+    """Defence in depth: the wrapper is what turns the name into a path."""
+    from pathlib import Path
+    sh = Path(__file__).resolve().parent.parent / 'scripts' / 'run_restore.sh'
+    text = sh.read_text()
+    assert '^(mb-backup|preupdate)-[0-9]{8}-[0-9]{6}\\.tar\\.gz$' in text
+    assert 'RESTORE_YES=1' in text, 'the wrapper would hang on the interactive prompt'
+
+
 # ── Operational-data registry ───────────────────────────────────────────────
 
 @pytest.mark.django_db

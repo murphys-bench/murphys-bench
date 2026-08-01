@@ -1,0 +1,101 @@
+{% comment %}
+Restorable-archive list (Settings → Maintenance → Restore), loaded on demand by
+RestoreArchivesView. Lazy because listing a destination is an rclone round trip
+to a NAS or S3 — doing that on every Settings page load would make an unrelated
+page slow, or hang it when the destination is down.
+
+⚠ CHOOSING and RESTORING are deliberately two separate acts. A per-row "Restore"
+button made them one click, so picking the wrong backup and running it were the
+same mistake — and the rows are near-identical timestamps. Selection first, then
+an explicit button that names what was chosen, then the browser confirm.
+{% endcomment %}
+<div id="restore-archives" x-data="{ chosen: '', chosenLabel: '', chosenSource: '' }">
+
+  {% for err in archive_errors %}
+    <div class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-3 mb-3">
+      ⚠ {{ err }}
+    </div>
+  {% endfor %}
+
+  {% if archives %}
+    <div class="overflow-x-auto border border-gray-200 rounded-md">
+      <table class="min-w-full text-sm">
+        <thead class="bg-gray-50 text-gray-600">
+          <tr>
+            <th class="px-3 py-2"></th>
+            <th class="text-left px-3 py-2 font-medium">Taken</th>
+            <th class="text-left px-3 py-2 font-medium">Backup</th>
+            <th class="text-left px-3 py-2 font-medium">Where</th>
+            <th class="text-right px-3 py-2 font-medium">Size</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for a in archives %}
+            <tr class="hover:bg-gray-50 cursor-pointer"
+                @click="chosen='{{ a.name }}'; chosenSource='{{ a.source }}';
+                        chosenLabel='{{ a.taken_at|date:"j M Y, H:i"|default:a.name }}'">
+              <td class="px-3 py-2">
+                <input type="radio" name="archive_choice" value="{{ a.name }}"
+                       :checked="chosen === '{{ a.name }}'"
+                       @change="chosen='{{ a.name }}'; chosenSource='{{ a.source }}';
+                                chosenLabel='{{ a.taken_at|date:"j M Y, H:i"|default:a.name }}'">
+              </td>
+              <td class="px-3 py-2">
+                {% if a.taken_at %}
+                  {{ a.taken_at|date:"j M Y, H:i" }}
+                  <span class="text-gray-500">({{ a.taken_at|timesince }} ago)</span>
+                {% else %}
+                  <span class="text-gray-500">unknown</span>
+                {% endif %}
+              </td>
+              <td class="px-3 py-2 font-mono text-xs">{{ a.name }}</td>
+              <td class="px-3 py-2 text-gray-600">
+                {% if a.source == 'local' %}On this server{% elif a.source == 'onsite' %}Onsite{% else %}Offsite{% endif %}
+              </td>
+              <td class="px-3 py-2 text-right text-gray-600">{{ a.size|filesizeformat }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-4 text-sm rounded-md border border-red-200 bg-red-50 p-4 text-red-800">
+      <p class="font-medium">Restoring replaces everything on this server with the contents of the backup you pick.</p>
+      <p class="mt-1">
+        Any ticket, work order, client, invoice or uploaded file created <strong>after</strong> that
+        backup was taken will be gone. Your current data is copied to
+        <code>backups/pre-restore-&lt;timestamp&gt;/</code> first, but getting it back is a
+        command-line step, not a button — so treat this as one-way.
+      </p>
+      <p class="mt-1">Murphy's Bench stops and restarts, so it will be briefly unreachable.</p>
+    </div>
+
+    <form method="post" action="{% url 'core:restore_run' %}" class="mt-4"
+          hx-post="{% url 'core:restore_run' %}"
+          hx-target="#restore-status" hx-swap="outerHTML"
+          @submit="if (!confirm('Restore the backup taken ' + chosenLabel + '?\n\n' +
+                               'Everything created since then will be permanently gone, and ' +
+                               'Murphy\'s Bench will restart.')) $event.preventDefault()">
+      {% csrf_token %}
+      <input type="hidden" name="archive" :value="chosen">
+      <input type="hidden" name="source" :value="chosenSource">
+      <button type="submit"
+              :disabled="!chosen{% if restore_running %} || true{% endif %}"
+              :class="chosen{% if restore_running %} && false{% endif %}
+                      ? 'px-5 py-2 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700'
+                      : 'px-5 py-2 bg-gray-300 text-white text-sm font-medium rounded-md cursor-not-allowed'">
+        <span x-show="!chosen">Choose a backup above</span>
+        <span x-show="chosen" x-cloak>Restore the backup from <span x-text="chosenLabel"></span></span>
+      </button>
+    </form>
+  {% else %}
+    <div class="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-md p-4">
+      No backups found.
+      {% if not archive_errors %}
+        Backups are shipped to the destination configured above and the local copy is
+        deleted, so this list comes from that destination. If none is configured yet,
+        there is nothing to restore from.
+      {% endif %}
+    </div>
+  {% endif %}
+</div>

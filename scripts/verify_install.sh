@@ -84,6 +84,7 @@ UNITS_ENABLED=(
     murphys-bench.service
     murphys-bench-update.path
     murphys-bench-backup-now.path
+    murphys-bench-restore.path
     murphys-bench-backup.timer
     murphys-bench-fetch-email.timer
     murphys-bench-sla-check.timer
