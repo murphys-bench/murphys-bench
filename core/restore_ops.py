@@ -20,6 +20,7 @@ an arbitrary path.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import re
 import subprocess
@@ -56,6 +57,26 @@ def is_valid_archive_name(name: str) -> bool:
     return bool(name) and '/' not in name and ARCHIVE_RE.match(name) is not None
 
 
+def taken_at(name: str):
+    """When the backup was taken, read from its own filename.
+
+    Deliberately parsed from the name rather than the file's mtime or rclone's
+    ModTime: a copy to a NAS or S3 rewrites those, so the timestamp a user needs
+    ("how much work am I about to lose?") is the one mb_backup.sh baked into the
+    name. Returns an aware datetime, or None if it cannot be read.
+    """
+    from django.utils import timezone
+    m = re.search(r'(\d{8})-(\d{6})\.tar\.gz$', name or '')
+    if not m:
+        return None
+    try:
+        naive = datetime.datetime.strptime(m.group(1) + m.group(2), '%Y%m%d%H%M%S')
+    except ValueError:
+        return None
+    # mb_backup.sh stamps local server time.
+    return timezone.make_aware(naive, timezone.get_current_timezone())
+
+
 def read_status() -> dict:
     try:
         return json.loads(status_path().read_text())
@@ -82,7 +103,8 @@ def _list_local() -> list[dict]:
     out = []
     for p in d.iterdir():
         if p.is_file() and is_valid_archive_name(p.name):
-            out.append({'source': 'local', 'name': p.name, 'size': p.stat().st_size})
+            out.append({'source': 'local', 'name': p.name, 'size': p.stat().st_size,
+                        'taken_at': taken_at(p.name)})
     return out
 
 
@@ -114,7 +136,8 @@ def _list_remote(site, source: str) -> tuple[list[dict], str]:
     for row in rows:
         name = row.get('Name') or ''
         if is_valid_archive_name(name):
-            out.append({'source': source, 'name': name, 'size': row.get('Size') or 0})
+            out.append({'source': source, 'name': name, 'size': row.get('Size') or 0,
+                        'taken_at': taken_at(name)})
     return out, ''
 
 

@@ -18,6 +18,11 @@ the Unreleased entries move under that version and prod gets a single update.
   the app could not do. The restore runs out-of-band, the same way the Update button does,
   because it has to stop and start Murphy's Bench and a web request cannot stop the server
   answering it. Your current data is copied aside first.
+  - **Choosing a backup and restoring it are two separate steps.** You select a backup,
+    then press a button that names the one you picked and states plainly that everything
+    created since it will be gone. The rows are near-identical timestamps, so a Restore
+    button on each row would have made picking the wrong one and running it the same
+    click. Each backup shows when it was taken and how long ago.
   - The list reads the backup destination rather than the server's own disk, because a
     backup is shipped off-box and the local copy deleted — a list of local files would be
     empty on a healthy box. If a destination is unreachable it says so and still shows

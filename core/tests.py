@@ -9613,6 +9613,60 @@ def test_restore_request_writes_trigger_and_rejects_bad_input(tmp_path, settings
 
 
 @pytest.mark.django_db
+def test_restore_refuses_a_submission_with_nothing_selected(client, admin_user, tmp_path):
+    """The disabled button is client-side only; the server must refuse too.
+
+    Choosing and restoring are two separate acts, so "restore" with no selection
+    is a real submission shape (JS off, a stale fragment, a crafted POST) and it
+    must not fall through to some default archive.
+    """
+    from unittest.mock import patch
+    from core import restore_ops
+
+    logs = tmp_path / 'logs'
+    logs.mkdir()
+    client.force_login(admin_user)
+    with patch.object(restore_ops.backup_ops, '_logs_dir', lambda: logs):
+        resp = client.post(reverse('core:restore_run'), {'source': '', 'archive': ''})
+        assert resp.status_code == 200
+        assert not restore_ops.trigger_path().exists()
+
+
+def test_restore_reads_the_backup_time_from_the_name_not_the_file():
+    """The user needs "how much work am I about to lose?", and a copy to a NAS or
+    S3 rewrites mtime — so the timestamp must come from the name mb_backup.sh
+    baked in."""
+    from core import restore_ops
+
+    dt = restore_ops.taken_at('mb-backup-20260801-184430.tar.gz')
+    assert dt is not None
+    assert (dt.year, dt.month, dt.day, dt.hour, dt.minute) == (2026, 8, 1, 18, 44)
+
+    assert restore_ops.taken_at('preupdate-20260731-235959.tar.gz') is not None
+    # Unparseable must degrade to None, never raise into the list view.
+    assert restore_ops.taken_at('mb-backup-20261301-999999.tar.gz') is None
+    assert restore_ops.taken_at('nonsense') is None
+    assert restore_ops.taken_at('') is None
+
+
+def test_restore_ui_separates_choosing_from_restoring():
+    """A per-row Restore button made picking the wrong backup and running it the
+    same click, on rows that are near-identical timestamps."""
+    from pathlib import Path
+    tpl = (Path(__file__).resolve().parent / 'templates' / 'core' / 'partials'
+           / 'restore_archives.html').read_text()
+
+    # Selection is its own control, and the action button is gated on it.
+    assert 'type="radio"' in tpl
+    assert ':disabled="!chosen' in tpl
+    # The confirmation names the chosen backup rather than asking a generic question.
+    assert 'chosenLabel' in tpl
+    # And the consequence is stated, including that it is not a one-click undo.
+    assert 'will be gone' in tpl
+    assert 'pre-restore' in tpl
+
+
+@pytest.mark.django_db
 def test_restore_views_are_admin_only(client, db):
     """All three restore routes live under settings/ and must be gated."""
     from core.models import Role
