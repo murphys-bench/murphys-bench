@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch for an in-app Murphy's Bench restore request
+
+[Path]
+# The admin UI drops this file (core/restore_ops.request_restore); its appearance
+# starts murphys-bench-restore.service. PathExists (not PathChanged) means the
+# wrapper deleting the file at the end doesn't re-fire — a fresh file = one run.
+PathExists=__APP__/logs/restore-trigger
+
+[Install]
+WantedBy=multi-user.target

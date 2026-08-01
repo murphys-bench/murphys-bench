@@ -1,0 +1,18 @@
+[Unit]
+Description=Murphy's Bench in-app restore (runs scripts/restore.sh out-of-band)
+
+[Service]
+Type=oneshot
+User=__RUN_USER__
+Group=__RUN_GROUP__
+WorkingDirectory=__APP__
+# Launched by murphys-bench-restore.path when the admin UI drops the trigger
+# file. MUST be out-of-band: restore.sh STOPS murphys-bench, and a gunicorn
+# worker cannot stop the server that is running it — the same reason the in-app
+# Update button works this way. No new sudo; the service stop/start is already
+# in the passwordless grant update.sh uses.
+ExecStart=__APP__/scripts/run_restore.sh
+TimeoutStartSec=3600
+
+[Install]
+WantedBy=multi-user.target

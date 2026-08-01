@@ -10,6 +10,29 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+### Added
+
+- **Restore from a backup in the app.** Settings → Maintenance → Restore lists the backups
+  on your configured destination and restores one. Until now recovering a backup was a
+  command-line job, which meant the one thing you need on your worst day was the one thing
+  the app could not do. The restore runs out-of-band, the same way the Update button does,
+  because it has to stop and start Murphy's Bench and a web request cannot stop the server
+  answering it. Your current data is copied aside first.
+  - The list reads the backup destination rather than the server's own disk, because a
+    backup is shipped off-box and the local copy deleted — a list of local files would be
+    empty on a healthy box. If a destination is unreachable it says so and still shows
+    what it could read.
+  - **`scripts/restore.sh` no longer needs `--with-env`.** Rebuilding on a fresh box now
+    picks up the encryption key bundled in the archive automatically, because that is the
+    only key that can read what was just restored and a disaster recovery should not fail
+    on a forgotten argument. Rolling back on the same box still keeps the live `.env`, so
+    working secrets are never silently overwritten. Force either with `--with-env` or
+    `--keep-env`.
+  - **A restore now tests the encryption key instead of warning you to watch for it.** A
+    mismatched key does not break anything visibly: the app starts normally and every
+    stored credential is quietly unreadable. The restore now reads one encrypted field and
+    tells you plainly if it could not decrypt it.
+
 ### Fixed
 
 - **A reset that failed partway through destroyed attachment files anyway.**

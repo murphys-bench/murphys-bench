@@ -217,6 +217,9 @@ urlpatterns = [
     path('settings/updates/changelog/', views.UpdateChangelogView.as_view(), name='update_changelog'),
     path('settings/backups/test/<str:which>/', views.BackupTestView.as_view(), name='backup_test'),
     path('settings/backups/status/', views.BackupStatusView.as_view(), name='backup_status'),
+    path('settings/restore/archives/', views.RestoreArchivesView.as_view(), name='restore_archives'),
+    path('settings/restore/status/', views.RestoreStatusView.as_view(), name='restore_status'),
+    path('settings/restore/run/', views.RestoreRunView.as_view(), name='restore_run'),
     path('settings/backups/run/', views.BackupRunView.as_view(), name='backup_run'),
 
     # Settings — Repair Types CRUD
