@@ -194,7 +194,13 @@ else
     # the in-app Update button deploys, pushing a single release-candidate tag
     # would hand every install in the field a prerelease as "the latest release",
     # and a pushed tag cannot be withdrawn once boxes have seen it.
-    TARGET="$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+    # `|| true` is load-bearing. This script runs under `set -euo pipefail`, and
+    # grep exits 1 when nothing matches — which is exactly the "only prerelease
+    # tags exist" case. Without it the script dies HERE, silently, and the
+    # explanatory failure on the next line never runs. It still fails closed
+    # either way; the cost is the diagnostic, which is the whole reason that line
+    # exists.
+    TARGET="$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)"
     [ -n "$TARGET" ] || fail "no release tags exist yet. Create one with scripts/release.sh \
 (on your dev machine, after CI is green), or pass an explicit ref to deploy untagged \
 code, e.g.: scripts/update.sh main"

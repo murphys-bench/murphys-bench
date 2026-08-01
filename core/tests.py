@@ -2850,6 +2850,48 @@ def test_a_real_newer_release_is_still_offered(monkeypatch):
     assert update_ops.available_version() == 'v0.10.0'
 
 
+def test_default_target_line_survives_a_prerelease_only_repo():
+    """EXECUTE update.sh's default-target line under its real shell flags.
+
+    The filter that excludes prereleases is a `grep`, and grep exits 1 when it
+    matches nothing — which is precisely the "only prerelease tags exist" case.
+    update.sh runs under `set -euo pipefail`, so without a guard the script dies at
+    the assignment and the explanatory failure on the NEXT line never runs. It
+    still fails closed, but the operator loses the one message written to explain
+    this exact situation.
+
+    The structural test above cannot see this: the pipeline looks correct. Only
+    running it under the script's own flags does.
+    """
+    import subprocess, tempfile, os
+    src = (_repo_root() / 'scripts' / 'update.sh').read_text()
+    line = next(ln.strip() for ln in src.splitlines()
+                if ln.strip().startswith('TARGET="$(git tag -l'))
+
+    with tempfile.TemporaryDirectory() as d:
+        run = lambda *c: subprocess.run(c, cwd=d, capture_output=True, text=True)
+        run('git', 'init', '-q', '.')
+        run('git', 'config', 'user.email', 't@t')
+        run('git', 'config', 'user.name', 't')
+        open(os.path.join(d, 'f'), 'w').write('x')
+        run('git', 'add', 'f')
+        run('git', 'commit', '-qm', 'x')
+        # ONLY prereleases — no strict vX.Y.Z tag anywhere.
+        for tag in ('v1.0.0-beta', 'v0.10.0-rc1'):
+            run('git', 'tag', tag)
+
+        script = f'set -euo pipefail\n{line}\n[ -n "$TARGET" ] || {{ echo REACHED_DIAGNOSTIC; exit 3; }}\necho "PICKED=$TARGET"\n'
+        out = subprocess.run(['bash', '-c', script], cwd=d,
+                             capture_output=True, text=True)
+
+    assert 'REACHED_DIAGNOSTIC' in out.stdout, (
+        'update.sh dies at the tag-selection assignment when only prerelease tags '
+        'exist, so its "no release tags exist yet" message never prints. '
+        f'stdout={out.stdout!r} rc={out.returncode}'
+    )
+    assert 'PICKED=' not in out.stdout, 'a prerelease was selected as the target'
+
+
 def test_every_newest_release_tag_site_filters_prereleases():
     """update.sh, run_update.sh, verify_install.sh and the documented recovery
     command each pick "the newest tag" independently. If one drifts, the UI offers
