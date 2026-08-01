@@ -1,0 +1,73 @@
+{% comment %}
+Restorable-archive list (Settings → Maintenance → Restore), loaded on demand by
+RestoreArchivesView. Lazy because listing a destination is an rclone round trip
+to a NAS or S3 — doing that on every Settings page load would make an unrelated
+page slow, or hang it when the destination is down.
+{% endcomment %}
+<div id="restore-archives">
+
+  {% for err in archive_errors %}
+    <div class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-3 mb-3">
+      ⚠ {{ err }}
+    </div>
+  {% endfor %}
+
+  {% if archives %}
+    <div class="overflow-x-auto border border-gray-200 rounded-md">
+      <table class="min-w-full text-sm">
+        <thead class="bg-gray-50 text-gray-600">
+          <tr>
+            <th class="text-left px-3 py-2 font-medium">Backup</th>
+            <th class="text-left px-3 py-2 font-medium">Where</th>
+            <th class="text-right px-3 py-2 font-medium">Size</th>
+            <th class="px-3 py-2"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for a in archives %}
+            <tr>
+              <td class="px-3 py-2 font-mono text-xs">{{ a.name }}</td>
+              <td class="px-3 py-2">
+                {% if a.source == 'local' %}
+                  <span class="text-gray-600">On this server</span>
+                {% elif a.source == 'onsite' %}
+                  <span class="text-gray-600">Onsite</span>
+                {% else %}
+                  <span class="text-gray-600">Offsite</span>
+                {% endif %}
+              </td>
+              <td class="px-3 py-2 text-right text-gray-600">{{ a.size|filesizeformat }}</td>
+              <td class="px-3 py-2 text-right">
+                <form method="post" action="{% url 'core:restore_run' %}"
+                      hx-post="{% url 'core:restore_run' %}"
+                      hx-target="#restore-status" hx-swap="outerHTML"
+                      hx-confirm="Restore from {{ a.name }}? This REPLACES the current database, attachments and media with the contents of that backup. Murphy's Bench will stop and restart. Your current data is copied aside first, but recovering it is a command-line step.">
+                  {% csrf_token %}
+                  <input type="hidden" name="source" value="{{ a.source }}">
+                  <input type="hidden" name="archive" value="{{ a.name }}">
+                  <button type="submit"
+                          {% if restore_running %}disabled
+                          class="px-3 py-1.5 bg-red-300 text-white text-xs font-medium rounded-md cursor-not-allowed"
+                          {% else %}
+                          class="px-3 py-1.5 bg-red-600 text-white text-xs font-medium rounded-md hover:bg-red-700"
+                          {% endif %}>
+                    Restore this
+                  </button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-md p-4">
+      No backups found.
+      {% if not archive_errors %}
+        Backups are shipped to the destination configured above and the local copy is
+        deleted, so this list comes from that destination. If none is configured yet,
+        there is nothing to restore from.
+      {% endif %}
+    </div>
+  {% endif %}
+</div>

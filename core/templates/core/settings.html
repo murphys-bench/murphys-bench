@@ -2892,6 +2892,32 @@
             </form>
         </div>
 
+        <!-- ── Restore ─────────────────────────────────────────────── -->
+        <div class="bg-white rounded-lg shadow p-6 mt-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-1">Restore</h2>
+            <p class="text-sm text-gray-500 mb-4">
+                Put this server back to the state captured in a backup. This <strong>replaces</strong> the
+                current database, attachments and media. Your current data is copied aside first, but
+                getting it back is a command-line step, so treat this as one-way.
+            </p>
+
+            <div class="mb-4">
+                {% include 'core/partials/restore_status.html' %}
+            </div>
+
+            <div id="restore-archives">
+                <button type="button"
+                        hx-get="{% url 'core:restore_archives' %}"
+                        hx-target="#restore-archives" hx-swap="outerHTML"
+                        class="px-4 py-2 bg-gray-700 text-white text-sm font-medium rounded-md hover:bg-gray-800">
+                    Show available backups
+                </button>
+                <p class="text-xs text-gray-500 mt-2">
+                    Reads the backup destination configured above, which can take a few seconds.
+                </p>
+            </div>
+        </div>
+
         <!-- ── Software Updates ────────────────────────────────────── -->
         <div class="bg-white rounded-lg shadow p-6 mt-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-1">Software Updates</h2>

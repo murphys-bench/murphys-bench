@@ -44,9 +44,9 @@ command -v systemctl >/dev/null || fail "this host has no systemd; \
 Murphy's Bench's scheduled backups and in-app update need it. Wire up the \
 equivalents for your init system using deploy/ as the reference."
 
-# Units that are always installed. The two .path units are what make the in-app
-# "Back up now" and "Update" buttons do anything at all — without them the UI
-# spins forever. The three timers are inert until the matching feature is
+# Units that are always installed. The three .path units are what make the in-app
+# "Back up now", "Update" and "Restore" buttons do anything at all — without them
+# the UI spins forever. The three timers are inert until the matching feature is
 # configured in the app, but must exist BEFORE that, because the web process
 # deliberately has no privilege to enable a systemd unit itself.
 UNITS=(
@@ -56,6 +56,8 @@ UNITS=(
     murphys-bench-update.service
     murphys-bench-backup-now.path      # in-app "Back up now" button
     murphys-bench-backup-now.service
+    murphys-bench-restore.path         # in-app Restore button
+    murphys-bench-restore.service
     murphys-bench-backup.timer         # scheduled backups (per in-app schedule)
     murphys-bench-backup.service
     murphys-bench-fetch-email.timer    # inbound email -> tickets
@@ -74,6 +76,7 @@ ENABLE=(
     murphys-bench.service
     murphys-bench-update.path
     murphys-bench-backup-now.path
+    murphys-bench-restore.path
     murphys-bench-backup.timer
     murphys-bench-fetch-email.timer
     murphys-bench-sla-check.timer
