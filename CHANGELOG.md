@@ -38,6 +38,8 @@ the Unreleased entries move under that version and prod gets a single update.
     stored credential is quietly unreadable. The restore now reads one encrypted field and
     tells you plainly if it could not decrypt it.
 
+## v0.10.1 — 2026-08-01
+
 ### Fixed
 
 - **A reset that failed partway through destroyed attachment files anyway.**
