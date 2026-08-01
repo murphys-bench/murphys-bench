@@ -74,9 +74,19 @@ REGISTRY = (
     OperationalModel('core.CustomFieldValue', 'Custom-field values', delete_order=20),
 
     # ── Logs ────────────────────────────────────────────────────────────────
+    # Order matters here in a way it does not elsewhere: a log that records
+    # deletions has to be wiped after the things it would record.
     OperationalModel('core.EmailSendLog', 'Email send logs', delete_order=21),
     OperationalModel('core.InboundEmailLog', 'Inbound email logs', delete_order=22),
-    OperationalModel('auditlog.LogEntry', 'Audit-log entries', delete_order=23),
+    # ⚠ MUST DELETE LAST (delete_order 95, after Client at 90). auditlog records
+    # the reset's OWN deletions: Ticket, TicketReply, WorkOrder and WorkOrderNote
+    # are registered with it, and cascade deletes fire it too. Wiping the log
+    # partway through therefore left fresh entries behind naming the very records
+    # that were being destroyed — on a real cutover, four rows carrying live
+    # client names and ticket subjects, on a box the command had just reported
+    # clean. Found by running the real wipe on mb-test; the dry run cannot show
+    # it, because nothing is deleted and so nothing is logged.
+    OperationalModel('auditlog.LogEntry', 'Audit-log entries', delete_order=95),
     OperationalModel('core.DeviceCredentialAccessLog', 'Device cred access logs',
                      delete_order=24),
 

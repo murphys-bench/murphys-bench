@@ -22,6 +22,12 @@ the Unreleased entries move under that version and prod gets a single update.
   email suppression list.** Both suppressed-address views kept a redundant `is_staff` check
   inside a view already gated on superuser-or-`can_manage_settings`, which quietly narrowed
   those two routes to staff only while every neighbouring settings page worked.
+- **The data reset left an audit trail of itself, naming the customers it had just
+  deleted.** The audit log was wiped partway through the sequence, and everything destroyed
+  after that point wrote fresh entries, so the command finished holding rows that carried
+  real client names and ticket subjects on a box it had just reported clean. The audit log
+  is now wiped last. Found by running the real wipe on a test box; a dry run cannot show
+  it, because nothing is deleted and so nothing is logged.
 
 ### Changed
 

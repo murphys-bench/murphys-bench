@@ -248,6 +248,36 @@ def test_reset_can_keep_named_user(client_obj, admin_user):
 
 
 @pytest.mark.django_db
+def test_reset_leaves_no_audit_entries_naming_deleted_records(client_obj, admin_user):
+    """The wipe must not leave an audit trail of itself naming real customers.
+
+    auditlog records this command's OWN deletions: Ticket, TicketReply, WorkOrder
+    and WorkOrderNote are registered with it, and cascade deletes fire it too. The
+    audit log was being wiped partway through the sequence, so every record
+    destroyed after that point wrote a fresh entry, and the reset finished with
+    rows carrying live client names and ticket subjects on a box it had just
+    reported clean.
+
+    Found by running the real wipe on mb-test. A dry run cannot surface it,
+    because nothing is deleted and so nothing is logged — which is why the
+    ordering is asserted here as well as in the registry.
+    """
+    from auditlog.models import LogEntry
+    from django.core.management import call_command
+
+    ticket = Ticket.objects.create(client=client_obj, subject='Real customer subject',
+                                   description='D')
+    WorkOrder.objects.create(client=client_obj, ticket=ticket)
+    # Sanity: these models really are audited, or the test proves nothing.
+    assert LogEntry.objects.exists(), 'no audit entries created — is auditlog still wired?'
+
+    call_command('reset_operational_data', confirm='DELETE ALL OPERATIONAL DATA')
+
+    survivors = list(LogEntry.objects.values_list('object_repr', flat=True))
+    assert not survivors, f'reset left audit entries naming deleted records: {survivors}'
+
+
+@pytest.mark.django_db
 def test_reset_keeps_attachment_files_when_the_transaction_rolls_back(client_obj, admin_user):
     """A rolled-back reset must not have already destroyed the files on disk.
 
@@ -9572,7 +9602,16 @@ def test_operational_registry_deletion_plan_is_resolvable_and_ordered(db):
     # tickets and everything under them, so anything that must be deleted
     # explicitly has to go first.
     labels = [label for label, _model in plan]
-    assert labels[-1] == 'Clients', f'Clients must delete last, got {labels[-1]}'
+
+    # The audit log records this command's own deletions, so it must be wiped
+    # after everything it would record — including Client, which cascades to
+    # tickets and replies. See the LogEntry entry in the registry.
+    assert labels[-1] == 'Audit-log entries', (
+        f'audit log must delete last, got {labels[-1]}')
+    assert labels.index('Clients') < labels.index('Audit-log entries')
+
+    # Client still deletes after everything that cannot rely on cascading.
+    assert labels[-2] == 'Clients', f'Clients must delete after the rest, got {labels[-2]}'
 
     # Every entry resolves (raises LookupError otherwise) and is a real model.
     for _label, model in plan:
