@@ -8,7 +8,24 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
-## Unreleased
+## v0.11.0 — 2026-08-02
+
+### Upgrading to this release
+
+**A fresh install needs nothing. An existing install needs one command.**
+
+In-app restore ships with two systemd services, and the Update button cannot install
+system services, because Murphy's Bench runs as an unprivileged user on purpose. So after
+updating an existing install, run:
+
+```
+cd /opt/murphys-bench && scripts/install_units.sh
+```
+
+Update first, then the units, since the unit definitions arrive with the code. Without
+this the Restore page appears but waits forever for something that is not running. From
+this release on, the Update button checks for exactly this and tells you rather than
+reporting success. See `UPDATING.md`.
 
 ### Added
 
@@ -37,6 +54,9 @@ the Unreleased entries move under that version and prod gets a single update.
     mismatched key does not break anything visibly: the app starts normally and every
     stored credential is quietly unreadable. The restore now reads one encrypted field and
     tells you plainly if it could not decrypt it.
+- **`UPDATING.md`** explains what the in-app Update, Restore and Back Up Now buttons can
+  and cannot do, why the limit exists, and the one command an existing install needs after
+  a release that adds a system service. A fresh install needs none of it.
 
 ### Changed
 
@@ -51,12 +71,6 @@ the Unreleased entries move under that version and prod gets a single update.
   `install_units.sh`, so a release that adds a unit is covered without anyone remembering
   to update a second place. Opt-in units are excluded, so a box that deliberately does not
   run them is not warned about them.
-
-### Added
-
-- **`UPDATING.md`** explains what the in-app Update, Restore and Back Up Now buttons can
-  and cannot do, why the limit exists, and the one command an existing install needs after
-  a release that adds a system service. A fresh install needs none of it.
 
 ## v0.10.1 — 2026-08-01
 
