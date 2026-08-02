@@ -9299,6 +9299,60 @@ def test_unit_templates_are_templates_not_baked_for_one_box():
     )
 
 
+def test_update_sh_derives_its_expected_units_from_install_units(tmp_path):
+    """update.sh's completeness check must not carry its own unit list.
+
+    It used to name three units inline, so it only ever knew about the units that
+    existed when that line was written. In-app restore added two more and the check
+    stayed silent about them: the update reported success, the button appeared, and
+    nothing had installed what it needed. Deriving the list from install_units.sh
+    means a release that adds a unit is covered without anyone remembering to.
+
+    Proven by planting a unit install_units.sh has never contained and requiring
+    update.sh's own derivation to surface it.
+    """
+    import re
+    import subprocess
+
+    update_sh = (_repo_root() / 'scripts' / 'update.sh').read_text()
+    m = re.search(r'^expected_units\(\)\s*\{.*?^\}', update_sh, re.S | re.M)
+    assert m, 'update.sh no longer defines expected_units()'
+
+    fake = tmp_path / 'scripts'
+    fake.mkdir(parents=True)
+    (fake / 'install_units.sh').write_text(
+        "UNITS=(\n"
+        "    murphys-bench.service              # gunicorn\n"
+        "    'murphys-bench-alert@.service'     # quoted template unit\n"
+        "    murphys-bench-planted.path         # never existed before this test\n"
+        ")\n"
+        '[ "$WITH_DISK_CHECK" = 1 ] && UNITS+=(\n'
+        "    murphys-bench-disk-check.timer\n"
+        ")\n"
+    )
+
+    out = subprocess.run(
+        ['bash', '-c', f'{m.group(0)}\nAPP={tmp_path}\nexpected_units'],
+        capture_output=True, text=True, timeout=30,
+    )
+    found = out.stdout.split()
+
+    assert 'murphys-bench-planted.path' in found, (
+        f'update.sh did not pick up a newly added unit — its check has drifted '
+        f'back to a hardcoded list. Got: {found}'
+    )
+    # Comments and quotes must be stripped, or systemctl is handed a garbage name
+    # and every box reports a phantom missing unit.
+    assert 'murphys-bench-alert@.service' in found, f'quoted entry mangled: {found}'
+    assert not any(f.startswith('#') for f in found), f'comment leaked: {found}'
+    # The disk-check units are opt-in (--with-disk-check). Treating them as expected
+    # would warn every box that deliberately does not run them, and a warning that
+    # cries wolf is one nobody reads.
+    assert 'murphys-bench-disk-check.timer' not in found, (
+        f'opt-in units must not be treated as expected: {found}'
+    )
+
+
 
 # ── System alerts are the owner's, not the technicians' ─────────────────────
 # MB writes its own operational failures (failed backup, disk pressure, an

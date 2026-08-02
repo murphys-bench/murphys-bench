@@ -195,6 +195,15 @@ The most important requirement is preserving `FIELD_ENCRYPTION_KEY`. Without tha
 
 Additional information is available in [deploy/README.md](deploy/README.md).
 
+## Updating
+
+The in-app Update button updates application code. It cannot install system-level pieces such as
+systemd units, sudoers rules or OS packages, because Murphy's Bench deliberately runs as an
+unprivileged user. A release that adds one of those needs a single command on an existing install.
+
+[UPDATING.md](UPDATING.md) explains what each button does, what it cannot do, and why. Read it
+before your first update.
+
 ## Versioning
 
 Murphy's Bench is a self-hosted application rather than a library, so "breaking" here does not

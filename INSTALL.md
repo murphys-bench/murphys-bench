@@ -116,6 +116,9 @@ Then:
 1. Log in with the superuser account created by the installer.
 2. Open Settings.
 3. Configure company information, email, users, workflow options, and backups.
+4. Read [UPDATING.md](UPDATING.md) before your first update. It explains what the in-app
+   Update, Restore and Back Up Now buttons can and cannot do, and when a release needs a
+   command instead.
 
 ### The install contains demo data
 
