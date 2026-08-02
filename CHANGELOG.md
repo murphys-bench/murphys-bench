@@ -38,6 +38,26 @@ the Unreleased entries move under that version and prod gets a single update.
     stored credential is quietly unreadable. The restore now reads one encrypted field and
     tells you plainly if it could not decrypt it.
 
+### Changed
+
+- **The Update button now tells you when a release needs a command.** Murphy's Bench runs
+  as an unprivileged user on purpose, so updating cannot install a systemd unit, a sudoers
+  rule or an OS package. Until now that part of a release simply did not arrive and the
+  update still reported success. It now reports exactly which system services are missing,
+  what stops working without them, and the one command that installs them.
+- **That check no longer keeps its own list of units.** It named three of them inline, so
+  it only knew about the units that existed when that line was written, which is why it
+  said nothing when in-app restore added two more. It now derives the list from
+  `install_units.sh`, so a release that adds a unit is covered without anyone remembering
+  to update a second place. Opt-in units are excluded, so a box that deliberately does not
+  run them is not warned about them.
+
+### Added
+
+- **`UPDATING.md`** explains what the in-app Update, Restore and Back Up Now buttons can
+  and cannot do, why the limit exists, and the one command an existing install needs after
+  a release that adds a system service. A fresh install needs none of it.
+
 ## v0.10.1 — 2026-08-01
 
 ### Fixed

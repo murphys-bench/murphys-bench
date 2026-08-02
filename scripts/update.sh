@@ -238,9 +238,30 @@ chmod -R o+rX "$APP/staticfiles" 2>/dev/null || true
 # it NOPASSWD for `systemctl restart` and nothing else). So: detect, and say so
 # loudly with the exact command. Never silent, never fatal — a good update must
 # not roll back over this.
+#
+# The expected unit list is DERIVED from install_units.sh's own UNITS array, not
+# written out again here. A hardcoded list only knows about the units that existed
+# when it was written, so a release adding a new one (in-app restore was exactly
+# this) shipped a button whose unit nothing checked for and nothing installed. The
+# array is parsed rather than sourced because install_units.sh does real work at
+# import time. Only the unconditional block is read, so the opt-in disk-check units
+# never produce a false warning on a box that deliberately does not have them.
+expected_units() {
+    awk '/^UNITS=\(/{f=1;next} f&&/^\)/{exit} f{print}' "$APP/scripts/install_units.sh" 2>/dev/null \
+      | sed -e 's/#.*//' -e "s/['\"]//g" -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+      | grep -v '^$'
+}
+
 deploy_layer_warning() {
-    local missing=()
-    for u in murphys-bench-update.path murphys-bench-backup-now.path murphys-bench-backup.timer; do
+    local missing=() units
+    units="$(expected_units)"
+    # A parse that returns nothing would turn this whole check into a silent no-op,
+    # which is the failure mode it exists to prevent. Fall back to the units the
+    # in-app buttons depend on rather than passing by default.
+    [ -z "$units" ] && units="murphys-bench-update.path
+murphys-bench-backup-now.path
+murphys-bench-backup.timer"
+    for u in $units; do
         systemctl cat "$u" >/dev/null 2>&1 || missing+=("$u")
     done
     css="$(ls "$APP"/staticfiles/css/*.css 2>/dev/null | head -1 || true)"
@@ -251,19 +272,34 @@ deploy_layer_warning() {
     [ "${#missing[@]}" -eq 0 ] && [ "$css_code" = "200" ] && return 0
 
     echo
-    echo "⚠ THIS INSTALL IS INCOMPLETE — the update itself succeeded, but:" >&2
+    echo "⚠ THIS INSTALL IS INCOMPLETE. The update itself succeeded, but:" >&2
     if [ "${#missing[@]}" -gt 0 ]; then
-        echo "  • Background jobs are NOT installed (${missing[*]})." >&2
-        echo "    Scheduled backups do not run. The in-app Back up now and Update" >&2
-        echo "    buttons will queue a job that nothing picks up, and spin forever." >&2
+        echo "  • These system services are NOT installed:" >&2
+        for u in "${missing[@]}"; do echo "      $u" >&2; done
+        echo "    This update moved code onto the server, but it could not install" >&2
+        echo "    system services, because Murphy's Bench runs unprivileged on purpose." >&2
+        echo "    Whatever those services drive does not work: a missing .path unit" >&2
+        echo "    means the matching in-app button queues a job nothing picks up and" >&2
+        echo "    spins forever, and a missing .timer means that scheduled job never" >&2
+        echo "    runs. Nothing warns you inside the app." >&2
     fi
     if [ "$css_code" != "200" ]; then
         echo "  • The web server cannot read this install's stylesheets (HTTP $css_code)." >&2
         echo "    Pages render as unstyled HTML with no logo." >&2
     fi
     echo >&2
-    echo "  Fix both, safe to re-run over an existing install:" >&2
-    echo "    cd $APP && scripts/install.sh" >&2
+    # Units alone need only the unit installer. A static-permissions problem needs the
+    # full installer, which install_units.sh does not touch.
+    if [ "$css_code" = "200" ]; then
+        echo "  Fix it once. Safe to re-run over an existing install:" >&2
+        echo "    cd $APP && scripts/install_units.sh" >&2
+    else
+        echo "  Fix it once. Safe to re-run over an existing install:" >&2
+        echo "    cd $APP && scripts/install.sh" >&2
+    fi
+    echo >&2
+    echo "  Both need a password, so run them from a terminal. The in-app Update" >&2
+    echo "  button cannot do this itself. See UPDATING.md." >&2
     echo >&2
 }
 deploy_layer_warning
