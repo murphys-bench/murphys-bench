@@ -8,6 +8,25 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## v0.11.1 — 2026-08-03
+
+Code only. The in-app Update button can deliver this one on its own.
+
+### Fixed
+
+- **An incomplete install now says so in the app, not just in a log.** v0.11.0 made the
+  updater report an install it could not finish, but it reported it to the terminal. The
+  in-app Update button captures that output into a log it shows collapsed, underneath a
+  green "update succeeded" banner, so the way almost everyone updates still showed a tick
+  with the warning folded out of sight. Settings → Maintenance → Updates now reports "This
+  install is incomplete", names the services that are missing and gives the command that
+  installs them, and keeps reporting it until the install is whole rather than only once
+  after an update.
+- **The recovery command in `UPDATING.md` was wrong.** It said `git pull`, which fails on
+  any server that has ever used the Update button, because releases are deployed as
+  detached tags and `git pull` refuses to run without a branch. Use `scripts/update.sh`,
+  which deploys the newest release tag, then `scripts/install_units.sh`.
+
 ## v0.11.0 — 2026-08-02
 
 ### Upgrading to this release
