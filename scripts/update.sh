@@ -315,7 +315,8 @@ murphys-bench-backup.timer"
         echo "    Whatever those services drive does not work: a missing .path unit" >&2
         echo "    means the matching in-app button queues a job nothing picks up and" >&2
         echo "    spins forever, and a missing .timer means that scheduled job never" >&2
-        echo "    runs. Nothing warns you inside the app." >&2
+        echo "    runs. Settings → Maintenance → Updates reports this too, and keeps" >&2
+        echo "    reporting it until it is fixed." >&2
     fi
     if [ "$css_code" != "200" ]; then
         echo "  • The web server cannot read this install's stylesheets (HTTP $css_code)." >&2
