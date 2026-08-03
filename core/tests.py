@@ -2847,6 +2847,51 @@ def test_request_update_writes_trigger_and_refuses_duplicate(settings, tmp_path)
 
 
 @pytest.mark.django_db
+def test_incomplete_install_replaces_the_success_tick_in_the_ui(settings, tmp_path, client):
+    """A succeeded update on an incomplete install must NOT render a green tick.
+
+    v0.11.0 made update.sh report an install it could not finish, but only on
+    stderr. The in-app Update button captures that into a log it renders
+    COLLAPSED beneath "✓ Last update succeeded", so the path nearly everyone
+    uses showed a tick and hid the warning. The exit code was honest and the
+    product was not.
+
+    update.sh now writes logs/update-incomplete, and the card reports the
+    CONSEQUENCE instead of the exit code for as long as that file exists.
+    """
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    admin = User.objects.create_superuser(username='boss', password='x')
+    client.force_login(admin)
+
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'succeeded', 'exit_code': 0, 'finished_at': '2026-08-03T00:00:00Z',
+    }))
+    update_ops.incomplete_path().write_text(
+        'These system services are not installed:\n'
+        '  murphys-bench-restore.path\n'
+        'FIX: scripts/install_units.sh\n'
+    )
+
+    body = client.get(reverse('core:update_status')).content.decode()
+    assert 'This install is incomplete' in body
+    assert 'murphys-bench-restore.path' in body, 'the card must name what is missing'
+    assert 'scripts/install_units.sh' in body, 'the card must give the fix'
+    assert 'Last update succeeded' not in body, (
+        'a green success banner alongside an incomplete install is the exact '
+        'defect this exists to remove'
+    )
+
+    # Cleared the moment the install is whole again: a warning that outlives the
+    # problem is how people learn to ignore warnings.
+    update_ops.incomplete_path().unlink()
+    body = client.get(reverse('core:update_status')).content.decode()
+    assert 'This install is incomplete' not in body
+    assert 'Last update succeeded' in body
+
+
+@pytest.mark.django_db
 def test_read_status_idle_on_corrupt_file(settings, tmp_path):
     from core import update_ops
     settings.BASE_DIR = tmp_path
