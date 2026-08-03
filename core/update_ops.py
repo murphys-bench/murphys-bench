@@ -36,6 +36,29 @@ def status_path() -> Path:
     return _logs_dir() / 'update-status.json'
 
 
+def incomplete_path() -> Path:
+    return _logs_dir() / 'update-incomplete'
+
+
+def read_incomplete() -> str:
+    """What is missing from this install's DEPLOYMENT layer, or '' if it is whole.
+
+    ``scripts/update.sh`` writes this file when it finds units or static
+    permissions that an update cannot repair, because the app user deliberately
+    holds no privilege to install them, and deletes it once the install is whole.
+
+    It is read on every render rather than carried in the update status, because
+    the condition outlives the update that discovered it: the install stays
+    incomplete until someone runs the fix, and a status entry would go stale or
+    scroll away. The consequence has to keep being visible for as long as it is
+    true.
+    """
+    try:
+        return incomplete_path().read_text(errors='replace').strip()
+    except Exception:
+        return ''
+
+
 def _git(*args) -> str:
     """Run a read-only git command in the repo; return stripped stdout, or '' on
     any failure (missing git, not a repo, etc.). Never raises."""

@@ -61,14 +61,46 @@ is queued/running it polls itself every 3s; terminal states stop polling.
     keep the log reachable below.
     {% endcomment %}
   {% elif update_status.state == 'succeeded' %}
-    <div class="mt-4 text-sm text-green-800 bg-green-50 border border-green-200 rounded-md p-4">
-      ✓ Last update succeeded{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %}.
-      Now on <strong>{{ update_current }}</strong>.
-    </div>
+    {% if update_incomplete %}
+      {% comment %}
+      A green tick here would be the exact defect this panel exists to remove: the
+      code arrived, so update.sh legitimately exits 0, but part of the release is
+      not running and saying "succeeded" is how that stayed invisible. Report the
+      consequence, not the exit code.
+      {% endcomment %}
+      <div class="mt-4 text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-md p-4">
+        ⚠ The update itself succeeded{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %}
+        and this server is now on <strong>{{ update_current }}</strong>, but
+        <strong>this install is incomplete</strong> and part of this release is not working.
+      </div>
+    {% else %}
+      <div class="mt-4 text-sm text-green-800 bg-green-50 border border-green-200 rounded-md p-4">
+        ✓ Last update succeeded{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %}.
+        Now on <strong>{{ update_current }}</strong>.
+      </div>
+    {% endif %}
   {% elif update_status.state == 'failed' %}
     <div class="mt-4 text-sm text-red-800 bg-red-50 border border-red-200 rounded-md p-4">
       ✗ Last update <strong>failed</strong>{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %}
       and was automatically rolled back. The app is back on <strong>{{ update_current }}</strong>. See the log below.
+    </div>
+  {% endif %}
+
+  {% comment %}
+  Rendered on EVERY visit while the marker exists, not only after an update. The
+  install stays incomplete until someone runs the fix, so the warning has to stay
+  visible for as long as it is true rather than scrolling away with one status
+  entry. scripts/update.sh deletes the marker the moment the install is whole.
+  {% endcomment %}
+  {% if update_incomplete %}
+    <div class="mt-3 text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-md p-4">
+      <p class="font-medium">This install is incomplete.</p>
+      <p class="mt-1">
+        Updating moved new code onto this server, but it could not install the system
+        services that code needs. Murphy's Bench runs as an unprivileged user on purpose,
+        so it cannot install them itself and no button here can.
+      </p>
+      <pre class="mt-2 text-xs bg-gray-900 text-gray-100 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">{{ update_incomplete }}</pre>
     </div>
   {% endif %}
 

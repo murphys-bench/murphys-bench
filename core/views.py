@@ -6862,6 +6862,7 @@ def _update_status_context():
         'update_available': update_ops.available_version(),
         'update_is_available': update_ops.is_update_available(),
         'update_status': update_ops.read_status(),
+        'update_incomplete': update_ops.read_incomplete(),
     }
 
 
