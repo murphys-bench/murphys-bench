@@ -45,15 +45,26 @@ works.
 
 ## When a release needs a command
 
-The changelog says so, and from v0.11.0 onward the Update button checks for
-itself and tells you. When that happens:
+The changelog says so, and the Update button checks for itself and tells you: the
+Updates card reports "This install is incomplete" and names what is missing,
+instead of a green tick. That warning stays until you fix it.
+
+If you updated with the button, run this and you are done:
 
 ```bash
-cd /opt/murphys-bench && git pull && scripts/install_units.sh
+cd /opt/murphys-bench && scripts/install_units.sh
 ```
 
-Order matters. Update first, because the unit definitions arrive with the code.
-Running `install_units.sh` before updating installs the old set.
+If you are updating from a terminal instead, update first, then install the
+units, because the unit definitions arrive with the code:
+
+```bash
+cd /opt/murphys-bench && scripts/update.sh && scripts/install_units.sh
+```
+
+Use `scripts/update.sh`, not `git pull`. Releases are tags, and `update.sh` with
+no argument deploys the newest one. `git pull` puts this server on whatever is
+currently on the main branch, which is not a release.
 
 You will be asked for your password. That is the point: installing a system
 service is an administrative act, and it should involve a human who has

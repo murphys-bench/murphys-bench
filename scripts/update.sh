@@ -269,7 +269,41 @@ murphys-bench-backup.timer"
     [ -n "$css" ] && css_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
         "http://127.0.0.1/static/css/$(basename "$css")" 2>/dev/null || echo 000)"
 
-    [ "${#missing[@]}" -eq 0 ] && [ "$css_code" = "200" ] && return 0
+    # The in-app Update button is the path most people use, and it renders a green
+    # "succeeded" banner with the log COLLAPSED. Printing this warning to stderr
+    # therefore told a terminal user and left everyone else with a tick and a
+    # disclosure triangle nobody opens after being told it worked. So the state is
+    # also written where the app can read it and say so in its own UI. Removed the
+    # moment the install is whole again, so it can never outlive the problem.
+    local marker="$APP/logs/update-incomplete"
+
+    if [ "${#missing[@]}" -eq 0 ] && [ "$css_code" = "200" ]; then
+        rm -f "$marker"
+        return 0
+    fi
+
+    {
+        if [ "${#missing[@]}" -gt 0 ]; then
+            echo "These system services are not installed:"
+            for u in "${missing[@]}"; do echo "  $u"; done
+            echo "A missing .path unit means the matching button queues a job nothing"
+            echo "picks up and spins forever. A missing .timer means that scheduled job"
+            echo "never runs. Updating cannot install them, because Murphy's Bench runs"
+            echo "as an unprivileged user on purpose."
+        fi
+        if [ "$css_code" != "200" ]; then
+            echo "The web server cannot read this install's stylesheets (HTTP $css_code)."
+            echo "Pages render as unstyled HTML with no logo."
+        fi
+        echo
+        if [ "$css_code" = "200" ]; then
+            echo "FIX: cd $APP && scripts/install_units.sh"
+        else
+            echo "FIX: cd $APP && scripts/install.sh"
+        fi
+        echo "Run it in a terminal. It needs a password, which is exactly why the"
+        echo "Update button cannot do it for you. See UPDATING.md."
+    } > "$marker" 2>/dev/null || true
 
     echo
     echo "⚠ THIS INSTALL IS INCOMPLETE. The update itself succeeded, but:" >&2
@@ -281,7 +315,8 @@ murphys-bench-backup.timer"
         echo "    Whatever those services drive does not work: a missing .path unit" >&2
         echo "    means the matching in-app button queues a job nothing picks up and" >&2
         echo "    spins forever, and a missing .timer means that scheduled job never" >&2
-        echo "    runs. Nothing warns you inside the app." >&2
+        echo "    runs. Settings → Maintenance → Updates reports this too, and keeps" >&2
+        echo "    reporting it until it is fixed." >&2
     fi
     if [ "$css_code" != "200" ]; then
         echo "  • The web server cannot read this install's stylesheets (HTTP $css_code)." >&2
