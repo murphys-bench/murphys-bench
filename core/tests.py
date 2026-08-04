@@ -9711,6 +9711,59 @@ def test_expected_units_cannot_fail_the_update_when_the_manifest_is_absent(tmp_p
     )
 
 
+def test_manifest_less_target_still_expects_that_release_s_own_units(tmp_path):
+    """A rollback target with no manifest must still be checked properly.
+
+    Caught in review 2026-08-04. The manifest-less path returned nothing and fell
+    through to a three-unit fallback, while v0.11.1 — the release you actually
+    roll back to — declares FOURTEEN. So restore, inbound-email and SLA units went
+    unchecked and the update could report the install clean while they were
+    missing. Under-reporting on the recovery path is precisely what this check
+    exists to prevent.
+
+    Driven against the REAL v0.11.1 install_units.sh out of git, not a fixture.
+    """
+    import re
+    import subprocess
+
+    update_sh = (_repo_root() / 'scripts' / 'update.sh').read_text()
+    m = re.search(r'^expected_units\(\)\s*\{.*?^\}', update_sh, re.S | re.M)
+    assert m, 'update.sh no longer defines expected_units()'
+
+    # A tree shaped like a pre-manifest release: its own install_units.sh, no manifest.
+    scripts = tmp_path / 'scripts'
+    scripts.mkdir(parents=True)
+    real_old = subprocess.run(
+        ['git', 'show', 'v0.11.1:scripts/install_units.sh'],
+        cwd=str(_repo_root()), capture_output=True, text=True,
+    )
+    if real_old.returncode != 0:
+        pytest.skip('tag v0.11.1 not available in this checkout')
+    (scripts / 'install_units.sh').write_text(real_old.stdout)
+
+    out = subprocess.run(
+        ['bash', '-c', f'set -euo pipefail\n{m.group(0)}\nAPP={tmp_path}\n'
+                       'units="$(expected_units)"\necho "$units"'],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert out.returncode == 0, f'expected_units failed: {out.stderr.strip()}'
+    found = out.stdout.split()
+
+    assert len(found) == 14, (
+        f'a manifest-less rollback target must still be checked against its own '
+        f'14 units; got {len(found)}: {found}'
+    )
+    for critical in (
+        'murphys-bench-restore.path',
+        'murphys-bench-fetch-email.timer',
+        'murphys-bench-sla-check.timer',
+    ):
+        assert critical in found, (
+            f'{critical} went unchecked on the rollback path — the box could be '
+            'told it is clean while that unit is missing'
+        )
+
+
 
 # ── System alerts are the owner's, not the technicians' ─────────────────────
 # MB writes its own operational failures (failed backup, disk pressure, an

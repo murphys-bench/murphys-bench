@@ -257,7 +257,27 @@ chmod -R o+rX "$APP/staticfiles" 2>/dev/null || true
 # and healthy and the UI reported a failure. Caught by the clean-room gate,
 # 2026-08-04. Returning empty-and-zero lets the fallback do its job instead.
 expected_units() {
-    ( . "$APP/deploy/manifest.sh" 2>/dev/null && printf '%s\n' "${MB_UNITS[@]:-}" ) 2>/dev/null || true
+    local units
+
+    # 1. Current shape: deploy/manifest.sh, sourced in a SUBSHELL so it cannot
+    #    touch this script's variables mid-update.
+    units="$( ( . "$APP/deploy/manifest.sh" 2>/dev/null && printf '%s\n' "${MB_UNITS[@]:-}" ) 2>/dev/null || true )"
+    if [ -n "$units" ]; then
+        printf '%s\n' "$units"
+        return 0
+    fi
+
+    # 2. Pre-manifest target: read THAT release's own literal UNITS block with the
+    #    same reader v0.11.1 used. Without this the manifest-less path fell all the
+    #    way through to the three-unit fallback below, so a rollback to v0.11.1 —
+    #    which declares 14 — checked neither the restore units nor inbound-email nor
+    #    SLA, and could report clean while they were missing. Under-reporting on the
+    #    recovery path is the failure this whole check exists to prevent.
+    #    `|| true` because that pipeline ends in grep, which exits 1 on empty, and
+    #    this script runs under `set -e`.
+    awk '/^UNITS=\(/{f=1;next} f&&/^\)/{exit} f{print}' "$APP/scripts/install_units.sh" 2>/dev/null \
+      | sed -e 's/#.*//' -e "s/['\"]//g" -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+      | grep -v '^$' || true
 }
 
 deploy_layer_warning() {
