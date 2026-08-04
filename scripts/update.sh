@@ -248,8 +248,16 @@ chmod -R o+rX "$APP/staticfiles" 2>/dev/null || true
 # mid-update. Only MB_UNITS is read, never MB_UNITS_OPTIONAL, so the opt-in
 # disk-check units never produce a false warning on a box that deliberately does
 # not have them.
+#
+# ⚠ MUST NOT FAIL. This script runs under `set -e`, and the tree it reads has
+# ALREADY been checked out to the target by this point — so on a rollback or a
+# downgrade to any release older than the manifest, the file is simply not
+# there. A bare subshell returns non-zero then, which killed the whole update at
+# the assignment below, AFTER every real step had succeeded: the box was updated
+# and healthy and the UI reported a failure. Caught by the clean-room gate,
+# 2026-08-04. Returning empty-and-zero lets the fallback do its job instead.
 expected_units() {
-    ( . "$APP/deploy/manifest.sh" 2>/dev/null && printf '%s\n' "${MB_UNITS[@]}" )
+    ( . "$APP/deploy/manifest.sh" 2>/dev/null && printf '%s\n' "${MB_UNITS[@]:-}" ) 2>/dev/null || true
 }
 
 deploy_layer_warning() {

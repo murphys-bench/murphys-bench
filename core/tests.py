@@ -9502,6 +9502,43 @@ def test_update_sh_derives_its_expected_units_from_install_units(tmp_path):
     )
 
 
+def test_expected_units_cannot_fail_the_update_when_the_manifest_is_absent(tmp_path):
+    """A missing manifest must yield an empty list, never a non-zero exit.
+
+    update.sh runs under `set -e`, and by the time this function is called the
+    tree has ALREADY been checked out to the target — so on a rollback, or a
+    downgrade to any release older than the manifest, the file is not there. The
+    first version of this returned non-zero in that case, which killed the update
+    at `units="$(expected_units)"` AFTER every real step had succeeded: migrate,
+    css build and collectstatic all done, service healthy, and the UI reporting a
+    failed update. The empty-list fallback below it never got to run.
+
+    Found by the clean-room gate on a real box, not by any test — which is why
+    this one exists.
+    """
+    import re
+    import subprocess
+
+    update_sh = (_repo_root() / 'scripts' / 'update.sh').read_text()
+    m = re.search(r'^expected_units\(\)\s*\{.*?^\}', update_sh, re.S | re.M)
+    assert m, 'update.sh no longer defines expected_units()'
+
+    # tmp_path has no deploy/manifest.sh — the rollback-target shape.
+    out = subprocess.run(
+        ['bash', '-c', f'set -euo pipefail\n{m.group(0)}\nAPP={tmp_path}\n'
+                       'units="$(expected_units)"\necho "SURVIVED:[$units]"'],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert out.returncode == 0, (
+        'expected_units failed the caller when the manifest was missing, so an '
+        'update that had already succeeded would report failure. '
+        f'stderr: {out.stderr.strip()}'
+    )
+    assert 'SURVIVED:[]' in out.stdout, (
+        f'expected an empty unit list, got: {out.stdout.strip()}'
+    )
+
+
 
 # ── System alerts are the owner's, not the technicians' ─────────────────────
 # MB writes its own operational failures (failed backup, disk pressure, an
