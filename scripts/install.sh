@@ -57,6 +57,15 @@ VENV="$APP/venv/bin"
 RUN_USER="$(id -un)"
 RUN_GROUP="$(id -gn)"
 
+# The package list and the sudo verbs come from deploy/manifest.sh, which
+# install_units.sh, verify_install.sh and update.sh read as well. Restating any
+# of it here is how the installer and the verifier came to describe two
+# different correct installs.
+MANIFEST="$APP/deploy/manifest.sh"
+[ -f "$MANIFEST" ] || { echo "INSTALL FAILED: missing $MANIFEST — is this a complete checkout?" >&2; exit 1; }
+# shellcheck source=../deploy/manifest.sh
+. "$MANIFEST"
+
 SKIP_APT=0; SKIP_WEB=0; SKIP_TESTS=0; NOINPUT=0; SEED_DEMO=1
 for a in "$@"; do
   case "$a" in
@@ -199,14 +208,10 @@ if [ "$SKIP_APT" = 0 ]; then
     #
     # Array form, not a string: word-splitting an unquoted list is how a package
     # name with a space silently becomes two wrong ones.
-    pkgs=(
-        python3 python3-venv python3-pip git logrotate curl
-        libpango-1.0-0 libpangocairo-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
-        rclone
-    )
+    pkgs=("${MB_APT_PACKAGES[@]}")
     # Only the standard, web-managed install has any use for it.
     if [ "$SKIP_WEB" = 0 ]; then
-        pkgs+=(nginx)
+        pkgs+=("${MB_APT_PACKAGES_WEB[@]}")
     fi
     sudo apt-get install -y -qq "${pkgs[@]}" || fail "apt install failed"
 else
@@ -465,19 +470,33 @@ either drop --skip-apt so this script installs it, or pass --skip-web to wire up
     [ -n "$SYSTEMCTL" ] || fail "no systemctl found at /usr/bin/systemctl or /bin/systemctl.
   This installer targets systemd on the Debian/Ubuntu family; pass --skip-web to
   wire up your own process manager instead."
+    # ONE grant string, built from the manifest, used for both the rule that gets
+    # installed and the instructions printed if it cannot be. Those two used to be
+    # written out separately and had already drifted: the rule granted five verbs
+    # while the instructions named three, so anyone who followed the fallback got a
+    # box the verifier could not tell was wrong.
+    sudo_grant=""
+    for verb in "${MB_SUDO_VERBS[@]}"; do
+        [ -n "$sudo_grant" ] && sudo_grant="$sudo_grant, "
+        sudo_grant="${sudo_grant}${SYSTEMCTL} ${verb} murphys-bench"
+    done
+    sudoers_line="${RUN_USER} ALL=(root) NOPASSWD: ${sudo_grant}"
+
     sudoers_tmp="$(mktemp)"
     cat > "$sudoers_tmp" <<SUDOEOF
-# Murphy's Bench — written by scripts/install.sh. Lets the app user control ONLY
-# its own service without a password, which is what the in-app Update button
-# needs (it runs with no terminal, so sudo cannot prompt).
+# Murphy's Bench — written by scripts/install.sh from deploy/manifest.sh. Lets
+# the app user control ONLY its own service without a password, which is what the
+# in-app Update button needs (it runs with no terminal, so sudo cannot prompt).
 #
 # stop and start are here because they are NOT optional: when an update fails,
 # rollback runs restore.sh, which stops the service, restores the database, and
 # starts it again. Granting restart alone leaves the recovery path broken in
 # exactly the situation it exists for. Do not trim this list to "just restart".
 #
-# Nothing else is granted: not shutdown, not other units, not root shells.
-${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} restart murphys-bench, ${SYSTEMCTL} stop murphys-bench, ${SYSTEMCTL} start murphys-bench, ${SYSTEMCTL} status murphys-bench, ${SYSTEMCTL} is-active murphys-bench
+# This FILE grants nothing else: not shutdown, not other units, not root shells.
+# It says nothing about the account itself — a service account that is also an
+# administrator has far more than this, and Murphy's Bench cannot see that.
+${sudoers_line}
 SUDOEOF
     # NEVER install an unvalidated sudoers file — a syntax error in /etc/sudoers.d
     # can break sudo for every user on the box, including the one holding the only
@@ -489,7 +508,7 @@ SUDOEOF
         rm -f "$sudoers_tmp"
         fail "visudo not found, so the sudoers rule cannot be safely validated.
   Install the 'sudo' package, or add this line yourself with 'sudo visudo -f /etc/sudoers.d/murphys-bench':
-    ${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} restart murphys-bench, ${SYSTEMCTL} stop murphys-bench, ${SYSTEMCTL} start murphys-bench"
+    ${sudoers_line}"
     fi
     sudo install -m 0440 -o root -g root "$sudoers_tmp" /etc/sudoers.d/murphys-bench \
         || { rm -f "$sudoers_tmp"; fail "could not install /etc/sudoers.d/murphys-bench"; }

@@ -32,6 +32,16 @@ set -uo pipefail
 APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$APP"
 
+# What a correct install contains is NOT restated here. This script used to keep
+# its own copy of the enabled-unit list, its own copy of the alert-hook jobs and
+# its own (shorter, wrong) copy of the sudo verbs — so it could and did pass a
+# box that install.sh had built differently. It now asserts against the same
+# deploy/manifest.sh the installer builds from.
+MANIFEST="$APP/deploy/manifest.sh"
+[ -f "$MANIFEST" ] || { echo "VERIFY FAILED: missing $MANIFEST — nothing to verify against" >&2; exit 1; }
+# shellcheck source=../deploy/manifest.sh
+. "$MANIFEST"
+
 PASS=0; FAIL=0
 
 # The in-app Update check below deploys the latest RELEASE TAG, which moves this
@@ -80,16 +90,7 @@ else
 fi
 
 head_ "systemd units installed and running"
-UNITS_ENABLED=(
-    murphys-bench.service
-    murphys-bench-update.path
-    murphys-bench-backup-now.path
-    murphys-bench-restore.path
-    murphys-bench-backup.timer
-    murphys-bench-fetch-email.timer
-    murphys-bench-sla-check.timer
-)
-for u in "${UNITS_ENABLED[@]}"; do
+for u in "${MB_UNITS_ENABLE[@]}"; do
     if ! systemctl cat "$u" >/dev/null 2>&1; then
         bad "$u is not installed — the feature behind it silently does nothing"
     elif systemctl is-active --quiet "$u"; then
@@ -206,7 +207,7 @@ head_ "A failed job actually reports itself"
 # Two halves, both required: systemd must SHOW the hook on the real units, and
 # the alert must actually produce a ticket when it runs.
 missing_hook=()
-for u in murphys-bench-backup murphys-bench-fetch-email murphys-bench-sla-check; do
+for u in "${MB_ALERT_HOOK_JOBS[@]}"; do
     systemctl show -p OnFailure --value "$u.service" 2>/dev/null \
         | grep -q 'murphys-bench-alert@' || missing_hook+=("$u")
 done
@@ -294,16 +295,21 @@ fi
 # Each verb rollback needs, not just the one the update needs. Granting restart
 # alone lets an update succeed while leaving restore.sh unable to run — which is
 # precisely the state the first version of this fix shipped in.
+#
+# ⚠ This loop used to read `restart stop start` while install.sh INSTALLED five
+# verbs and its own fallback instructions named three. So the gate passed a box
+# missing status and is-active, and nobody could see it from any one file. The
+# list now comes from the manifest the installer writes the rule from.
 missing_verbs=""
 policy="$(LC_ALL=C sudo -n -l 2>/dev/null || true)"
-for verb in restart stop start; do
+for verb in "${MB_SUDO_VERBS[@]}"; do
     # Matched within a SINGLE line and against the full resolved path, so a verb
     # from one rule cannot be paired with the NOPASSWD of another.
     printf '%s\n' "$policy" | grep -F 'NOPASSWD' | grep -qF "$SYSTEMCTL $verb murphys-bench" \
         || missing_verbs="$missing_verbs $verb"
 done
 if [ -z "$missing_verbs" ]; then
-    ok "every verb the update AND its rollback need is granted (restart, stop, start)"
+    ok "every verb the update AND its rollback need is granted (${MB_SUDO_VERBS[*]})"
 else
     bad "the sudoers rule is MISSING:${missing_verbs}
         An update could still finish, but a FAILED update could not roll back —

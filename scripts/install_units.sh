@@ -25,9 +25,24 @@
 set -euo pipefail
 
 APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# ⚠ RUN_USER is WHOEVER RUNS THIS SCRIPT. That is deliberate — the script is
+# meant to run as the app user and `sudo` for each individual write — but it
+# means running the whole script as root would render every unit User=root.
+# Anything privileged that ever invokes this must pass the app user in
+# explicitly rather than letting `id -un` answer.
 RUN_USER="$(id -un)"
 RUN_GROUP="$(id -gn)"
 UNIT_DIR=/etc/systemd/system
+
+# The unit list, the enable list and the alert-hook jobs are NOT written here.
+# They live in deploy/manifest.sh, which install.sh, verify_install.sh and
+# update.sh read as well, so there is exactly one description of what a correct
+# install contains.
+MANIFEST="$APP/deploy/manifest.sh"
+[ -f "$MANIFEST" ] || { echo "UNIT INSTALL FAILED: missing $MANIFEST — is this a complete checkout?" >&2; exit 1; }
+# shellcheck source=../deploy/manifest.sh
+. "$MANIFEST"
 
 WITH_DISK_CHECK=0
 for a in "$@"; do
@@ -44,44 +59,12 @@ command -v systemctl >/dev/null || fail "this host has no systemd; \
 Murphy's Bench's scheduled backups and in-app update need it. Wire up the \
 equivalents for your init system using deploy/ as the reference."
 
-# Units that are always installed. The three .path units are what make the in-app
-# "Back up now", "Update" and "Restore" buttons do anything at all — without them
-# the UI spins forever. The three timers are inert until the matching feature is
-# configured in the app, but must exist BEFORE that, because the web process
-# deliberately has no privilege to enable a systemd unit itself.
-UNITS=(
-    murphys-bench.service              # gunicorn
-    'murphys-bench-alert@.service'     # turns a failed job into a System Alert ticket
-    murphys-bench-update.path          # in-app Update button
-    murphys-bench-update.service
-    murphys-bench-backup-now.path      # in-app "Back up now" button
-    murphys-bench-backup-now.service
-    murphys-bench-restore.path         # in-app Restore button
-    murphys-bench-restore.service
-    murphys-bench-backup.timer         # scheduled backups (per in-app schedule)
-    murphys-bench-backup.service
-    murphys-bench-fetch-email.timer    # inbound email -> tickets
-    murphys-bench-fetch-email.service
-    murphys-bench-sla-check.timer      # overdue-SLA sweep
-    murphys-bench-sla-check.service
-)
-[ "$WITH_DISK_CHECK" = 1 ] && UNITS+=(
-    murphys-bench-disk-check.timer
-    murphys-bench-disk-check.service
-)
-
-# Units systemd should actually start. Plain .service units named by a .path or
-# .timer are launched by their trigger and must NOT be enabled themselves.
-ENABLE=(
-    murphys-bench.service
-    murphys-bench-update.path
-    murphys-bench-backup-now.path
-    murphys-bench-restore.path
-    murphys-bench-backup.timer
-    murphys-bench-fetch-email.timer
-    murphys-bench-sla-check.timer
-)
-[ "$WITH_DISK_CHECK" = 1 ] && ENABLE+=(murphys-bench-disk-check.timer)
+UNITS=("${MB_UNITS[@]}")
+ENABLE=("${MB_UNITS_ENABLE[@]}")
+if [ "$WITH_DISK_CHECK" = 1 ]; then
+    UNITS+=("${MB_UNITS_OPTIONAL[@]}")
+    ENABLE+=("${MB_UNITS_OPTIONAL_ENABLE[@]}")
+fi
 
 log "rendering ${#UNITS[@]} units for APP=$APP USER=$RUN_USER (sudo)..."
 for u in "${UNITS[@]}"; do
@@ -139,8 +122,9 @@ fi
 # entire purpose is to make silent failures visible — was itself silently absent.
 # A nightly backup could fail forever and say nothing.
 #
-# %N expands to the failed unit's name, so one template serves every job.
-for u in murphys-bench-backup murphys-bench-fetch-email murphys-bench-sla-check; do
+# %N expands to the failed unit's name, so one template serves every job. The
+# job list comes from the manifest — verify_install.sh checks the same names.
+for u in "${MB_ALERT_HOOK_JOBS[@]}"; do
     sudo mkdir -p "$UNIT_DIR/$u.service.d" || fail "could not create $UNIT_DIR/$u.service.d"
     sudo tee "$UNIT_DIR/$u.service.d/onfailure.conf" >/dev/null <<'DROPIN' || fail "could not write the $u failure hook"
 # Written by scripts/install_units.sh. A failure here opens a System Alert

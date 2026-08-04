@@ -239,17 +239,17 @@ chmod -R o+rX "$APP/staticfiles" 2>/dev/null || true
 # loudly with the exact command. Never silent, never fatal — a good update must
 # not roll back over this.
 #
-# The expected unit list is DERIVED from install_units.sh's own UNITS array, not
-# written out again here. A hardcoded list only knows about the units that existed
-# when it was written, so a release adding a new one (in-app restore was exactly
-# this) shipped a button whose unit nothing checked for and nothing installed. The
-# array is parsed rather than sourced because install_units.sh does real work at
-# import time. Only the unconditional block is read, so the opt-in disk-check units
-# never produce a false warning on a box that deliberately does not have them.
+# The expected unit list is READ from deploy/manifest.sh, the same file
+# install_units.sh installs from and verify_install.sh asserts against, so this
+# check cannot fall behind a release that adds a unit (in-app restore was exactly
+# that: a button whose unit nothing installed and nothing checked for).
+#
+# Sourced in a SUBSHELL so the manifest cannot touch this script's own variables
+# mid-update. Only MB_UNITS is read, never MB_UNITS_OPTIONAL, so the opt-in
+# disk-check units never produce a false warning on a box that deliberately does
+# not have them.
 expected_units() {
-    awk '/^UNITS=\(/{f=1;next} f&&/^\)/{exit} f{print}' "$APP/scripts/install_units.sh" 2>/dev/null \
-      | sed -e 's/#.*//' -e "s/['\"]//g" -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
-      | grep -v '^$'
+    ( . "$APP/deploy/manifest.sh" 2>/dev/null && printf '%s\n' "${MB_UNITS[@]}" )
 }
 
 deploy_layer_warning() {
