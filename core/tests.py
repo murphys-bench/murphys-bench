@@ -2892,6 +2892,84 @@ def test_incomplete_install_replaces_the_success_tick_in_the_ui(settings, tmp_pa
 
 
 @pytest.mark.django_db
+def test_card_discards_a_marker_that_names_no_real_unit(settings, tmp_path, client):
+    """A garbled marker must be discarded, not rendered at the user.
+
+    Reproduced on a real 24.04 box 2026-08-04: a box on v0.11.1 updating forward
+    to a release carrying deploy/manifest.sh runs its OWN update.sh, whose awk
+    parser finds no literal UNITS block to stop at, swallows install_units.sh and
+    writes 269 lines of shell fragments here. The update itself succeeded — exit
+    0, service healthy — and the card told the operator their install was broken
+    and listed nonsense.
+
+    The sample below is real captured output, trimmed. A warning nobody can act
+    on teaches people to ignore the one that matters.
+    """
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    admin = User.objects.create_superuser(username='boss2', password='x')
+    client.force_login(admin)
+
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'succeeded', 'exit_code': 0, 'finished_at': '2026-08-04T00:00:00Z',
+    }))
+    update_ops.incomplete_path().write_text(
+        'These system services are not installed:\n'
+        '  if\n  $WITH_DISK_CHECK\n  =\n  1\n  ];\n  then\n  fi\n'
+        '  log\n  rendering\n  ${\n  for\n  u\n  in\n  do\n'
+        '  src=$APP/deploy/$u\n  sed\n  -e\n  s|__APP__|$APP|g\n'
+    )
+
+    assert update_ops.read_incomplete() == '', 'garbled marker was not discarded'
+    body = client.get(reverse('core:update_status')).content.decode()
+    assert 'This install is incomplete' not in body
+    assert '$WITH_DISK_CHECK' not in body, 'shell fragments reached the user'
+    assert 'Last update succeeded' in body, (
+        'the update genuinely succeeded, so with the bogus marker discarded the '
+        'card should report success'
+    )
+
+
+@pytest.mark.django_db
+def test_card_still_shows_a_warning_that_names_no_units_but_is_not_about_units(
+    settings, tmp_path,
+):
+    """Don't over-suppress: update.sh also warns about static permissions.
+
+    That text names no systemd unit at all, and it is a real condition a user
+    must act on. Only markers that CLAIM missing services while naming none are
+    untrustworthy.
+    """
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+
+    update_ops.incomplete_path().write_text(
+        'The login page is served without styling, because nginx cannot read\n'
+        'the static files.\n\nFIX: cd /opt/murphys-bench && scripts/install.sh\n'
+    )
+    assert 'without styling' in update_ops.read_incomplete()
+
+
+@pytest.mark.django_db
+def test_card_discards_an_absurdly_long_marker(settings, tmp_path):
+    """Length alone is a tell: the honest vocabulary here is a few unit names."""
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+
+    update_ops.incomplete_path().write_text(
+        'These system services are not installed:\n'
+        + '  murphys-bench-restore.path\n' * 200
+    )
+    assert update_ops.read_incomplete() == '', (
+        'a 200-line marker is a parser accident even when the lines parse as '
+        'unit names; it must not become a wall of text in the UI'
+    )
+
+
+@pytest.mark.django_db
 def test_read_status_idle_on_corrupt_file(settings, tmp_path):
     from core import update_ops
     settings.BASE_DIR = tmp_path
@@ -9329,6 +9407,48 @@ def test_every_unit_template_is_listed_in_the_manifest():
     assert not missing_file, (
         'The manifest lists units with no template in deploy/, so install_units.sh '
         f'will fail partway through a real install: {missing_file}'
+    )
+
+
+def test_legacy_unit_block_matches_the_manifest():
+    """install_units.sh's legacy literal block must equal MB_UNITS exactly.
+
+    Releases at or before v0.11.1 awk-parse this file for a literal `UNITS=(`
+    block to learn what units to expect, and that parser is already shipped. The
+    block is a duplicate list, which is normally the exact thing the manifest
+    exists to abolish — it is tolerable ONLY because this test makes drift
+    impossible.
+
+    Verified on a real box: with no literal block the old parser swallows the
+    script and writes 269 lines of shell fragments into logs/update-incomplete,
+    which the Updates card renders verbatim on a healthy install. With an EMPTY
+    block it is worse — that parser ends in `grep -v '^$'`, which exits 1 on
+    empty input, and the old update.sh runs under `set -euo pipefail`, so the
+    update fails outright.
+    """
+    import subprocess
+
+    installer = _repo_root() / 'scripts' / 'install_units.sh'
+    # Parsed with the SAME awk+sed pipeline the shipped v0.11.1 update.sh uses,
+    # so this asserts what that code will actually see, not what we hope it sees.
+    legacy = subprocess.run(
+        ['bash', '-c',
+         "awk '/^UNITS=\\(/{f=1;next} f&&/^\\)/{exit} f{print}' \"$1\" "
+         "| sed -e 's/#.*//' -e \"s/['\\\"]//g\" -e 's/^[[:space:]]*//' "
+         "-e 's/[[:space:]]*$//' | grep -v '^$'",
+         '_', str(installer)],
+        capture_output=True, text=True, check=False,
+    ).stdout.split()
+
+    assert legacy, (
+        'the legacy literal UNITS block is gone or unparseable. An old box '
+        'updating forward would get an EMPTY list, and its parser exits 1 on '
+        'empty under set -e — the update would fail, not just warn.'
+    )
+    assert legacy == _manifest_array('MB_UNITS'), (
+        'the legacy literal block and MB_UNITS disagree, so a box on v0.11.1 or '
+        'earlier would be told the wrong units are missing.\n'
+        f'  legacy:   {legacy}\n  manifest: {_manifest_array("MB_UNITS")}'
     )
 
 

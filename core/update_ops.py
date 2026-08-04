@@ -40,6 +40,19 @@ def incomplete_path() -> Path:
     return _logs_dir() / 'update-incomplete'
 
 
+# A Murphy's Bench systemd unit as update.sh would name one. Used to decide
+# whether a marker claiming missing services is telling the truth.
+_UNIT_NAME_RE = re.compile(r'^murphys-bench[-@.a-z0-9]*\.(service|timer|path)$')
+
+# update.sh's own wording when it lists units. If this header is present the
+# lines under it are unit names, so at least one of them must look like one.
+_MISSING_SERVICES_HEADER = 'These system services are not installed:'
+
+# No honest marker is anywhere near this big — the whole vocabulary is a handful
+# of unit names plus a fixed block of advice. A larger one is a parser accident.
+_MAX_MARKER_LINES = 60
+
+
 def read_incomplete() -> str:
     """What is missing from this install's DEPLOYMENT layer, or '' if it is whole.
 
@@ -52,11 +65,34 @@ def read_incomplete() -> str:
     incomplete until someone runs the fix, and a status entry would go stale or
     scroll away. The consequence has to keep being visible for as long as it is
     true.
+
+    ⚠ The content is NOT trusted. This file is written by whichever version of
+    update.sh happens to be on the box, including versions that predate whatever
+    is running now. Verified on a real box 2026-08-04: v0.11.1's update.sh, when
+    it reads a newer install_units.sh, mis-parses it and writes 269 lines of
+    shell fragments here — which this card then rendered verbatim as "This
+    install is incomplete" on a perfectly healthy install. A warning nobody can
+    act on is worse than no warning, because it teaches people to ignore the one
+    that matters. So a marker that claims services are missing but names no
+    plausible unit, or that is absurdly long, is discarded rather than shown.
     """
     try:
-        return incomplete_path().read_text(errors='replace').strip()
+        text = incomplete_path().read_text(errors='replace').strip()
     except Exception:
         return ''
+    if not text:
+        return ''
+
+    lines = text.splitlines()
+    if len(lines) > _MAX_MARKER_LINES:
+        return ''
+
+    if _MISSING_SERVICES_HEADER in text:
+        named = any(_UNIT_NAME_RE.match(line.strip()) for line in lines)
+        if not named:
+            return ''
+
+    return text
 
 
 def _git(*args) -> str:

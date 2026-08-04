@@ -59,6 +59,44 @@ command -v systemctl >/dev/null || fail "this host has no systemd; \
 Murphy's Bench's scheduled backups and in-app update need it. Wire up the \
 equivalents for your init system using deploy/ as the reference."
 
+# ⚠ LEGACY-COMPATIBILITY BLOCK — DO NOT "TIDY THIS AWAY", AND DO NOT EDIT BY HAND.
+#
+# Releases at or before v0.11.1 derive their expected unit list by awk-parsing
+# THIS FILE for a literal `UNITS=(` ... `)` block. Their parser is already shipped
+# and cannot be changed. When such a box updates forward to a release carrying
+# deploy/manifest.sh, it reads this file with that parser, so the shape below is
+# the only thing it will ever see.
+#
+# Verified on a real 24.04 box 2026-08-04, both ways:
+#   - With no literal block, the parser found no `)` to stop at, swallowed the
+#     rest of the script and wrote 269 lines of shell fragments into
+#     logs/update-incomplete — which the Updates card renders verbatim as
+#     "This install is incomplete" on a box that is perfectly healthy.
+#   - An EMPTY literal block is WORSE, not better: that parser ends in
+#     `grep -v '^$'`, which exits 1 on empty input, and the old update.sh runs
+#     under `set -euo pipefail`. The update would FAIL outright.
+#
+# So it must be non-empty AND correct. `test_legacy_unit_block_matches_the_manifest`
+# fails if this list and MB_UNITS ever disagree, so it cannot drift. Delete both
+# the block and that test once no supported install predates the manifest.
+UNITS=(
+    murphys-bench.service
+    'murphys-bench-alert@.service'
+    murphys-bench-update.path
+    murphys-bench-update.service
+    murphys-bench-backup-now.path
+    murphys-bench-backup-now.service
+    murphys-bench-restore.path
+    murphys-bench-restore.service
+    murphys-bench-backup.timer
+    murphys-bench-backup.service
+    murphys-bench-fetch-email.timer
+    murphys-bench-fetch-email.service
+    murphys-bench-sla-check.timer
+    murphys-bench-sla-check.service
+)
+
+# The real assignment. Everything this script actually does uses the manifest.
 UNITS=("${MB_UNITS[@]}")
 ENABLE=("${MB_UNITS_ENABLE[@]}")
 if [ "$WITH_DISK_CHECK" = 1 ]; then
