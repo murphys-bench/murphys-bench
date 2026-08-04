@@ -2945,11 +2945,63 @@ def test_card_still_shows_a_warning_that_names_no_units_but_is_not_about_units(
     settings.BASE_DIR = tmp_path
     (tmp_path / 'logs').mkdir()
 
+    # update.sh's REAL wording (scripts/update.sh:303-305). An earlier version of
+    # this test invented the text, so it proved nothing about the actual product.
     update_ops.incomplete_path().write_text(
-        'The login page is served without styling, because nginx cannot read\n'
-        'the static files.\n\nFIX: cd /opt/murphys-bench && scripts/install.sh\n'
+        "The web server cannot read this install's stylesheets (HTTP 403).\n"
+        'Pages render as unstyled HTML with no logo.\n'
+        '\nFIX: cd /opt/murphys-bench && scripts/install.sh\n'
     )
-    assert 'without styling' in update_ops.read_incomplete()
+    kept = update_ops.read_incomplete()
+    assert 'stylesheets (HTTP 403)' in kept
+    assert 'unstyled HTML' in kept
+    assert 'scripts/install.sh' in kept, 'the fix must survive with the problem'
+
+
+@pytest.mark.django_db
+def test_mixed_marker_keeps_the_real_warning_and_drops_the_bogus_block(
+    settings, tmp_path, client,
+):
+    """A garbled services block must not take a real warning down with it.
+
+    update.sh writes BOTH problems into one file (scripts/update.sh:293-311), and
+    the FIX line differs depending on which one exists. An all-or-nothing discard
+    therefore hid a genuine "your site renders unstyled" warning whenever the
+    services block happened to be garbage — which is exactly the case on a
+    v0.11.1 box updating forward. Silence about a real problem is a worse failure
+    than the noise it replaced.
+
+    Caught in review, 2026-08-04.
+    """
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    admin = User.objects.create_superuser(username='boss3', password='x')
+    client.force_login(admin)
+
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'succeeded', 'exit_code': 0, 'finished_at': '2026-08-04T00:00:00Z',
+    }))
+    update_ops.incomplete_path().write_text(
+        'These system services are not installed:\n'
+        '  if\n  $WITH_DISK_CHECK\n  =\n  1\n  ];\n  then\n'
+        'The web server cannot read this install\'s stylesheets (HTTP 403).\n'
+        'Pages render as unstyled HTML with no logo.\n'
+        '\n'
+        'FIX: cd /home/tester/murphys-bench && scripts/install.sh\n'
+        'Run it in a terminal. It needs a password.\n'
+    )
+
+    kept = update_ops.read_incomplete()
+    assert 'stylesheets (HTTP 403)' in kept, 'the real warning was discarded'
+    assert 'scripts/install.sh' in kept, 'the actionable fix was discarded'
+    assert '$WITH_DISK_CHECK' not in kept, 'shell fragments survived'
+    assert 'These system services' not in kept, 'the bogus block survived'
+
+    body = client.get(reverse('core:update_status')).content.decode()
+    assert 'This install is incomplete' in body
+    assert 'stylesheets (HTTP 403)' in body
+    assert '$WITH_DISK_CHECK' not in body
 
 
 @pytest.mark.django_db

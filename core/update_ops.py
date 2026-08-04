@@ -44,13 +44,79 @@ def incomplete_path() -> Path:
 # whether a marker claiming missing services is telling the truth.
 _UNIT_NAME_RE = re.compile(r'^murphys-bench[-@.a-z0-9]*\.(service|timer|path)$')
 
-# update.sh's own wording when it lists units. If this header is present the
-# lines under it are unit names, so at least one of them must look like one.
+# The section headers scripts/update.sh writes. It puts BOTH problems in one
+# file, so this must be sanitized per section: discarding the whole marker
+# because the services list is garbage would also throw away a real
+# "your site is rendering unstyled" warning sitting underneath it.
 _MISSING_SERVICES_HEADER = 'These system services are not installed:'
+_STATIC_HEADER_PREFIX = 'The web server cannot read this install'
+_FIX_PREFIX = 'FIX:'
 
-# No honest marker is anywhere near this big — the whole vocabulary is a handful
-# of unit names plus a fixed block of advice. A larger one is a parser accident.
-_MAX_MARKER_LINES = 60
+# There are 16 units in the largest possible install, so a services block much
+# longer than that is a parser accident, not a broken box.
+_MAX_SERVICE_LINES = 24
+
+
+def _sanitize_incomplete(text: str) -> str:
+    """Drop only the missing-services block, and only when it cannot be believed.
+
+    ``update.sh`` writes up to two independent problems plus a shared FIX line
+    into one file (scripts/update.sh:293-311). An all-or-nothing check therefore
+    threw away a real "your site renders unstyled" warning whenever the services
+    list happened to be garbage — trading noise for silence, which is the worse
+    of the two. Caught in review, 2026-08-04.
+
+    So this KEEPS BY DEFAULT. Every line survives unless it belongs to a
+    missing-services block that names no plausible unit or is absurdly long. If
+    the wording of anything else ever changes, the failure is that the card shows
+    too much, never that it silently shows nothing.
+
+    The services block is exactly what update.sh emits: the header, an indented
+    run of unit names, then its own unindented prose, ending at a blank line or
+    at whichever section comes next.
+    """
+    lines = text.splitlines()
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        if lines[i].strip() != _MISSING_SERVICES_HEADER:
+            out.append(lines[i])
+            i += 1
+            continue
+
+        # The indented run is the unit list.
+        j = i + 1
+        named = []
+        while j < len(lines) and lines[j].startswith('  ') and lines[j].strip():
+            named.append(lines[j])
+            j += 1
+        # Then this block's own prose, up to a blank line or the next section.
+        k = j
+        while k < len(lines) and lines[k].strip() and not (
+            lines[k].strip().startswith(_STATIC_HEADER_PREFIX)
+            or lines[k].strip().startswith(_FIX_PREFIX)
+        ):
+            k += 1
+
+        believable = (
+            bool(named)
+            and len(named) <= _MAX_SERVICE_LINES
+            and all(_UNIT_NAME_RE.match(ln.strip()) for ln in named)
+        )
+        if believable:
+            out.extend(lines[i:k])
+        i = k
+
+    kept = '\n'.join(out).strip()
+    # Nothing but advice left means the only problem we had was the one we just
+    # decided was not real. Advice for a non-problem is its own false alarm.
+    substantive = [
+        ln for ln in kept.splitlines()
+        if ln.strip() and not ln.strip().startswith(_FIX_PREFIX)
+        and not ln.strip().startswith('Run it in a terminal')
+        and not ln.strip().startswith('Update button cannot do it')
+    ]
+    return kept if substantive else ''
 
 
 def read_incomplete() -> str:
@@ -82,17 +148,7 @@ def read_incomplete() -> str:
         return ''
     if not text:
         return ''
-
-    lines = text.splitlines()
-    if len(lines) > _MAX_MARKER_LINES:
-        return ''
-
-    if _MISSING_SERVICES_HEADER in text:
-        named = any(_UNIT_NAME_RE.match(line.strip()) for line in lines)
-        if not named:
-            return ''
-
-    return text
+    return _sanitize_incomplete(text)
 
 
 def _git(*args) -> str:
