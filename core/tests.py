@@ -9721,7 +9721,16 @@ def test_manifest_less_target_still_expects_that_release_s_own_units(tmp_path):
     missing. Under-reporting on the recovery path is precisely what this check
     exists to prevent.
 
-    Driven against the REAL v0.11.1 install_units.sh out of git, not a fixture.
+    Driven against a CHECKED-IN copy of v0.11.1's install_units.sh, deliberately
+    not `git show v0.11.1:...`. The first version of this test read the tag and
+    skipped when it was missing — and CI's checkout is shallow with no tags
+    (`.github/workflows/ci.yml` sets no fetch-depth), so the test guarding this
+    defect would have silently skipped in the one place it most needed to run.
+    A test whose authority depends on repo tag availability is decoration.
+    Caught in review, 2026-08-04.
+
+    `test_legacy_fixture_matches_the_real_tag` keeps the fixture honest, and that
+    one is allowed to skip because nothing load-bearing rests on it.
     """
     import re
     import subprocess
@@ -9733,13 +9742,12 @@ def test_manifest_less_target_still_expects_that_release_s_own_units(tmp_path):
     # A tree shaped like a pre-manifest release: its own install_units.sh, no manifest.
     scripts = tmp_path / 'scripts'
     scripts.mkdir(parents=True)
-    real_old = subprocess.run(
-        ['git', 'show', 'v0.11.1:scripts/install_units.sh'],
-        cwd=str(_repo_root()), capture_output=True, text=True,
+    fixture = _repo_root() / 'core' / 'testdata' / 'install_units_v0.11.1.sh'
+    assert fixture.exists(), (
+        'the checked-in v0.11.1 installer fixture is missing, so this test has '
+        'nothing to assert against — it must never degrade to a skip'
     )
-    if real_old.returncode != 0:
-        pytest.skip('tag v0.11.1 not available in this checkout')
-    (scripts / 'install_units.sh').write_text(real_old.stdout)
+    (scripts / 'install_units.sh').write_text(fixture.read_text())
 
     out = subprocess.run(
         ['bash', '-c', f'set -euo pipefail\n{m.group(0)}\nAPP={tmp_path}\n'
@@ -9762,6 +9770,32 @@ def test_manifest_less_target_still_expects_that_release_s_own_units(tmp_path):
             f'{critical} went unchecked on the rollback path — the box could be '
             'told it is clean while that unit is missing'
         )
+
+
+def test_legacy_fixture_matches_the_real_tag():
+    """The checked-in v0.11.1 fixture must still match what v0.11.1 shipped.
+
+    This is the ONLY test here allowed to skip. Nothing load-bearing rests on it:
+    it exists so the fixture cannot quietly drift from the release it claims to
+    copy. The test that actually guards the rollback under-reporting defect reads
+    the fixture directly and never skips, which is the whole point of splitting
+    the two — CI checks out shallow with no tags.
+    """
+    import subprocess
+
+    real = subprocess.run(
+        ['git', 'show', 'v0.11.1:scripts/install_units.sh'],
+        cwd=str(_repo_root()), capture_output=True, text=True,
+    )
+    if real.returncode != 0:
+        pytest.skip('tag v0.11.1 not reachable here (shallow checkout); the '
+                    'fixture-driven test above still ran')
+
+    fixture = (_repo_root() / 'core' / 'testdata' / 'install_units_v0.11.1.sh').read_text()
+    assert fixture == real.stdout, (
+        'core/testdata/install_units_v0.11.1.sh no longer matches what v0.11.1 '
+        'actually shipped, so the rollback test is asserting against fiction'
+    )
 
 
 
