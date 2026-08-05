@@ -11311,20 +11311,157 @@ def test_check_reports_missing_units_and_still_exits_clean(tmp_path):
     )
 
 
-def test_every_repair_path_runs_the_completeness_check():
-    """All three scripts that can repair an install must re-check it.
+def _call_block(script_name, first_line_startswith, after=None):
+    """The lines of a script that invoke check_install.sh, ready to run.
 
-    This is the wiring the prod defect was missing. A future edit that drops the
-    call from install_units.sh would silently restore the bug where the fix cannot
-    clear the warning, and no behavioural test would notice on a box where the
-    units happened to be present already.
+    Asserting that a script CONTAINS the string "check_install.sh" is not a test:
+    it passes when the call sits in a comment, in a dead branch, behind the wrong
+    condition, or passes the wrong mode. That is exactly how the --skip-web
+    regression below got past the first version of this file. So the real block is
+    lifted out of the real script and executed.
     """
-    for name in ('update.sh', 'install_units.sh', 'install.sh'):
-        src = (_repo_root() / 'scripts' / name).read_text()
-        assert 'check_install.sh' in src, (
-            f'{name} can leave an install in a different state and never re-checks '
-            f'it, so a repaired box can go on being told it is broken'
-        )
+    lines = (_repo_root() / 'scripts' / script_name).read_text().splitlines()
+    start = 0
+    if after is not None:
+        start = next(n for n, ln in enumerate(lines) if ln.startswith(after))
+    i = next(n for n, ln in enumerate(lines[start:], start)
+             if ln.startswith(first_line_startswith))
+    if not lines[i].startswith('if '):
+        return lines[i]
+    depth, j = 0, i
+    while j < len(lines):
+        st = lines[j].strip()
+        if st.startswith('if '):
+            depth += 1
+        elif st == 'fi':
+            depth -= 1
+            if depth == 0:
+                return '\n'.join(lines[i:j + 1])
+        j += 1
+    raise AssertionError(f'unterminated if-block in {script_name}')
+
+
+def _run_call_block(tmp_path, block, script_present=True, **env_vars):
+    """Run a lifted call block against a stub check_install.sh that records itself."""
+    import subprocess
+
+    app = tmp_path / 'app'
+    (app / 'scripts').mkdir(parents=True, exist_ok=True)
+    (app / 'logs').mkdir(parents=True, exist_ok=True)
+    record = app / 'logs' / 'called'
+    if script_present:
+        stub = app / 'scripts' / 'check_install.sh'
+        stub.write_text('#!/bin/sh\necho "ARGS:[$*]" >> "%s"\n' % record)
+        stub.chmod(0o755)
+
+    setup = [f'{k}={v}' for k, v in env_vars.items()]
+    prelude = '\n'.join([
+        'set -uo pipefail',
+        f'APP={app}',
+        *setup,
+        f'log() {{ echo "LOG:$*" >> {record}; }}',
+    ])
+    out = subprocess.run(['bash', '-c', prelude + '\n' + block],
+                         capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, f'the call block failed: {out.stderr}'
+    return record.read_text() if record.exists() else ''
+
+
+def test_a_skip_web_install_does_not_get_told_it_is_incomplete(tmp_path):
+    """--skip-web installs no units and no web server. Nothing to check.
+
+    THE REGRESSION, caught in review before this shipped: install.sh ran the check
+    with --no-static-probe on a --skip-web box, believing that made it safe. It
+    does not. That flag suppresses the stylesheet probe only; every unit is still
+    checked, and a --skip-web box deliberately has none. The result was a marker
+    naming all 14 units as missing, telling the operator to run install_units.sh,
+    which is the standard systemd setup they explicitly opted out of.
+
+    A permanent "This install is incomplete" on an install working exactly as
+    documented is the same defect this branch exists to remove, aimed at a
+    different user.
+    """
+    called = _run_call_block(tmp_path, _call_block('install.sh', 'if [ "$SKIP_WEB" = 0 ]; then', after='# 11b)'),
+                             SKIP_WEB=1)
+
+    assert 'ARGS:' not in called, (
+        'the completeness check ran on a --skip-web install, so a correct custom '
+        f'install is told it is broken. Recorded: {called!r}'
+    )
+    assert 'LOG:' in called, (
+        'skipping it silently is its own failure: an operator who later wonders '
+        'why nothing checks their install deserves the reason in the log'
+    )
+
+
+def test_a_standard_install_re_checks_everything_including_the_stylesheet(tmp_path):
+    """The normal path must run the FULL check, stylesheet included.
+
+    install.sh is the fix a stylesheet warning names, so it is the one caller that
+    must be able to clear that half.
+    """
+    called = _run_call_block(tmp_path, _call_block('install.sh', 'if [ "$SKIP_WEB" = 0 ]; then', after='# 11b)'),
+                             SKIP_WEB=0)
+
+    assert 'ARGS:[]' in called, (
+        f'a standard install must run the full check with no flags, got: {called!r}'
+    )
+
+
+def test_the_unit_installer_re_checks_without_speaking_for_the_stylesheet(tmp_path):
+    """install_units.sh must re-check, and must pass --no-static-probe.
+
+    Without the call, the original defect returns: the command the banner names
+    repairs the box and cannot clear the banner. Without the flag, installing
+    units would clear or invent a stylesheet verdict it has no basis for.
+    """
+    called = _run_call_block(tmp_path, _call_block('install_units.sh', 'bash "$APP/scripts/check_install.sh"'))
+
+    assert 'ARGS:[--no-static-probe]' in called, (
+        f'install_units.sh must re-check units only, got: {called!r}'
+    )
+
+
+def test_update_runs_the_check_and_says_so_when_the_release_has_none(tmp_path):
+    """update.sh calls it, and is honest on a rollback target that lacks it.
+
+    update.sh is loaded by bash before the checkout and calls this script from the
+    tree AFTER it, so rolling back to any release older than this one finds no
+    script. Passing silently there would be a completeness check that quietly does
+    nothing, which is the failure mode the check exists to prevent.
+    """
+    block = _call_block('update.sh', 'if [ -f "$APP/scripts/check_install.sh" ]; then')
+
+    present = _run_call_block(tmp_path / 'a', block, script_present=True)
+    assert 'ARGS:[]' in present, f'update.sh did not run the check: {present!r}'
+
+    absent = _run_call_block(tmp_path / 'b', block, script_present=False)
+    assert 'ARGS:' not in absent, 'a missing script cannot have run'
+    assert 'LOG:' in absent, (
+        'an update that skipped the completeness check must say so, not pass in '
+        'silence'
+    )
+
+
+def test_static_warning_prefix_is_the_same_string_everywhere():
+    """Three files quote this sentence. A copy edit must not split them.
+
+    check_install.sh writes it and greps for it to carry it through a units-only
+    repair; core/update_ops.py matches it to keep the section when it sanitizes
+    the marker. The shell side now uses one variable for write and read. This
+    locks the Python side to it, because a drift there means the app throws away
+    a real warning rather than showing too much.
+    """
+    from core.update_ops import _STATIC_HEADER_PREFIX
+
+    src = (_repo_root() / 'scripts' / 'check_install.sh').read_text()
+    line = next(ln for ln in src.splitlines() if ln.startswith('STATIC_HEADER='))
+    shell_text = line.split('=', 1)[1].strip().strip('"')
+
+    assert shell_text.startswith(_STATIC_HEADER_PREFIX), (
+        f'the app parser looks for {_STATIC_HEADER_PREFIX!r} and the scripts now '
+        f'write {shell_text!r}, so the stylesheet warning would be dropped'
+    )
 
 
 def test_completeness_check_is_defined_in_exactly_one_place():

@@ -37,6 +37,17 @@ set -uo pipefail
 APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MARKER="$APP/logs/update-incomplete"
 
+# The stylesheet warning's opening words, written ONCE and used by both the code
+# that emits it and the code that carries it through a units-only repair. They
+# used to be two copies of the same sentence, so a copy edit to one would have
+# made install_units.sh silently discard a real "your site is unstyled" warning
+# while repairing units. Caught in review.
+#
+# ⚠ core/update_ops.py keeps its own prefix for the app-side parser
+# (_STATIC_HEADER_PREFIX). It must stay a prefix of this line;
+# test_static_warning_prefix_is_the_same_string_everywhere fails if it drifts.
+STATIC_HEADER="The web server cannot read this install's stylesheets"
+
 STATIC_PROBE=1
 for a in "$@"; do
     case "$a" in
@@ -103,7 +114,7 @@ else
     # problem, carry those exact lines through: repairing the units does not
     # repair the styling, and silently dropping the warning would be the same
     # class of lie as never showing it.
-    carried_static="$(grep -A1 '^The web server cannot read this install' "$MARKER" 2>/dev/null || true)"
+    carried_static="$(grep -A1 "^$STATIC_HEADER" "$MARKER" 2>/dev/null || true)"
 fi
 
 if [ "${#missing[@]}" -eq 0 ] && [ "$css_code" = "200" ] && [ -z "$carried_static" ]; then
@@ -129,7 +140,7 @@ fi
     if [ -n "$carried_static" ]; then
         printf '%s\n' "$carried_static"
     elif [ "$css_code" != "200" ]; then
-        echo "The web server cannot read this install's stylesheets (HTTP $css_code)."
+        echo "$STATIC_HEADER (HTTP $css_code)."
         echo "Pages render as unstyled HTML with no logo."
     fi
     echo
@@ -156,7 +167,7 @@ fi
 if [ -n "$carried_static" ]; then
     printf '  • %s\n' "$carried_static" >&2
 elif [ "$css_code" != "200" ]; then
-    echo "  • The web server cannot read this install's stylesheets (HTTP $css_code)." >&2
+    echo "  • $STATIC_HEADER (HTTP $css_code)." >&2
     echo "    Pages render as unstyled HTML with no logo." >&2
 fi
 echo >&2

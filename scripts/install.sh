@@ -684,13 +684,25 @@ fi
 # as the fix when the problem is static permissions. Re-check now, so a box that
 # was just repaired stops being told it is broken.
 #
-# On a --skip-web install there is no web server here to probe, so the stylesheet
-# half is not ours to answer: checking it would invent a failure on a box that is
-# working exactly as its operator intended.
+# ⚠ NOT on a --skip-web install, and --no-static-probe is not enough to make it
+# safe there. That flag only suppresses the stylesheet probe; the units are still
+# checked, and a --skip-web box deliberately has NO systemd units and no nginx.
+# So running it there wrote a marker naming all 14 units as missing and told the
+# operator to run install_units.sh, which is precisely the standard systemd setup
+# they opted out of. A permanent "This install is incomplete" on an install that
+# is working exactly as documented is the same defect this whole change exists to
+# remove, pointed at a different user. Caught in review; I had reasoned about the
+# stylesheet half and not the units.
+#
+# There is nothing to check on such a box: it has no deployment contract of ours
+# to be incomplete against. An existing marker is left alone rather than deleted,
+# because showing too much is the safe direction here and a stale one can only
+# have come from a mode this box is no longer in.
 if [ "$SKIP_WEB" = 0 ]; then
     bash "$APP/scripts/check_install.sh" || true
 else
-    bash "$APP/scripts/check_install.sh" --no-static-probe || true
+    log "skipping the install-completeness check: --skip-web installs no units and"
+    log "        no web server, so there is no standard deployment contract to check"
 fi
 
 # 12) Done.
