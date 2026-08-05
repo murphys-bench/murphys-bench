@@ -10260,8 +10260,18 @@ def test_restore_units_are_templates_and_registered():
     # the installer, the verifier and the update-time drift check all read. The
     # assertion is the same one: these units must actually be installed.
     installed = _manifest_array('MB_UNITS')
-    assert 'murphys-bench-restore.path' in installed
-    assert 'murphys-bench-restore.service' in installed
+    # Each of these carries its OWN message rather than being a bare assert.
+    # Bare asserts made the three failures indistinguishable from one another in
+    # a report, which let a mutation sweep score a plant that hit the enable list
+    # as if it had hit the install list.
+    assert 'murphys-bench-restore.path' in installed, (
+        'the restore .path unit is not in MB_UNITS, so nothing installs it and '
+        'the Restore button queues a job nothing picks up'
+    )
+    assert 'murphys-bench-restore.service' in installed, (
+        'the restore .service unit is not in MB_UNITS, so the .path unit would '
+        'trigger a service that does not exist'
+    )
     assert 'murphys-bench-restore.path' in _manifest_array('MB_UNITS_ENABLE'), (
         'the restore .path unit is installed but never enabled, so the trigger '
         'file it watches for is never noticed'
