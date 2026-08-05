@@ -10,8 +10,20 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## v0.11.2 — 2026-08-05
 
-Code and dependencies only. No new services, no new sudo rules, no new packages, so the
-in-app Update button can deliver this one on its own.
+This release adds no services, no sudo rules and no packages of its own, so the Update
+button can deliver everything that is in it.
+
+**That is not the same as your install being complete.** If an earlier release put a
+system service on your server that was never installed, this release does not fix that,
+and the Updates page will keep telling you so until you run the command it names. In-app
+restore shipped two services in v0.11.0, and a server that took v0.11.0 or v0.11.1 through
+the Update button does not have them: its Restore page will wait forever for something
+that is not running. The fix is one command in a terminal, and it needs a password, which
+is why the button cannot do it for you:
+
+```
+cd /opt/murphys-bench && scripts/install_units.sh
+```
 
 ### Security
 
