@@ -8,6 +8,42 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## v0.11.2 — 2026-08-05
+
+Code and dependencies only. No new services, no new sudo rules, no new packages, so the
+in-app Update button can deliver this one on its own.
+
+### Security
+
+- **The library that encrypts your stored secrets was updated.** Three vulnerabilities
+  were disclosed on August 4th against the version Murphy's Bench pinned
+  (PYSEC-2026-3552, PYSEC-2026-3553, PYSEC-2026-3554); this release moves `cryptography`
+  from 48.0.1 to 50.0.0, which fixes all three. The fields this protects are your mailbox
+  passwords, the backup destination password, the Invoice Ninja token and saved device
+  credentials. The stored format did not change, and every encrypted field in a real
+  production database was checked to still decrypt before this shipped.
+
+### Fixed
+
+- **The installer and the install checker described two different correct installs.**
+  `scripts/install.sh` granted the app user five `sudo` permissions, the instructions it
+  prints when it cannot write the rule itself named three, and `scripts/verify_install.sh`
+  checked three. So a server set up by hand from those printed instructions was missing
+  two permissions and still passed the check. A box in that state can apply an update but
+  cannot roll one back, which is the state you find out about on the day it matters. The
+  checker now tests every permission the installer grants. If your box reports missing
+  permissions after this update, it was already missing them; the check just could not see
+  it before.
+
+### Changed
+
+- **What a correct install contains is now written down once**, in `deploy/manifest.sh`:
+  the services, which of them are enabled, which jobs report their own failures, the sudo
+  permissions and the system packages. `install.sh`, `install_units.sh`,
+  `verify_install.sh` and `update.sh` all read that one file instead of each keeping its
+  own copy, so they can no longer drift apart the way they just had. Nothing about how you
+  install or update changes; a complete checkout now simply has to include `deploy/`.
+
 ## v0.11.1 — 2026-08-03
 
 Code only. The in-app Update button can deliver this one on its own.
