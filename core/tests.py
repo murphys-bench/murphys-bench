@@ -11479,3 +11479,46 @@ def test_completeness_check_is_defined_in_exactly_one_place():
     assert owners == ['check_install.sh'], (
         f'the marker text is written in more than one script: {owners}'
     )
+
+
+@pytest.mark.django_db
+def test_the_incomplete_banner_does_not_diagnose_the_wrong_problem(settings, tmp_path, client):
+    """The card's own prose must not name a cause the marker does not claim.
+
+    The marker has two independent halves: missing system services, and a web
+    server that cannot read this install's stylesheets. The banner's lead-in said
+    "it could not install the system services that code needs" for BOTH, so a box
+    whose real problem was file permissions was told, in bold, that it was missing
+    services, directly above the text that said otherwise.
+
+    Found on mb-test by running the drill rather than the suite: repair the units
+    on a doubly-broken box and look at what the operator actually sees. Reachable
+    before this branch too, but repairing units is now a routine way to land in
+    exactly this state.
+    """
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    admin = User.objects.create_superuser(username='boss2', password='x')
+    client.force_login(admin)
+
+    update_ops.incomplete_path().write_text(
+        "The web server cannot read this install's stylesheets (HTTP 403).\n"
+        'Pages render as unstyled HTML with no logo.\n'
+        '\n'
+        'FIX: cd /opt/murphys-bench && scripts/install.sh\n'
+    )
+
+    raw = client.get(reverse('core:update_status')).content.decode()
+    # ⚠ Collapse whitespace FIRST. The template wraps this sentence across lines,
+    # so the phrase never appears contiguously in the raw HTML and a plain
+    # `not in` assertion passes against the buggy template too. The first version
+    # of this test did exactly that and sailed through the planted regression.
+    body = ' '.join(raw.split())
+
+    assert 'This install is incomplete' in body, 'the warning itself must still show'
+    assert 'cannot read this install' in body, 'the real problem must be named'
+    assert 'scripts/install.sh' in body, 'the fix for THIS half must be shown'
+    assert 'system services that code needs' not in body, (
+        'the banner diagnosed missing services on a box whose services are fine'
+    )

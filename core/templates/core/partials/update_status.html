@@ -95,10 +95,19 @@ is queued/running it polls itself every 3s; terminal states stop polling.
   {% if update_incomplete %}
     <div class="mt-3 text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-md p-4">
       <p class="font-medium">This install is incomplete.</p>
+      {% comment %}
+      This lead-in must NOT name the problem. The marker has two independent halves
+      (missing system services, and a web server that cannot read this install's
+      stylesheets) and it states its own case precisely, with the command that fixes
+      it. Diagnosing here as "system services" told an operator whose ACTUAL problem
+      was file permissions the wrong thing, in bold, above the text that had it right.
+      Found on mb-test 2026-08-05 by repairing the units on a doubly-broken box and
+      looking at the card, which is a state no test was rendering.
+      {% endcomment %}
       <p class="mt-1">
-        Updating moved new code onto this server, but it could not install the system
-        services that code needs. Murphy's Bench runs as an unprivileged user on purpose,
-        so it cannot install them itself and no button here can.
+        Updating moved new code onto this server, but part of what this release needs is
+        not in place, and no button here can put it there: Murphy's Bench runs as an
+        unprivileged user on purpose. What is missing, and the command that fixes it:
       </p>
       <pre class="mt-2 text-xs bg-gray-900 text-gray-100 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">{{ update_incomplete }}</pre>
     </div>
