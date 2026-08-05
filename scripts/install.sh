@@ -679,6 +679,20 @@ if [ -f "$STATUS_FILE" ]; then
     esac
 fi
 
+# 11b) Same reasoning as step 11, for the OTHER banner. logs/update-incomplete is
+# what the app renders as "This install is incomplete", and it names this script
+# as the fix when the problem is static permissions. Re-check now, so a box that
+# was just repaired stops being told it is broken.
+#
+# On a --skip-web install there is no web server here to probe, so the stylesheet
+# half is not ours to answer: checking it would invent a failure on a box that is
+# working exactly as its operator intended.
+if [ "$SKIP_WEB" = 0 ]; then
+    bash "$APP/scripts/check_install.sh" || true
+else
+    bash "$APP/scripts/check_install.sh" --no-static-probe || true
+fi
+
 # 12) Done.
 cat <<DONE
 

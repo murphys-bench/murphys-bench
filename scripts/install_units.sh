@@ -186,3 +186,14 @@ done
 if [ "$WITH_DISK_CHECK" = 0 ]; then
     log "disk-space check not installed (pass --with-disk-check once alerts are configured)"
 fi
+
+# The install may have been incomplete precisely BECAUSE these units were
+# missing, and this script is what the app's own warning tells the operator to
+# run. Re-check now so repairing the box also clears the warning: before this,
+# update.sh alone wrote and deleted that marker, so the documented fix worked and
+# the Updates page went on saying the install was broken until the next update.
+#
+# --no-static-probe because this script installs units and cannot change static
+# file permissions. It must neither clear a real stylesheet warning nor invent
+# one on a --skip-web box that has no web server to probe.
+bash "$APP/scripts/check_install.sh" --no-static-probe || true
