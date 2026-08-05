@@ -148,6 +148,24 @@ def render_config(site) -> None:
             f'[{RCLONE_REMOTE_NAME}]\n'
             'type = s3\n'
             'provider = Other\n'
+            # Murphy's Bench is not in the bucket-provisioning business. The
+            # Backups settings form asks for a bucket that already exists, and
+            # the ship target is always <bucket>/<prefix>. Without this, rclone
+            # preflights the bucket, which a least-privilege key is often not
+            # allowed to do: a Backblaze S3 key restricted to one bucket lacks
+            # listAllBucketNames, so every copy fails on a permission check for
+            # something MB never needed. Unconditional rather than a setting
+            # (Mike's call, 2026-08-05) because it is an rclone implementation
+            # detail, not a decision a shop owner should have to understand.
+            # The cost is weaker early detection of a mistyped bucket, which is
+            # acceptable: the Test destination button and the real backup copy
+            # both exercise the configured target, which is the authority.
+            #
+            # ⚠ This shipped for six weeks as an UNCOMMITTED one-line edit on
+            # the production box (2026-07-23), where a rollback would have
+            # discarded it silently and any release touching this file would
+            # have failed the update outright.
+            'no_check_bucket = true\n'
             f'access_key_id = {site.backup_s3_access_key}\n'
             f'secret_access_key = {site.backup_s3_secret_key}\n'
             f'endpoint = {site.backup_s3_endpoint}\n'

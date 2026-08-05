@@ -8,6 +8,39 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## v0.11.3 — 2026-08-05
+
+### Fixed
+
+- **Offsite backups no longer depend on permission to inspect the bucket.** Murphy's Bench
+  ships backups to a bucket you have already created, and never creates one. It was still
+  asking the storage provider to check the bucket first, which a least-privilege key is
+  often not allowed to do: a Backblaze key restricted to a single bucket fails that check,
+  and with it every offsite copy. Nothing about your settings changes, and the Test
+  destination button and the backup itself still exercise the real target.
+- **Running the fix now clears the warning that asked for it.** When an update cannot
+  finish installing a release, Settings → Maintenance → Updates shows "This install is
+  incomplete" and names the command that repairs it. Running that command repaired the
+  server and left the message on screen, because only an update could clear it. You could
+  do exactly as you were told, watch it work, and still be told your install was broken
+  until the next release came out. `scripts/install_units.sh` and `scripts/install.sh` now
+  re-check the install when they finish, so the message goes when the problem does.
+- **An install set up with `--skip-web` is no longer told it is incomplete.** That mode
+  deliberately installs no background services and no web server, so the check had nothing
+  to measure and reported all of them missing, recommending the standard setup its operator
+  had chosen not to use. It no longer runs there, and says why.
+- **The warning no longer names the wrong cause.** It described every problem as a missing
+  background service, including when the actual problem was that the web server could not
+  read this install's stylesheets. It now leaves the description to the specific problem
+  found, which was always printed just below it.
+
+### Changed
+
+- **What counts as a complete install is described in one place**, `scripts/check_install.sh`,
+  which `update.sh`, `install_units.sh` and `install.sh` all run when they finish. Repairing
+  half a problem now reports the half that is left, rather than clearing the message or
+  keeping a stale one.
+
 ## v0.11.2 — 2026-08-05
 
 This release adds no services, no sudo rules and no packages of its own, so the Update

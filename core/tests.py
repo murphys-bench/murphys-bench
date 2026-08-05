@@ -7917,6 +7917,14 @@ def test_backup_settings_both_destinations_render_files(admin_user, client, sett
     conf_path = backup_ops.rclone_conf_path()
     conf = conf_path.read_text()
     assert '[mbbackup]' in conf and 'secret_access_key = secret123' in conf
+    # A least-privilege S3 key scoped to one bucket cannot preflight the bucket,
+    # so rclone must be told not to try. Asserted under [mbbackup] specifically:
+    # it belongs to the S3 stanza, not the SMB one.
+    offsite_stanza = conf.split('[mbbackup]', 1)[1].split('[', 1)[0]
+    assert 'no_check_bucket = true' in offsite_stanza, (
+        'without this, a bucket-scoped B2/S3 key fails every offsite copy on a '
+        'permission check for a bucket operation Murphy\'s Bench never needs'
+    )
     assert '[mbonsite]' in conf and 'type = smb' in conf and 'host = 192.0.2.50' in conf
     # The onsite password must be rclone-OBSCURED, never stored in plaintext.
     assert 'nassecret' not in conf, 'onsite password must not appear in plaintext in .rclone.conf'
