@@ -2892,6 +2892,136 @@ def test_incomplete_install_replaces_the_success_tick_in_the_ui(settings, tmp_pa
 
 
 @pytest.mark.django_db
+def test_card_discards_a_marker_that_names_no_real_unit(settings, tmp_path, client):
+    """A garbled marker must be discarded, not rendered at the user.
+
+    Reproduced on a real 24.04 box 2026-08-04: a box on v0.11.1 updating forward
+    to a release carrying deploy/manifest.sh runs its OWN update.sh, whose awk
+    parser finds no literal UNITS block to stop at, swallows install_units.sh and
+    writes 269 lines of shell fragments here. The update itself succeeded — exit
+    0, service healthy — and the card told the operator their install was broken
+    and listed nonsense.
+
+    The sample below is real captured output, trimmed. A warning nobody can act
+    on teaches people to ignore the one that matters.
+    """
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    admin = User.objects.create_superuser(username='boss2', password='x')
+    client.force_login(admin)
+
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'succeeded', 'exit_code': 0, 'finished_at': '2026-08-04T00:00:00Z',
+    }))
+    update_ops.incomplete_path().write_text(
+        'These system services are not installed:\n'
+        '  if\n  $WITH_DISK_CHECK\n  =\n  1\n  ];\n  then\n  fi\n'
+        '  log\n  rendering\n  ${\n  for\n  u\n  in\n  do\n'
+        '  src=$APP/deploy/$u\n  sed\n  -e\n  s|__APP__|$APP|g\n'
+    )
+
+    assert update_ops.read_incomplete() == '', 'garbled marker was not discarded'
+    body = client.get(reverse('core:update_status')).content.decode()
+    assert 'This install is incomplete' not in body
+    assert '$WITH_DISK_CHECK' not in body, 'shell fragments reached the user'
+    assert 'Last update succeeded' in body, (
+        'the update genuinely succeeded, so with the bogus marker discarded the '
+        'card should report success'
+    )
+
+
+@pytest.mark.django_db
+def test_card_still_shows_a_warning_that_names_no_units_but_is_not_about_units(
+    settings, tmp_path,
+):
+    """Don't over-suppress: update.sh also warns about static permissions.
+
+    That text names no systemd unit at all, and it is a real condition a user
+    must act on. Only markers that CLAIM missing services while naming none are
+    untrustworthy.
+    """
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+
+    # update.sh's REAL wording (scripts/update.sh:303-305). An earlier version of
+    # this test invented the text, so it proved nothing about the actual product.
+    update_ops.incomplete_path().write_text(
+        "The web server cannot read this install's stylesheets (HTTP 403).\n"
+        'Pages render as unstyled HTML with no logo.\n'
+        '\nFIX: cd /opt/murphys-bench && scripts/install.sh\n'
+    )
+    kept = update_ops.read_incomplete()
+    assert 'stylesheets (HTTP 403)' in kept
+    assert 'unstyled HTML' in kept
+    assert 'scripts/install.sh' in kept, 'the fix must survive with the problem'
+
+
+@pytest.mark.django_db
+def test_mixed_marker_keeps_the_real_warning_and_drops_the_bogus_block(
+    settings, tmp_path, client,
+):
+    """A garbled services block must not take a real warning down with it.
+
+    update.sh writes BOTH problems into one file (scripts/update.sh:293-311), and
+    the FIX line differs depending on which one exists. An all-or-nothing discard
+    therefore hid a genuine "your site renders unstyled" warning whenever the
+    services block happened to be garbage — which is exactly the case on a
+    v0.11.1 box updating forward. Silence about a real problem is a worse failure
+    than the noise it replaced.
+
+    Caught in review, 2026-08-04.
+    """
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    admin = User.objects.create_superuser(username='boss3', password='x')
+    client.force_login(admin)
+
+    update_ops.status_path().write_text(json.dumps({
+        'state': 'succeeded', 'exit_code': 0, 'finished_at': '2026-08-04T00:00:00Z',
+    }))
+    update_ops.incomplete_path().write_text(
+        'These system services are not installed:\n'
+        '  if\n  $WITH_DISK_CHECK\n  =\n  1\n  ];\n  then\n'
+        'The web server cannot read this install\'s stylesheets (HTTP 403).\n'
+        'Pages render as unstyled HTML with no logo.\n'
+        '\n'
+        'FIX: cd /home/tester/murphys-bench && scripts/install.sh\n'
+        'Run it in a terminal. It needs a password.\n'
+    )
+
+    kept = update_ops.read_incomplete()
+    assert 'stylesheets (HTTP 403)' in kept, 'the real warning was discarded'
+    assert 'scripts/install.sh' in kept, 'the actionable fix was discarded'
+    assert '$WITH_DISK_CHECK' not in kept, 'shell fragments survived'
+    assert 'These system services' not in kept, 'the bogus block survived'
+
+    body = client.get(reverse('core:update_status')).content.decode()
+    assert 'This install is incomplete' in body
+    assert 'stylesheets (HTTP 403)' in body
+    assert '$WITH_DISK_CHECK' not in body
+
+
+@pytest.mark.django_db
+def test_card_discards_an_absurdly_long_marker(settings, tmp_path):
+    """Length alone is a tell: the honest vocabulary here is a few unit names."""
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+
+    update_ops.incomplete_path().write_text(
+        'These system services are not installed:\n'
+        + '  murphys-bench-restore.path\n' * 200
+    )
+    assert update_ops.read_incomplete() == '', (
+        'a 200-line marker is a parser accident even when the lines parse as '
+        'unit names; it must not become a wall of text in the UI'
+    )
+
+
+@pytest.mark.django_db
 def test_read_status_idle_on_corrupt_file(settings, tmp_path):
     from core import update_ops
     settings.BASE_DIR = tmp_path
@@ -9268,13 +9398,28 @@ def test_successful_install_leaves_an_in_flight_update_alone():
         assert 'leaving' in out
 
 
-def test_skip_web_does_not_install_a_web_server():
-    src = (_repo_root() / 'scripts' / 'install.sh').read_text()
-    start = src.index('    pkgs=(')
-    end = src.index('apt install failed', start)
-    block = src[start:end]
+def _manifest_array(name):
+    """Read an array out of deploy/manifest.sh by SOURCING it, not parsing it.
 
-    base, conditional = block.split('if [ "$SKIP_WEB" = 0 ]; then', 1)
+    install.sh, install_units.sh, verify_install.sh and update.sh all source that
+    file. So does this. Re-parsing it in Python would make these tests a second
+    reader with its own idea of the format, which is the exact defect the
+    manifest exists to remove.
+    """
+    import subprocess
+
+    manifest = _repo_root() / 'deploy' / 'manifest.sh'
+    result = subprocess.run(
+        ['bash', '-c', f'. "{manifest}" && printf "%s\\n" "${{{name}[@]}}"'],
+        capture_output=True, text=True, check=True,
+    )
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def test_skip_web_does_not_install_a_web_server():
+    base = _manifest_array('MB_APT_PACKAGES')
+    conditional = _manifest_array('MB_APT_PACKAGES_WEB')
+
     for server in ('nginx', 'apache2', 'caddy', 'lighttpd'):
         assert server not in base, (
             f'{server} is in the unconditional package list, so --skip-web would '
@@ -9283,6 +9428,160 @@ def test_skip_web_does_not_install_a_web_server():
     assert 'nginx' in conditional, (
         'nginx is no longer installed for a standard install either — the normal '
         'path needs it'
+    )
+
+
+def _unit_templates_on_disk():
+    deploy = _repo_root() / 'deploy'
+    found = {p.name for ext in ('*.service', '*.timer', '*.path')
+             for p in deploy.glob(ext)}
+    assert found, 'no unit templates found in deploy/ — the repo is not intact'
+    return found
+
+
+def _units_listed_in_manifest():
+    return set(_manifest_array('MB_UNITS')) | set(_manifest_array('MB_UNITS_OPTIONAL'))
+
+
+def test_every_unit_template_is_listed_in_the_manifest():
+    """A unit file in deploy/ that nothing installs is the July 2026 defect.
+
+    Sharing one manifest stops the installer and the verifier disagreeing, but it
+    cannot notice a template someone added to deploy/ and never listed. That unit
+    is never installed, so the button or timer behind it silently does nothing —
+    which is exactly how in-app restore shipped a dead button. This is the one
+    drift a shared file cannot prevent by construction, so it is a test.
+    """
+    unlisted = sorted(_unit_templates_on_disk() - _units_listed_in_manifest())
+    assert not unlisted, (
+        'These unit templates exist in deploy/ but are in no manifest list, so '
+        'nothing installs them and the feature behind each one silently does '
+        f'nothing: {unlisted}'
+    )
+
+
+def test_every_manifest_unit_has_a_template_on_disk():
+    """The mirror of the above: a listed unit with no template makes
+    install_units.sh fail partway through a real install."""
+    missing = sorted(_units_listed_in_manifest() - _unit_templates_on_disk())
+    assert not missing, (
+        'The manifest lists units with no template in deploy/, so install_units.sh '
+        f'will fail partway through a real install: {missing}'
+    )
+
+
+def test_legacy_unit_block_matches_the_manifest():
+    """install_units.sh's legacy literal block must equal MB_UNITS exactly.
+
+    Releases at or before v0.11.1 awk-parse this file for a literal `UNITS=(`
+    block to learn what units to expect, and that parser is already shipped. The
+    block is a duplicate list, which is normally the exact thing the manifest
+    exists to abolish — it is tolerable ONLY because this test makes drift
+    impossible.
+
+    Verified on a real box: with no literal block the old parser swallows the
+    script and writes 269 lines of shell fragments into logs/update-incomplete,
+    which the Updates card renders verbatim on a healthy install. With an EMPTY
+    block it is worse — that parser ends in `grep -v '^$'`, which exits 1 on
+    empty input, and the old update.sh runs under `set -euo pipefail`, so the
+    update fails outright.
+    """
+    import subprocess
+
+    installer = _repo_root() / 'scripts' / 'install_units.sh'
+    # Parsed with the SAME awk+sed pipeline the shipped v0.11.1 update.sh uses,
+    # so this asserts what that code will actually see, not what we hope it sees.
+    legacy = subprocess.run(
+        ['bash', '-c',
+         "awk '/^UNITS=\\(/{f=1;next} f&&/^\\)/{exit} f{print}' \"$1\" "
+         "| sed -e 's/#.*//' -e \"s/['\\\"]//g\" -e 's/^[[:space:]]*//' "
+         "-e 's/[[:space:]]*$//' | grep -v '^$'",
+         '_', str(installer)],
+        capture_output=True, text=True, check=False,
+    ).stdout.split()
+
+    assert legacy, (
+        'the legacy literal UNITS block is gone or unparseable. An old box '
+        'updating forward would get an EMPTY list, and its parser exits 1 on '
+        'empty under set -e — the update would fail, not just warn.'
+    )
+    assert legacy == _manifest_array('MB_UNITS'), (
+        'the legacy literal block and MB_UNITS disagree, so a box on v0.11.1 or '
+        'earlier would be told the wrong units are missing.\n'
+        f'  legacy:   {legacy}\n  manifest: {_manifest_array("MB_UNITS")}'
+    )
+
+
+# These four were one test with four assertions. Split so that a failure
+# identifies itself: which invariant broke is now the test name, not something you
+# work out by reading the source. That also means a mutation sweep needs no text
+# matching to tell them apart — the earlier combined version let a planted defect
+# aimed at the install list be satisfied by the enable-list assertion instead.
+
+def test_enabled_units_are_all_installed_units():
+    units = set(_manifest_array('MB_UNITS'))
+    stray = sorted(set(_manifest_array('MB_UNITS_ENABLE')) - units)
+    assert not stray, f'enabled but never installed: {stray}'
+
+
+def test_optional_enabled_units_are_all_optional_installed_units():
+    optional = set(_manifest_array('MB_UNITS_OPTIONAL'))
+    stray = sorted(set(_manifest_array('MB_UNITS_OPTIONAL_ENABLE')) - optional)
+    assert not stray, f'optional units enabled but never installed: {stray}'
+
+
+def test_alert_hook_jobs_are_installed_units():
+    """An OnFailure drop-in is written into <job>.service.d, so the job has to be a
+    real installed service or the hook lands on nothing and the failure it exists
+    to report passes silently."""
+    units = set(_manifest_array('MB_UNITS'))
+    hooks = [f'{job}.service' for job in _manifest_array('MB_ALERT_HOOK_JOBS')]
+    stray = sorted(set(hooks) - units)
+    assert not stray, (
+        f'failure alerts are wired to units that are never installed: {stray}'
+    )
+
+
+def test_every_path_unit_has_its_companion_service_installed():
+    """A .path unit triggers the .service of the same name. Installing one without
+    the other is a button that queues a job nothing consumes — the spinner."""
+    units = set(_manifest_array('MB_UNITS'))
+    orphans = [u for u in units if u.endswith('.path')
+               and u[: -len('.path')] + '.service' not in units]
+    assert not orphans, (
+        f'these .path units have no companion .service, so whatever writes their '
+        f'trigger file will spin forever: {sorted(orphans)}'
+    )
+
+
+# Three separate guards on one real drift found 2026-08-03: install.sh INSTALLED
+# five sudo verbs, its own fallback instructions named three, and
+# verify_install.sh checked three — so a box missing status and is-active passed
+# the clean-room gate. All three now derive from MB_SUDO_VERBS.
+
+def test_sudo_grant_keeps_the_verbs_rollback_needs():
+    verbs = _manifest_array('MB_SUDO_VERBS')
+    missing = [v for v in ('restart', 'stop', 'start') if v not in verbs]
+    assert not missing, (
+        f'{missing} removed from the sudo grant. Rollback runs restore.sh, which '
+        'stops the service, restores the database and starts it again — trimming '
+        'this list breaks recovery in the one situation it exists for.'
+    )
+
+
+def test_installer_does_not_hand_write_the_sudo_grant():
+    install = (_repo_root() / 'scripts' / 'install.sh').read_text()
+    assert 'restart murphys-bench, ' not in install, (
+        'install.sh hand-writes a sudo grant string again. Build it from '
+        'MB_SUDO_VERBS so the rule and the printed instructions cannot diverge.'
+    )
+
+
+def test_verifier_does_not_keep_its_own_sudo_verb_list():
+    verify = (_repo_root() / 'scripts' / 'verify_install.sh').read_text()
+    assert 'for verb in restart' not in verify, (
+        'verify_install.sh keeps its own verb list again, so it can pass a box '
+        'the installer built differently. Loop over MB_SUDO_VERBS.'
     )
 
 
@@ -9350,11 +9649,11 @@ def test_update_sh_derives_its_expected_units_from_install_units(tmp_path):
     It used to name three units inline, so it only ever knew about the units that
     existed when that line was written. In-app restore added two more and the check
     stayed silent about them: the update reported success, the button appeared, and
-    nothing had installed what it needed. Deriving the list from install_units.sh
+    nothing had installed what it needed. Reading the list from deploy/manifest.sh
     means a release that adds a unit is covered without anyone remembering to.
 
-    Proven by planting a unit install_units.sh has never contained and requiring
-    update.sh's own derivation to surface it.
+    Proven by planting a unit the real manifest has never contained and requiring
+    update.sh's own lookup to surface it.
     """
     import re
     import subprocess
@@ -9363,15 +9662,15 @@ def test_update_sh_derives_its_expected_units_from_install_units(tmp_path):
     m = re.search(r'^expected_units\(\)\s*\{.*?^\}', update_sh, re.S | re.M)
     assert m, 'update.sh no longer defines expected_units()'
 
-    fake = tmp_path / 'scripts'
+    fake = tmp_path / 'deploy'
     fake.mkdir(parents=True)
-    (fake / 'install_units.sh').write_text(
-        "UNITS=(\n"
+    (fake / 'manifest.sh').write_text(
+        "MB_UNITS=(\n"
         "    murphys-bench.service              # gunicorn\n"
         "    'murphys-bench-alert@.service'     # quoted template unit\n"
         "    murphys-bench-planted.path         # never existed before this test\n"
         ")\n"
-        '[ "$WITH_DISK_CHECK" = 1 ] && UNITS+=(\n'
+        "MB_UNITS_OPTIONAL=(\n"
         "    murphys-bench-disk-check.timer\n"
         ")\n"
     )
@@ -9395,6 +9694,130 @@ def test_update_sh_derives_its_expected_units_from_install_units(tmp_path):
     # cries wolf is one nobody reads.
     assert 'murphys-bench-disk-check.timer' not in found, (
         f'opt-in units must not be treated as expected: {found}'
+    )
+
+
+def test_expected_units_cannot_fail_the_update_when_the_manifest_is_absent(tmp_path):
+    """A missing manifest must yield an empty list, never a non-zero exit.
+
+    update.sh runs under `set -e`, and by the time this function is called the
+    tree has ALREADY been checked out to the target — so on a rollback, or a
+    downgrade to any release older than the manifest, the file is not there. The
+    first version of this returned non-zero in that case, which killed the update
+    at `units="$(expected_units)"` AFTER every real step had succeeded: migrate,
+    css build and collectstatic all done, service healthy, and the UI reporting a
+    failed update. The empty-list fallback below it never got to run.
+
+    Found by the clean-room gate on a real box, not by any test — which is why
+    this one exists.
+    """
+    import re
+    import subprocess
+
+    update_sh = (_repo_root() / 'scripts' / 'update.sh').read_text()
+    m = re.search(r'^expected_units\(\)\s*\{.*?^\}', update_sh, re.S | re.M)
+    assert m, 'update.sh no longer defines expected_units()'
+
+    # tmp_path has no deploy/manifest.sh — the rollback-target shape.
+    out = subprocess.run(
+        ['bash', '-c', f'set -euo pipefail\n{m.group(0)}\nAPP={tmp_path}\n'
+                       'units="$(expected_units)"\necho "SURVIVED:[$units]"'],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert out.returncode == 0, (
+        'expected_units failed the caller when the manifest was missing, so an '
+        'update that had already succeeded would report failure. '
+        f'stderr: {out.stderr.strip()}'
+    )
+    assert 'SURVIVED:[]' in out.stdout, (
+        f'expected an empty unit list, got: {out.stdout.strip()}'
+    )
+
+
+def test_manifest_less_target_still_expects_that_release_s_own_units(tmp_path):
+    """A rollback target with no manifest must still be checked properly.
+
+    Caught in review 2026-08-04. The manifest-less path returned nothing and fell
+    through to a three-unit fallback, while v0.11.1 — the release you actually
+    roll back to — declares FOURTEEN. So restore, inbound-email and SLA units went
+    unchecked and the update could report the install clean while they were
+    missing. Under-reporting on the recovery path is precisely what this check
+    exists to prevent.
+
+    Driven against a CHECKED-IN copy of v0.11.1's install_units.sh, deliberately
+    not `git show v0.11.1:...`. The first version of this test read the tag and
+    skipped when it was missing — and CI's checkout is shallow with no tags
+    (`.github/workflows/ci.yml` sets no fetch-depth), so the test guarding this
+    defect would have silently skipped in the one place it most needed to run.
+    A test whose authority depends on repo tag availability is decoration.
+    Caught in review, 2026-08-04.
+
+    `test_legacy_fixture_matches_the_real_tag` keeps the fixture honest, and that
+    one is allowed to skip because nothing load-bearing rests on it.
+    """
+    import re
+    import subprocess
+
+    update_sh = (_repo_root() / 'scripts' / 'update.sh').read_text()
+    m = re.search(r'^expected_units\(\)\s*\{.*?^\}', update_sh, re.S | re.M)
+    assert m, 'update.sh no longer defines expected_units()'
+
+    # A tree shaped like a pre-manifest release: its own install_units.sh, no manifest.
+    scripts = tmp_path / 'scripts'
+    scripts.mkdir(parents=True)
+    fixture = _repo_root() / 'core' / 'testdata' / 'install_units_v0.11.1.sh'
+    assert fixture.exists(), (
+        'the checked-in v0.11.1 installer fixture is missing, so this test has '
+        'nothing to assert against — it must never degrade to a skip'
+    )
+    (scripts / 'install_units.sh').write_text(fixture.read_text())
+
+    out = subprocess.run(
+        ['bash', '-c', f'set -euo pipefail\n{m.group(0)}\nAPP={tmp_path}\n'
+                       'units="$(expected_units)"\necho "$units"'],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert out.returncode == 0, f'expected_units failed: {out.stderr.strip()}'
+    found = out.stdout.split()
+
+    assert len(found) == 14, (
+        f'a manifest-less rollback target must still be checked against its own '
+        f'14 units; got {len(found)}: {found}'
+    )
+    for critical in (
+        'murphys-bench-restore.path',
+        'murphys-bench-fetch-email.timer',
+        'murphys-bench-sla-check.timer',
+    ):
+        assert critical in found, (
+            f'{critical} went unchecked on the rollback path — the box could be '
+            'told it is clean while that unit is missing'
+        )
+
+
+def test_legacy_fixture_matches_the_real_tag():
+    """The checked-in v0.11.1 fixture must still match what v0.11.1 shipped.
+
+    This is the ONLY test here allowed to skip. Nothing load-bearing rests on it:
+    it exists so the fixture cannot quietly drift from the release it claims to
+    copy. The test that actually guards the rollback under-reporting defect reads
+    the fixture directly and never skips, which is the whole point of splitting
+    the two — CI checks out shallow with no tags.
+    """
+    import subprocess
+
+    real = subprocess.run(
+        ['git', 'show', 'v0.11.1:scripts/install_units.sh'],
+        cwd=str(_repo_root()), capture_output=True, text=True,
+    )
+    if real.returncode != 0:
+        pytest.skip('tag v0.11.1 not reachable here (shallow checkout); the '
+                    'fixture-driven test above still ran')
+
+    fixture = (_repo_root() / 'core' / 'testdata' / 'install_units_v0.11.1.sh').read_text()
+    assert fixture == real.stdout, (
+        'core/testdata/install_units_v0.11.1.sh no longer matches what v0.11.1 '
+        'actually shipped, so the rollback test is asserting against fiction'
     )
 
 
@@ -9856,12 +10279,25 @@ def test_restore_units_are_templates_and_registered():
         assert '__APP__' in text, f'{unit} is not a template'
         assert '/opt/murphys-bench' not in text, f'{unit} hardcodes the author path'
 
-    installer = (root / 'scripts' / 'install_units.sh').read_text()
-    assert 'murphys-bench-restore.path' in installer
-    assert 'murphys-bench-restore.service' in installer
 
-    gate = (root / 'scripts' / 'verify_install.sh').read_text()
-    assert 'murphys-bench-restore.path' in gate, 'the clean-room gate does not check the restore unit'
+def test_restore_units_are_installed():
+    """Registration moved out of install_units.sh into deploy/manifest.sh, which
+    the installer, the verifier and the update-time drift check all read. The
+    assertion is unchanged: these units must actually be installed."""
+    installed = _manifest_array('MB_UNITS')
+    missing = [u for u in ('murphys-bench-restore.path', 'murphys-bench-restore.service')
+               if u not in installed]
+    assert not missing, (
+        f'{missing} not in MB_UNITS, so nothing installs them and the Restore '
+        'button queues a job nothing picks up'
+    )
+
+
+def test_restore_path_unit_is_enabled():
+    assert 'murphys-bench-restore.path' in _manifest_array('MB_UNITS_ENABLE'), (
+        'the restore .path unit is installed but never enabled, so the trigger '
+        'file it watches for is never noticed'
+    )
 
 
 def test_run_restore_wrapper_revalidates_the_archive_name():

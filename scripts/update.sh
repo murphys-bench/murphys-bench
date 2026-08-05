@@ -239,17 +239,45 @@ chmod -R o+rX "$APP/staticfiles" 2>/dev/null || true
 # loudly with the exact command. Never silent, never fatal — a good update must
 # not roll back over this.
 #
-# The expected unit list is DERIVED from install_units.sh's own UNITS array, not
-# written out again here. A hardcoded list only knows about the units that existed
-# when it was written, so a release adding a new one (in-app restore was exactly
-# this) shipped a button whose unit nothing checked for and nothing installed. The
-# array is parsed rather than sourced because install_units.sh does real work at
-# import time. Only the unconditional block is read, so the opt-in disk-check units
-# never produce a false warning on a box that deliberately does not have them.
+# The expected unit list is READ from deploy/manifest.sh, the same file
+# install_units.sh installs from and verify_install.sh asserts against, so this
+# check cannot fall behind a release that adds a unit (in-app restore was exactly
+# that: a button whose unit nothing installed and nothing checked for).
+#
+# Sourced in a SUBSHELL so the manifest cannot touch this script's own variables
+# mid-update. Only MB_UNITS is read, never MB_UNITS_OPTIONAL, so the opt-in
+# disk-check units never produce a false warning on a box that deliberately does
+# not have them.
+#
+# ⚠ MUST NOT FAIL. This script runs under `set -e`, and the tree it reads has
+# ALREADY been checked out to the target by this point — so on a rollback or a
+# downgrade to any release older than the manifest, the file is simply not
+# there. A bare subshell returns non-zero then, which killed the whole update at
+# the assignment below, AFTER every real step had succeeded: the box was updated
+# and healthy and the UI reported a failure. Caught by the clean-room gate,
+# 2026-08-04. Returning empty-and-zero lets the fallback do its job instead.
 expected_units() {
+    local units
+
+    # 1. Current shape: deploy/manifest.sh, sourced in a SUBSHELL so it cannot
+    #    touch this script's variables mid-update.
+    units="$( ( . "$APP/deploy/manifest.sh" 2>/dev/null && printf '%s\n' "${MB_UNITS[@]:-}" ) 2>/dev/null || true )"
+    if [ -n "$units" ]; then
+        printf '%s\n' "$units"
+        return 0
+    fi
+
+    # 2. Pre-manifest target: read THAT release's own literal UNITS block with the
+    #    same reader v0.11.1 used. Without this the manifest-less path fell all the
+    #    way through to the three-unit fallback below, so a rollback to v0.11.1 —
+    #    which declares 14 — checked neither the restore units nor inbound-email nor
+    #    SLA, and could report clean while they were missing. Under-reporting on the
+    #    recovery path is the failure this whole check exists to prevent.
+    #    `|| true` because that pipeline ends in grep, which exits 1 on empty, and
+    #    this script runs under `set -e`.
     awk '/^UNITS=\(/{f=1;next} f&&/^\)/{exit} f{print}' "$APP/scripts/install_units.sh" 2>/dev/null \
       | sed -e 's/#.*//' -e "s/['\"]//g" -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
-      | grep -v '^$'
+      | grep -v '^$' || true
 }
 
 deploy_layer_warning() {
