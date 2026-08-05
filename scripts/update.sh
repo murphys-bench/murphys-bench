@@ -239,133 +239,21 @@ chmod -R o+rX "$APP/staticfiles" 2>/dev/null || true
 # loudly with the exact command. Never silent, never fatal — a good update must
 # not roll back over this.
 #
-# The expected unit list is READ from deploy/manifest.sh, the same file
-# install_units.sh installs from and verify_install.sh asserts against, so this
-# check cannot fall behind a release that adds a unit (in-app restore was exactly
-# that: a button whose unit nothing installed and nothing checked for).
+# The check itself lives in scripts/check_install.sh, because install_units.sh and
+# install.sh have to run the SAME check when they finish. It used to live here,
+# and only here, so the fix this warning tells you to run could repair the box
+# and not clear the warning — see that script's header.
 #
-# Sourced in a SUBSHELL so the manifest cannot touch this script's own variables
-# mid-update. Only MB_UNITS is read, never MB_UNITS_OPTIONAL, so the opt-in
-# disk-check units never produce a false warning on a box that deliberately does
-# not have them.
-#
-# ⚠ MUST NOT FAIL. This script runs under `set -e`, and the tree it reads has
-# ALREADY been checked out to the target by this point — so on a rollback or a
-# downgrade to any release older than the manifest, the file is simply not
-# there. A bare subshell returns non-zero then, which killed the whole update at
-# the assignment below, AFTER every real step had succeeded: the box was updated
-# and healthy and the UI reported a failure. Caught by the clean-room gate,
-# 2026-08-04. Returning empty-and-zero lets the fallback do its job instead.
-expected_units() {
-    local units
-
-    # 1. Current shape: deploy/manifest.sh, sourced in a SUBSHELL so it cannot
-    #    touch this script's variables mid-update.
-    units="$( ( . "$APP/deploy/manifest.sh" 2>/dev/null && printf '%s\n' "${MB_UNITS[@]:-}" ) 2>/dev/null || true )"
-    if [ -n "$units" ]; then
-        printf '%s\n' "$units"
-        return 0
-    fi
-
-    # 2. Pre-manifest target: read THAT release's own literal UNITS block with the
-    #    same reader v0.11.1 used. Without this the manifest-less path fell all the
-    #    way through to the three-unit fallback below, so a rollback to v0.11.1 —
-    #    which declares 14 — checked neither the restore units nor inbound-email nor
-    #    SLA, and could report clean while they were missing. Under-reporting on the
-    #    recovery path is the failure this whole check exists to prevent.
-    #    `|| true` because that pipeline ends in grep, which exits 1 on empty, and
-    #    this script runs under `set -e`.
-    awk '/^UNITS=\(/{f=1;next} f&&/^\)/{exit} f{print}' "$APP/scripts/install_units.sh" 2>/dev/null \
-      | sed -e 's/#.*//' -e "s/['\"]//g" -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
-      | grep -v '^$' || true
-}
-
-deploy_layer_warning() {
-    local missing=() units
-    units="$(expected_units)"
-    # A parse that returns nothing would turn this whole check into a silent no-op,
-    # which is the failure mode it exists to prevent. Fall back to the units the
-    # in-app buttons depend on rather than passing by default.
-    [ -z "$units" ] && units="murphys-bench-update.path
-murphys-bench-backup-now.path
-murphys-bench-backup.timer"
-    for u in $units; do
-        systemctl cat "$u" >/dev/null 2>&1 || missing+=("$u")
-    done
-    css="$(ls "$APP"/staticfiles/css/*.css 2>/dev/null | head -1 || true)"
-    css_code=000
-    [ -n "$css" ] && css_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
-        "http://127.0.0.1/static/css/$(basename "$css")" 2>/dev/null || echo 000)"
-
-    # The in-app Update button is the path most people use, and it renders a green
-    # "succeeded" banner with the log COLLAPSED. Printing this warning to stderr
-    # therefore told a terminal user and left everyone else with a tick and a
-    # disclosure triangle nobody opens after being told it worked. So the state is
-    # also written where the app can read it and say so in its own UI. Removed the
-    # moment the install is whole again, so it can never outlive the problem.
-    local marker="$APP/logs/update-incomplete"
-
-    if [ "${#missing[@]}" -eq 0 ] && [ "$css_code" = "200" ]; then
-        rm -f "$marker"
-        return 0
-    fi
-
-    {
-        if [ "${#missing[@]}" -gt 0 ]; then
-            echo "These system services are not installed:"
-            for u in "${missing[@]}"; do echo "  $u"; done
-            echo "A missing .path unit means the matching button queues a job nothing"
-            echo "picks up and spins forever. A missing .timer means that scheduled job"
-            echo "never runs. Updating cannot install them, because Murphy's Bench runs"
-            echo "as an unprivileged user on purpose."
-        fi
-        if [ "$css_code" != "200" ]; then
-            echo "The web server cannot read this install's stylesheets (HTTP $css_code)."
-            echo "Pages render as unstyled HTML with no logo."
-        fi
-        echo
-        if [ "$css_code" = "200" ]; then
-            echo "FIX: cd $APP && scripts/install_units.sh"
-        else
-            echo "FIX: cd $APP && scripts/install.sh"
-        fi
-        echo "Run it in a terminal. It needs a password, which is exactly why the"
-        echo "Update button cannot do it for you. See UPDATING.md."
-    } > "$marker" 2>/dev/null || true
-
-    echo
-    echo "⚠ THIS INSTALL IS INCOMPLETE. The update itself succeeded, but:" >&2
-    if [ "${#missing[@]}" -gt 0 ]; then
-        echo "  • These system services are NOT installed:" >&2
-        for u in "${missing[@]}"; do echo "      $u" >&2; done
-        echo "    This update moved code onto the server, but it could not install" >&2
-        echo "    system services, because Murphy's Bench runs unprivileged on purpose." >&2
-        echo "    Whatever those services drive does not work: a missing .path unit" >&2
-        echo "    means the matching in-app button queues a job nothing picks up and" >&2
-        echo "    spins forever, and a missing .timer means that scheduled job never" >&2
-        echo "    runs. Settings → Maintenance → Updates reports this too, and keeps" >&2
-        echo "    reporting it until it is fixed." >&2
-    fi
-    if [ "$css_code" != "200" ]; then
-        echo "  • The web server cannot read this install's stylesheets (HTTP $css_code)." >&2
-        echo "    Pages render as unstyled HTML with no logo." >&2
-    fi
-    echo >&2
-    # Units alone need only the unit installer. A static-permissions problem needs the
-    # full installer, which install_units.sh does not touch.
-    if [ "$css_code" = "200" ]; then
-        echo "  Fix it once. Safe to re-run over an existing install:" >&2
-        echo "    cd $APP && scripts/install_units.sh" >&2
-    else
-        echo "  Fix it once. Safe to re-run over an existing install:" >&2
-        echo "    cd $APP && scripts/install.sh" >&2
-    fi
-    echo >&2
-    echo "  Both need a password, so run them from a terminal. The in-app Update" >&2
-    echo "  button cannot do this itself. See UPDATING.md." >&2
-    echo >&2
-}
-deploy_layer_warning
+# ⚠ The tree has already been checked out to the target by this point, so on a
+# rollback to any release older than this one the script is simply not there.
+# Say so rather than passing silently: a completeness check that quietly does
+# nothing is the exact failure mode it exists to prevent.
+if [ -f "$APP/scripts/check_install.sh" ]; then
+    bash "$APP/scripts/check_install.sh" || true
+else
+    log "note: this release has no scripts/check_install.sh, so the install-completeness"
+    log "      check did not run. Any existing warning in the app is left as it was."
+fi
 
 # 6b) Regenerate the backup destination files from SiteSettings, so a fresh box /
 # post-restore never silently loses its configured offsite target. Non-fatal —

@@ -9658,9 +9658,12 @@ def test_update_sh_derives_its_expected_units_from_install_units(tmp_path):
     import re
     import subprocess
 
-    update_sh = (_repo_root() / 'scripts' / 'update.sh').read_text()
-    m = re.search(r'^expected_units\(\)\s*\{.*?^\}', update_sh, re.S | re.M)
-    assert m, 'update.sh no longer defines expected_units()'
+    # expected_units() moved out of update.sh into check_install.sh when
+    # install_units.sh and install.sh had to run the same check. These tests
+    # follow the function, not the file it used to live in.
+    check_sh = (_repo_root() / 'scripts' / 'check_install.sh').read_text()
+    m = re.search(r'^expected_units\(\)\s*\{.*?^\}', check_sh, re.S | re.M)
+    assert m, 'check_install.sh no longer defines expected_units()'
 
     fake = tmp_path / 'deploy'
     fake.mkdir(parents=True)
@@ -9714,9 +9717,12 @@ def test_expected_units_cannot_fail_the_update_when_the_manifest_is_absent(tmp_p
     import re
     import subprocess
 
-    update_sh = (_repo_root() / 'scripts' / 'update.sh').read_text()
-    m = re.search(r'^expected_units\(\)\s*\{.*?^\}', update_sh, re.S | re.M)
-    assert m, 'update.sh no longer defines expected_units()'
+    # expected_units() moved out of update.sh into check_install.sh when
+    # install_units.sh and install.sh had to run the same check. These tests
+    # follow the function, not the file it used to live in.
+    check_sh = (_repo_root() / 'scripts' / 'check_install.sh').read_text()
+    m = re.search(r'^expected_units\(\)\s*\{.*?^\}', check_sh, re.S | re.M)
+    assert m, 'check_install.sh no longer defines expected_units()'
 
     # tmp_path has no deploy/manifest.sh — the rollback-target shape.
     out = subprocess.run(
@@ -9758,9 +9764,12 @@ def test_manifest_less_target_still_expects_that_release_s_own_units(tmp_path):
     import re
     import subprocess
 
-    update_sh = (_repo_root() / 'scripts' / 'update.sh').read_text()
-    m = re.search(r'^expected_units\(\)\s*\{.*?^\}', update_sh, re.S | re.M)
-    assert m, 'update.sh no longer defines expected_units()'
+    # expected_units() moved out of update.sh into check_install.sh when
+    # install_units.sh and install.sh had to run the same check. These tests
+    # follow the function, not the file it used to live in.
+    check_sh = (_repo_root() / 'scripts' / 'check_install.sh').read_text()
+    m = re.search(r'^expected_units\(\)\s*\{.*?^\}', check_sh, re.S | re.M)
+    assert m, 'check_install.sh no longer defines expected_units()'
 
     # A tree shaped like a pre-manifest release: its own install_units.sh, no manifest.
     scripts = tmp_path / 'scripts'
@@ -11162,3 +11171,354 @@ def test_reset_operational_data_keeps_configuration_including_the_catalog(settin
     assert RepairType.objects.exists()
     assert StatusDefinition.objects.exists()
     assert SiteSettings.objects.exists()
+
+
+# ---------------------------------------------------------------------------
+# The install-completeness marker must not outlive the problem
+# ---------------------------------------------------------------------------
+
+def _fake_install(tmp_path, marker_text=None):
+    """A tree shaped like a real install, for running check_install.sh against.
+
+    The script derives APP from its own location, so it is copied in rather than
+    run from the repo — otherwise every one of these tests would write to the
+    developer's own logs/ directory.
+    """
+    import shutil
+
+    (tmp_path / 'scripts').mkdir(parents=True, exist_ok=True)
+    (tmp_path / 'deploy').mkdir(parents=True, exist_ok=True)
+    (tmp_path / 'logs').mkdir(parents=True, exist_ok=True)
+    (tmp_path / 'staticfiles' / 'css').mkdir(parents=True, exist_ok=True)
+    (tmp_path / 'staticfiles' / 'css' / 'app.css').write_text('body{}')
+
+    src = _repo_root() / 'scripts' / 'check_install.sh'
+    shutil.copy(src, tmp_path / 'scripts' / 'check_install.sh')
+    shutil.copy(_repo_root() / 'deploy' / 'manifest.sh', tmp_path / 'deploy' / 'manifest.sh')
+
+    if marker_text is not None:
+        (tmp_path / 'logs' / 'update-incomplete').write_text(marker_text)
+    return tmp_path / 'logs' / 'update-incomplete'
+
+
+def _stub_tools(tmp_path, systemctl_exit=0, http_code='200'):
+    """A PATH where systemctl and curl answer however the test needs.
+
+    Stubbing the real binaries beats adding test-only switches to the script:
+    what runs under test is then byte-identical to what runs on a server.
+    """
+    import os
+    import stat
+
+    binp = tmp_path / 'stubbin'
+    binp.mkdir(exist_ok=True)
+    (binp / 'systemctl').write_text('#!/bin/sh\nexit %d\n' % systemctl_exit)
+    (binp / 'curl').write_text('#!/bin/sh\nprintf %s\n' % http_code)
+    for f in ('systemctl', 'curl'):
+        (binp / f).chmod((binp / f).stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    env = dict(os.environ)
+    env['PATH'] = '%s:%s' % (binp, env.get('PATH', ''))
+    return env
+
+
+def _run_check(app, env, *args):
+    import subprocess
+    return subprocess.run(
+        ['bash', str(app / 'scripts' / 'check_install.sh'), *args],
+        capture_output=True, text=True, timeout=60, env=env,
+    )
+
+
+def test_repairing_the_install_clears_the_warning_that_asked_for_the_repair(tmp_path):
+    """Running the fix must clear the banner that told you to run it.
+
+    THE DEFECT, hit on prod 2026-08-05: update.sh was the only thing that ever
+    wrote or deleted logs/update-incomplete. The marker tells the operator to run
+    install_units.sh; install_units.sh did not touch the marker. So Mike ran the
+    command the app asked for, his server was genuinely repaired, and the page
+    went on saying "This install is incomplete" — with no way to clear it short
+    of waiting for the next release.
+
+    Same shape as v0.11.0's warning that never reached the UI: the fix reached the
+    machine and not the product.
+    """
+    marker = _fake_install(tmp_path, marker_text='These system services are not installed:\n  murphys-bench-restore.path\n')
+    env = _stub_tools(tmp_path)          # every unit present, stylesheet serves
+
+    out = _run_check(tmp_path, env, '--no-static-probe')
+
+    assert out.returncode == 0, f'the check must never fail its caller: {out.stderr}'
+    assert not marker.exists(), (
+        'the install is whole and the marker survived, so the app would keep '
+        'reporting a problem that no longer exists — the exact prod defect'
+    )
+
+
+def test_repairing_the_units_does_not_clear_a_real_stylesheet_warning(tmp_path):
+    """install_units.sh fixes units. It must not speak for the stylesheet.
+
+    A box can be missing units AND serving unstyled pages. Installing the units
+    repairs one of those, and silently dropping the other half would be the same
+    class of lie as never showing it: the operator would see the banner clear and
+    conclude the site was fixed.
+    """
+    stale = (
+        'These system services are not installed:\n'
+        '  murphys-bench-restore.path\n'
+        "The web server cannot read this install's stylesheets (HTTP 403).\n"
+        'Pages render as unstyled HTML with no logo.\n'
+        '\n'
+        'FIX: cd /opt/murphys-bench && scripts/install.sh\n'
+    )
+    marker = _fake_install(tmp_path, marker_text=stale)
+    env = _stub_tools(tmp_path)          # units now all present
+
+    out = _run_check(tmp_path, env, '--no-static-probe')
+
+    assert out.returncode == 0, out.stderr
+    assert marker.exists(), 'the stylesheet problem is real and was thrown away'
+    body = marker.read_text()
+    assert 'murphys-bench-restore.path' not in body, (
+        'the units were repaired and the marker still names them as missing'
+    )
+    assert 'cannot read this install' in body, 'the surviving warning lost its text'
+    assert 'scripts/install.sh' in body, (
+        'a stylesheet problem needs the full installer; install_units.sh does not '
+        'touch static permissions'
+    )
+
+
+def test_check_reports_missing_units_and_still_exits_clean(tmp_path):
+    """The failing half, proven: a missing unit is named, and nothing dies.
+
+    The exit code matters as much as the text. update.sh calls this after migrate,
+    css and collectstatic have all succeeded, under `set -e` — a non-zero exit
+    here reports a FAILED update on a box that updated perfectly, which is exactly
+    what the clean-room gate caught on 2026-08-04.
+    """
+    marker = _fake_install(tmp_path)
+    env = _stub_tools(tmp_path, systemctl_exit=1)   # nothing is installed
+
+    out = _run_check(tmp_path, env, '--no-static-probe')
+
+    assert out.returncode == 0, f'the check failed its caller: {out.stderr}'
+    assert marker.exists(), 'units are missing and the marker was not written'
+    body = marker.read_text()
+    assert 'murphys-bench-restore.path' in body, body
+    assert 'scripts/install_units.sh' in body, 'the marker must carry the fix'
+    assert 'THIS INSTALL IS INCOMPLETE' in out.stderr, (
+        'a terminal user must be told too, not only the app'
+    )
+
+
+def _call_block(script_name, first_line_startswith, after=None):
+    """The lines of a script that invoke check_install.sh, ready to run.
+
+    Asserting that a script CONTAINS the string "check_install.sh" is not a test:
+    it passes when the call sits in a comment, in a dead branch, behind the wrong
+    condition, or passes the wrong mode. That is exactly how the --skip-web
+    regression below got past the first version of this file. So the real block is
+    lifted out of the real script and executed.
+    """
+    lines = (_repo_root() / 'scripts' / script_name).read_text().splitlines()
+    start = 0
+    if after is not None:
+        start = next(n for n, ln in enumerate(lines) if ln.startswith(after))
+    i = next(n for n, ln in enumerate(lines[start:], start)
+             if ln.startswith(first_line_startswith))
+    if not lines[i].startswith('if '):
+        return lines[i]
+    depth, j = 0, i
+    while j < len(lines):
+        st = lines[j].strip()
+        if st.startswith('if '):
+            depth += 1
+        elif st == 'fi':
+            depth -= 1
+            if depth == 0:
+                return '\n'.join(lines[i:j + 1])
+        j += 1
+    raise AssertionError(f'unterminated if-block in {script_name}')
+
+
+def _run_call_block(tmp_path, block, script_present=True, **env_vars):
+    """Run a lifted call block against a stub check_install.sh that records itself."""
+    import subprocess
+
+    app = tmp_path / 'app'
+    (app / 'scripts').mkdir(parents=True, exist_ok=True)
+    (app / 'logs').mkdir(parents=True, exist_ok=True)
+    record = app / 'logs' / 'called'
+    if script_present:
+        stub = app / 'scripts' / 'check_install.sh'
+        stub.write_text('#!/bin/sh\necho "ARGS:[$*]" >> "%s"\n' % record)
+        stub.chmod(0o755)
+
+    setup = [f'{k}={v}' for k, v in env_vars.items()]
+    prelude = '\n'.join([
+        'set -uo pipefail',
+        f'APP={app}',
+        *setup,
+        f'log() {{ echo "LOG:$*" >> {record}; }}',
+    ])
+    out = subprocess.run(['bash', '-c', prelude + '\n' + block],
+                         capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, f'the call block failed: {out.stderr}'
+    return record.read_text() if record.exists() else ''
+
+
+def test_a_skip_web_install_does_not_get_told_it_is_incomplete(tmp_path):
+    """--skip-web installs no units and no web server. Nothing to check.
+
+    THE REGRESSION, caught in review before this shipped: install.sh ran the check
+    with --no-static-probe on a --skip-web box, believing that made it safe. It
+    does not. That flag suppresses the stylesheet probe only; every unit is still
+    checked, and a --skip-web box deliberately has none. The result was a marker
+    naming all 14 units as missing, telling the operator to run install_units.sh,
+    which is the standard systemd setup they explicitly opted out of.
+
+    A permanent "This install is incomplete" on an install working exactly as
+    documented is the same defect this branch exists to remove, aimed at a
+    different user.
+    """
+    called = _run_call_block(tmp_path, _call_block('install.sh', 'if [ "$SKIP_WEB" = 0 ]; then', after='# 11b)'),
+                             SKIP_WEB=1)
+
+    assert 'ARGS:' not in called, (
+        'the completeness check ran on a --skip-web install, so a correct custom '
+        f'install is told it is broken. Recorded: {called!r}'
+    )
+    assert 'LOG:' in called, (
+        'skipping it silently is its own failure: an operator who later wonders '
+        'why nothing checks their install deserves the reason in the log'
+    )
+
+
+def test_a_standard_install_re_checks_everything_including_the_stylesheet(tmp_path):
+    """The normal path must run the FULL check, stylesheet included.
+
+    install.sh is the fix a stylesheet warning names, so it is the one caller that
+    must be able to clear that half.
+    """
+    called = _run_call_block(tmp_path, _call_block('install.sh', 'if [ "$SKIP_WEB" = 0 ]; then', after='# 11b)'),
+                             SKIP_WEB=0)
+
+    assert 'ARGS:[]' in called, (
+        f'a standard install must run the full check with no flags, got: {called!r}'
+    )
+
+
+def test_the_unit_installer_re_checks_without_speaking_for_the_stylesheet(tmp_path):
+    """install_units.sh must re-check, and must pass --no-static-probe.
+
+    Without the call, the original defect returns: the command the banner names
+    repairs the box and cannot clear the banner. Without the flag, installing
+    units would clear or invent a stylesheet verdict it has no basis for.
+    """
+    called = _run_call_block(tmp_path, _call_block('install_units.sh', 'bash "$APP/scripts/check_install.sh"'))
+
+    assert 'ARGS:[--no-static-probe]' in called, (
+        f'install_units.sh must re-check units only, got: {called!r}'
+    )
+
+
+def test_update_runs_the_check_and_says_so_when_the_release_has_none(tmp_path):
+    """update.sh calls it, and is honest on a rollback target that lacks it.
+
+    update.sh is loaded by bash before the checkout and calls this script from the
+    tree AFTER it, so rolling back to any release older than this one finds no
+    script. Passing silently there would be a completeness check that quietly does
+    nothing, which is the failure mode the check exists to prevent.
+    """
+    block = _call_block('update.sh', 'if [ -f "$APP/scripts/check_install.sh" ]; then')
+
+    present = _run_call_block(tmp_path / 'a', block, script_present=True)
+    assert 'ARGS:[]' in present, f'update.sh did not run the check: {present!r}'
+
+    absent = _run_call_block(tmp_path / 'b', block, script_present=False)
+    assert 'ARGS:' not in absent, 'a missing script cannot have run'
+    assert 'LOG:' in absent, (
+        'an update that skipped the completeness check must say so, not pass in '
+        'silence'
+    )
+
+
+def test_static_warning_prefix_is_the_same_string_everywhere():
+    """Three files quote this sentence. A copy edit must not split them.
+
+    check_install.sh writes it and greps for it to carry it through a units-only
+    repair; core/update_ops.py matches it to keep the section when it sanitizes
+    the marker. The shell side now uses one variable for write and read. This
+    locks the Python side to it, because a drift there means the app throws away
+    a real warning rather than showing too much.
+    """
+    from core.update_ops import _STATIC_HEADER_PREFIX
+
+    src = (_repo_root() / 'scripts' / 'check_install.sh').read_text()
+    line = next(ln for ln in src.splitlines() if ln.startswith('STATIC_HEADER='))
+    shell_text = line.split('=', 1)[1].strip().strip('"')
+
+    assert shell_text.startswith(_STATIC_HEADER_PREFIX), (
+        f'the app parser looks for {_STATIC_HEADER_PREFIX!r} and the scripts now '
+        f'write {shell_text!r}, so the stylesheet warning would be dropped'
+    )
+
+
+def test_completeness_check_is_defined_in_exactly_one_place():
+    """One definition of "complete", not one per script.
+
+    update.sh used to own this logic outright. Copying it into install_units.sh
+    would have fixed the prod symptom and recreated the drift that
+    deploy/manifest.sh exists to prevent — two descriptions of a correct install,
+    diverging quietly.
+    """
+    owners = [
+        name for name in ('update.sh', 'install_units.sh', 'install.sh', 'check_install.sh')
+        if 'These system services are not installed:' in (_repo_root() / 'scripts' / name).read_text()
+    ]
+    assert owners == ['check_install.sh'], (
+        f'the marker text is written in more than one script: {owners}'
+    )
+
+
+@pytest.mark.django_db
+def test_the_incomplete_banner_does_not_diagnose_the_wrong_problem(settings, tmp_path, client):
+    """The card's own prose must not name a cause the marker does not claim.
+
+    The marker has two independent halves: missing system services, and a web
+    server that cannot read this install's stylesheets. The banner's lead-in said
+    "it could not install the system services that code needs" for BOTH, so a box
+    whose real problem was file permissions was told, in bold, that it was missing
+    services, directly above the text that said otherwise.
+
+    Found on mb-test by running the drill rather than the suite: repair the units
+    on a doubly-broken box and look at what the operator actually sees. Reachable
+    before this branch too, but repairing units is now a routine way to land in
+    exactly this state.
+    """
+    from core import update_ops
+    settings.BASE_DIR = tmp_path
+    (tmp_path / 'logs').mkdir()
+    admin = User.objects.create_superuser(username='boss2', password='x')
+    client.force_login(admin)
+
+    update_ops.incomplete_path().write_text(
+        "The web server cannot read this install's stylesheets (HTTP 403).\n"
+        'Pages render as unstyled HTML with no logo.\n'
+        '\n'
+        'FIX: cd /opt/murphys-bench && scripts/install.sh\n'
+    )
+
+    raw = client.get(reverse('core:update_status')).content.decode()
+    # ⚠ Collapse whitespace FIRST. The template wraps this sentence across lines,
+    # so the phrase never appears contiguously in the raw HTML and a plain
+    # `not in` assertion passes against the buggy template too. The first version
+    # of this test did exactly that and sailed through the planted regression.
+    body = ' '.join(raw.split())
+
+    assert 'This install is incomplete' in body, 'the warning itself must still show'
+    assert 'cannot read this install' in body, 'the real problem must be named'
+    assert 'scripts/install.sh' in body, 'the fix for THIS half must be shown'
+    assert 'system services that code needs' not in body, (
+        'the banner diagnosed missing services on a box whose services are fine'
+    )
