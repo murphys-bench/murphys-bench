@@ -165,7 +165,9 @@ if [ "${#missing[@]}" -gt 0 ]; then
     echo "    reporting it until it is fixed." >&2
 fi
 if [ -n "$carried_static" ]; then
-    printf '  • %s\n' "$carried_static" >&2
+    # Two lines, so indent the continuation. A bare printf '  • %s' bulleted the
+    # first and left the second flush against the margin.
+    printf '%s\n' "$carried_static" | sed -e '1s/^/  • /' -e '2,$s/^/    /' >&2
 elif [ "$css_code" != "200" ]; then
     echo "  • $STATIC_HEADER (HTTP $css_code)." >&2
     echo "    Pages render as unstyled HTML with no logo." >&2
