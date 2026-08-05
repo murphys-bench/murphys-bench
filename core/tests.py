@@ -9431,6 +9431,18 @@ def test_skip_web_does_not_install_a_web_server():
     )
 
 
+def _unit_templates_on_disk():
+    deploy = _repo_root() / 'deploy'
+    found = {p.name for ext in ('*.service', '*.timer', '*.path')
+             for p in deploy.glob(ext)}
+    assert found, 'no unit templates found in deploy/ — the repo is not intact'
+    return found
+
+
+def _units_listed_in_manifest():
+    return set(_manifest_array('MB_UNITS')) | set(_manifest_array('MB_UNITS_OPTIONAL'))
+
+
 def test_every_unit_template_is_listed_in_the_manifest():
     """A unit file in deploy/ that nothing installs is the July 2026 defect.
 
@@ -9440,25 +9452,21 @@ def test_every_unit_template_is_listed_in_the_manifest():
     which is exactly how in-app restore shipped a dead button. This is the one
     drift a shared file cannot prevent by construction, so it is a test.
     """
-    deploy = _repo_root() / 'deploy'
-    on_disk = {
-        p.name for ext in ('*.service', '*.timer', '*.path') for p in deploy.glob(ext)
-    }
-    assert on_disk, 'no unit templates found in deploy/'
-
-    listed = set(_manifest_array('MB_UNITS')) | set(_manifest_array('MB_UNITS_OPTIONAL'))
-
-    unlisted = sorted(on_disk - listed)
+    unlisted = sorted(_unit_templates_on_disk() - _units_listed_in_manifest())
     assert not unlisted, (
         'These unit templates exist in deploy/ but are in no manifest list, so '
         'nothing installs them and the feature behind each one silently does '
         f'nothing: {unlisted}'
     )
 
-    missing_file = sorted(listed - on_disk)
-    assert not missing_file, (
+
+def test_every_manifest_unit_has_a_template_on_disk():
+    """The mirror of the above: a listed unit with no template makes
+    install_units.sh fail partway through a real install."""
+    missing = sorted(_units_listed_in_manifest() - _unit_templates_on_disk())
+    assert not missing, (
         'The manifest lists units with no template in deploy/, so install_units.sh '
-        f'will fail partway through a real install: {missing_file}'
+        f'will fail partway through a real install: {missing}'
     )
 
 
@@ -9504,58 +9512,73 @@ def test_legacy_unit_block_matches_the_manifest():
     )
 
 
-def test_manifest_enable_and_alert_lists_refer_to_installed_units():
-    units = set(_manifest_array('MB_UNITS'))
-    optional = set(_manifest_array('MB_UNITS_OPTIONAL'))
+# These four were one test with four assertions. Split so that a failure
+# identifies itself: which invariant broke is now the test name, not something you
+# work out by reading the source. That also means a mutation sweep needs no text
+# matching to tell them apart — the earlier combined version let a planted defect
+# aimed at the install list be satisfied by the enable-list assertion instead.
 
+def test_enabled_units_are_all_installed_units():
+    units = set(_manifest_array('MB_UNITS'))
     stray = sorted(set(_manifest_array('MB_UNITS_ENABLE')) - units)
     assert not stray, f'enabled but never installed: {stray}'
 
-    stray_opt = sorted(set(_manifest_array('MB_UNITS_OPTIONAL_ENABLE')) - optional)
-    assert not stray_opt, f'optional units enabled but never installed: {stray_opt}'
 
-    # An OnFailure drop-in is written into <job>.service.d, so the job has to be
-    # a real installed service or the hook lands on nothing and the failure it
-    # exists to report passes silently.
+def test_optional_enabled_units_are_all_optional_installed_units():
+    optional = set(_manifest_array('MB_UNITS_OPTIONAL'))
+    stray = sorted(set(_manifest_array('MB_UNITS_OPTIONAL_ENABLE')) - optional)
+    assert not stray, f'optional units enabled but never installed: {stray}'
+
+
+def test_alert_hook_jobs_are_installed_units():
+    """An OnFailure drop-in is written into <job>.service.d, so the job has to be a
+    real installed service or the hook lands on nothing and the failure it exists
+    to report passes silently."""
+    units = set(_manifest_array('MB_UNITS'))
     hooks = [f'{job}.service' for job in _manifest_array('MB_ALERT_HOOK_JOBS')]
-    stray_hooks = sorted(set(hooks) - units)
-    assert not stray_hooks, (
-        f'failure alerts are wired to units that are never installed: {stray_hooks}'
+    stray = sorted(set(hooks) - units)
+    assert not stray, (
+        f'failure alerts are wired to units that are never installed: {stray}'
     )
 
-    # A .path unit triggers the .service of the same name. Installing one without
-    # the other is a button that queues a job nothing consumes — the spinner.
-    for path_unit in [u for u in units if u.endswith('.path')]:
-        companion = path_unit[: -len('.path')] + '.service'
-        assert companion in units, (
-            f'{path_unit} is installed but {companion} is not, so whatever writes '
-            'its trigger file will spin forever'
-        )
+
+def test_every_path_unit_has_its_companion_service_installed():
+    """A .path unit triggers the .service of the same name. Installing one without
+    the other is a button that queues a job nothing consumes — the spinner."""
+    units = set(_manifest_array('MB_UNITS'))
+    orphans = [u for u in units if u.endswith('.path')
+               and u[: -len('.path')] + '.service' not in units]
+    assert not orphans, (
+        f'these .path units have no companion .service, so whatever writes their '
+        f'trigger file will spin forever: {sorted(orphans)}'
+    )
 
 
-def test_sudoers_grant_is_built_from_the_manifest_not_written_out():
-    """Regression lock on a real drift found 2026-08-03.
+# Three separate guards on one real drift found 2026-08-03: install.sh INSTALLED
+# five sudo verbs, its own fallback instructions named three, and
+# verify_install.sh checked three — so a box missing status and is-active passed
+# the clean-room gate. All three now derive from MB_SUDO_VERBS.
 
-    install.sh INSTALLED five verbs, its own fallback instructions named three,
-    and verify_install.sh checked three — so a box missing status and is-active
-    passed the clean-room gate. All three now derive from MB_SUDO_VERBS. These
-    assertions fail if someone hand-writes a verb list back into either file.
-    """
+def test_sudo_grant_keeps_the_verbs_rollback_needs():
     verbs = _manifest_array('MB_SUDO_VERBS')
-    for required in ('restart', 'stop', 'start'):
-        assert required in verbs, (
-            f'{required} was removed from the sudo grant. Rollback runs restore.sh, '
-            'which stops the service, restores the database and starts it again — '
-            'trimming this list breaks recovery in the one situation it exists for.'
-        )
+    missing = [v for v in ('restart', 'stop', 'start') if v not in verbs]
+    assert not missing, (
+        f'{missing} removed from the sudo grant. Rollback runs restore.sh, which '
+        'stops the service, restores the database and starts it again — trimming '
+        'this list breaks recovery in the one situation it exists for.'
+    )
 
+
+def test_installer_does_not_hand_write_the_sudo_grant():
     install = (_repo_root() / 'scripts' / 'install.sh').read_text()
-    verify = (_repo_root() / 'scripts' / 'verify_install.sh').read_text()
-
     assert 'restart murphys-bench, ' not in install, (
         'install.sh hand-writes a sudo grant string again. Build it from '
         'MB_SUDO_VERBS so the rule and the printed instructions cannot diverge.'
     )
+
+
+def test_verifier_does_not_keep_its_own_sudo_verb_list():
+    verify = (_repo_root() / 'scripts' / 'verify_install.sh').read_text()
     assert 'for verb in restart' not in verify, (
         'verify_install.sh keeps its own verb list again, so it can pass a box '
         'the installer built differently. Loop over MB_SUDO_VERBS.'
@@ -10256,22 +10279,21 @@ def test_restore_units_are_templates_and_registered():
         assert '__APP__' in text, f'{unit} is not a template'
         assert '/opt/murphys-bench' not in text, f'{unit} hardcodes the author path'
 
-    # Registration moved out of install_units.sh into deploy/manifest.sh, which
-    # the installer, the verifier and the update-time drift check all read. The
-    # assertion is the same one: these units must actually be installed.
+
+def test_restore_units_are_installed():
+    """Registration moved out of install_units.sh into deploy/manifest.sh, which
+    the installer, the verifier and the update-time drift check all read. The
+    assertion is unchanged: these units must actually be installed."""
     installed = _manifest_array('MB_UNITS')
-    # Each of these carries its OWN message rather than being a bare assert.
-    # Bare asserts made the three failures indistinguishable from one another in
-    # a report, which let a mutation sweep score a plant that hit the enable list
-    # as if it had hit the install list.
-    assert 'murphys-bench-restore.path' in installed, (
-        'the restore .path unit is not in MB_UNITS, so nothing installs it and '
-        'the Restore button queues a job nothing picks up'
+    missing = [u for u in ('murphys-bench-restore.path', 'murphys-bench-restore.service')
+               if u not in installed]
+    assert not missing, (
+        f'{missing} not in MB_UNITS, so nothing installs them and the Restore '
+        'button queues a job nothing picks up'
     )
-    assert 'murphys-bench-restore.service' in installed, (
-        'the restore .service unit is not in MB_UNITS, so the .path unit would '
-        'trigger a service that does not exist'
-    )
+
+
+def test_restore_path_unit_is_enabled():
     assert 'murphys-bench-restore.path' in _manifest_array('MB_UNITS_ENABLE'), (
         'the restore .path unit is installed but never enabled, so the trigger '
         'file it watches for is never noticed'
