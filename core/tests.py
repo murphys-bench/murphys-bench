@@ -3487,7 +3487,7 @@ def test_redirect_flow_renders_message_in_base(client, client_obj, admin_user):
     """
     from decimal import Decimal
     from core.models import LineItem
-    wo = WorkOrder.objects.create(client=client_obj, status='closed')
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
     LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
                             quantity=1, unit_price=Decimal('40.00'))
     client.force_login(admin_user)
@@ -6377,11 +6377,15 @@ from core.models import Invoice as _POSInvoice
 
 @pytest.mark.django_db
 def test_pos_home_search_finds_finished_wo_by_number_and_client(client, admin_user, client_obj):
-    """A finished WO is eligible for the register. MB's real terminal state is
-    'completed' (what techs actually set); 'closed' is also accepted. An
-    unfinished WO (in_progress) must not appear."""
+    """A finished WO is eligible for the register.
+
+    'completed' is the ONLY finished state now — 'closed' was removed as a work
+    order status in migration 0104. This test used to assert both were settleable,
+    which was the register quietly agreeing that a status the rest of the app
+    called active meant finished. A cancelled WO is not settleable either: it is
+    work that never happened, not work to be paid for."""
     completed = WorkOrder.objects.create(client=client_obj, status='completed')
-    closed = WorkOrder.objects.create(client=client_obj, status='closed')
+    cancelled = WorkOrder.objects.create(client=client_obj, status='cancelled')
     open_wo = WorkOrder.objects.create(client=client_obj, status='in_progress')
     client.force_login(admin_user)
 
@@ -6389,11 +6393,11 @@ def test_pos_home_search_finds_finished_wo_by_number_and_client(client, admin_us
     numbers = [w.work_order_number for w in resp.context['results']]
     assert completed.work_order_number in numbers
 
-    # Both completed and closed appear; in_progress does not (search by customer)
+    # Only the completed WO appears; neither cancelled nor in_progress is settleable.
     resp = client.get(reverse('core:pos_home'), {'q': client_obj.name})
     numbers = [w.work_order_number for w in resp.context['results']]
     assert completed.work_order_number in numbers
-    assert closed.work_order_number in numbers
+    assert cancelled.work_order_number not in numbers
     assert open_wo.work_order_number not in numbers
 
 
@@ -7118,20 +7122,24 @@ def test_reports_workorders_domain_shows_raw_activity_and_mileage(client, admin_
 
 
 @pytest.mark.django_db
-def test_reports_wo_status_includes_closed_work_orders(client, admin_user, client_obj):
+def test_reports_wo_status_includes_finished_work_orders(client, admin_user, client_obj):
     """Unlike Tickets' 'by status' view (which excludes closed on purpose),
-    Work Orders by Status must include closed/completed WOs — Mike's exact
-    report: 'no open WOs, but there are 5 closed ones, should I see them
-    here?' Hiding them would repeat the same gap."""
+    Work Orders by Status must include finished WOs — Mike's exact report: 'no
+    open WOs, but there are 5 closed ones, should I see them here?' Hiding them
+    would repeat the same gap.
+
+    Asserts 'Completed' and 'Cancelled' rather than the retired 'Closed': a work
+    order finishes as completed, and migration 0104 removed the third state.
+    """
     WorkOrder.objects.create(client=client_obj, status='completed')
-    WorkOrder.objects.create(client=client_obj, status='closed')
+    WorkOrder.objects.create(client=client_obj, status='cancelled')
     WorkOrder.objects.create(client=client_obj, status='new')
 
     client.force_login(admin_user)
     resp = client.get(reverse('core:reports'), {'domain': 'workorders'})
     labels = {row['label'] for row in resp.context['wo_status_counts']}
     assert 'Completed' in labels
-    assert 'Closed' in labels
+    assert 'Cancelled' in labels
     assert 'New' in labels
     numbers = [wo.work_order_number for wo in resp.context['wo_list']]
     assert len(numbers) == 3
@@ -12026,44 +12034,59 @@ def test_every_role_flag_is_actually_consulted_somewhere():
 # gate, are the two shapes this kind of work fails in.
 
 @pytest.mark.django_db
-def test_closed_status_cannot_bypass_the_workorder_close_grant(client, client_obj):
-    """`closed` is a terminal WorkOrder status that the LIST constant omits.
+def test_there_is_no_closed_work_order_status():
+    """A work order finishes as 'completed'. There is no third terminal state.
 
-    The close gate originally tested WO_CLOSED_STATUSES (['completed',
-    'cancelled']), which exists to answer "is this off the active list", not
-    "does this move finish the work order". `closed` is a real STATUS_CHOICES
-    option missing from it, so an edit-only role could post status=closed and
-    finish a work order outright. Gating now uses WO_FINISHING_STATUSES.
+    'closed' existed for months as a status the app could not agree about: the
+    Register settled it, Reports counted it finished, the work order list called
+    it active, and a linked ticket was never told the work was done. It had
+    already been switched off in Settings → Statuses — SCS's own server had it
+    inactive with zero work orders holding it — but the views still accepted it
+    from a posted form, which is how it survived to become a permission bypass an
+    edit-only role could use to finish a job.
+
+    Two earlier fixes tried to reconcile the disagreement rather than end it.
+    Removing the status ended it.
     """
-    tech = _role_tech('t_wo_closed_bypass', can_edit_workorder=True)
-    wo = WorkOrder.objects.create(
-        work_order_number=WorkOrder.generate_work_order_number(),
-        client=client_obj, assigned_to=tech, status='in_progress',
+    from core.models import WorkOrder
+    slugs = [s for s, _ in WorkOrder.STATUS_CHOICES]
+    assert 'closed' not in slugs, (
+        "'closed' is back as a work order status; a work order completes, it does "
+        'not close (tickets close — that is Ticket.STATUS_CHOICES)'
     )
-    client.force_login(tech)
-    resp = client.post(reverse('core:work_order_quick_update', args=[wo.pk]), {'status': 'closed'})
-    assert resp.status_code == 403
-    wo.refresh_from_db()
-    assert wo.status == 'in_progress', 'an edit-only role finished the work order'
+    assert 'completed' in slugs and 'cancelled' in slugs
 
 
 @pytest.mark.django_db
-def test_closed_status_cannot_bypass_the_grant_on_the_full_edit_form(client, client_obj):
-    """The same constant was wrong on the full edit form too — fix both doors."""
-    tech = _role_tech('t_wo_closed_form', can_edit_workorder=True)
-    wo = WorkOrder.objects.create(
-        work_order_number=WorkOrder.generate_work_order_number(),
-        client=client_obj, assigned_to=tech, status='in_progress',
-    )
+def test_tickets_still_close(client, client_obj):
+    """⚠ The removal was scoped to work orders. Tickets close all day.
+
+    Migration 0104 filters on entity_type='workorder' precisely so it cannot
+    retire the ticket status half the ticket workflow depends on. If someone
+    widens that filter, this fails.
+    """
+    from core.models import Ticket, StatusDefinition
+    assert 'closed' in [s for s, _ in Ticket.STATUS_CHOICES]
+    assert StatusDefinition.objects.filter(entity_type='ticket', slug='closed').exists()
+    assert not StatusDefinition.objects.filter(entity_type='workorder', slug='closed').exists()
+
+    tech = _role_tech('t_ticket_still_closes', can_close_tickets=True)
+    ticket = _ticket_for(tech, client_obj)
     client.force_login(tech)
-    resp = client.post(reverse('core:work_order_edit', args=[wo.pk]), {
-        'client': client_obj.pk, 'status': 'closed', 'priority': 'normal',
-        'service_type': 'in_shop',
-    })
-    wo.refresh_from_db()
-    assert wo.status == 'in_progress', (
-        f'the edit form finished the WO without the close grant (HTTP {resp.status_code})'
-    )
+    client.post(reverse('core:ticket_close', args=[ticket.pk]))
+    ticket.refresh_from_db()
+    assert ticket.status == 'resolved'
+
+
+@pytest.mark.django_db
+def test_existing_closed_work_orders_became_completed(client_obj):
+    """Migration 0104 must not strand rows in a status that no longer exists.
+
+    Anything that WAS closed is work that got finished, so it lands on
+    'completed' — not 'cancelled', which means the job never happened.
+    """
+    from core.models import WorkOrder
+    assert not WorkOrder.objects.filter(status='closed').exists()
 
 
 @pytest.mark.django_db
@@ -12139,20 +12162,20 @@ def test_structural_flag_guard_does_not_accept_ui_only_references(tmp_path):
 def test_closing_a_linked_wo_tells_its_ticket_the_work_is_done(client, client_obj):
     """One definition of "finished", including the linked-ticket workflow.
 
-    Round 2 gated `closed` as a finishing transition for permissions but left
-    `_flag_ticket_wo_complete` reading a constant that omitted it. A reviewer
-    probed it: quick-updating a linked WO to `closed` saved fine and left
-    ticket.wo_complete False, so the "work is complete — ready for final contact"
-    banner and the Close Ticket button never appeared. The ticket was stranded
-    behind a work order the app insisted was still open.
+    A reviewer probed the ancestor of this: quick-updating a linked WO to the
+    then-existing `closed` status saved fine and left ticket.wo_complete False, so
+    the "work is complete — ready for final contact" banner and the Close Ticket
+    button never appeared and the ticket was stranded behind a work order the app
+    insisted was still open. `closed` is gone now, but the hole it came through —
+    a finishing status the ticket half does not know about — is reachable again
+    the moment someone adds a status without checking here.
 
-    Asserted for every finishing status, so adding a fourth cannot quietly skip
-    the ticket half again.
+    Asserted for every finishing status, so adding a third cannot quietly skip it.
     """
     admin = User.objects.create_user(username='wo_done_admin', password='x',
                                      is_staff=True, is_superuser=True)
     client.force_login(admin)
-    for status in ('completed', 'closed', 'cancelled'):
+    for status in ('completed', 'cancelled'):
         ticket = Ticket.objects.create(
             ticket_number=Ticket.generate_ticket_number(),
             client=client_obj, subject=f'S-{status}', description='D', status='open',
@@ -12169,35 +12192,19 @@ def test_closing_a_linked_wo_tells_its_ticket_the_work_is_done(client, client_ob
 
 
 @pytest.mark.django_db
-def test_a_closed_wo_is_not_shown_as_open_on_its_ticket(client, client_obj):
-    """The same omission drove the ticket page's own "is the WO still open" flag."""
-    admin = User.objects.create_user(username='wo_open_admin', password='x',
-                                     is_staff=True, is_superuser=True)
-    ticket = Ticket.objects.create(
-        ticket_number=Ticket.generate_ticket_number(),
-        client=client_obj, subject='S', description='D', status='open',
-    )
-    WorkOrder.objects.create(
-        work_order_number=WorkOrder.generate_work_order_number(),
-        client=client_obj, ticket=ticket, status='closed',
-    )
-    client.force_login(admin)
-    resp = client.get(reverse('core:ticket_detail', args=[ticket.pk]))
-    assert resp.context['wo_is_open'] is False
+def test_finished_work_order_statuses_stay_in_step_with_the_status_list():
+    """Every finishing status must be a status a work order can actually hold.
 
-
-@pytest.mark.django_db
-def test_a_closed_wo_leaves_the_active_list():
-    """`closed` counts as closed on the list tabs, like its name says.
-
-    It did not before: a WO set to `closed` sat in the Active tab permanently,
-    while POS accepted it at the register and Reports counted it as closed. This
-    pins the constant that now settles the disagreement.
+    The `closed` saga was this invariant broken in both directions at once: a
+    status existed that the finished-list omitted, and later a finished-list
+    entry for a status being removed. Cheap to assert, and it fails the moment
+    the two drift again.
     """
+    from core.models import WorkOrder
     from core.views import WO_CLOSED_STATUSES
-    assert 'closed' in WO_CLOSED_STATUSES
-    for status in ('completed', 'cancelled'):
-        assert status in WO_CLOSED_STATUSES, 'the original two must not be lost'
+    slugs = {s for s, _ in WorkOrder.STATUS_CHOICES}
+    stray = [s for s in WO_CLOSED_STATUSES if s not in slugs]
+    assert not stray, f'finished-status list names statuses a WO cannot hold: {stray}'
 
 
 @pytest.mark.django_db
@@ -12216,3 +12223,126 @@ def test_only_one_definition_of_a_finished_work_order(client_obj):
         'a second "finished work order" constant is back; fold it into '
         'WO_CLOSED_STATUSES so the app cannot disagree with itself'
     )
+
+
+@pytest.mark.django_db
+def test_upgrading_does_not_widen_technician_ticket_visibility(client, client_obj):
+    """The seeded Technician role must not start seeing every ticket on upgrade.
+
+    ⚠ This is the mirror image of migration 0102 and the more dangerous direction.
+    The Technician role has carried can_view_all_tickets=True since Batch 4, which
+    predates the ticket visibility model (own + unclaimed pool + escalations)
+    entirely. Nothing revisited it when that model arrived, because nothing read
+    the flag. Enforcing it in v0.12.0 without migration 0103 handed every
+    technician on every existing install sight of every ticket, silently undoing a
+    deliberate design, with no setting changed by the operator.
+
+    Found from a screenshot of the live Roles page, not from this suite — the flag
+    was ticked in plain sight and three review rounds went past it.
+    """
+    from core.models import Role
+    tech_role = Role.objects.get(name='Technician')
+    assert tech_role.can_view_all_tickets is False, (
+        'the seeded Technician role can see every ticket; migration 0103 is meant '
+        'to leave non-admin roles on the unclaimed-pool model'
+    )
+
+    mine = User.objects.create_user(username='pool_a', password='x', role_obj=tech_role)
+    theirs = User.objects.create_user(username='pool_b', password='x', role_obj=tech_role)
+    theirs_ticket = _ticket_for(theirs, client_obj)
+
+    client.force_login(mine)
+    assert client.get(reverse('core:ticket_detail', args=[theirs_ticket.pk])).status_code == 404
+    listing = client.get(reverse('core:ticket_list'))
+    numbers = [t.ticket_number for t in listing.context['tickets']]
+    assert theirs_ticket.ticket_number not in numbers
+
+
+@pytest.mark.django_db
+def test_admin_roles_keep_view_all_tickets_ticked():
+    """Migration 0103 deliberately skips admin roles, and this pins why.
+
+    _is_admin() short-circuits ticket scoping, so an admin role sees everything
+    whatever this flag says. Writing False there would leave the Roles page
+    showing an unticked box beside a role that plainly does see all tickets — a
+    checkbox that lies about what it does, which is the entire defect v0.12.0
+    exists to end. Honest display beats a tidy-looking backfill.
+    """
+    from core.models import Role
+    admin_role = Role.objects.get(name='Administrator')
+    assert admin_role.can_manage_settings is True
+    assert admin_role.can_view_all_tickets is True
+
+
+@pytest.mark.django_db
+def test_a_role_may_still_be_granted_view_all_tickets(client, client_obj):
+    """The migration preserves behaviour; it must not disable the capability.
+
+    Turning the box back on has to work, or 0103 would have replaced one lying
+    checkbox with another.
+    """
+    tech = _role_tech('t_widened', can_view_all_tickets=True)
+    other = _role_tech('t_widened_other')
+    theirs = _ticket_for(other, client_obj)
+    client.force_login(tech)
+    assert client.get(reverse('core:ticket_detail', args=[theirs.pk])).status_code == 200
+
+
+@pytest.mark.django_db
+def test_quick_update_rejects_a_status_that_does_not_exist(client, client_obj):
+    """The inline panel must not accept any string as a work order status.
+
+    It assigned request.POST['status'] straight onto the model, and the field has
+    no `choices=` (migration 0036 moved status definitions into the database), so
+    anything saved. WorkOrderForm validated the same field all along; only this
+    endpoint did not.
+
+    That is what kept `closed` reachable by POST after Settings → Statuses had
+    switched it off — removing it from the model and the table was not enough on
+    its own — and it accepts typos and stale bookmarks just as happily, leaving a
+    work order in a state no list, report or register recognises.
+    """
+    from core.models import StatusDefinition
+    admin = User.objects.create_user(username='qu_admin', password='x',
+                                     is_staff=True, is_superuser=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, status='in_progress',
+    )
+    client.force_login(admin)
+
+    assert not StatusDefinition.objects.filter(entity_type='workorder', slug='closed').exists()
+    for bogus in ('closed', 'banana', ''):
+        resp = client.post(reverse('core:work_order_quick_update', args=[wo.pk]),
+                           {'status': bogus})
+        wo.refresh_from_db()
+        assert wo.status == 'in_progress', (
+            f'posting status={bogus!r} was saved (HTTP {resp.status_code})'
+        )
+
+    # A real status still works — the guard must not break the panel.
+    client.post(reverse('core:work_order_quick_update', args=[wo.pk]), {'status': 'completed'})
+    wo.refresh_from_db()
+    assert wo.status == 'completed'
+
+
+@pytest.mark.django_db
+def test_quick_update_still_saves_a_wo_holding_a_retired_status(client, client_obj):
+    """A legacy status must not make the rest of the panel unusable.
+
+    If a row somehow still holds a status that has since been retired, refusing
+    every save would strand it — the operator could not even change its priority.
+    The WO's own current status is always allowed through.
+    """
+    admin = User.objects.create_user(username='qu_admin2', password='x',
+                                     is_staff=True, is_superuser=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, status='in_progress', priority='normal',
+    )
+    WorkOrder.objects.filter(pk=wo.pk).update(status='some_retired_status')
+    client.force_login(admin)
+    client.post(reverse('core:work_order_quick_update', args=[wo.pk]),
+                {'status': 'some_retired_status', 'priority': 'urgent'})
+    wo.refresh_from_db()
+    assert wo.priority == 'urgent', 'a legacy status blocked an unrelated edit'

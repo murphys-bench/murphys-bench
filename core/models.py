@@ -1072,12 +1072,24 @@ class TicketWorkLog(models.Model):
 class WorkOrder(models.Model):
     """Repair job (main entity)"""
 
+    # ⚠ There is no 'closed' work order. A work order finishes as 'completed'
+    # (or 'cancelled' if it never happened) — Mike's decision, and the reason
+    # mark_completed() is the only terminal helper on this model. 'closed' used
+    # to sit between the two and belonged to neither: the Register settled it,
+    # Reports counted it as finished, the list tabs treated it as active, and a
+    # linked ticket was never told the work was done. It was already switched off
+    # in Settings → Statuses, so the dropdown had stopped offering it, but the
+    # views still accepted it from a posted form — which is how it survived long
+    # enough to become a permission bypass. Removed in migration 0104; any work
+    # order still holding it was moved to 'completed'.
+    #
+    # Tickets are unaffected and DO close. Ticket.STATUS_CHOICES keeps its own
+    # 'closed', and the migration is scoped to entity_type='workorder'.
     STATUS_CHOICES = [
         ('new', 'New'),
         ('assigned', 'Assigned'),
         ('in_progress', 'In Progress'),
         ('completed', 'Completed'),
-        ('closed', 'Closed'),
         ('cancelled', 'Cancelled'),
     ]
 

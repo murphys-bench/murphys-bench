@@ -42,16 +42,31 @@ the Unreleased entries move under that version and prod gets a single update.
 - **Claiming an unassigned ticket is deliberately not restricted** by "Assign Tickets".
   Any technician can still pick up unclaimed work — that permission covers handing a
   ticket to someone else, which is the part that needs the grant.
+- **"View All Tickets" is switched off for non-administrator roles when you upgrade, so
+  technicians keep seeing exactly what they see today.** The stock Technician role has had
+  that box ticked since long before Murphy's Bench limited what a technician sees, and
+  because nothing read it, technicians got the normal view regardless: their own tickets,
+  plus the unclaimed pool, plus anything escalated to them. Enforcing the box as-found
+  would have shown every technician every ticket in the shop the moment you upgraded,
+  without you changing a thing. Administrator roles are left alone — they see everything
+  either way, and unticking a box that still lets you see everything would be its own lie.
+  Turn it on for a role when you actually want that.
 
 ### Fixed
 
-- **A work order set to "Closed" now counts as finished everywhere.** It used to sit in
-  the Active tab permanently, and if it came from a ticket, that ticket never showed
-  "Work is complete — ready for final contact" and never offered its Close Ticket button,
-  so the ticket was stranded behind a job the app insisted was still open. Meanwhile the
-  register would happily settle the same work order and the reports counted it as closed.
-  "Completed" is the state Murphy's Bench expects you to use and nothing about it changes;
-  this only fixes "Closed" behaving like neither one thing nor the other.
+- **"Closed" is no longer a work order status. A work order is Completed, or Cancelled.**
+  "Closed" sat between the two and behaved like neither: the register would settle it,
+  the reports counted it as finished, the work order list called it active, and if the job
+  came from a ticket, that ticket never showed "Work is complete — ready for final contact"
+  and never offered its Close Ticket button — it stayed stranded behind a job the app
+  insisted was still open. Most shops will never have seen it, because it was already
+  switched off in Settings → Statuses and the dropdown stopped offering it; the views
+  accepted it anyway. Any work order still holding it becomes Completed when you upgrade.
+  **Tickets are unaffected and still close** — this is only about work orders.
+- **The work order status panel now rejects a status that does not exist.** It saved
+  whatever was submitted, so a stale page, a typo, or a retired status could leave a work
+  order in a state that no list, report or register recognised. The full edit form always
+  checked this; the inline panel did not.
 - **The roadmap no longer says restoring a backup is command-line only.** Restore from
   Settings shipped in v0.11.0.
 

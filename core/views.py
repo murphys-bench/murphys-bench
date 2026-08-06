@@ -658,20 +658,15 @@ class DashboardView(LoginRequiredMixin, View):
 # Statuses that mean a work order is finished: off the active list, settleable at the
 # register, and — when a ticket is linked — ready for final client contact.
 #
-# ⚠ `closed` was missing here until v0.12.0, and that omission was a bug, not a design.
-# Every other part of the app already treated it as finished: POS_SETTLE_STATUSES
-# accepts it at the register, the Reports "by status" view counts it alongside
-# completed, and StatusDefinition seeds it with the same grey swatch as the other
-# terminal states. Only this constant disagreed, so a `closed` work order sat in the
-# Active tab forever and never told its linked ticket the work was done.
-#
-# It surfaced through permissions: gating the close grant on a list constant let an
-# edit-only role post status=closed and finish a work order outright. The first fix
-# added a second constant for permissions alone, which an outside reviewer correctly
-# rejected — two definitions of "finished" that disagree is the drift this project
-# spends its time preventing, and the ticket workflow still read the old one. One
-# definition, used everywhere.
-WO_CLOSED_STATUSES = ['completed', 'cancelled', 'closed']
+# ⚠ This list is now complete because 'closed' no longer exists as a work order status
+# (see WorkOrder.STATUS_CHOICES and migration 0104). It used to, and the resulting
+# three-way disagreement — the Register settled it, Reports counted it finished, this
+# constant called it active — is what let an edit-only role finish a work order by
+# posting status=closed. Two intermediate fixes tried to reconcile the disagreement,
+# first by gating permissions on a second constant, then by folding 'closed' in here.
+# Deleting the status removed the disagreement instead of managing it, and there is
+# nothing left to keep in step.
+WO_CLOSED_STATUSES = ['completed', 'cancelled']
 
 
 class WorkOrderListView(LoginRequiredMixin, ListView):
@@ -883,6 +878,26 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
         # before it is overwritten below, or the comparison tests the new value
         # against itself and a role without close rights closes work orders here.
         new_status = p.get('status', wo.status)
+
+        # ⚠ Validate the posted status against the statuses that actually exist.
+        # This panel used to assign request.POST['status'] straight onto the model,
+        # and WorkOrder.status is a plain CharField with no `choices=` (migration
+        # 0036 moved status definitions into the database so shops can add their
+        # own), so ANY string was accepted and saved. WorkOrderForm has always
+        # validated the same field against a ChoiceField built from these very
+        # rows; only this endpoint did not. That gap is what kept `closed`
+        # reachable by POST after it was switched off in Settings → Statuses, and
+        # it would equally accept a typo or a stale bookmark, leaving a work order
+        # in a status no list, report or register knows about. The WO's CURRENT
+        # status is always allowed through so a legacy value cannot make an
+        # unrelated edit unsavable.
+        valid_statuses = set(
+            StatusDefinition.objects.filter(entity_type='workorder', is_active=True)
+            .values_list('slug', flat=True)
+        )
+        valid_statuses.add(wo.status)
+        if new_status not in valid_statuses:
+            return HttpResponse('Forbidden', status=403)
         closing = (
             new_status in WO_CLOSED_STATUSES
             and wo.status not in WO_CLOSED_STATUSES
@@ -6215,7 +6230,12 @@ class POSAccessMixin(LoginRequiredMixin):
 # real terminal state is 'completed' (mark_completed(); the status dropdown's
 # common choice); 'closed' is a rarely-used dropdown option that also means
 # "done". Both make a WO ready to ring up.
-POS_SETTLE_STATUSES = ('completed', 'closed')
+# Which work orders the Register will settle. 'closed' was accepted here because the
+# status existed and plainly meant finished; it no longer exists, so 'completed' is the
+# whole list. This constant was originally written as ('closed',) alone, which returned
+# zero results for every search because the state technicians actually set is
+# 'completed' — the bug that first showed 'closed' was decorative.
+POS_SETTLE_STATUSES = ('completed',)
 
 
 class POSHomeView(POSAccessMixin, View):
