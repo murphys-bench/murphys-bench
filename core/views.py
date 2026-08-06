@@ -655,20 +655,23 @@ class DashboardView(LoginRequiredMixin, View):
         return render(request, self.template_name, context)
 
 
-WO_CLOSED_STATUSES = ['completed', 'cancelled']
-
-# Which transitions count as FINISHING a work order, for permission purposes only.
+# Statuses that mean a work order is finished: off the active list, settleable at the
+# register, and — when a ticket is linked — ready for final client contact.
 #
-# ⚠ Deliberately a superset of WO_CLOSED_STATUSES, and the two are not interchangeable.
-# WO_CLOSED_STATUSES answers "is this WO off the active list" and drives list tabs,
-# counts and dashboards. This answers "does this move need can_close_workorder", and
-# must cover EVERY terminal status the dropdown can actually reach. `closed` is a real
-# WorkOrder.STATUS_CHOICES option that the list constant omits — it is not used day to
-# day at SCS, which is exactly why it was easy to miss. Gating on the list constant let
-# a can_edit_workorder-only role post status=closed and finish a work order outright;
-# an outside reviewer reproduced it. Derived from the list constant rather than retyped
-# so the two cannot drift apart.
-WO_FINISHING_STATUSES = WO_CLOSED_STATUSES + ['closed']
+# ⚠ `closed` was missing here until v0.12.0, and that omission was a bug, not a design.
+# Every other part of the app already treated it as finished: POS_SETTLE_STATUSES
+# accepts it at the register, the Reports "by status" view counts it alongside
+# completed, and StatusDefinition seeds it with the same grey swatch as the other
+# terminal states. Only this constant disagreed, so a `closed` work order sat in the
+# Active tab forever and never told its linked ticket the work was done.
+#
+# It surfaced through permissions: gating the close grant on a list constant let an
+# edit-only role post status=closed and finish a work order outright. The first fix
+# added a second constant for permissions alone, which an outside reviewer correctly
+# rejected — two definitions of "finished" that disagree is the drift this project
+# spends its time preventing, and the ticket workflow still read the old one. One
+# definition, used everywhere.
+WO_CLOSED_STATUSES = ['completed', 'cancelled', 'closed']
 
 
 class WorkOrderListView(LoginRequiredMixin, ListView):
@@ -803,7 +806,7 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
             # field would silently reopen it.
             choices = [
                 c for c in choices
-                if c[0] not in WO_FINISHING_STATUSES or c[0] == self.object.status
+                if c[0] not in WO_CLOSED_STATUSES or c[0] == self.object.status
             ]
         context['wo_status_choices'] = choices
         return context
@@ -881,8 +884,8 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
         # against itself and a role without close rights closes work orders here.
         new_status = p.get('status', wo.status)
         closing = (
-            new_status in WO_FINISHING_STATUSES
-            and wo.status not in WO_FINISHING_STATUSES
+            new_status in WO_CLOSED_STATUSES
+            and wo.status not in WO_CLOSED_STATUSES
         )
         if closing and not _can_close_workorder(request.user):
             return HttpResponse('Forbidden', status=403)
@@ -1629,8 +1632,8 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
         new_status = form.cleaned_data.get('status')
         old_status = WorkOrder.objects.filter(pk=self.object.pk).values_list('status', flat=True).first()
         if (
-            new_status in WO_FINISHING_STATUSES
-            and old_status not in WO_FINISHING_STATUSES
+            new_status in WO_CLOSED_STATUSES
+            and old_status not in WO_CLOSED_STATUSES
             and not _can_close_workorder(self.request.user)
         ):
             return HttpResponse('Forbidden', status=403)

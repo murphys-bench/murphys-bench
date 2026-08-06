@@ -12133,3 +12133,86 @@ def test_structural_flag_guard_does_not_accept_ui_only_references(tmp_path):
     assert 'context_processors.py' not in scanned, (
         'exposing a flag to templates is not enforcing it'
     )
+
+
+@pytest.mark.django_db
+def test_closing_a_linked_wo_tells_its_ticket_the_work_is_done(client, client_obj):
+    """One definition of "finished", including the linked-ticket workflow.
+
+    Round 2 gated `closed` as a finishing transition for permissions but left
+    `_flag_ticket_wo_complete` reading a constant that omitted it. A reviewer
+    probed it: quick-updating a linked WO to `closed` saved fine and left
+    ticket.wo_complete False, so the "work is complete — ready for final contact"
+    banner and the Close Ticket button never appeared. The ticket was stranded
+    behind a work order the app insisted was still open.
+
+    Asserted for every finishing status, so adding a fourth cannot quietly skip
+    the ticket half again.
+    """
+    admin = User.objects.create_user(username='wo_done_admin', password='x',
+                                     is_staff=True, is_superuser=True)
+    client.force_login(admin)
+    for status in ('completed', 'closed', 'cancelled'):
+        ticket = Ticket.objects.create(
+            ticket_number=Ticket.generate_ticket_number(),
+            client=client_obj, subject=f'S-{status}', description='D', status='open',
+        )
+        wo = WorkOrder.objects.create(
+            work_order_number=WorkOrder.generate_work_order_number(),
+            client=client_obj, ticket=ticket, status='in_progress',
+        )
+        client.post(reverse('core:work_order_quick_update', args=[wo.pk]), {'status': status})
+        ticket.refresh_from_db()
+        assert ticket.wo_complete is True, (
+            f'a linked WO moved to {status!r} left its ticket showing the work as unfinished'
+        )
+
+
+@pytest.mark.django_db
+def test_a_closed_wo_is_not_shown_as_open_on_its_ticket(client, client_obj):
+    """The same omission drove the ticket page's own "is the WO still open" flag."""
+    admin = User.objects.create_user(username='wo_open_admin', password='x',
+                                     is_staff=True, is_superuser=True)
+    ticket = Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(),
+        client=client_obj, subject='S', description='D', status='open',
+    )
+    WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, ticket=ticket, status='closed',
+    )
+    client.force_login(admin)
+    resp = client.get(reverse('core:ticket_detail', args=[ticket.pk]))
+    assert resp.context['wo_is_open'] is False
+
+
+@pytest.mark.django_db
+def test_a_closed_wo_leaves_the_active_list():
+    """`closed` counts as closed on the list tabs, like its name says.
+
+    It did not before: a WO set to `closed` sat in the Active tab permanently,
+    while POS accepted it at the register and Reports counted it as closed. This
+    pins the constant that now settles the disagreement.
+    """
+    from core.views import WO_CLOSED_STATUSES
+    assert 'closed' in WO_CLOSED_STATUSES
+    for status in ('completed', 'cancelled'):
+        assert status in WO_CLOSED_STATUSES, 'the original two must not be lost'
+
+
+@pytest.mark.django_db
+def test_only_one_definition_of_a_finished_work_order(client_obj):
+    """There must not be a second "finished" list that can drift from this one.
+
+    The first fix for the `closed` bypass added WO_FINISHING_STATUSES for
+    permissions while leaving the ticket workflow on the old constant, which is
+    how the linked-ticket half stayed broken. Two descriptions of one fact is the
+    failure mode deploy/manifest.sh and check_install.sh both exist to prevent.
+    """
+    import inspect
+    from core import views
+    src = inspect.getsource(views)
+    assert 'WO_FINISHING_STATUSES' not in src, (
+        'a second "finished work order" constant is back; fold it into '
+        'WO_CLOSED_STATUSES so the app cannot disagree with itself'
+    )

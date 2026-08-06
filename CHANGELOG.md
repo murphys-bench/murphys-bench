@@ -12,17 +12,29 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ### Security
 
-- **The role permissions for tickets, replies and work orders are now enforced.** Eleven
-  checkboxes in Settings → Roles were displayed but never checked by anything: "View All
-  Tickets", "Create Tickets", "Edit Tickets", "Close/Resolve Tickets", "Delete Tickets",
-  "Assign Tickets", "Internal Replies", "Customer Replies", "Create Work Orders", "Edit
-  Work Orders" and "Close Work Orders". Whatever you set them to, every technician could
-  do all of it. This cut both ways: unchecking a box did not take an ability away, and
-  ticking one did not hand it over — "Delete Tickets" in particular could never grant
-  deletion, because deletion checked a separate administrator flag instead. If you run
-  Murphy's Bench alone this changed nothing you would have noticed. If you have more than
-  one technician, the permissions you configured were not the permissions you had. Found
-  by an outside review of the public repository.
+- **Eleven role permissions are now enforced on the main ticket and work order screens.**
+  These checkboxes in Settings → Roles were displayed but never checked by anything: "View
+  All Tickets", "Create Tickets", "Edit Tickets", "Close/Resolve Tickets", "Delete
+  Tickets", "Assign Tickets", "Internal Replies", "Customer Replies", "Create Work
+  Orders", "Edit Work Orders" and "Close Work Orders". Whatever you set them to, every
+  technician could do all of it. This cut both ways: unchecking a box did not take an
+  ability away, and ticking one did not hand it over — "Delete Tickets" in particular
+  could never grant deletion, because deletion checked a separate administrator flag
+  instead. If you run Murphy's Bench alone this changed nothing you would have noticed. If
+  you have more than one technician, the permissions you configured were not the
+  permissions you had. Found by an outside review of the public repository.
+- **⚠ Read this before relying on those permissions: the boundary is not yet complete.**
+  What is enforced is creating, editing, closing, reopening, deleting, assigning and
+  replying, on the ticket and work order screens themselves. Several smaller actions are
+  **not** yet covered and remain available to any technician who can see the record:
+  adding a work order note, ticking a checklist item, logging time, uploading an
+  attachment, applying a checklist, linking tickets, escalating, dismissing a
+  needs-response flag, and acknowledging an overdue ticket. Converting a ticket to a work
+  order currently needs only "Create Work Orders", and doing so also ends the ticket. So a
+  technician with editing turned off can still annotate a job and finish a ticket by
+  converting it. These are open decisions about where the line belongs, not oversights —
+  they are named here rather than left for you to discover. "Manage Users" is likewise
+  still administrator-gated and its checkbox does nothing.
 - **"Close/Resolve Tickets" is switched on for every existing role when you upgrade.**
   Every technician could close tickets before, regardless of the setting, so enforcing the
   old default would have taken that away from working shops that changed nothing. The
@@ -33,6 +45,13 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ### Fixed
 
+- **A work order set to "Closed" now counts as finished everywhere.** It used to sit in
+  the Active tab permanently, and if it came from a ticket, that ticket never showed
+  "Work is complete — ready for final contact" and never offered its Close Ticket button,
+  so the ticket was stranded behind a job the app insisted was still open. Meanwhile the
+  register would happily settle the same work order and the reports counted it as closed.
+  "Completed" is the state Murphy's Bench expects you to use and nothing about it changes;
+  this only fixes "Closed" behaving like neither one thing nor the other.
 - **The roadmap no longer says restoring a backup is command-line only.** Restore from
   Settings shipped in v0.11.0.
 
