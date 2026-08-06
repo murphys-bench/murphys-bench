@@ -11969,15 +11969,21 @@ def test_every_role_flag_is_actually_consulted_somewhere():
         and f.name.startswith('can_')
     ]
     root = Path(inspect.getfile(Role)).parent
-    # Where a flag may be DISPLAYED rather than enforced: the model itself, the
-    # role-edit form, and Django admin's fieldsets. A flag appearing only in
-    # these is exactly the defect. tests.py is excluded too — naming a flag in a
-    # test is not enforcing it, and leaving it in let this very test see its own
-    # exception list as proof the flag was handled.
-    display_only = {'models.py', 'forms.py', 'admin.py', 'tests.py'}
+    # What counts as ENFORCEMENT is server-side Python only.
+    #
+    # ⚠ Templates and context_processors.py are deliberately NOT scanned. An
+    # outside reviewer pointed out that the first version of this test accepted
+    # any surviving mention of the flag, so a future flag that merely hides a
+    # button in a template — with no server-side check behind it — would satisfy
+    # the guard while granting nothing. Hiding a control is not a permission; the
+    # endpoint is. Excluded for the same reason: models.py (the field), forms.py
+    # (the role editor), admin.py (fieldsets), and tests.py, whose own exception
+    # list below would otherwise read as proof the flag was handled.
+    display_only = {'models.py', 'forms.py', 'admin.py', 'tests.py',
+                    'context_processors.py'}
     enforcement = '\n'.join(
         p.read_text()
-        for p in list(root.glob('*.py')) + list(root.glob('templates/**/*.html'))
+        for p in root.glob('*.py')
         if p.name not in display_only
     )
     # views.py holds the role-editor's own label list, which is display too. Drop
@@ -12008,4 +12014,122 @@ def test_every_role_flag_is_actually_consulted_somewhere():
     assert sorted(still_dead) == sorted(KNOWN_UNENFORCED), (
         'a flag listed as known-unenforced is now enforced — remove it from '
         f'KNOWN_UNENFORCED: {sorted(set(KNOWN_UNENFORCED) - set(still_dead))}'
+    )
+
+
+# ── Reviewer-found bypasses in the first cut of the enforcement work ────────
+#
+# Both were reproduced with live probes by an outside reviewer against e847228,
+# after the branch's own 30 tests were green. They are recorded here as their own
+# block because the lesson is not "two bugs" — it is that a permission constant
+# borrowed from a different question, and a whole-record write behind a narrow
+# gate, are the two shapes this kind of work fails in.
+
+@pytest.mark.django_db
+def test_closed_status_cannot_bypass_the_workorder_close_grant(client, client_obj):
+    """`closed` is a terminal WorkOrder status that the LIST constant omits.
+
+    The close gate originally tested WO_CLOSED_STATUSES (['completed',
+    'cancelled']), which exists to answer "is this off the active list", not
+    "does this move finish the work order". `closed` is a real STATUS_CHOICES
+    option missing from it, so an edit-only role could post status=closed and
+    finish a work order outright. Gating now uses WO_FINISHING_STATUSES.
+    """
+    tech = _role_tech('t_wo_closed_bypass', can_edit_workorder=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, assigned_to=tech, status='in_progress',
+    )
+    client.force_login(tech)
+    resp = client.post(reverse('core:work_order_quick_update', args=[wo.pk]), {'status': 'closed'})
+    assert resp.status_code == 403
+    wo.refresh_from_db()
+    assert wo.status == 'in_progress', 'an edit-only role finished the work order'
+
+
+@pytest.mark.django_db
+def test_closed_status_cannot_bypass_the_grant_on_the_full_edit_form(client, client_obj):
+    """The same constant was wrong on the full edit form too — fix both doors."""
+    tech = _role_tech('t_wo_closed_form', can_edit_workorder=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, assigned_to=tech, status='in_progress',
+    )
+    client.force_login(tech)
+    resp = client.post(reverse('core:work_order_edit', args=[wo.pk]), {
+        'client': client_obj.pk, 'status': 'closed', 'priority': 'normal',
+        'service_type': 'in_shop',
+    })
+    wo.refresh_from_db()
+    assert wo.status == 'in_progress', (
+        f'the edit form finished the WO without the close grant (HTTP {resp.status_code})'
+    )
+
+
+@pytest.mark.django_db
+def test_close_only_role_cannot_rewrite_other_fields_while_closing(client_obj, client):
+    """Permission to FINISH a work order is not permission to rewrite it.
+
+    The quick-update panel posts every field in one request. Allowing a closing
+    request through wholesale handed a close-only role the priority, assignee,
+    contact, device, repair type, schedule and invoice ref as well. Reproduced by
+    the reviewer with status=completed&priority=urgent.
+    """
+    tech = _role_tech('t_wo_close_only', can_close_workorder=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, assigned_to=tech, status='in_progress', priority='normal',
+    )
+    client.force_login(tech)
+    client.post(reverse('core:work_order_quick_update', args=[wo.pk]), {
+        'status': 'completed', 'priority': 'urgent',
+    })
+    wo.refresh_from_db()
+    assert wo.status == 'completed', 'the close itself must still work'
+    assert wo.priority == 'normal', 'a close-only role rewrote a field it may not edit'
+
+
+@pytest.mark.django_db
+def test_close_only_role_still_gets_a_working_complete_button(client, client_obj):
+    """The narrowing must not break the legitimate path.
+
+    Ignoring the rest of the request rather than rejecting it means the ordinary
+    Complete action still works for a close-only user; a 403 here would have made
+    the grant useless in the UI that posts the whole panel.
+    """
+    tech = _role_tech('t_wo_close_works', can_close_workorder=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, assigned_to=tech, status='in_progress',
+    )
+    client.force_login(tech)
+    client.post(reverse('core:work_order_quick_update', args=[wo.pk]), {'status': 'completed'})
+    wo.refresh_from_db()
+    assert wo.status == 'completed'
+    assert wo.completed_date is not None, 'completing must still stamp the date'
+
+
+@pytest.mark.django_db
+def test_structural_flag_guard_does_not_accept_ui_only_references(tmp_path):
+    """The guard must require SERVER-side enforcement, not a hidden button.
+
+    Its first version scanned templates and the context processor too, so a flag
+    that only hid a control would have satisfied it while granting nothing —
+    precisely the defect the guard exists to catch, one level up. Verified by
+    planting a UI-exposed, never-enforced flag: the old scan passed it, the
+    current one fails it.
+    """
+    import inspect
+    from pathlib import Path
+    from core.models import Role
+
+    root = Path(inspect.getfile(Role)).parent
+    scanned = {
+        p.name for p in root.glob('*.py')
+        if p.name not in {'models.py', 'forms.py', 'admin.py', 'tests.py',
+                          'context_processors.py'}
+    }
+    assert 'views.py' in scanned, 'the guard must still read the views'
+    assert 'context_processors.py' not in scanned, (
+        'exposing a flag to templates is not enforcing it'
     )

@@ -657,6 +657,19 @@ class DashboardView(LoginRequiredMixin, View):
 
 WO_CLOSED_STATUSES = ['completed', 'cancelled']
 
+# Which transitions count as FINISHING a work order, for permission purposes only.
+#
+# ⚠ Deliberately a superset of WO_CLOSED_STATUSES, and the two are not interchangeable.
+# WO_CLOSED_STATUSES answers "is this WO off the active list" and drives list tabs,
+# counts and dashboards. This answers "does this move need can_close_workorder", and
+# must cover EVERY terminal status the dropdown can actually reach. `closed` is a real
+# WorkOrder.STATUS_CHOICES option that the list constant omits — it is not used day to
+# day at SCS, which is exactly why it was easy to miss. Gating on the list constant let
+# a can_edit_workorder-only role post status=closed and finish a work order outright;
+# an outside reviewer reproduced it. Derived from the list constant rather than retyped
+# so the two cannot drift apart.
+WO_FINISHING_STATUSES = WO_CLOSED_STATUSES + ['closed']
+
 
 class WorkOrderListView(LoginRequiredMixin, ListView):
     """Display list of all work orders with filtering and search"""
@@ -790,7 +803,7 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
             # field would silently reopen it.
             choices = [
                 c for c in choices
-                if c[0] not in WO_CLOSED_STATUSES or c[0] == self.object.status
+                if c[0] not in WO_FINISHING_STATUSES or c[0] == self.object.status
             ]
         context['wo_status_choices'] = choices
         return context
@@ -868,13 +881,31 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
         # against itself and a role without close rights closes work orders here.
         new_status = p.get('status', wo.status)
         closing = (
-            new_status in WO_CLOSED_STATUSES
-            and wo.status not in WO_CLOSED_STATUSES
+            new_status in WO_FINISHING_STATUSES
+            and wo.status not in WO_FINISHING_STATUSES
         )
         if closing and not _can_close_workorder(request.user):
             return HttpResponse('Forbidden', status=403)
         if not closing and not _can_edit_workorder(request.user):
             return HttpResponse('Forbidden', status=403)
+
+        # ⚠ Permission to FINISH a work order is not permission to rewrite it. This
+        # panel posts every field at once, so letting a closing request through
+        # wholesale handed a close-only role the priority, assignee, contact,
+        # device, repair type, schedule and invoice ref as well — a reviewer
+        # reproduced it by posting status=completed&priority=urgent. When the user
+        # may close but not edit, the status is the only thing that moves; the rest
+        # of the request is ignored rather than rejected, so the normal Complete
+        # button still works for them.
+        status_only = closing and not _can_edit_workorder(request.user)
+        if status_only:
+            wo.status = new_status
+            if wo.status == 'completed' and not wo.completed_date:
+                from django.utils import timezone as tz
+                wo.completed_date = tz.now()
+            wo.save()
+            _flag_ticket_wo_complete(wo)
+            return redirect('core:work_order_detail', pk=pk)
 
         wo.status       = p.get('status', wo.status)
         wo.priority     = p.get('priority', wo.priority)
@@ -1598,8 +1629,8 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
         new_status = form.cleaned_data.get('status')
         old_status = WorkOrder.objects.filter(pk=self.object.pk).values_list('status', flat=True).first()
         if (
-            new_status in WO_CLOSED_STATUSES
-            and old_status not in WO_CLOSED_STATUSES
+            new_status in WO_FINISHING_STATUSES
+            and old_status not in WO_FINISHING_STATUSES
             and not _can_close_workorder(self.request.user)
         ):
             return HttpResponse('Forbidden', status=403)

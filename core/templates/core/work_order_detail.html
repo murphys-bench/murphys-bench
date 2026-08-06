@@ -163,7 +163,11 @@
         <div class="bg-white rounded-lg shadow p-6" x-data="{ editing: false }">
             <div class="flex items-center justify-between mb-4">
                 <h2 class="text-base font-semibold text-gray-900">Details</h2>
-                {% if can_edit_workorder or can_close_workorder %}
+                {% comment %}
+                Editing every field is the edit grant alone. A close-only role keeps the
+                status dropdown in the header, which is all it may actually change.
+                {% endcomment %}
+                {% if can_edit_workorder %}
                 <button type="button" @click="editing = !editing"
                         class="text-xs text-blue-600 hover:underline" x-text="editing ? 'Cancel' : 'Edit'"></button>
                 {% endif %}
