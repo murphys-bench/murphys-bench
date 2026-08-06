@@ -23,18 +23,21 @@ the Unreleased entries move under that version and prod gets a single update.
   instead. If you run Murphy's Bench alone this changed nothing you would have noticed. If
   you have more than one technician, the permissions you configured were not the
   permissions you had. Found by an outside review of the public repository.
-- **⚠ Read this before relying on those permissions: the boundary is not yet complete.**
-  What is enforced is creating, editing, closing, reopening, deleting, assigning and
-  replying, on the ticket and work order screens themselves. Several smaller actions are
-  **not** yet covered and remain available to any technician who can see the record:
-  adding a work order note, ticking a checklist item, logging time, uploading an
-  attachment, applying a checklist, linking tickets, escalating, dismissing a
-  needs-response flag, and acknowledging an overdue ticket. Converting a ticket to a work
-  order currently needs only "Create Work Orders", and doing so also ends the ticket. So a
-  technician with editing turned off can still annotate a job and finish a ticket by
-  converting it. These are open decisions about where the line belongs, not oversights —
-  they are named here rather than left for you to discover. "Manage Users" is likewise
-  still administrator-gated and its checkbox does nothing.
+- **The smaller actions obey the same permissions as the screens they sit on.** A first
+  pass covered creating, editing, closing, deleting, assigning and replying, but left the
+  buttons around them open, so "Edit Work Orders" could be switched off while a technician
+  still added notes, logged time, ticked checklist items, uploaded attachments, changed
+  billing, and added, repriced or deleted the priced lines that decide what a job is worth.
+  The ticket side was the same for escalating, linking, logging time, dismissing a
+  needs-response flag and acknowledging an overdue ticket. All of those now follow the box
+  that claims to cover them.
+- **"Manage Users" now actually grants user management.** It was ignored in favour of an
+  administrator check, so ticking it did nothing. A role with that box can now manage
+  users; administrators still can, as before. The stock Technician role does not have it.
+- **Converting a ticket to a work order needs both "Create Work Orders" and "Edit
+  Tickets".** Converting creates the work order and also ends the ticket, so it needs the
+  permission for each. It previously asked only for the first, which let a role that could
+  not otherwise finish a ticket finish one this way.
 - **"Close/Resolve Tickets" is switched on for every existing role when you upgrade.**
   Every technician could close tickets before, regardless of the setting, so enforcing the
   old default would have taken that away from working shops that changed nothing. The
@@ -63,6 +66,10 @@ the Unreleased entries move under that version and prod gets a single update.
   switched off in Settings → Statuses and the dropdown stopped offering it; the views
   accepted it anyway. Any work order still holding it becomes Completed when you upgrade.
   **Tickets are unaffected and still close** — this is only about work orders.
+- **A negative price is refused instead of silently becoming no price at all.** Typing
+  -60.00 into a line item produced a line with no price, no error, and an unchanged total —
+  so anyone trying to record a discount got a worthless line and no hint that it had not
+  worked. Murphy's Bench has no discount line yet; it now says so rather than pretending.
 - **The work order status panel now rejects a status that does not exist.** It saved
   whatever was submitted, so a stale page, a typo, or a retired status could leave a work
   order in a state that no list, report or register recognised. The full edit form always

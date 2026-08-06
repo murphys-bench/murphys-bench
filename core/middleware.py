@@ -89,3 +89,41 @@ class ContentSecurityPolicyMiddleware:
             )
             response[header] = f'{policy}; report-uri /csp-report/'
         return response
+
+
+class NegativePriceMiddleware:
+    """Turn a rejected negative price into a visible refusal, never a 500.
+
+    `core.views._parse_price` raises NegativePriceError instead of quietly
+    returning None, because returning None created a line item with no price at
+    all: typing -60.00 into a custom-line form produced a line named "Goodwill
+    discount" worth nothing, HTTP 200, no message, and an unchanged total.
+
+    Raising fixes the silence but must not crash the operator, so it is caught
+    here rather than at each of the ten places a price is parsed — a per-call-site
+    try/except would cover the paths someone remembered, which is how the original
+    gap survived. Every path is covered, including any added later.
+
+    ⚠ Known limit: this returns the message as a 400, so on the HTMX line-item
+    forms the request visibly fails but the text is not yet rendered beside the
+    field. That is deliberate for now — the fix is honest about failing, and where
+    a discount should actually live is a question for the native money layer, not
+    something to answer with a nicer error box.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        return self.get_response(request)
+
+    def process_exception(self, request, exception):
+        from django.http import HttpResponse
+        from core.views import NegativePriceError
+        if isinstance(exception, NegativePriceError):
+            import logging
+            logging.getLogger('core').warning(
+                'Rejected a negative price on %s: %s', request.path, exception
+            )
+            return HttpResponse(str(exception), status=400, content_type='text/plain')
+        return None

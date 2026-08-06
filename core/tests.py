@@ -12000,28 +12000,24 @@ def test_every_role_flag_is_actually_consulted_somewhere():
         line for line in enforcement.splitlines()
         if not re.match(r"\s*\('can_\w+',\s+'", line)
     )
-    # ⚠ KNOWN-UNENFORCED, awaiting Mike's decision — NOT a pass, a recorded debt.
-    # This test found a twelfth decorative flag beyond the eleven v0.12.0 fixed.
-    # User management is gated on _is_admin (is_staff OR can_manage_settings), so
-    # can_manage_users is inert exactly like the others were. It is excepted here
-    # rather than fixed because enforcing it would GRANT user management to a
-    # non-admin role that has the box ticked, and who may create logins is Mike's
-    # call, not a tidy-up to fold into this branch. Named so that adding a second
-    # exception is a visible edit rather than silent drift, the same standard
-    # STRUCTURAL_EXCEPTIONS uses in the settings-route guard.
-    KNOWN_UNENFORCED = {'can_manage_users'}
+    # ⚠ EMPTY, and it should stay that way. This list once held can_manage_users,
+    # the twelfth decorative flag this test found. Mike's ruling closed it: a
+    # checkbox and its enforcement must agree, so "Manage Users" now actually
+    # grants user management rather than being ignored in favour of an admin
+    # check. The guard below is what forced the list to be emptied — it fails
+    # while an entry is listed as dead but has since been enforced, so an
+    # exception cannot quietly outlive the problem it documented.
+    KNOWN_UNENFORCED = set()
 
     unenforced = [f for f in flags if f not in enforcement and f not in KNOWN_UNENFORCED]
     assert not unenforced, (
         'these Role flags are shown to operators but no code reads them, so the '
         f'checkbox does nothing: {unenforced}'
     )
-    # The exception list must not outlive the problem: if someone enforces
-    # can_manage_users, this fails until they delete it from KNOWN_UNENFORCED.
-    still_dead = [f for f in KNOWN_UNENFORCED if f not in enforcement]
-    assert sorted(still_dead) == sorted(KNOWN_UNENFORCED), (
+    resolved = [f for f in KNOWN_UNENFORCED if f in enforcement]
+    assert not resolved, (
         'a flag listed as known-unenforced is now enforced — remove it from '
-        f'KNOWN_UNENFORCED: {sorted(set(KNOWN_UNENFORCED) - set(still_dead))}'
+        f'KNOWN_UNENFORCED: {sorted(resolved)}'
     )
 
 
@@ -12407,3 +12403,184 @@ def test_consequential_permissions_are_marked(client):
     from django.utils.html import escape
     for group in _ROLE_FLAG_GROUPS:
         assert escape(group['label']) in body, f"group {group['label']!r} is not rendered"
+
+
+@pytest.mark.django_db
+def test_a_negative_price_is_refused_not_silently_dropped(client, client_obj):
+    """Typing a discount must not produce a line worth nothing.
+
+    `_parse_price` returned None for negatives, so the custom-line form saved a
+    line named "Goodwill discount" with NO price: HTTP 200, no message, total
+    unchanged. The operator had every reason to think a discount was recorded.
+
+    MB has no discount concept — LineItem is labor or part — and how a price
+    reduction should be represented belongs to the native money layer, not to an
+    invention here. Until then the honest answer is to refuse and say why.
+    """
+    admin = User.objects.create_user(username='negprice', password='x',
+                                     is_staff=True, is_superuser=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, status='in_progress',
+    )
+    client.force_login(admin)
+    resp = client.post(reverse('core:work_performed_custom', args=[wo.pk]), {
+        'custom_label': 'Goodwill discount', 'kind': 'part',
+        'quantity': '1', 'unit_price': '-60.00',
+    })
+    assert resp.status_code == 400, 'a negative price must be refused, not accepted'
+    assert b'negative' in resp.content.lower()
+    assert wo.line_items.count() == 0, 'a worthless line was created anyway'
+
+
+@pytest.mark.django_db
+def test_a_blank_price_still_means_unpriced(client, client_obj):
+    """Refusing negatives must not break the legitimate unpriced line.
+
+    A blank price is a real and supported case — work logged without a figure —
+    and it must keep returning None rather than being caught up in the new guard.
+    """
+    admin = User.objects.create_user(username='blankprice', password='x',
+                                     is_staff=True, is_superuser=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, status='in_progress',
+    )
+    client.force_login(admin)
+    resp = client.post(reverse('core:work_performed_custom', args=[wo.pk]), {
+        'custom_label': 'Diagnostics', 'kind': 'labor', 'quantity': '1', 'unit_price': '',
+    })
+    assert resp.status_code == 200
+    line = wo.line_items.get()
+    assert line.unit_price is None
+    assert wo.line_items_total == 0
+
+
+# ── Checkbox and enforcement must agree (Mike's ruling, Aug 6) ──────────────
+#
+# The first pass gated the obvious screens and left ~22 smaller actions open, so
+# "Edit Work Orders" could be off while a technician still added notes, logged
+# time, ticked checklists and rewrote priced lines. Mike's ruling: where a
+# checkbox and its enforcement disagree, fix the disagreement. These lock the
+# actions to the box that claims to cover them.
+
+@pytest.mark.django_db
+def test_work_order_actions_obey_the_edit_work_orders_box(client, client_obj):
+    """Every action that changes a work order needs the box that says so."""
+    from decimal import Decimal
+    from core.models import WorkOrderItem, LineItem
+    tech = _role_tech('t_wo_actions')          # can_edit_workorder = False
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, assigned_to=tech, status='in_progress',
+    )
+    item = WorkOrderItem.objects.create(work_order=wo, description='Check PSU')
+    line = LineItem.objects.create(content_object=wo, kind='labor',
+                                   description='Bench', quantity=1, unit_price='50.00')
+    client.force_login(tech)
+
+    attempts = [
+        ('add a note',        reverse('core:work_order_note_add', args=[wo.pk]),
+         {'content': 'x', 'note_type': 'internal'}),
+        ('log time',          reverse('core:work_order_add_time', args=[wo.pk]), {'minutes': '30'}),
+        ('apply a checklist', reverse('core:work_order_apply_checklist', args=[wo.pk]), {}),
+        ('tick a checklist item', reverse('core:work_order_item_check', args=[item.pk]), {}),
+        ('add a priced line', reverse('core:work_performed_custom', args=[wo.pk]),
+         {'custom_label': 'Extra', 'kind': 'part', 'quantity': '1', 'unit_price': '99.00'}),
+        ('rewrite a priced line', reverse('core:work_performed_update', args=[line.pk]),
+         {'description': 'Rewritten', 'quantity': '1', 'unit_price': '1.00'}),
+        ('delete a priced line', reverse('core:work_performed_delete', args=[line.pk]), {}),
+        ('change billing',    reverse('core:wo_billing_update', args=[wo.pk]),
+         {'billing_status': 'invoiced'}),
+    ]
+    for label, url, payload in attempts:
+        resp = client.post(url, payload)
+        assert resp.status_code == 403, f'a tech without edit rights could {label}'
+
+    wo.refresh_from_db(); line.refresh_from_db()
+    assert wo.line_items.count() == 1, 'line items changed despite the refusals'
+    assert line.unit_price == Decimal('50.00'), 'a price changed despite the refusal'
+    assert wo.notes.count() == 0
+
+
+@pytest.mark.django_db
+def test_work_order_actions_work_once_the_box_is_ticked(client, client_obj):
+    """The gate must not break the job — the same actions succeed when granted."""
+    tech = _role_tech('t_wo_actions_on', can_edit_workorder=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, assigned_to=tech, status='in_progress',
+    )
+    client.force_login(tech)
+    client.post(reverse('core:work_order_note_add', args=[wo.pk]),
+                {'content': 'real note', 'note_type': 'internal'})
+    client.post(reverse('core:work_performed_custom', args=[wo.pk]),
+                {'custom_label': 'Bench work', 'kind': 'labor',
+                 'quantity': '1', 'unit_price': '80.00'})
+    wo.refresh_from_db()
+    assert wo.notes.count() == 1
+    assert wo.line_items.count() == 1
+
+
+@pytest.mark.django_db
+def test_ticket_actions_obey_the_edit_tickets_box(client, client_obj):
+    """Every action that changes a ticket needs the box that says so."""
+    tech = _role_tech('t_tkt_actions')          # can_edit_ticket = False
+    ticket = _ticket_for(tech, client_obj, needs_response=True)
+    other = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+
+    attempts = [
+        ('escalate',              reverse('core:ticket_escalate', args=[ticket.pk]), {}),
+        ('dismiss needs-response', reverse('core:ticket_dismiss_response', args=[ticket.pk]),
+         {'note': 'x'}),
+        ('acknowledge overdue',   reverse('core:ticket_acknowledge_overdue', args=[ticket.pk]),
+         {'note': 'x'}),
+        ('log time',              reverse('core:ticket_add_time', args=[ticket.pk]), {'minutes': '15'}),
+        ('link a ticket',         reverse('core:ticket_link_add', args=[ticket.pk]),
+         {'ticket_number': other.ticket_number, 'link_type': 'related'}),
+    ]
+    for label, url, payload in attempts:
+        resp = client.post(url, payload)
+        assert resp.status_code == 403, f'a tech without edit rights could {label}'
+
+    ticket.refresh_from_db()
+    assert ticket.escalation_level == 1, 'the ticket was escalated despite the refusal'
+    assert ticket.needs_response is True, 'the flag was cleared despite the refusal'
+
+
+@pytest.mark.django_db
+def test_converting_a_ticket_needs_both_grants(client, client_obj):
+    """Convert creates a work order AND ends the ticket, so it needs both boxes."""
+    wo_only = _role_tech('t_conv_wo', can_create_workorder=True)   # no ticket edit
+    tkt_only = _role_tech('t_conv_tkt', can_edit_ticket=True)      # no WO create
+    both = _role_tech('t_conv_both', can_create_workorder=True, can_edit_ticket=True)
+
+    for user, expected in ((wo_only, 403), (tkt_only, 403), (both, 200)):
+        ticket = _ticket_for(user, client_obj)
+        client.force_login(user)
+        resp = client.get(reverse('core:ticket_convert', args=[ticket.pk]))
+        assert resp.status_code == expected, (
+            f'{user.username} got {resp.status_code}, expected {expected}'
+        )
+
+
+@pytest.mark.django_db
+def test_manage_users_box_now_grants_user_management(client):
+    """The twelfth decorative checkbox, closed.
+
+    User management tested _is_admin, so ticking "Manage Users" on a role did
+    nothing at all. Both directions are asserted: the box grants it, and a role
+    without it is refused.
+    """
+    granted = _role_tech('t_users_on')
+    granted.role_obj.can_manage_users = True
+    granted.role_obj.save()
+    denied = _role_tech('t_users_off')
+
+    client.force_login(granted)
+    assert client.get(reverse('core:user_list')).status_code == 200
+    assert client.get(reverse('core:user_create')).status_code == 200
+
+    client.force_login(denied)
+    assert client.get(reverse('core:user_list')).status_code == 403

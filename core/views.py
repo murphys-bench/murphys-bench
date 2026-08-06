@@ -257,6 +257,20 @@ def _can_close_workorder(user):
     return _is_admin(user) or _role_flag(user, 'can_close_workorder')
 
 
+def _can_manage_users(user):
+    """Create, edit, delete user accounts and set passwords.
+
+    ⚠ This one GRANTS. User management was gated on _is_admin alone, so the
+    "Manage Users" box could never hand the capability to a non-admin role — the
+    twelfth decorative checkbox, left unfixed in v0.12.0's first pass because
+    enabling it widens who can create logins and that was Mike's call to make.
+    He made it: a checkbox and its enforcement must agree, so the flag now works.
+    Admins still qualify, so nothing an admin could do before is lost, and the
+    seeded Technician role has it False.
+    """
+    return _is_admin(user) or _role_flag(user, 'can_manage_users')
+
+
 class SettingsAdminMixin(LoginRequiredMixin):
     """The single administrative gate for everything under /settings/.
 
@@ -831,6 +845,8 @@ class WorkOrderAddTimeView(LoginRequiredMixin, View):
     """Add minutes to a work order's time_spent_minutes. Returns updated display fragment."""
 
     def post(self, request, pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         wo = _get_scoped_wo_or_404(request, pk)
         try:
             minutes = max(0, int(request.POST.get('minutes', 0)))
@@ -851,6 +867,8 @@ class TicketAddTimeView(LoginRequiredMixin, View):
     """
 
     def post(self, request, pk):
+        if not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         try:
             minutes = max(0, int(request.POST.get('minutes', 0)))
@@ -969,6 +987,46 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
         return redirect('core:work_order_detail', pk=pk)
 
 
+# Billing statuses that mean a number has already gone to the client.
+_BILLED_STATUSES = ('invoiced', 'paid', 'paid_direct')
+
+
+def _billing_divergence(wo):
+    """Has this work order's priced work drifted from what the client was billed?
+
+    MB's line items are what gets pushed to Invoice Ninja, and nothing stops them
+    being edited after the invoice goes out: a technician with no edit permission
+    at all can add a part, rewrite a price, or delete a line on a completed and
+    invoiced job. Every one of those was reproduced on a real request. The
+    invoice keeps its original figure, Invoice Ninja keeps its own copy, and
+    nothing anywhere says the three no longer agree.
+
+    Mike's ruling is to WARN, not block — shops legitimately adjust a finished
+    job when a part comes back or a labour line was wrong, and a closed ticket
+    frequently reopens on a client reply, so a hard stop would fight real work.
+    What was missing is not permission, it is that the divergence was silent.
+
+    Returns None when there is nothing to say: no invoice, nothing billed yet, no
+    amount recorded, or the numbers still agree.
+    """
+    invoice = getattr(wo, 'invoice', None)
+    if invoice is None or invoice.billing_status not in _BILLED_STATUSES:
+        return None
+    if invoice.amount is None:
+        return None
+    current = wo.line_items_total
+    if current == invoice.amount:
+        return None
+    return {
+        'billed': invoice.amount,
+        'current': current,
+        'difference': abs(current - invoice.amount),
+        'increased': current > invoice.amount,
+        'billing_status': invoice.get_billing_status_display(),
+        'in_ref': wo.invoice_ninja_ref or invoice.invoice_ninja_ref or '',
+    }
+
+
 def _flag_ticket_wo_complete(wo):
     """Arm wo_complete on linked ticket when WO is completed/closed; clear it if WO re-opened."""
     try:
@@ -1001,6 +1059,8 @@ class WorkOrderAttachmentUploadView(LoginRequiredMixin, View):
     """Upload files directly to a work order (not tied to a note)."""
 
     def post(self, request, pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         wo = _get_scoped_wo_or_404(request, pk)
         _save_attachments(request, wo)
         return redirect('core:work_order_detail', pk=pk)
@@ -1010,6 +1070,8 @@ class WorkOrderApplyChecklistView(LoginRequiredMixin, View):
     """Re-apply checklist items from the flat bank to an existing WO."""
 
     def post(self, request, pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         wo = _get_scoped_wo_or_404(request, pk)
         _apply_checklist_items(wo)
         return redirect('core:work_order_detail', pk=pk)
@@ -1311,6 +1373,8 @@ class WorkOrderNoteCreateView(LoginRequiredMixin, View):
     """Add a note to a work order — returns HTML fragment for HTMX"""
 
     def post(self, request, pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         work_order = _get_scoped_wo_or_404(request, pk)
         note_type = request.POST.get('note_type', 'internal')
         content = request.POST.get('content', '').strip()
@@ -1494,6 +1558,8 @@ class WorkOrderItemCheckView(LoginRequiredMixin, View):
     """HTMX: update pre_check or post_check on a checklist item, return full checklist."""
 
     def post(self, request, pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         item = get_object_or_404(
             WorkOrderItem.objects.filter(
                 work_order__in=_scope_assignable_for(WorkOrder.objects.all(), request.user)
@@ -4039,6 +4105,8 @@ class TicketDismissNeedsResponseView(LoginRequiredMixin, View):
     """Manually dismiss the needs_response flag with a required note."""
 
     def post(self, request, pk):
+        if not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         note = request.POST.get('note', '').strip()
         if not note:
@@ -4081,13 +4149,18 @@ class TicketReopenView(LoginRequiredMixin, View):
 class TicketConvertView(LoginRequiredMixin, View):
     """Convert a ticket to a work order.
 
-    Gated on can_create_workorder rather than a ticket flag: whatever the button
-    is called, the outcome of this endpoint is a new WorkOrder, and a role denied
-    WO creation should not be able to reach one through the ticket page.
+    Needs BOTH grants, because it does two things. It creates a WorkOrder, so a
+    role denied WO creation must not reach one through the ticket page. It also
+    drives the ticket to 'converted', a terminal state — so a role denied ticket
+    editing could otherwise finish a ticket here that it cannot finish anywhere
+    else. An outside reviewer spotted the second half; requiring only the WO grant
+    left "Edit Tickets" saying less than it meant.
     """
 
     def dispatch(self, request, *args, **kwargs):
-        if request.user.is_authenticated and not _can_create_workorder(request.user):
+        if request.user.is_authenticated and not (
+            _can_create_workorder(request.user) and _can_edit_ticket(request.user)
+        ):
             return HttpResponse('Forbidden', status=403)
         return super().dispatch(request, *args, **kwargs)
 
@@ -4159,6 +4232,8 @@ class TicketLinkAddView(LoginRequiredMixin, View):
     """Add a link between two tickets — returns updated linked tickets partial"""
 
     def post(self, request, pk):
+        if not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         ticket_number = request.POST.get('ticket_number', '').strip()
         link_type = request.POST.get('link_type', 'related')
@@ -4241,6 +4316,8 @@ class TicketLinkRemoveView(LoginRequiredMixin, View):
     """Remove a ticket link — returns updated linked tickets partial"""
 
     def post(self, request, pk):
+        if not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         link_id = request.POST.get('link_id')
         try:
@@ -4300,6 +4377,8 @@ class TicketEscalateView(LoginRequiredMixin, View):
     tech claims it — so the client is never left without a person."""
 
     def post(self, request, pk):
+        if not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = get_object_or_404(_scope_tickets_for(Ticket.objects.all(), request.user), pk=pk)
         if ticket.escalate():
             TicketReply.objects.create(
@@ -4322,6 +4401,8 @@ class TicketAcknowledgeOverdueView(LoginRequiredMixin, View):
         return render(request, 'core/partials/overdue_ack_form.html', {'ticket': ticket})
 
     def post(self, request, pk):
+        if not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         note_text = request.POST.get('note', '').strip()
         if not note_text:
@@ -5460,7 +5541,7 @@ class UserListView(LoginRequiredMixin, View):
     """Admin-only: list all users with MFA status."""
 
     def dispatch(self, request, *args, **kwargs):
-        if request.user.is_authenticated and not _is_admin(request.user):
+        if request.user.is_authenticated and not _can_manage_users(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
@@ -5515,7 +5596,7 @@ class UserDeleteView(LoginRequiredMixin, View):
     survive — those FKs are SET_NULL, so history is kept, just unattributed."""
 
     def dispatch(self, request, *args, **kwargs):
-        if request.user.is_authenticated and not _is_admin(request.user):
+        if request.user.is_authenticated and not _can_manage_users(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
@@ -5540,7 +5621,7 @@ class UserDeleteView(LoginRequiredMixin, View):
 
 class UserCreateView(LoginRequiredMixin, View):
     def dispatch(self, request, *args, **kwargs):
-        if not _is_admin(request.user):
+        if not _can_manage_users(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
@@ -5569,7 +5650,7 @@ class UserCreateView(LoginRequiredMixin, View):
 
 class UserEditView(LoginRequiredMixin, View):
     def dispatch(self, request, *args, **kwargs):
-        if not _is_admin(request.user):
+        if not _can_manage_users(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
@@ -5602,7 +5683,7 @@ class UserEditView(LoginRequiredMixin, View):
 
 class UserSetPasswordView(LoginRequiredMixin, View):
     def dispatch(self, request, *args, **kwargs):
-        if not _is_admin(request.user):
+        if not _can_manage_users(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
@@ -5845,8 +5926,24 @@ def _log_catalog_item(host, item, user):
     )
 
 
+class NegativePriceError(ValueError):
+    """A negative price was submitted. Discounts are not a thing MB has yet."""
+
+
 def _parse_price(val):
-    """Parse a money string to a non-negative Decimal, or None if blank/invalid."""
+    """Parse a money string to a non-negative Decimal, or None if blank/invalid.
+
+    ⚠ A negative value RAISES rather than returning None. It used to return None,
+    which meant a line was created with no price at all: typing -60.00 into the
+    custom-line form produced a line called "Goodwill discount" worth nothing,
+    HTTP 200, no message, and a total that had not moved. The operator had every
+    reason to believe they had recorded a discount.
+
+    MB has no discount concept — LineItem is labor or part, and how a price
+    reduction should be represented is a decision belonging to the native money
+    layer, not something to invent here. Until then the honest answer is to say
+    so, not to silently drop the number.
+    """
     from decimal import Decimal, InvalidOperation
     val = (val or '').strip()
     if not val:
@@ -5855,7 +5952,12 @@ def _parse_price(val):
         d = Decimal(val)
     except InvalidOperation:
         return None
-    return d if d >= 0 else None
+    if d < 0:
+        raise NegativePriceError(
+            'Prices cannot be negative — Murphy\'s Bench has no discount line yet. '
+            'Record the agreed price directly, or adjust it in your invoicing system.'
+        )
+    return d
 
 
 def _parse_qty(val):
@@ -5922,6 +6024,8 @@ class WorkPerformedLogView(LoginRequiredMixin, View):
     The item's optional default_price prefills the line price."""
 
     def post(self, request, wo_pk, item_pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         work_order = _get_scoped_wo_or_404(request, wo_pk)
         item = get_object_or_404(CatalogItem, pk=item_pk, is_active=True)
         _log_catalog_item(work_order, item, request.user)
@@ -5942,6 +6046,8 @@ class WorkPerformedDeleteView(LoginRequiredMixin, View):
     """HTMX: remove a logged line item."""
 
     def post(self, request, pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         entry = get_object_or_404(LineItem, pk=pk)
         host = entry.content_object
         _guard_line_host(request, host)
@@ -5953,6 +6059,8 @@ class WorkPerformedUpdateView(LoginRequiredMixin, View):
     """HTMX: update label, notes, quantity and price on a logged line item."""
 
     def post(self, request, pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         entry = get_object_or_404(LineItem, pk=pk)
         _guard_line_host(request, entry.content_object)
         label = request.POST.get('custom_label', '').strip()
@@ -5970,6 +6078,8 @@ class WorkPerformedCustomLogView(LoginRequiredMixin, View):
     """HTMX: log a fully custom line item — labor or part — with optional price."""
 
     def post(self, request, wo_pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         work_order = _get_scoped_wo_or_404(request, wo_pk)
         label = request.POST.get('custom_label', '').strip()
         notes = request.POST.get('notes', '').strip()
@@ -6900,6 +7010,8 @@ class WorkOrderBillingUpdateView(LoginRequiredMixin, View):
     """HTMX: update billing state inline on WO detail."""
 
     def post(self, request, pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         from django.utils import timezone
         wo = _get_scoped_wo_or_404(request, pk)
         invoice, _ = Invoice.objects.get_or_create(work_order=wo)
