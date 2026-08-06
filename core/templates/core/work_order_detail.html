@@ -42,6 +42,7 @@
         <div class="flex flex-col items-end gap-2 shrink-0">
             <div class="flex items-center gap-2">
                 {% include "core/partials/header_bell.html" %}
+                {% if can_edit_workorder or can_close_workorder %}
                 <form method="post" action="{% url 'core:work_order_quick_update' work_order.pk %}" class="inline">
                     {% csrf_token %}
                     <input type="hidden" name="priority" value="{{ work_order.priority }}">
@@ -58,6 +59,7 @@
                         {% endfor %}
                     </select>
                 </form>
+                {% endif %}
                 <div x-data="{ open: false }" class="relative">
                     <button type="button" @click="open = !open"
                             class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium flex items-center gap-1">
@@ -72,7 +74,9 @@
                         {% if work_order.device %}
                         <a href="{% url 'core:device_edit' work_order.device.pk %}" class="block px-4 py-2 text-gray-700 hover:bg-gray-50">Edit Device</a>
                         {% endif %}
+                        {% if can_edit_workorder %}
                         <a href="{% url 'core:work_order_edit' work_order.pk %}" class="block px-4 py-2 text-gray-700 hover:bg-gray-50">Edit WO</a>
+                        {% endif %}
                         <a href="{% url 'core:work_order_print' work_order.pk %}" target="_blank" class="block px-4 py-2 text-gray-700 hover:bg-gray-50">Repair Report</a>
                         <a href="{% url 'core:work_order_email_report' work_order.pk %}" class="block px-4 py-2 text-gray-700 hover:bg-gray-50">Email Report</a>
                         <a href="{% url 'core:work_order_print' work_order.pk %}?type=claim" target="_blank" class="block px-4 py-2 text-gray-700 hover:bg-gray-50">Claim Ticket</a>
@@ -146,7 +150,7 @@
         <div class="bg-white rounded-lg shadow p-6">
             <div class="flex items-center justify-between mb-2">
                 <h2 class="text-base font-semibold text-gray-900">Reported Issue / Work Requested</h2>
-                <a href="{% url 'core:work_order_edit' work_order.pk %}" class="text-xs text-blue-600 hover:underline">Edit</a>
+                {% if can_edit_workorder %}<a href="{% url 'core:work_order_edit' work_order.pk %}" class="text-xs text-blue-600 hover:underline">Edit</a>{% endif %}
             </div>
             {% if work_order.reported_problem %}
             <div class="text-sm text-gray-900 whitespace-pre-line">{{ work_order.reported_problem }}</div>
@@ -159,8 +163,10 @@
         <div class="bg-white rounded-lg shadow p-6" x-data="{ editing: false }">
             <div class="flex items-center justify-between mb-4">
                 <h2 class="text-base font-semibold text-gray-900">Details</h2>
+                {% if can_edit_workorder or can_close_workorder %}
                 <button type="button" @click="editing = !editing"
                         class="text-xs text-blue-600 hover:underline" x-text="editing ? 'Cancel' : 'Edit'"></button>
+                {% endif %}
             </div>
             <!-- Read view -->
             <div x-show="!editing">

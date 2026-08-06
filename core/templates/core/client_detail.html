@@ -22,8 +22,10 @@
         </div>
         <div class="flex gap-2">
             {% include "core/partials/header_bell.html" %}
+            {% if can_create_workorder %}
             <a href="{% url 'core:work_order_create' %}?client={{ client.pk }}"
                class="px-4 py-2 bg-green-700 text-white rounded-md hover:bg-green-800 text-sm font-medium">+ Work Order</a>
+            {% endif %}
             <a href="{% url 'core:client_edit' client.pk %}"
                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">Edit Client</a>
         </div>
@@ -184,8 +186,10 @@
                                     {% endif %}
                                 </div>
                                 <div class="flex flex-wrap gap-2 shrink-0">
+                                    {% if can_create_workorder %}
                                     <a href="{% url 'core:work_order_create' %}?client={{ client.pk }}&contact={{ contact.pk }}"
                                        class="px-2 py-1 text-xs bg-green-700 text-white rounded hover:bg-green-800 font-medium">+ WO</a>
+                                    {% endif %}
                                     <button @click="editing = true"
                                             class="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 font-medium">Edit</button>
                                     {% if not contact.is_primary %}
@@ -331,8 +335,10 @@
                                 <div class="flex gap-2">
                                     <a href="{% url 'core:device_detail' device.pk %}"
                                        class="text-xs text-blue-600 hover:underline">View</a>
+                                    {% if can_create_workorder %}
                                     <a href="{% url 'core:work_order_create' %}?device={{ device.pk }}&client={{ client.pk }}"
                                        class="px-2 py-0.5 text-xs bg-green-700 text-white rounded hover:bg-green-800 font-medium">+ WO</a>
+                                    {% endif %}
                                     {% if is_admin %}
                                     {% with wo_count=device.work_orders.count %}
                                     <form method="post" action="{% url 'core:device_delete' device.pk %}" class="inline"
@@ -546,8 +552,10 @@
                     {% icon "arrow-down-tray" 4 %}
                     CSV
                 </a>
+                {% if can_create_workorder %}
                 <a href="{% url 'core:work_order_create' %}?client={{ client.pk }}"
                    class="text-sm text-blue-600 hover:underline">+ New WO</a>
+                {% endif %}
             </div>
         </div>
         {% with work_orders=client.work_orders.all %}

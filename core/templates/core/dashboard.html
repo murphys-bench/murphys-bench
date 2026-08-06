@@ -12,14 +12,18 @@
         </div>
         <div class="flex gap-3">
             {% include "core/partials/header_bell.html" %}
+            {% if can_create_ticket %}
             <a href="{% url 'core:ticket_create' %}"
                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
                 + New Ticket
             </a>
+            {% endif %}
+            {% if can_create_workorder %}
             <a href="{% url 'core:work_order_create' %}"
                class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">
                 + New Work Order
             </a>
+            {% endif %}
         </div>
     </div>
 </div>

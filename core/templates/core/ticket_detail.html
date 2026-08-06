@@ -19,13 +19,13 @@
             <div id="overdue-section">
                 {% include "core/partials/overdue_badge.html" %}
             </div>
-            {% if ticket.status != 'closed' %}
+            {% if ticket.status != 'closed' and can_edit_ticket %}
                 <a href="{% url 'core:ticket_edit' ticket.pk %}"
                    class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
                     Edit
                 </a>
             {% endif %}
-            {% if user.is_staff and not ticket.work_order %}
+            {% if can_delete_ticket and not ticket.work_order %}
             <div x-data="{ open: false }">
                 <button @click="open = true"
                         class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm font-medium">
@@ -92,7 +92,7 @@
             </div>
         </div>
         <div class="flex items-center gap-2 flex-shrink-0 ml-4">
-            {% if ticket.status in ticket.CLOSED_AT_STATUSES %}
+            {% if ticket.status in ticket.CLOSED_AT_STATUSES and can_close_tickets %}
             <form method="post" action="{% url 'core:ticket_reopen' ticket.pk %}" class="inline">
                 {% csrf_token %}
                 <button type="submit" class="text-xs text-amber-700 border border-amber-300 rounded px-2 py-1 hover:bg-amber-100">
@@ -197,7 +197,10 @@ window.addEventListener('beforeunload', function() {
                                 <button type="submit" class="text-xs text-blue-600 hover:underline font-medium normal-case">Claim</button>
                             </form>
                             {% endif %}
+                            {# Claim above stays open to everyone — taking unowned work is not a grant. Handing it to someone else is. #}
+                            {% if can_assign_ticket %}
                             <button @click="editing = !editing" class="text-xs text-blue-500 hover:text-blue-400 underline normal-case">{% if is_admin %}Assign{% else %}Transfer{% endif %}</button>
+                            {% endif %}
                             {% if ticket.can_escalate %}
                             <form method="post" action="{% url 'core:ticket_escalate' ticket.pk %}">
                                 {% csrf_token %}
@@ -290,7 +293,7 @@ window.addEventListener('beforeunload', function() {
             {% endif %}
             {% endwith %}
 
-            {% if ticket.status != 'closed' %}
+            {% if ticket.status != 'closed' %}{% if can_reply_internal or can_reply_customer %}
             <div class="border-t border-gray-100 pt-4">
                 <h3 class="text-sm font-semibold text-gray-700 mb-3">Add Reply</h3>
                 <form hx-post="{% url 'core:ticket_reply_add' ticket.pk %}"
@@ -298,8 +301,9 @@ window.addEventListener('beforeunload', function() {
                       hx-swap="beforeend"
                       hx-encoding="multipart/form-data"
                       hx-on:htmx:after-request="if(event.detail.successful){this.reset(); localStorage.removeItem('mb_draft_{{ ticket.pk }}')}"
-                      x-data="{ replyType: 'customer_visible' }">
+                      x-data="{ replyType: '{% if can_reply_customer %}customer_visible{% else %}internal{% endif %}' }">
                     {% csrf_token %}
+                    {% if can_reply_customer and can_reply_internal %}
                     <div class="mb-3 flex gap-4">
                         <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
                             <input type="radio" name="reply_type" value="customer_visible" x-model="replyType" class="text-blue-600 focus:ring-blue-500">
@@ -310,6 +314,17 @@ window.addEventListener('beforeunload', function() {
                             🔒 Internal Only
                         </label>
                     </div>
+                    {% else %}
+                    {% comment %}
+                    Only one grant, so there is no choice to offer. ⚠ This MUST stay a
+                    hidden input rather than simply dropping the radios: the view reads
+                    reply_type from the POST and defaults it to 'internal', so a
+                    customer-only replier would post nothing, be treated as writing an
+                    internal note, and get a 403 for a reply they are allowed to send.
+                    {% endcomment %}
+                    <input type="hidden" name="reply_type" value="{% if can_reply_customer %}customer_visible{% else %}internal{% endif %}">
+                    <p class="mb-3 text-xs text-gray-500">{% if can_reply_customer %}👤 Goes to the customer.{% else %}🔒 Internal note — the customer never sees this.{% endif %}</p>
+                    {% endif %}
                     <div class="mb-3" x-show="replyType === 'customer_visible'" x-cloak>
                         <label class="block text-xs font-medium text-gray-500 mb-1">Also send to (optional — comma-separated emails)</label>
                         <div class="flex gap-2">
@@ -341,7 +356,7 @@ window.addEventListener('beforeunload', function() {
                     </button>
                 </form>
             </div>
-            {% endif %}
+            {% endif %}{% endif %}
         </div>
 
         <!-- Attachments Tab -->
@@ -443,26 +458,34 @@ window.addEventListener('beforeunload', function() {
                     <p class="text-sm text-gray-400 text-center">This ticket is closed.</p>
                 {% else %}
                     <!-- Status change -->
+                    {% if can_edit_ticket or can_close_tickets %}
                     <form method="post" action="{% url 'core:ticket_status_update' ticket.pk %}" class="flex gap-2">
                         {% csrf_token %}
                         <select name="status" class="flex-1 px-2 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                             {% for sd in ticket_statuses %}
+                            {% if sd.slug in ticket.CLOSED_AT_STATUSES %}{% if can_close_tickets %}
                             <option value="{{ sd.slug }}" {% if ticket.status == sd.slug %}selected{% endif %}>{{ sd.label }}</option>
+                            {% endif %}{% elif can_edit_ticket %}
+                            <option value="{{ sd.slug }}" {% if ticket.status == sd.slug %}selected{% endif %}>{{ sd.label }}</option>
+                            {% endif %}
                             {% endfor %}
                         </select>
                         <button type="submit" class="px-3 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-800 text-sm font-medium">Set</button>
                     </form>
+                    {% endif %}
+                    {% if can_edit_ticket %}
                     <a href="{% url 'core:ticket_edit' ticket.pk %}"
                        class="block w-full text-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
                         Edit Ticket
                     </a>
-                    {% if ticket.status != 'converted' %}
+                    {% endif %}
+                    {% if ticket.status != 'converted' and can_create_workorder %}
                     <a href="{% url 'core:ticket_convert' ticket.pk %}"
                        class="block w-full text-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">
                         Convert to Work Order
                     </a>
                     {% endif %}
-                    {% if ticket.wo_complete %}
+                    {% if ticket.wo_complete and can_close_tickets %}
                     <form method="post" action="{% url 'core:ticket_close' ticket.pk %}">
                         {% csrf_token %}
                         <button type="submit"

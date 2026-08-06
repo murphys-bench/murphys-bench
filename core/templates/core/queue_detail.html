@@ -24,10 +24,12 @@
             <a href="{% url 'core:queue_edit' queue.pk %}"
                class="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Edit Queue</a>
             {% endif %}
+            {% if can_create_ticket %}
             <a href="{% url 'core:ticket_create' %}"
                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
                 + New Ticket
             </a>
+            {% endif %}
         </div>
     </div>
 </div>

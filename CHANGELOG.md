@@ -8,6 +8,39 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Security
+
+- **The role permissions for tickets, replies and work orders are now enforced.** Eleven
+  checkboxes in Settings → Roles were displayed but never checked by anything: "View All
+  Tickets", "Create Tickets", "Edit Tickets", "Close/Resolve Tickets", "Delete Tickets",
+  "Assign Tickets", "Internal Replies", "Customer Replies", "Create Work Orders", "Edit
+  Work Orders" and "Close Work Orders". Whatever you set them to, every technician could
+  do all of it. This cut both ways: unchecking a box did not take an ability away, and
+  ticking one did not hand it over — "Delete Tickets" in particular could never grant
+  deletion, because deletion checked a separate administrator flag instead. If you run
+  Murphy's Bench alone this changed nothing you would have noticed. If you have more than
+  one technician, the permissions you configured were not the permissions you had. Found
+  by an outside review of the public repository.
+- **"Close/Resolve Tickets" is switched on for every existing role when you upgrade.**
+  Every technician could close tickets before, regardless of the setting, so enforcing the
+  old default would have taken that away from working shops that changed nothing. The
+  upgrade preserves what you actually had; turn it off for a role when you mean to.
+- **Claiming an unassigned ticket is deliberately not restricted** by "Assign Tickets".
+  Any technician can still pick up unclaimed work — that permission covers handing a
+  ticket to someone else, which is the part that needs the grant.
+
+### Fixed
+
+- **The roadmap no longer says restoring a backup is command-line only.** Restore from
+  Settings shipped in v0.11.0.
+
+### Changed
+
+- The weekly dependency-audit workflow now pins its GitHub Actions to exact commits, the
+  way the main CI workflow already did.
+
 ## v0.11.3 — 2026-08-05
 
 ### Fixed

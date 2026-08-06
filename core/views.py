@@ -167,6 +167,96 @@ def _can_reset_mfa(user):
     return user.is_superuser or user.has_perm_flag('can_reset_user_mfa')
 
 
+# --- Ticket / reply / work order capability flags -------------------------------
+#
+# ⚠ These eleven flags were displayed in Settings → Roles and in Django admin for
+# months while NO endpoint consulted them. An operator could uncheck "Close/Resolve
+# Tickets" on a role and that role's techs went on closing tickets; checking "Delete
+# Tickets" granted nothing, because deletion tested Django's is_staff instead. The
+# matrix was a picture of a permission system. Every helper below exists so a
+# checkbox means what it says, in both directions, and each has a flag-off/flag-on
+# test pair — the absence of those tests is what let the gap live.
+#
+# Admins (is_staff or can_manage_settings) bypass all of them, matching every other
+# gate in this file.
+
+def _role_flag(user, name):
+    """Read a role flag, falling back to the Role field's own default when the
+    user has no role_obj at all.
+
+    ⚠ Do NOT simplify this to a bare has_perm_flag() call. That returns False for
+    every flag when role_obj is None, and a user with no role assigned is an
+    ordinary state on existing installs — nothing has ever required one. Until
+    v0.12.0 none of these flags were enforced, so those users could create, edit,
+    assign, reply and close freely. Enforcing via has_perm_flag alone would lock
+    them out of their own tickets on upgrade, having changed nothing. The field
+    defaults are what those users effectively had, which is the same reasoning
+    migration 0102 applies to stored values on real roles.
+    """
+    if getattr(user, 'role_obj', None) is None and getattr(user, 'role', None) != 'admin':
+        from .models import Role
+        return Role._meta.get_field(name).default
+    return user.has_perm_flag(name)
+
+
+def _can_view_all_tickets(user):
+    """Whether a non-admin sees every ticket rather than their own + the unclaimed
+    pool. Off by default: the pool model is the norm and this is the opt-in."""
+    return _is_admin(user) or _role_flag(user, 'can_view_all_tickets')
+
+
+def _can_create_ticket(user):
+    return _is_admin(user) or _role_flag(user, 'can_create_ticket')
+
+
+def _can_edit_ticket(user):
+    return _is_admin(user) or _role_flag(user, 'can_edit_ticket')
+
+
+def _can_close_tickets(user):
+    """Resolve/close/reopen a ticket. ⚠ The model default was flipped False → True
+    in migration 0102 and backfilled onto existing roles, because every tech could
+    close before enforcement existed and an upgrade must not silently take that
+    away. Unchecking it is now a deliberate act by the operator."""
+    return _is_admin(user) or _role_flag(user, 'can_close_tickets')
+
+
+def _can_delete_ticket(user):
+    """⚠ This one GRANTS as well as denies. Deletion used to test is_staff, so the
+    checkbox could never hand a non-admin role the capability it named. It can now."""
+    return _is_admin(user) or _role_flag(user, 'can_delete_ticket')
+
+
+def _can_assign_ticket(user):
+    """Hand a ticket to someone else, or unassign one. Deliberately NOT consulted
+    for self-claiming out of the unclaimed pool: the pool only works if any tech
+    can pick work up, and claiming takes nothing away from anyone."""
+    return _is_admin(user) or _role_flag(user, 'can_assign_ticket')
+
+
+def _can_reply_internal(user):
+    return _is_admin(user) or _role_flag(user, 'can_reply_internal')
+
+
+def _can_reply_customer(user):
+    """Send a reply the client actually receives. Separate from the internal note
+    flag because "may write on the ticket" and "may speak to the customer" are
+    genuinely different grants in a shop with junior techs."""
+    return _is_admin(user) or _role_flag(user, 'can_reply_customer')
+
+
+def _can_create_workorder(user):
+    return _is_admin(user) or _role_flag(user, 'can_create_workorder')
+
+
+def _can_edit_workorder(user):
+    return _is_admin(user) or _role_flag(user, 'can_edit_workorder')
+
+
+def _can_close_workorder(user):
+    return _is_admin(user) or _role_flag(user, 'can_close_workorder')
+
+
 class SettingsAdminMixin(LoginRequiredMixin):
     """The single administrative gate for everything under /settings/.
 
@@ -242,7 +332,12 @@ def _scope_tickets_for(qs, user):
     # below, so every technician saw "Backup failed: rclone auth error" in their
     # queue and could claim, answer or close it — none of which a technician can
     # act on, and closing one hides a real outage. Owner-facing only.
+    #
+    # ⚠ System tickets are excluded BEFORE the can_view_all_tickets branch, so
+    # "view all tickets" means all shop work, never the owner's own alert feed.
     qs = qs.exclude(source='system')
+    if user.has_perm_flag('can_view_all_tickets'):
+        return qs
     return qs.filter(
         Q(assigned_to=user)
         | Q(assigned_to__isnull=True)
@@ -681,11 +776,23 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         # Billing
         invoice, _ = Invoice.objects.get_or_create(work_order=self.object)
         context['invoice'] = invoice
-        # Dynamic status choices for inline status dropdown
-        context['wo_status_choices'] = list(
+        # Dynamic status choices for inline status dropdown. Statuses that finish a
+        # WO are dropped for a user without the close grant, so the dropdown cannot
+        # offer a move the server will refuse.
+        choices = list(
             StatusDefinition.objects.filter(entity_type='workorder', is_active=True)
             .order_by('sort_order').values_list('slug', 'label')
         )
+        if not _can_close_workorder(self.request.user):
+            # The WO's CURRENT status always survives the filter even when it is a
+            # closing one. Dropping it would leave an already-completed WO showing
+            # some other status preselected, and the next save of an unrelated
+            # field would silently reopen it.
+            choices = [
+                c for c in choices
+                if c[0] not in WO_CLOSED_STATUSES or c[0] == self.object.status
+            ]
+        context['wo_status_choices'] = choices
         return context
 
 
@@ -754,6 +861,20 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
     def post(self, request, pk):
         wo = _get_scoped_wo_or_404(request, pk)
         p = request.POST
+
+        # Same split as the ticket status dropdown: this one panel both edits a WO
+        # and finishes it, so the gate follows the move being made. Read the status
+        # before it is overwritten below, or the comparison tests the new value
+        # against itself and a role without close rights closes work orders here.
+        new_status = p.get('status', wo.status)
+        closing = (
+            new_status in WO_CLOSED_STATUSES
+            and wo.status not in WO_CLOSED_STATUSES
+        )
+        if closing and not _can_close_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
+        if not closing and not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
 
         wo.status       = p.get('status', wo.status)
         wo.priority     = p.get('priority', wo.priority)
@@ -1373,6 +1494,11 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
     form_class = WorkOrderForm
     template_name = 'core/work_order_form.html'
 
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _can_create_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
+        return super().dispatch(request, *args, **kwargs)
+
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         client_id = self.request.GET.get('client') or self.request.POST.get('client')
@@ -1454,12 +1580,29 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
     def get_queryset(self):
         return _scope_assignable_for(WorkOrder.objects.all(), self.request.user)
 
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
+        return super().dispatch(request, *args, **kwargs)
+
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         kwargs['client_id'] = self.object.client_id
         return kwargs
 
     def form_valid(self, form):
+        # This form carries a status field too, so finishing a WO from here needs
+        # the close grant. `self.object.status` has already been overwritten by
+        # _post_clean(), so the previous status is read fresh from the DB — the
+        # same trap TicketUpdateView documents.
+        new_status = form.cleaned_data.get('status')
+        old_status = WorkOrder.objects.filter(pk=self.object.pk).values_list('status', flat=True).first()
+        if (
+            new_status in WO_CLOSED_STATUSES
+            and old_status not in WO_CLOSED_STATUSES
+            and not _can_close_workorder(self.request.user)
+        ):
+            return HttpResponse('Forbidden', status=403)
         response = super().form_valid(form)
         # Push any edited hardware specs back to the device master so it stays current
         self.object.sync_specs_to_device()
@@ -3633,6 +3776,11 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
     form_class = TicketForm
     template_name = 'core/ticket_form.html'
 
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _can_create_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
+        return super().dispatch(request, *args, **kwargs)
+
     def form_valid(self, form):
         form.instance.ticket_number = Ticket.generate_ticket_number()
         form.instance.created_by = self.request.user
@@ -3664,6 +3812,11 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
     def get_queryset(self):
         return _scope_tickets_for(Ticket.objects.all(), self.request.user)
 
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
+        return super().dispatch(request, *args, **kwargs)
+
     def form_valid(self, form):
         new_status = form.cleaned_data.get('status')
         # NOTE: MB deliberately does NOT block closing a ticket whose linked WO is
@@ -3684,6 +3837,19 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
         old_client_id, old_client_was_unsorted, old_status = Ticket.objects.filter(
             pk=self.object.pk
         ).values_list('client_id', 'client__is_unsorted', 'status').first()
+        # This form can also close a ticket, which is a separate grant from editing
+        # one, so a role that may edit but not close is refused rather than quietly
+        # let in through the side door. ⚠ The comparison uses `old_status` from the
+        # fresh query above, NOT self.object.status — _post_clean() has already
+        # written the new status onto self.object, so testing it would compare the
+        # new status against itself and never fire. That is the same in-memory
+        # mutation bug this method's own comment documents twice.
+        if (
+            new_status in Ticket.CLOSED_AT_STATUSES
+            and old_status not in Ticket.CLOSED_AT_STATUSES
+            and not _can_close_tickets(self.request.user)
+        ):
+            return HttpResponse('Forbidden', status=403)
         client_changed = bool(new_client) and old_client_id != new_client.pk
         if client_changed:
             new_device = form.cleaned_data.get('device')
@@ -3740,6 +3906,16 @@ class TicketReplyCreateView(LoginRequiredMixin, View):
         reply_type = request.POST.get('reply_type', 'internal')
         content = request.POST.get('content', '').strip()
 
+        # Writing a note on the ticket and speaking to the customer are different
+        # grants — a junior tech may be trusted with the first and not the second.
+        # The reply_type comes from the browser, so this is checked server-side on
+        # the value actually being saved, not on which button the UI showed.
+        if reply_type == 'customer_visible':
+            if not _can_reply_customer(request.user):
+                return HttpResponse('Forbidden', status=403)
+        elif not _can_reply_internal(request.user):
+            return HttpResponse('Forbidden', status=403)
+
         if not content:
             return HttpResponse(status=204)
 
@@ -3783,6 +3959,10 @@ class TicketReplyResendView(LoginRequiredMixin, View):
     """Resend a specific reply email to a chosen address."""
 
     def post(self, request, pk, reply_pk):
+        # A resend puts mail in front of the customer to an address chosen here,
+        # so it needs the customer-reply grant even though the text already exists.
+        if not _can_reply_customer(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         reply = get_object_or_404(TicketReply, pk=reply_pk, ticket=ticket)
         to_email = request.POST.get('to_email', '').strip()
@@ -3835,6 +4015,10 @@ class TicketReopenView(LoginRequiredMixin, View):
     the flag, same as any other needs_response ticket."""
 
     def post(self, request, pk):
+        # Reopening is the inverse of closing and rides the same grant: whoever
+        # decides a ticket is finished is who may decide it is not.
+        if not _can_close_tickets(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         if ticket.status not in Ticket.CLOSED_AT_STATUSES:
             messages.info(request, 'Ticket is not closed.')
@@ -3846,7 +4030,17 @@ class TicketReopenView(LoginRequiredMixin, View):
 
 
 class TicketConvertView(LoginRequiredMixin, View):
-    """Convert a ticket to a work order"""
+    """Convert a ticket to a work order.
+
+    Gated on can_create_workorder rather than a ticket flag: whatever the button
+    is called, the outcome of this endpoint is a new WorkOrder, and a role denied
+    WO creation should not be able to reach one through the ticket page.
+    """
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _can_create_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
+        return super().dispatch(request, *args, **kwargs)
 
     def get(self, request, pk):
         ticket = _get_scoped_ticket_or_404(request, pk)
@@ -4026,9 +4220,15 @@ class TicketAssignView(LoginRequiredMixin, View):
         # Can only act on a ticket the user is allowed to see.
         ticket = get_object_or_404(_scope_tickets_for(Ticket.objects.all(), request.user), pk=pk)
         if request.POST.get('claim'):
+            # Claiming is deliberately NOT gated on can_assign_ticket: the unclaimed
+            # pool only functions if any tech can pick work up, and taking an
+            # unowned ticket removes nothing from anyone. Handing work to someone
+            # else (below) is the act that needs the grant.
             ticket.assigned_to = request.user
             ticket.assignment_unseen = False
         else:
+            if not _can_assign_ticket(request.user):
+                return HttpResponse('Forbidden', status=403)
             uid = request.POST.get('assigned_to', '').strip()
             if uid:
                 ticket.assigned_to_id = int(uid)
@@ -4119,6 +4319,8 @@ class TicketCloseView(LoginRequiredMixin, View):
     """Set a ticket to 'resolved' status. Used when WO is complete and tech has contacted client."""
 
     def post(self, request, pk):
+        if not _can_close_tickets(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         if ticket.status in TICKET_CLOSED_STATUSES:
             messages.info(request, 'Ticket is already closed.')
@@ -4131,10 +4333,17 @@ class TicketCloseView(LoginRequiredMixin, View):
 
 
 class TicketDeleteView(LoginRequiredMixin, View):
-    """Hard-delete a ticket. Admin only. Blocked if a work order is linked."""
+    """Hard-delete a ticket. Blocked if a work order is linked.
+
+    ⚠ This used to test Django's `is_staff` directly, which meant the role flag
+    named "Delete Tickets" could never actually grant the capability it advertised
+    — an operator could check it and nothing changed. It now honours the flag, so
+    a non-admin role CAN be given deletion deliberately. `_can_delete_ticket`
+    still lets any admin through, so nothing an admin could do before is lost.
+    """
 
     def post(self, request, pk):
-        if not request.user.is_staff:
+        if not _can_delete_ticket(request.user):
             return HttpResponse('Forbidden', status=403)
         ticket = get_object_or_404(Ticket, pk=pk)
         if WorkOrder.objects.filter(ticket=ticket).exists():
@@ -8366,6 +8575,17 @@ class TicketStatusUpdateView(LoginRequiredMixin, View):
             return redirect('core:ticket_detail', pk=pk)
         # No block on closing a ticket with an open linked WO — see TicketUpdateView.form_valid.
         old_status = ticket.status
+        # This one dropdown spans both grants: moving to resolved/closed is closing,
+        # anything else is ordinary editing. Gate on which move is being made, not
+        # on the endpoint, or a role without close rights closes tickets from here.
+        closing = (
+            new_status in Ticket.CLOSED_AT_STATUSES
+            and old_status not in Ticket.CLOSED_AT_STATUSES
+        )
+        if closing and not _can_close_tickets(request.user):
+            return HttpResponse('Forbidden', status=403)
+        if not closing and not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket.apply_status_change(new_status)
         if new_status in TICKET_CLOSED_STATUSES and ticket.wo_complete:
             ticket.wo_complete = False
