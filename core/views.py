@@ -5634,30 +5634,86 @@ class UserSetPasswordView(LoginRequiredMixin, View):
 # Role CRUD (admin only — lives in Settings)
 # ---------------------------------------------------------------------------
 
+# Role permissions, grouped for the Settings → Roles screen.
+#
+# There are 23 of these and they used to render as one flat 3-column grid of
+# identical-looking checkboxes. That is how "View All Tickets" sat ticked on the
+# stock Technician role in plain sight for months without anyone reading it, and
+# how a role called "Full access to all features" can be missing three
+# permissions without it being obvious. The count is not really the problem —
+# a shop with several technicians needs this many — but presenting a switch that
+# charges a customer's card identically to one that shows a list is.
+#
+# `sensitive=True` marks the permissions with a consequence outside Murphy's
+# Bench: real money moves, a stored password is revealed, someone's two-factor
+# is cleared, a login is created, or a record is destroyed. They are flagged in
+# the UI so the eye lands on them; they are not treated differently in code.
+#
+# Each entry is (flag, label, sensitive). Order within a group is workflow order,
+# not alphabetical.
+_ROLE_FLAG_GROUPS = [
+    {
+        'label': 'Tickets',
+        'note': 'What a role can do with tickets and client correspondence.',
+        'flags': [
+            ('can_view_all_tickets',       'View All Tickets', False),
+            ('can_create_ticket',          'Create Tickets', False),
+            ('can_edit_ticket',            'Edit Tickets', False),
+            ('can_close_tickets',          'Close/Resolve Tickets', False),
+            ('can_assign_ticket',          'Assign Tickets', False),
+            ('can_reply_internal',         'Internal Replies', False),
+            ('can_reply_customer',         'Customer Replies', False),
+            ('can_delete_ticket',          'Delete Tickets', True),
+        ],
+    },
+    {
+        'label': 'Work Orders',
+        'note': 'Bench work. A work order is completed, never closed.',
+        'flags': [
+            ('can_create_workorder',       'Create Work Orders', False),
+            ('can_edit_workorder',         'Edit Work Orders', False),
+            ('can_close_workorder',        'Close Work Orders', False),
+        ],
+    },
+    {
+        'label': 'Sales & Money',
+        'note': 'Quoting and the register.',
+        'flags': [
+            ('can_view_prospects',         'View Prospects', False),
+            ('can_view_estimates',         'View Estimates', False),
+            ('can_view_sales',             'View Sales', False),
+            ('can_process_payments',       'Process Payments', True),
+        ],
+    },
+    {
+        'label': 'Knowledge Base',
+        'note': 'Shop documentation.',
+        'flags': [
+            ('can_manage_kb',              'Manage KB', False),
+            ('can_view_restricted_kb',     'View Restricted KB', False),
+        ],
+    },
+    {
+        'label': 'Administration',
+        'note': 'Keep these to the people who run the shop.',
+        'flags': [
+            ('can_view_reports',           'View Reports', False),
+            ('can_manage_settings',        'Manage Settings', True),
+            ('can_manage_users',           'Manage Users', True),
+            ('can_view_device_credentials','View Device Credentials', True),
+            ('can_view_org_credentials',   'View Org Credential Vault', True),
+            ('can_reset_user_mfa',         'Reset User MFA', True),
+        ],
+    },
+]
+
+# Flat view of the same thing, for anything that just needs every flag once.
+# Derived, never hand-maintained — a second hand-written list is how the groups
+# would quietly stop covering every permission.
 _ROLE_FLAGS = [
-    ('can_manage_settings',        'Manage Settings'),
-    ('can_manage_users',           'Manage Users'),
-    ('can_view_all_tickets',       'View All Tickets'),
-    ('can_create_ticket',          'Create Tickets'),
-    ('can_edit_ticket',            'Edit Tickets'),
-    ('can_close_tickets',          'Close/Resolve Tickets'),
-    ('can_delete_ticket',          'Delete Tickets'),
-    ('can_assign_ticket',          'Assign Tickets'),
-    ('can_reply_internal',         'Internal Replies'),
-    ('can_reply_customer',         'Customer Replies'),
-    ('can_create_workorder',       'Create Work Orders'),
-    ('can_edit_workorder',         'Edit Work Orders'),
-    ('can_close_workorder',        'Close Work Orders'),
-    ('can_view_reports',           'View Reports'),
-    ('can_view_restricted_kb',     'View Restricted KB'),
-    ('can_manage_kb',              'Manage KB'),
-    ('can_view_device_credentials','View Device Credentials'),
-    ('can_view_org_credentials',   'View Org Credential Vault'),
-    ('can_reset_user_mfa',         'Reset User MFA'),
-    ('can_view_prospects',         'View Prospects'),
-    ('can_view_estimates',         'View Estimates'),
-    ('can_view_sales',             'View Sales'),
-    ('can_process_payments',       'Process Payments'),
+    (flag, label)
+    for group in _ROLE_FLAG_GROUPS
+    for flag, label, _sensitive in group['flags']
 ]
 
 
@@ -5675,7 +5731,7 @@ class RoleListView(LoginRequiredMixin, View):
         return render(request, 'core/role_list.html', {
             'roles': roles,
             'new_form': RoleForm(),
-            'role_flags': _ROLE_FLAGS,
+            'role_flag_groups': _ROLE_FLAG_GROUPS,
         })
 
 
@@ -5711,7 +5767,7 @@ class RoleEditView(LoginRequiredMixin, View):
         return render(request, 'core/role_form.html', {
             'form': RoleForm(instance=role),
             'role': role,
-            'role_flags': _ROLE_FLAGS,
+            'role_flag_groups': _ROLE_FLAG_GROUPS,
         })
 
     def post(self, request, pk):
@@ -5726,7 +5782,7 @@ class RoleEditView(LoginRequiredMixin, View):
         return render(request, 'core/role_form.html', {
             'form': form,
             'role': role,
-            'role_flags': _ROLE_FLAGS,
+            'role_flag_groups': _ROLE_FLAG_GROUPS,
         })
 
 

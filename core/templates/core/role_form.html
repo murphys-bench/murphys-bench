@@ -28,12 +28,29 @@
 
         <div class="bg-white rounded-lg shadow p-6 mb-6">
             <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">Permissions</h2>
-            <div class="grid grid-cols-2 gap-x-8 gap-y-3">
-                {% for flag, label in role_flags %}
-                <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
-                    {{ form|getfield:flag }} {{ label }}
-                </label>
+            <div class="space-y-5">
+                {% for group in role_flag_groups %}
+                <div>
+                    <div class="flex items-baseline gap-2 mb-2 pb-1 border-b border-gray-100">
+                        <span class="text-xs font-semibold uppercase tracking-wider text-gray-500">{{ group.label }}</span>
+                        <span class="text-xs text-gray-400">{{ group.note }}</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-x-8 gap-y-3">
+                        {% for flag, label, sensitive in group.flags %}
+                        <label class="flex items-center gap-2 cursor-pointer text-sm {% if sensitive %}text-gray-900 font-medium{% else %}text-gray-700{% endif %}">
+                            {{ form|getfield:flag }} {{ label }}
+                            {% if sensitive %}<span class="text-amber-500 text-[10px]" title="Has an effect outside Murphy's Bench">●</span>{% endif %}
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
                 {% endfor %}
+                <p class="text-xs text-gray-400 flex items-center gap-1.5">
+                    <span class="text-amber-500 text-[10px]">●</span>
+                    Marked permissions have an effect outside Murphy's Bench — money moves, a stored
+                    password is revealed, someone's two-factor is cleared, a login is created, or a
+                    record is destroyed.
+                </p>
             </div>
         </div>
 

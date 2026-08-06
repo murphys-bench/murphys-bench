@@ -12346,3 +12346,64 @@ def test_quick_update_still_saves_a_wo_holding_a_retired_status(client, client_o
                 {'status': 'some_retired_status', 'priority': 'urgent'})
     wo.refresh_from_db()
     assert wo.priority == 'urgent', 'a legacy status blocked an unrelated edit'
+
+
+@pytest.mark.django_db
+def test_every_role_permission_appears_in_exactly_one_group():
+    """The grouped Roles screen must cover every permission, once.
+
+    Grouping is only an improvement if it is total. A flag left out of every
+    group would vanish from Settings → Roles entirely — still enforced, still
+    stored, but no longer configurable or visible, which is a worse version of
+    the decorative-checkbox problem it was introduced to fix. A flag in two
+    groups would render two checkboxes writing the same field.
+    """
+    from core.models import Role
+    from core.views import _ROLE_FLAG_GROUPS
+
+    declared = [f for g in _ROLE_FLAG_GROUPS for f, _label, _s in g['flags']]
+    model_flags = {
+        f.name for f in Role._meta.get_fields()
+        if getattr(f, 'get_internal_type', lambda: None)() == 'BooleanField'
+        and f.name.startswith('can_')
+    }
+
+    assert len(declared) == len(set(declared)), (
+        f'a permission is in more than one group: '
+        f'{sorted(f for f in declared if declared.count(f) > 1)}'
+    )
+    missing = model_flags - set(declared)
+    assert not missing, f'permissions missing from Settings → Roles entirely: {sorted(missing)}'
+    stray = set(declared) - model_flags
+    assert not stray, f'groups name permissions that do not exist: {sorted(stray)}'
+
+
+@pytest.mark.django_db
+def test_consequential_permissions_are_marked(client):
+    """The permissions with an effect outside MB carry the marker.
+
+    Twenty-three identical checkboxes is how a switch that charges a customer's
+    card came to look exactly like one that shows a list. Pinned so the marking
+    cannot quietly be dropped in a later restyle.
+    """
+    from core.views import _ROLE_FLAG_GROUPS
+    marked = {f for g in _ROLE_FLAG_GROUPS for f, _l, s in g['flags'] if s}
+    assert marked == {
+        'can_process_payments',          # charges a real card on file
+        'can_view_device_credentials',   # reveals a stored password
+        'can_view_org_credentials',      # reveals the shop's own passwords
+        'can_reset_user_mfa',            # clears someone's two-factor
+        'can_manage_settings',           # full run of the shop's configuration
+        'can_manage_users',              # creates logins
+        'can_delete_ticket',             # destroys a record permanently
+    }, 'the set of consequential permissions changed — deliberate, or an accident?'
+
+    admin = User.objects.create_user(username='rolegrid', password='x',
+                                     is_staff=True, is_superuser=True)
+    client.force_login(admin)
+    body = client.get(reverse('core:role_list')).content.decode()
+    # escape() because "Sales & Money" renders as "Sales &amp; Money" — comparing
+    # the raw label would fail on the ampersand and look like a missing group.
+    from django.utils.html import escape
+    for group in _ROLE_FLAG_GROUPS:
+        assert escape(group['label']) in body, f"group {group['label']!r} is not rendered"
