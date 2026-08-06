@@ -31,9 +31,14 @@ the Unreleased entries move under that version and prod gets a single update.
   The ticket side was the same for escalating, linking, logging time, dismissing a
   needs-response flag and acknowledging an overdue ticket. All of those now follow the box
   that claims to cover them.
-- **"Manage Users" now actually grants user management.** It was ignored in favour of an
-  administrator check, so ticking it did nothing. A role with that box can now manage
-  users; administrators still can, as before. The stock Technician role does not have it.
+- **"Manage Users" now actually grants user management, without granting more than that.**
+  The box was ignored in favour of an administrator check, so ticking it did nothing. It
+  works now, and a role that has it can add, edit and remove users and set their passwords
+  — but it cannot make anyone an administrator, cannot hand out a role that reaches
+  Settings, and cannot edit, delete or reset the password of anyone who is already an
+  administrator. Without those limits the permission was a way to become the owner: tick
+  "Admin" on your own account, or reset the owner's password and sign in as them.
+  Administrators are unaffected. The stock Technician role does not have this permission.
 - **Converting a ticket to a work order needs both "Create Work Orders" and "Edit
   Tickets".** Converting creates the work order and also ends the ticket, so it needs the
   permission for each. It previously asked only for the first, which let a role that could
@@ -66,6 +71,17 @@ the Unreleased entries move under that version and prod gets a single update.
   switched off in Settings → Statuses and the dropdown stopped offering it; the views
   accepted it anyway. Any work order still holding it becomes Completed when you upgrade.
   **Tickets are unaffected and still close** — this is only about work orders.
+- **Editing a line on a sale or a quote no longer asks for work order permission.** Sales,
+  quotes, recurring client charges and contract lines share the same underlying editor as
+  work orders, and it had started demanding work-order rights for all of them — so a role
+  set up to handle sales or quoting was locked out of its own pricing. Each now asks for
+  the permission that covers the record being edited.
+- **Buttons match what your permissions allow.** Convert, Dismiss, Escalate, the ticket
+  timer, Apply Checklist, the checklist pass/fail dropdowns and the line-item buttons were
+  still drawn for people the server would refuse. They now appear only when they will work,
+  and the checklist shows its results as plain text to anyone who cannot change them.
+- **The ticket status dropdown rejects a status that does not exist**, matching the same
+  fix on work orders.
 - **A negative price is refused instead of silently becoming no price at all.** Typing
   -60.00 into a line item produced a line with no price, no error, and an unchanged total —
   so anyone trying to record a discount got a worthless line and no hint that it had not

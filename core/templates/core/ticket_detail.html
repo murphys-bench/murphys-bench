@@ -100,10 +100,12 @@
                 </button>
             </form>
             {% endif %}
+            {% if can_edit_ticket %}
             <button @click="dismissOpen = !dismissOpen"
                     class="text-xs text-amber-700 border border-amber-300 rounded px-2 py-1 hover:bg-amber-100">
                 Dismiss
             </button>
+            {% endif %}
         </div>
     </div>
     <div x-show="dismissOpen" x-cloak class="mt-3 border-t border-amber-200 pt-3">
@@ -201,7 +203,7 @@ window.addEventListener('beforeunload', function() {
                             {% if can_assign_ticket %}
                             <button @click="editing = !editing" class="text-xs text-blue-500 hover:text-blue-400 underline normal-case">{% if is_admin %}Assign{% else %}Transfer{% endif %}</button>
                             {% endif %}
-                            {% if ticket.can_escalate %}
+                            {% if ticket.can_escalate and can_edit_ticket %}
                             <form method="post" action="{% url 'core:ticket_escalate' ticket.pk %}">
                                 {% csrf_token %}
                                 <button type="submit" class="text-xs text-amber-600 hover:underline font-medium normal-case">Escalate &uarr;</button>
@@ -375,7 +377,8 @@ window.addEventListener('beforeunload', function() {
     <!-- Right Column: Sidebar -->
     <div class="space-y-6">
 
-        <!-- Timer -->
+        <!-- Timer — logging time edits the ticket, so it follows Edit Tickets -->
+        {% if can_edit_ticket %}
         <div class="bg-white rounded-lg shadow p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-3">Timer</h2>
             <div class="text-center">
@@ -402,6 +405,7 @@ window.addEventListener('beforeunload', function() {
                 </form>
             </div>
         </div>
+        {% endif %}
 
         {% if custom_field_values %}
         <!-- Custom Fields -->
@@ -479,7 +483,7 @@ window.addEventListener('beforeunload', function() {
                         Edit Ticket
                     </a>
                     {% endif %}
-                    {% if ticket.status != 'converted' and can_create_workorder %}
+                    {% if ticket.status != 'converted' and can_create_workorder and can_edit_ticket %}
                     <a href="{% url 'core:ticket_convert' ticket.pk %}"
                        class="block w-full text-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">
                         Convert to Work Order

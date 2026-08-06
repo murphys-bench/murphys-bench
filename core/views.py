@@ -257,6 +257,55 @@ def _can_close_workorder(user):
     return _is_admin(user) or _role_flag(user, 'can_close_workorder')
 
 
+def _is_privileged_account(target):
+    """True if this account already holds administrative power.
+
+    Django staff, superusers, and anyone whose role can reach Settings — which
+    is what _is_admin() accepts, so it is what a non-admin user-manager must not
+    be able to touch or become.
+    """
+    return bool(
+        target.is_staff
+        or target.is_superuser
+        or (getattr(target, 'role_obj', None) and target.role_obj.can_manage_settings)
+    )
+
+
+def _may_act_on_user(actor, target):
+    """Whether `actor` may edit, delete or set the password of `target`.
+
+    ⚠ THE POINT OF THIS FUNCTION. "Manage Users" is a real permission now, and
+    without this it was a full administrator takeover in three separate ways: the
+    user form exposes `is_staff`, so a manager could tick it on their own account
+    and satisfy _is_admin(); it exposes `role_obj`, so they could assign
+    themselves a role carrying can_manage_settings and satisfy it that way; and
+    the set-password view took any target, so they could reset an admin's
+    password and simply log in as them. All three were reproduced by an outside
+    reviewer against the first version of this. I enforced the checkbox without
+    asking what the checkbox could reach.
+
+    The rule is the ordinary one for delegated user administration: you cannot
+    grant what you do not hold, and you cannot act on someone who outranks you.
+    Admins are unrestricted, as before.
+    """
+    if _is_admin(actor):
+        return True
+    return not _is_privileged_account(target)
+
+
+def _assignable_roles_for(actor):
+    """Roles `actor` may hand out.
+
+    A non-admin manager must not assign a role that grants Settings access —
+    that is the same escalation as ticking is_staff, wearing a different hat.
+    """
+    from .models import Role
+    qs = Role.objects.all().order_by('name')
+    if _is_admin(actor):
+        return qs
+    return qs.filter(can_manage_settings=False)
+
+
 def _can_manage_users(user):
     """Create, edit, delete user accounts and set passwords.
 
@@ -5603,6 +5652,8 @@ class UserDeleteView(LoginRequiredMixin, View):
 
     def post(self, request, pk):
         target = get_object_or_404(User, pk=pk)
+        if not _may_act_on_user(request.user, target):
+            return HttpResponse('Forbidden', status=403)
         if target.pk == request.user.pk:
             messages.error(request, 'You cannot delete your own account.')
             return redirect('core:user_list')
@@ -5629,14 +5680,14 @@ class UserCreateView(LoginRequiredMixin, View):
     def get(self, request):
         from .forms import UserCreateForm
         return render(request, 'core/user_form.html', {
-            'form': UserCreateForm(),
+            'form': UserCreateForm().restrict_for(request.user),
             'title': 'New User',
             'cancel_url': reverse_lazy('core:user_list'),
         })
 
     def post(self, request):
         from .forms import UserCreateForm
-        form = UserCreateForm(request.POST)
+        form = UserCreateForm(request.POST).restrict_for(request.user)
         if form.is_valid():
             user = form.save()
             messages.success(request, f'User {user.get_full_name() or user.username} created.')
@@ -5658,8 +5709,10 @@ class UserEditView(LoginRequiredMixin, View):
     def get(self, request, pk):
         from .forms import UserEditForm
         target = get_object_or_404(User, pk=pk)
+        if not _may_act_on_user(request.user, target):
+            return HttpResponse('Forbidden', status=403)
         return render(request, 'core/user_form.html', {
-            'form': UserEditForm(instance=target),
+            'form': UserEditForm(instance=target).restrict_for(request.user),
             'target': target,
             'title': f'Edit {target.get_full_name() or target.username}',
             'cancel_url': reverse_lazy('core:user_list'),
@@ -5668,7 +5721,9 @@ class UserEditView(LoginRequiredMixin, View):
     def post(self, request, pk):
         from .forms import UserEditForm
         target = get_object_or_404(User, pk=pk)
-        form = UserEditForm(request.POST, instance=target)
+        if not _may_act_on_user(request.user, target):
+            return HttpResponse('Forbidden', status=403)
+        form = UserEditForm(request.POST, instance=target).restrict_for(request.user)
         if form.is_valid():
             form.save()
             messages.success(request, f'User {target.get_full_name() or target.username} updated.')
@@ -5691,6 +5746,8 @@ class UserSetPasswordView(LoginRequiredMixin, View):
     def get(self, request, pk):
         from .forms import UserSetPasswordForm
         target = get_object_or_404(User, pk=pk)
+        if not _may_act_on_user(request.user, target):
+            return HttpResponse('Forbidden', status=403)
         return render(request, 'core/user_set_password.html', {
             'form': UserSetPasswordForm(),
             'target': target,
@@ -5699,6 +5756,8 @@ class UserSetPasswordView(LoginRequiredMixin, View):
     def post(self, request, pk):
         from .forms import UserSetPasswordForm
         target = get_object_or_404(User, pk=pk)
+        if not _may_act_on_user(request.user, target):
+            return HttpResponse('Forbidden', status=403)
         form = UserSetPasswordForm(request.POST)
         if form.is_valid():
             target.set_password(form.cleaned_data['password1'])
@@ -6033,21 +6092,38 @@ class WorkPerformedLogView(LoginRequiredMixin, View):
 
 
 def _guard_line_host(request, host):
-    """The line-edit views (delete/update) are host-agnostic — shared by WorkOrder,
-    Estimate, and EstimateOption (login-only, techs edit those) as well as the
-    billing hosts Sale, Client-recurring, and Contract. For the billing hosts the
-    same role gate that protects the sales/contract views applies here too, so
-    editing managed-client pricing isn't a login-only backdoor around it."""
-    if isinstance(host, (Sale, Client, Contract)) and not _can_view_sales(request.user):
-        raise PermissionDenied
+    """Authorize a line-item edit against the record it actually belongs to.
+
+    The delete/update views are shared by six hosts — WorkOrder, Estimate,
+    EstimateOption, Sale, Client-recurring and Contract — so the permission has
+    to be chosen from the host, and this is the one place that knows it.
+
+    ⚠ Do NOT gate these views on a single flag before the host is loaded. A
+    blanket can_edit_workorder check was added here and it locked sales-only and
+    estimate-only roles out of their own line items: the check ran first, so this
+    function never got the chance to say which permission applied. An outside
+    reviewer reproduced both. Whatever the shared endpoint is called, the record
+    being edited decides who may edit it.
+
+    Each host maps to the permission that already protects its own screens, so
+    this cannot become a backdoor around them.
+    """
+    if isinstance(host, WorkOrder):
+        if not _can_edit_workorder(request.user):
+            raise PermissionDenied
+    elif isinstance(host, (Sale, Client, Contract)):
+        if not _can_view_sales(request.user):
+            raise PermissionDenied
+    elif isinstance(host, (Estimate, EstimateOption)):
+        if not _can_view_estimates(request.user):
+            raise PermissionDenied
 
 
 class WorkPerformedDeleteView(LoginRequiredMixin, View):
     """HTMX: remove a logged line item."""
 
     def post(self, request, pk):
-        if not _can_edit_workorder(request.user):
-            return HttpResponse('Forbidden', status=403)
+        # No flag check here — _guard_line_host picks the permission from the host.
         entry = get_object_or_404(LineItem, pk=pk)
         host = entry.content_object
         _guard_line_host(request, host)
@@ -6059,8 +6135,7 @@ class WorkPerformedUpdateView(LoginRequiredMixin, View):
     """HTMX: update label, notes, quantity and price on a logged line item."""
 
     def post(self, request, pk):
-        if not _can_edit_workorder(request.user):
-            return HttpResponse('Forbidden', status=403)
+        # No flag check here — _guard_line_host picks the permission from the host.
         entry = get_object_or_404(LineItem, pk=pk)
         _guard_line_host(request, entry.content_object)
         label = request.POST.get('custom_label', '').strip()
@@ -8807,6 +8882,21 @@ class TicketStatusUpdateView(LoginRequiredMixin, View):
         if closing and not _can_close_tickets(request.user):
             return HttpResponse('Forbidden', status=403)
         if not closing and not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
+
+        # Validate against the statuses that actually exist — the ticket twin of
+        # the work-order fix above. Ticket.status is a plain CharField with no
+        # `choices=` (migration 0036 moved status definitions into the database),
+        # and apply_status_change() assigns whatever it is handed, so any string
+        # was accepted and saved. TicketForm has always validated this field; only
+        # the quick dropdown did not. The ticket's own current status is allowed
+        # through so a retired value cannot make it unsavable.
+        valid_statuses = set(
+            StatusDefinition.objects.filter(entity_type='ticket', is_active=True)
+            .values_list('slug', flat=True)
+        )
+        valid_statuses.add(ticket.status)
+        if new_status not in valid_statuses:
             return HttpResponse('Forbidden', status=403)
         ticket.apply_status_change(new_status)
         if new_status in TICKET_CLOSED_STATUSES and ticket.wo_complete:

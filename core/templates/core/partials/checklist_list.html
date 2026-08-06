@@ -14,6 +14,7 @@
             <tr class="{% if item.pre_check == 'pass' and item.post_check == 'pass' %}bg-green-50{% elif item.pre_check == 'fail' or item.post_check == 'fail' %}bg-red-50{% endif %}">
                 <td class="px-3 py-2 text-gray-800">{{ item.description }}</td>
                 <td class="px-3 py-2">
+                    {% if can_edit_workorder %}
                     <form method="post" action="{% url 'core:work_order_item_check' item.pk %}"
                           hx-post="{% url 'core:work_order_item_check' item.pk %}"
                           hx-target="#checklist-wrapper"
@@ -32,8 +33,23 @@
                             <option value="na" {% if item.pre_check == 'na' %}selected{% endif %}>N/A</option>
                         </select>
                     </form>
+                    {% else %}
+                    {% comment %}
+                    Read-only for a role without Edit Work Orders: the select posts
+                    to work_order_item_check, which now refuses them, so offering it
+                    would be a control that always fails.
+                    {% endcomment %}
+                    <span class="text-sm px-2 py-1 inline-block rounded
+                        {% if item.pre_check == 'pass' %}bg-green-100 text-green-800
+                        {% elif item.pre_check == 'fail' %}bg-red-100 text-red-800
+                        {% elif item.pre_check == 'na' %}bg-gray-100 text-gray-500
+                        {% else %}text-gray-400{% endif %}">
+                        {% if item.pre_check == 'pass' %}✓ Pass{% elif item.pre_check == 'fail' %}✗ Fail{% elif item.pre_check == 'na' %}N/A{% else %}—{% endif %}
+                    </span>
+                    {% endif %}
                 </td>
                 <td class="px-3 py-2">
+                    {% if can_edit_workorder %}
                     <form method="post" action="{% url 'core:work_order_item_check' item.pk %}"
                           hx-post="{% url 'core:work_order_item_check' item.pk %}"
                           hx-target="#checklist-wrapper"
@@ -52,6 +68,20 @@
                             <option value="na" {% if item.post_check == 'na' %}selected{% endif %}>N/A</option>
                         </select>
                     </form>
+                    {% else %}
+                    {% comment %}
+                    Read-only for a role without Edit Work Orders: the select posts
+                    to work_order_item_check, which now refuses them, so offering it
+                    would be a control that always fails.
+                    {% endcomment %}
+                    <span class="text-sm px-2 py-1 inline-block rounded
+                        {% if item.post_check == 'pass' %}bg-green-100 text-green-800
+                        {% elif item.post_check == 'fail' %}bg-red-100 text-red-800
+                        {% elif item.post_check == 'na' %}bg-gray-100 text-gray-500
+                        {% else %}text-gray-400{% endif %}">
+                        {% if item.post_check == 'pass' %}✓ Pass{% elif item.post_check == 'fail' %}✗ Fail{% elif item.post_check == 'na' %}N/A{% else %}—{% endif %}
+                    </span>
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}
@@ -59,9 +89,13 @@
     </table>
     {% else %}
     <div class="px-3 py-3 text-sm text-gray-400">
+        {% if can_edit_workorder %}
         <p>No checklist items yet. Click <strong>↺ Apply Checklist</strong> above to load items, or go to
         <a href="{% url 'core:settings' %}#checklist" class="text-blue-500 hover:underline">Settings › Checklist Items</a>
         to define items first.</p>
+        {% else %}
+        <p>No checklist items on this work order.</p>
+        {% endif %}
     </div>
     {% endif %}
 </div>
