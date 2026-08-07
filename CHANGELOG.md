@@ -101,6 +101,11 @@ the Unreleased entries move under that version and prod gets a single update.
   whatever was submitted, so a stale page, a typo, or a retired status could leave a work
   order in a state that no list, report or register recognised. The full edit form always
   checked this; the inline panel did not.
+- **A finished job shows up under "Recently Closed" again, and leaves "My Work".** The
+  technician dashboard's Recently Closed panel looked for the retired "Closed" status and so
+  could never list a completed job. Separately, and for longer, the My Work sidebar excluded
+  cancelled work but not completed work, so finished jobs stayed on a technician's list
+  indefinitely. Both now use the same definition of a finished work order as everywhere else.
 - **The roadmap no longer says restoring a backup is command-line only.** Restore from
   Settings shipped in v0.11.0.
 

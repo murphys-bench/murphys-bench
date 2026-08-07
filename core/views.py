@@ -704,8 +704,13 @@ class DashboardView(LoginRequiredMixin, View):
             wo_qs = wo_qs.filter(assigned_to=request.user)
         open_work_orders = wo_qs.order_by('-created_at')[:10]
 
+        # ⚠ Was ['closed', 'cancelled'] — a second hand-written list of what
+        # "finished" means, sitting three lines below the constant that exists to
+        # be the only one. Retiring the `closed` status left it naming a state
+        # nothing can hold, so a dashboard panel called "Recently Closed" could
+        # never show a completed job again.
         recently_closed = WorkOrder.objects.select_related('client', 'assigned_to').filter(
-            status__in=['closed', 'cancelled']
+            status__in=WO_CLOSED_STATUSES
         ).order_by('-updated_at')[:5]
 
         # Team workload (admin only)
@@ -909,7 +914,7 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         open_tickets = (
             Ticket.objects
             .filter(client=wo.client)
-            .exclude(status__in=('resolved', 'closed'))
+            .exclude(status__in=TICKET_CLOSED_STATUSES)
             .select_related('created_by')
             .prefetch_related('replies')
             .order_by('-created_at')
@@ -3975,7 +3980,7 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         open_wos = (
             WorkOrder.objects
             .filter(client=ticket.client)
-            .exclude(status__in=('completed', 'closed', 'cancelled'))
+            .exclude(status__in=WO_CLOSED_STATUSES)
             .select_related('assigned_to', 'repair_type')
             .prefetch_related('notes')
             .order_by('-created_at')
@@ -4825,7 +4830,7 @@ class SidebarFragmentView(LoginRequiredMixin, View):
         is_admin = _is_admin(request.user)
 
         ticket_qs = Ticket.objects.select_related('client').prefetch_related('replies').exclude(
-            status__in=['closed', 'resolved']
+            status__in=TICKET_CLOSED_STATUSES
         )
         if is_admin:
             ticket_qs = ticket_qs.order_by('-updated_at')
@@ -4834,8 +4839,12 @@ class SidebarFragmentView(LoginRequiredMixin, View):
                 Q(assigned_to=request.user) | Q(created_by=request.user)
             ).distinct().order_by('-updated_at')
 
+        # Pre-existing: this excluded 'closed' and 'cancelled' but never
+        # 'completed', which is the state technicians actually set — so finished
+        # jobs stayed in the My Work sidebar indefinitely, while the dashboard's
+        # own open-WO query excluded them correctly.
         wo_qs = WorkOrder.objects.select_related('client').prefetch_related('notes').exclude(
-            status__in=['closed', 'cancelled']
+            status__in=WO_CLOSED_STATUSES
         )
         if is_admin:
             wo_qs = wo_qs.order_by('-updated_at')

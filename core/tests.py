@@ -13306,3 +13306,74 @@ def test_a_legacy_admin_is_offered_the_settings_it_can_open(client):
     assert '← Dashboard' not in users_page, (
         'a legacy admin was given the non-admin backlink'
     )
+
+
+@pytest.mark.django_db
+def test_recently_closed_shows_completed_work(client, client_obj):
+    """The dashboard panel must show finished jobs, which means 'completed'.
+
+    It filtered a hand-written ['closed', 'cancelled'] — a second definition of
+    "finished" written three lines below the constant that exists to be the only
+    one. Retiring the `closed` status left it naming a state nothing can hold, so
+    "Recently Closed" could never show a completed job again.
+
+    ⚠ This panel is on the TECHNICIAN dashboard, not the owner's — admins get a
+    separate _admin_dashboard() that never builds this key. I first reported it
+    as "the dashboard", which would have had Mike looking for a panel his own
+    account never renders.
+    """
+    tech = _role_tech('rc_tech')
+    done = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                    client=client_obj, status='completed')
+    scrapped = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                        client=client_obj, status='cancelled')
+    live = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                    client=client_obj, status='in_progress')
+    client.force_login(tech)
+    shown = {w.work_order_number for w in client.get(reverse('core:dashboard')).context['recently_closed']}
+    assert done.work_order_number in shown, 'a completed job never reaches Recently Closed'
+    assert scrapped.work_order_number in shown
+    assert live.work_order_number not in shown
+
+
+@pytest.mark.django_db
+def test_finished_work_leaves_the_my_work_sidebar(client, client_obj):
+    """Pre-existing, same class: the sidebar never excluded 'completed'.
+
+    It excluded 'closed' and 'cancelled' only — so a finished job stayed in My
+    Work indefinitely, while the dashboard's own open-WO query excluded exactly
+    those jobs correctly. Two views, two definitions, one of them wrong.
+    """
+    tech = _role_tech('sidebar_tech', can_edit_workorder=True)
+    done = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                    client=client_obj, assigned_to=tech, status='completed')
+    live = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                    client=client_obj, assigned_to=tech, status='in_progress')
+    client.force_login(tech)
+    body = client.get(reverse('core:sidebar_fragment')).content.decode()
+    assert live.work_order_number in body
+    assert done.work_order_number not in body, 'a completed job stayed in My Work'
+
+
+@pytest.mark.django_db
+def test_no_view_keeps_its_own_copy_of_what_finished_means():
+    """One definition per record type, enforced.
+
+    Every regression in this area has been a second hand-written list drifting
+    from the constant beside it. This fails if a new one appears.
+    """
+    import inspect
+    from core import views
+    src = inspect.getsource(views)
+    # Strip the constants' own definitions and the commentary explaining the history.
+    body = '\n'.join(
+        line for line in src.splitlines()
+        if not line.lstrip().startswith('#')
+        and 'WO_CLOSED_STATUSES = ' not in line
+        and 'TICKET_CLOSED_STATUSES = ' not in line
+    )
+    strays = re.findall(r"status__in=[\(\[][^\)\]]*['\"](?:completed|cancelled)['\"][^\)\]]*[\)\]]", body)
+    assert not strays, (
+        'a view is carrying its own list of finished statuses instead of using '
+        f'WO_CLOSED_STATUSES: {strays}'
+    )
