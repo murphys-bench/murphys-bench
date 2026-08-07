@@ -27,6 +27,7 @@ def site_settings(request):
     can_view_estimates = False
     can_view_sales = False
     can_process_payments = False
+    can_manage_users = False
     flags = {name: False for name in _TICKET_WO_FLAGS}
     if user is not None and user.is_authenticated:
         is_admin = bool(
@@ -40,6 +41,12 @@ def site_settings(request):
         # Charging money is opt-in, NOT admin-by-default (unlike the flags above) —
         # gated on superuser or the dedicated flag, same bar as MFA reset.
         can_process_payments = user.is_superuser or user.has_perm_flag('can_process_payments')
+        # Needed in the chrome, not just on the users page: the ONLY navigation to
+        # Settings — and therefore to the user list living under it — was gated on
+        # is_staff, so a role granted "Manage Users" had no way to reach the thing it
+        # had just been granted. A permission with no route to it is the same lying
+        # checkbox as one that is never enforced, pointing the other way.
+        can_manage_users = is_admin or user.has_perm_flag('can_manage_users')
         # ⚠ Must go through views._role_flag, not has_perm_flag, or the UI and the
         # server disagree for a user with no role_obj: the view would allow the
         # action (field default) while the button that triggers it stayed hidden.
@@ -55,5 +62,6 @@ def site_settings(request):
         'can_view_estimates': can_view_estimates,
         'can_view_sales': can_view_sales,
         'can_process_payments': can_process_payments,
+        'can_manage_users': can_manage_users,
         **flags,
     }

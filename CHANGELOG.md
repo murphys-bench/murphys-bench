@@ -89,7 +89,8 @@ the Unreleased entries move under that version and prod gets a single update.
   still drawn for people the server would refuse. They now appear only when they will work,
   and the checklist shows its results as plain text to anyone who cannot change them. The
   user list does the same: Edit, Set Password, Delete and Reset MFA appear per person, only
-  for accounts you are allowed to act on, and Manage Roles only for administrators.
+  for accounts you are allowed to act on, and Manage Roles only for administrators. Its two
+  links into Settings are shown only to people Settings will let in.
 - **The ticket status dropdown rejects a status that does not exist**, matching the same
   fix on work orders.
 - **A negative price is refused instead of silently becoming no price at all.** Typing
@@ -102,6 +103,12 @@ the Unreleased entries move under that version and prod gets a single update.
   checked this; the inline panel did not.
 - **The roadmap no longer says restoring a backup is command-line only.** Restore from
   Settings shipped in v0.11.0.
+
+- **A role with "Manage Users" can now find the user list.** The only way into Settings —
+  where users are managed — was shown to Django staff accounts alone, so granting that
+  permission handed someone an ability with no route to it but typing the address. Such a
+  role now gets a Users link of its own. For the same reason, a role with "Manage Settings"
+  now sees the Admin link: it could always open Settings, but nothing offered the way in.
 
 ### Changed
 

@@ -13142,3 +13142,70 @@ def test_an_admin_still_sees_every_user_action(client):
     assert reverse('core:user_set_password', args=[other.pk]) in body
     assert reverse('core:user_delete', args=[other.pk]) in body
     assert reverse('core:role_list') in body, 'an admin must still reach Manage Roles'
+
+
+@pytest.mark.django_db
+def test_a_delegated_user_manager_can_actually_reach_the_user_list(client):
+    """A granted permission must have a route to it.
+
+    The only navigation to Settings was gated on Django `is_staff`, and the user
+    list lives under Settings — so a role granted "Manage Users" had no way to
+    reach the thing it had just been granted, short of typing the URL. That is
+    the same lying checkbox this branch exists to end, pointing the other way:
+    enforcement agreed with the box, the product never offered it.
+    """
+    mgr = _user_manager('nav_mgr')
+    client.force_login(mgr)
+    body = client.get(reverse('core:dashboard')).content.decode()
+    assert reverse('core:user_list') in body, (
+        'a user manager has no link to the user list'
+    )
+    assert reverse('core:settings') not in body, (
+        'Settings is admin-only; offering it here is a link to a 403'
+    )
+
+
+@pytest.mark.django_db
+def test_a_settings_admin_without_django_staff_can_reach_settings(client):
+    """`is_admin` is staff OR can_manage_settings — the nav only honoured the first.
+
+    views._is_admin() has always accepted a role carrying can_manage_settings, so
+    such a user could open Settings by URL while the app showed them no way in.
+    Pre-existing, and exactly the audience the role exists for.
+    """
+    from core.models import Role
+    role = Role.objects.create(name='SettingsAdminRole', can_manage_settings=True)
+    admin_by_role = User.objects.create_user(username='role_admin', password='x',
+                                             is_staff=False, role_obj=role)
+    client.force_login(admin_by_role)
+    body = client.get(reverse('core:dashboard')).content.decode()
+    assert reverse('core:settings') in body, (
+        'a can_manage_settings role has no link to Settings'
+    )
+    assert client.get(reverse('core:settings')).status_code == 200
+
+
+@pytest.mark.django_db
+def test_the_user_list_backlink_goes_somewhere_the_viewer_can_open(client):
+    """The reviewer's finding: ← Settings was drawn for people Settings refuses."""
+    mgr = _user_manager('backlink_mgr')
+    client.force_login(mgr)
+    body = client.get(reverse('core:user_list')).content.decode()
+    assert reverse('core:settings') not in body
+    assert reverse('core:dashboard') in body
+
+    admin = User.objects.create_user(username='backlink_admin', password='x',
+                                     is_staff=True, is_superuser=True)
+    client.force_login(admin)
+    body = client.get(reverse('core:user_list')).content.decode()
+    assert reverse('core:settings') in body, 'an admin should still go back to Settings'
+
+
+@pytest.mark.django_db
+def test_a_plain_technician_sees_neither_settings_nor_users(client, client_obj):
+    """The mirror — the new Users link must not leak to roles without the grant."""
+    tech = _role_tech('nav_plain')
+    client.force_login(tech)
+    body = client.get(reverse('core:dashboard')).content.decode()
+    assert reverse('core:settings') not in body
+    assert reverse('core:user_list') not in body
