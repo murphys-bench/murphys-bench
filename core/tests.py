@@ -13083,3 +13083,62 @@ def test_every_authority_dimension_is_compared():
     peer = User.objects.create_user(username='dim_peer', password='x',
                                     role_obj=plain, level=1)
     assert _outranks_or_equal(base, peer) and _outranks_or_equal(peer, base)
+
+
+@pytest.mark.django_db
+def test_user_list_only_offers_actions_the_server_will_allow(client):
+    """The user list must not draw buttons that 403 on click.
+
+    Every action was rendered for every account: Edit, Set Password, Delete,
+    Reset MFA, and Manage Roles. The server refuses them correctly, so this was
+    never a bypass — but in the one area of the app being hardened for privilege
+    escalation, showing a delegated manager a Set Password link for the owner is
+    the worst possible place to teach people that buttons lie.
+
+    Each row is now annotated with the same _may_act_on_user() result the views
+    use, so the page cannot disagree with them.
+    """
+    from core.models import Role
+    shared = Role.objects.create(name='ListMgr', can_manage_users=True)
+    mgr = User.objects.create_user(username='list_mgr', password='x',
+                                   role_obj=shared, level=1)
+    senior = User.objects.create_user(username='list_senior', password='x',
+                                      role_obj=shared, level=3)
+    owner = User.objects.create_user(username='list_owner', password='x',
+                                     is_staff=True, is_superuser=True)
+    junior = User.objects.create_user(username='list_junior', password='x',
+                                      role_obj=shared, level=1)
+
+    client.force_login(mgr)
+    body = client.get(reverse('core:user_list')).content.decode()
+
+    for unreachable in (senior, owner):
+        assert reverse('core:user_edit', args=[unreachable.pk]) not in body, (
+            f'Edit offered for {unreachable.username}, who outranks the manager'
+        )
+        assert reverse('core:user_set_password', args=[unreachable.pk]) not in body
+        assert reverse('core:user_delete', args=[unreachable.pk]) not in body
+        assert reverse('core:user_mfa_reset', args=[unreachable.pk]) not in body
+
+    # A peer stays fully actionable — this hides by rank, not by hiding everything.
+    assert reverse('core:user_edit', args=[junior.pk]) in body
+    assert reverse('core:user_set_password', args=[junior.pk]) in body
+
+    # Roles are Settings, and a delegated manager is not an admin.
+    assert reverse('core:role_list') not in body
+
+
+@pytest.mark.django_db
+def test_an_admin_still_sees_every_user_action(client):
+    """The mirror — the gating must be rank-driven, not blanket."""
+    from core.models import Role
+    admin = User.objects.create_user(username='list_admin', password='x',
+                                     is_staff=True, is_superuser=True)
+    other = User.objects.create_user(username='list_other', password='x',
+                                     role_obj=Role.objects.create(name='ListPlain'))
+    client.force_login(admin)
+    body = client.get(reverse('core:user_list')).content.decode()
+    assert reverse('core:user_edit', args=[other.pk]) in body
+    assert reverse('core:user_set_password', args=[other.pk]) in body
+    assert reverse('core:user_delete', args=[other.pk]) in body
+    assert reverse('core:role_list') in body, 'an admin must still reach Manage Roles'

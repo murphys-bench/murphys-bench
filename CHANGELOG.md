@@ -84,7 +84,9 @@ the Unreleased entries move under that version and prod gets a single update.
 - **Buttons match what your permissions allow.** Convert, Dismiss, Escalate, the ticket
   timer, Apply Checklist, the checklist pass/fail dropdowns and the line-item buttons were
   still drawn for people the server would refuse. They now appear only when they will work,
-  and the checklist shows its results as plain text to anyone who cannot change them.
+  and the checklist shows its results as plain text to anyone who cannot change them. The
+  user list does the same: Edit, Set Password, Delete and Reset MFA appear per person, only
+  for accounts you are allowed to act on, and Manage Roles only for administrators.
 - **The ticket status dropdown rejects a status that does not exist**, matching the same
   fix on work orders.
 - **A negative price is refused instead of silently becoming no price at all.** Typing

@@ -5678,9 +5678,17 @@ class UserListView(LoginRequiredMixin, View):
                 'user': u,
                 'has_mfa': bool(devices),
                 'device_count': len(devices),
+                # Same rule the Edit / Set Password / Delete / Reset MFA views
+                # apply, evaluated per row. Computed here rather than re-derived
+                # in the template so the page cannot disagree with the server:
+                # every one of those actions calls _may_act_on_user() too.
+                'may_act': _may_act_on_user(request.user, u),
             })
         return render(request, 'core/user_list.html', {
             'user_rows': user_rows,
+            # Roles live in Settings and are admin-only; a delegated user manager
+            # may add people but not rewrite what a role can do.
+            'can_manage_roles': _is_admin(request.user),
             'require_mfa': SiteSettings.get().require_mfa,
             'can_reset_mfa': _can_reset_mfa(request.user),
         })
