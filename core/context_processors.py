@@ -35,6 +35,10 @@ def site_settings(request):
         this same class.
       - `can_manage_users` used has_perm_flag where the server uses _role_flag,
         which differ for a user with no role at all.
+      - the eleven ticket/work-order flags were rebuilt as
+        `is_admin or _role_flag(user, name)`. That matched every helper's body, so
+        nothing was wrong — but it was equivalence rather than delegation, which
+        holds only until one helper differs from the others.
 
     The file already carried a warning about this for the ticket/work-order flags.
     The rule it describes is now applied to all of them: import the helper, call
@@ -54,8 +58,10 @@ def site_settings(request):
     if user is None or not user.is_authenticated:
         return context
 
+    from django.core.exceptions import ImproperlyConfigured
+    from . import views
     from .views import (
-        _is_admin, _role_flag, _can_view_prospects, _can_view_estimates,
+        _is_admin, _can_view_prospects, _can_view_estimates,
         _can_view_sales, _can_process_payments, _can_manage_users,
     )
     context.update({
@@ -66,10 +72,19 @@ def site_settings(request):
         'can_process_payments': _can_process_payments(user),
         'can_manage_users': _can_manage_users(user),
     })
-    # The ticket/work-order flags have no single-purpose helper each; they follow
-    # the same shape every one of those helpers uses.
-    context.update({
-        name: context['is_admin'] or _role_flag(user, name)
-        for name in _TICKET_WO_FLAGS
-    })
+    # Each of these DOES have its own helper, so call it rather than rebuilding
+    # what it happens to do today. This was written as
+    # `is_admin or _role_flag(user, name)` — equivalent to every helper's current
+    # body, and a reviewer confirmed the results matched. Equivalence is not
+    # delegation: the moment one helper grows a condition the others lack (a
+    # record-state check is the obvious candidate), the chrome silently stops
+    # following it. Resolving by name keeps that impossible.
+    for name in _TICKET_WO_FLAGS:
+        helper = getattr(views, f'_{name}', None)
+        if helper is None:  # fail loud rather than quietly falling back
+            raise ImproperlyConfigured(
+                f'context processor expects core.views._{name} to exist; a '
+                f'template flag with no server helper cannot be kept in step'
+            )
+        context[name] = bool(helper(user))
     return context

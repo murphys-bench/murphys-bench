@@ -13251,6 +13251,12 @@ def test_the_chrome_and_the_server_agree_for_every_shape_of_user(client, rf):
         'legacy admin':      User.objects.create_user(username='ctx_legacy', password='x',
                                                       is_staff=False, role='admin'),
     }
+    # ⚠ EVERY value the chrome publishes, not a chosen few. The first version of
+    # this test compared six and left the eleven ticket/work-order flags out — the
+    # exact values the branch spends most of its time on — so a reviewer had to
+    # probe those by hand. Built from the context keys themselves so a value added
+    # later is covered without anyone remembering to list it here.
+    from core.context_processors import _TICKET_WO_FLAGS
     checks = {
         'is_admin': v._is_admin,
         'can_view_prospects': v._can_view_prospects,
@@ -13258,7 +13264,9 @@ def test_the_chrome_and_the_server_agree_for_every_shape_of_user(client, rf):
         'can_view_sales': v._can_view_sales,
         'can_process_payments': v._can_process_payments,
         'can_manage_users': v._can_manage_users,
+        **{name: getattr(v, f'_{name}') for name in _TICKET_WO_FLAGS},
     }
+    assert len(checks) == 17, f'expected every published permission, got {len(checks)}'
 
     mismatches = []
     for shape, user in shapes.items():
