@@ -12867,3 +12867,108 @@ def test_the_ui_still_offers_everything_to_a_role_that_may_use_it(client, client
     assert 'Apply Checklist' in wb
     assert '+ Custom' in wb
     assert '/check/' in wb, 'the checklist dropdowns must be offered to a role that may use them'
+
+
+@pytest.mark.django_db
+def test_user_manager_cannot_grant_a_role_carrying_powers_they_lack(client):
+    """The general rule, not a list of "sensitive" flags.
+
+    The first version excluded only can_manage_settings, so a delegated manager
+    could still hand themselves a role carrying card charging, MFA reset, the org
+    credential vault or ticket deletion — a reviewer reproduced it and the POST
+    returned 302 with role_obj changed. A role is assignable only if everything
+    it grants is something the actor already holds.
+    """
+    from core.models import Role
+    mgr = _user_manager('esc_flags')
+    for flag in ('can_process_payments', 'can_reset_user_mfa',
+                 'can_view_org_credentials', 'can_delete_ticket',
+                 'can_view_device_credentials'):
+        juicy = Role.objects.create(name=f'Juicy-{flag}', **{flag: True})
+        client.force_login(mgr)
+        client.post(reverse('core:user_edit', args=[mgr.pk]), {
+            'first_name': '', 'last_name': '', 'username': mgr.username,
+            'email': '', 'phone': '', 'level': mgr.level,
+            'role_obj': juicy.pk, 'is_active': 'on',
+        })
+        mgr.refresh_from_db()
+        assert mgr.role_obj_id != juicy.pk, f'a manager granted themselves {flag}'
+
+
+@pytest.mark.django_db
+def test_a_manager_can_still_assign_a_role_within_their_own_powers(client):
+    """The rule restricts delegation; it must not make delegation useless."""
+    from core.models import Role
+    mgr = _user_manager('deleg_ok')
+    mgr.role_obj.can_edit_ticket = True
+    mgr.role_obj.save()
+    plain = Role.objects.create(name='PlainBench', can_edit_ticket=True)
+    target = User.objects.create_user(username='benchie', password='x')
+    client.force_login(mgr)
+    client.post(reverse('core:user_edit', args=[target.pk]), {
+        'first_name': '', 'last_name': '', 'username': target.username,
+        'email': '', 'phone': '', 'level': 1,
+        'role_obj': plain.pk, 'is_active': 'on',
+    })
+    target.refresh_from_db()
+    assert target.role_obj_id == plain.pk, 'a manager could not assign a role within their powers'
+
+
+@pytest.mark.django_db
+def test_user_manager_cannot_raise_their_own_escalation_level(client):
+    """Level is a permission: ticket visibility reads it.
+
+    _scope_tickets_for() shows a technician tickets escalated up to their own
+    level, so raising it widens what they can read. A reviewer took an L1
+    delegated manager to L3 through this form; the POST returned 302.
+    """
+    mgr = _user_manager('esc_level')
+    assert mgr.level == 1
+    client.force_login(mgr)
+    client.post(reverse('core:user_edit', args=[mgr.pk]), {
+        'first_name': '', 'last_name': '', 'username': mgr.username,
+        'email': '', 'phone': '', 'level': 3,
+        'role_obj': mgr.role_obj_id, 'is_active': 'on',
+    })
+    mgr.refresh_from_db()
+    assert mgr.level == 1, 'a manager raised their own escalation level'
+
+
+@pytest.mark.django_db
+def test_user_manager_cannot_act_on_someone_holding_powers_they_lack(client):
+    """Half the rule is not the rule.
+
+    Blocking role assignment but still allowing a password reset on a
+    better-equipped colleague leaves the same door open: sign in as them and use
+    the capability. "Outranks" is measured across the whole permission set.
+    """
+    from core.models import Role
+    mgr = _user_manager('esc_lateral')
+    payer_role = Role.objects.create(name='Cashier', can_process_payments=True)
+    payer = User.objects.create_user(username='cashier_x', password='cashpass',
+                                     role_obj=payer_role)
+    client.force_login(mgr)
+    assert client.get(reverse('core:user_edit', args=[payer.pk])).status_code == 403
+    resp = client.post(reverse('core:user_set_password', args=[payer.pk]),
+                       {'password1': 'taken-over-1234', 'password2': 'taken-over-1234'})
+    assert resp.status_code == 403
+    payer.refresh_from_db()
+    assert payer.check_password('cashpass')
+
+
+@pytest.mark.django_db
+def test_an_admin_is_still_unrestricted_by_any_of_this(client):
+    from core.models import Role
+    admin = User.objects.create_user(username='boss_unrestricted', password='x',
+                                     is_staff=True, is_superuser=True)
+    juicy = Role.objects.create(name='EverythingRole', can_process_payments=True,
+                                can_manage_settings=True)
+    target = User.objects.create_user(username='promote_me', password='x')
+    client.force_login(admin)
+    client.post(reverse('core:user_edit', args=[target.pk]), {
+        'first_name': '', 'last_name': '', 'username': target.username,
+        'email': '', 'phone': '', 'level': 3,
+        'role_obj': juicy.pk, 'is_staff': 'on', 'is_active': 'on',
+    })
+    target.refresh_from_db()
+    assert target.role_obj_id == juicy.pk and target.level == 3 and target.is_staff

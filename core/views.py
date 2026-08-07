@@ -257,6 +257,35 @@ def _can_close_workorder(user):
     return _is_admin(user) or _role_flag(user, 'can_close_workorder')
 
 
+def _role_flag_names():
+    """Every permission flag on Role, read from the model.
+
+    Derived, never hand-listed. A hand-maintained list of "the sensitive ones"
+    is wrong the day someone adds a flag and forgets to update it — and that is
+    not hypothetical: the first version of _assignable_roles_for() excluded
+    exactly one flag, so a delegated manager could still hand themselves a role
+    carrying card charging, MFA reset, the credential vault or ticket deletion.
+    """
+    from .models import Role
+    return [
+        f.name for f in Role._meta.get_fields()
+        if getattr(f, 'get_internal_type', lambda: None)() == 'BooleanField'
+        and f.name.startswith('can_')
+    ]
+
+
+def _effective_flags(user):
+    """The permissions this user actually holds. Admins hold all of them."""
+    if _is_admin(user) or user.is_superuser:
+        return set(_role_flag_names())
+    return {f for f in _role_flag_names() if _role_flag(user, f)}
+
+
+def _role_grants(role):
+    """The permissions a role hands out."""
+    return {f for f in _role_flag_names() if getattr(role, f, False)}
+
+
 def _is_privileged_account(target):
     """True if this account already holds administrative power.
 
@@ -290,20 +319,33 @@ def _may_act_on_user(actor, target):
     """
     if _is_admin(actor):
         return True
-    return not _is_privileged_account(target)
+    if _is_privileged_account(target):
+        return False
+    # ⚠ And the target must not hold a permission the actor lacks. Otherwise the
+    # rule is only half applied: set that person's password, sign in as them, and
+    # you are using a capability you were never granted. "Outranks" has to be
+    # measured against the whole permission set, not just the Settings flag.
+    return _effective_flags(target) <= _effective_flags(actor)
 
 
 def _assignable_roles_for(actor):
     """Roles `actor` may hand out.
 
-    A non-admin manager must not assign a role that grants Settings access —
-    that is the same escalation as ticking is_staff, wearing a different hat.
+    The rule is the general one: a role is assignable only if everything it
+    grants is something the actor already holds. This started as "exclude roles
+    with can_manage_settings", which was the rule stated in the docstring above
+    it implemented too narrowly — a reviewer showed a delegated manager handing
+    themselves card charging, MFA reset, the org credential vault or ticket
+    deletion, none of which touch Settings. Comparing the whole permission set
+    covers every flag now and every flag added later.
     """
     from .models import Role
     qs = Role.objects.all().order_by('name')
     if _is_admin(actor):
         return qs
-    return qs.filter(can_manage_settings=False)
+    held = _effective_flags(actor)
+    allowed = [r.pk for r in qs if _role_grants(r) <= held]
+    return Role.objects.filter(pk__in=allowed).order_by('name')
 
 
 def _can_manage_users(user):

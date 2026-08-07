@@ -34,9 +34,11 @@ the Unreleased entries move under that version and prod gets a single update.
 - **"Manage Users" now actually grants user management, without granting more than that.**
   The box was ignored in favour of an administrator check, so ticking it did nothing. It
   works now, and a role that has it can add, edit and remove users and set their passwords
-  — but it cannot make anyone an administrator, cannot hand out a role that reaches
-  Settings, and cannot edit, delete or reset the password of anyone who is already an
-  administrator. Without those limits the permission was a way to become the owner: tick
+  — but only within its own authority. It cannot make anyone an administrator, cannot give
+  out a role carrying any permission it does not itself hold (charging a card, resetting
+  two-factor, the credential vault, deleting tickets), cannot raise anyone's escalation
+  level above its own, and cannot edit, delete or reset the password of anyone who is
+  already an administrator or who holds a permission it lacks. Without those limits the permission was a way to become the owner: tick
   "Admin" on your own account, or reset the owner's password and sign in as them.
   Administrators are unaffected. The stock Technician role does not have this permission.
 - **Converting a ticket to a work order needs both "Create Work Orders" and "Edit

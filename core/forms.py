@@ -992,6 +992,17 @@ class UserCreateForm(forms.ModelForm):
         self.fields.pop('is_staff', None)
         if 'role_obj' in self.fields:
             self.fields['role_obj'].queryset = _assignable_roles_for(actor)
+        if 'level' in self.fields:
+            # ⚠ Escalation level is a permission, not profile decoration.
+            # _scope_tickets_for() lets a technician see tickets escalated up to
+            # THEIR level, so raising your own level widens what you can read. A
+            # reviewer set an L1 delegated manager to L3 through this form. Cap
+            # the choices at the actor's own level: you cannot grant a reach you
+            # do not have.
+            self.fields['level'].choices = [
+                (value, label) for value, label in self.fields['level'].choices
+                if not str(value).isdigit() or int(value) <= actor.level
+            ]
         return self
 
     def save(self, commit=True):
@@ -1043,6 +1054,17 @@ class UserEditForm(forms.ModelForm):
         self.fields.pop('is_staff', None)
         if 'role_obj' in self.fields:
             self.fields['role_obj'].queryset = _assignable_roles_for(actor)
+        if 'level' in self.fields:
+            # ⚠ Escalation level is a permission, not profile decoration.
+            # _scope_tickets_for() lets a technician see tickets escalated up to
+            # THEIR level, so raising your own level widens what you can read. A
+            # reviewer set an L1 delegated manager to L3 through this form. Cap
+            # the choices at the actor's own level: you cannot grant a reach you
+            # do not have.
+            self.fields['level'].choices = [
+                (value, label) for value, label in self.fields['level'].choices
+                if not str(value).isdigit() or int(value) <= actor.level
+            ]
         return self
 
 
