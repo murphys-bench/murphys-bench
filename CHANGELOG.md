@@ -8,6 +8,118 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Security
+
+- **Eleven role permissions are now enforced on the main ticket and work order screens.**
+  These checkboxes in Settings → Roles were displayed but never checked by anything: "View
+  All Tickets", "Create Tickets", "Edit Tickets", "Close/Resolve Tickets", "Delete
+  Tickets", "Assign Tickets", "Internal Replies", "Customer Replies", "Create Work
+  Orders", "Edit Work Orders" and "Close Work Orders". Whatever you set them to, every
+  technician could do all of it. This cut both ways: unchecking a box did not take an
+  ability away, and ticking one did not hand it over — "Delete Tickets" in particular
+  could never grant deletion, because deletion checked a separate administrator flag
+  instead. If you run Murphy's Bench alone this changed nothing you would have noticed. If
+  you have more than one technician, the permissions you configured were not the
+  permissions you had. Found by an outside review of the public repository.
+- **The smaller actions obey the same permissions as the screens they sit on.** A first
+  pass covered creating, editing, closing, deleting, assigning and replying, but left the
+  buttons around them open, so "Edit Work Orders" could be switched off while a technician
+  still added notes, logged time, ticked checklist items, uploaded attachments, changed
+  billing, and added, repriced or deleted the priced lines that decide what a job is worth.
+  The ticket side was the same for escalating, linking, logging time, dismissing a
+  needs-response flag and acknowledging an overdue ticket. All of those now follow the box
+  that claims to cover them.
+- **"Manage Users" now actually grants user management, without granting more than that.**
+  The box was ignored in favour of an administrator check, so ticking it did nothing. It
+  works now, and a role that has it can add, edit and remove users and set their passwords
+  — but only within its own authority. It cannot make anyone an administrator, cannot give
+  out a role carrying any permission it does not itself hold (charging a card, resetting
+  two-factor, the credential vault, deleting tickets), and cannot raise anyone's escalation
+  level above its own. It also cannot edit, delete, reset the password of, or clear the
+  two-factor of anyone who outranks it — meaning anyone who is an administrator, holds a
+  permission it lacks, or sits at a higher escalation level. Escalation level counts
+  because a higher-level technician can see tickets escalated to them, so taking over such
+  an account would buy visibility the permission never granted.
+
+  Those limits are the whole point. Without them, this one permission was a way to become
+  the owner: tick "Admin" on your own account, give yourself a role that reaches Settings,
+  or reset the owner's password and sign in as them. Administrators are unaffected, and the
+  stock Technician role does not have this permission.
+- **Converting a ticket to a work order needs both "Create Work Orders" and "Edit
+  Tickets".** Converting creates the work order and also ends the ticket, so it needs the
+  permission for each. It previously asked only for the first, which let a role that could
+  not otherwise finish a ticket finish one this way.
+- **"Close/Resolve Tickets" is switched on for every existing role when you upgrade.**
+  Every technician could close tickets before, regardless of the setting, so enforcing the
+  old default would have taken that away from working shops that changed nothing. The
+  upgrade preserves what you actually had; turn it off for a role when you mean to.
+- **Claiming an unassigned ticket is deliberately not restricted** by "Assign Tickets".
+  Any technician can still pick up unclaimed work — that permission covers handing a
+  ticket to someone else, which is the part that needs the grant.
+- **"View All Tickets" is switched off for non-administrator roles when you upgrade, so
+  technicians keep seeing exactly what they see today.** The stock Technician role has had
+  that box ticked since long before Murphy's Bench limited what a technician sees, and
+  because nothing read it, technicians got the normal view regardless: their own tickets,
+  plus the unclaimed pool, plus anything escalated to them. Enforcing the box as-found
+  would have shown every technician every ticket in the shop the moment you upgraded,
+  without you changing a thing. Administrator roles are left alone — they see everything
+  either way, and unticking a box that still lets you see everything would be its own lie.
+  Turn it on for a role when you actually want that.
+
+### Fixed
+
+- **"Closed" is no longer a work order status. A work order is Completed, or Cancelled.**
+  "Closed" sat between the two and behaved like neither: the register would settle it,
+  the reports counted it as finished, the work order list called it active, and if the job
+  came from a ticket, that ticket never showed "Work is complete — ready for final contact"
+  and never offered its Close Ticket button — it stayed stranded behind a job the app
+  insisted was still open. Most shops will never have seen it, because it was already
+  switched off in Settings → Statuses and the dropdown stopped offering it; the views
+  accepted it anyway. Any work order still holding it becomes Completed when you upgrade.
+  **Tickets are unaffected and still close** — this is only about work orders.
+- **Editing a line on a sale or a quote no longer asks for work order permission.** Sales,
+  quotes, recurring client charges and contract lines share the same underlying editor as
+  work orders, and it had started demanding work-order rights for all of them — so a role
+  set up to handle sales or quoting was locked out of its own pricing. Each now asks for
+  the permission that covers the record being edited.
+- **Buttons match what your permissions allow.** Convert, Dismiss, Escalate, the ticket
+  timer, Apply Checklist, the checklist pass/fail dropdowns and the line-item buttons were
+  still drawn for people the server would refuse. They now appear only when they will work,
+  and the checklist shows its results as plain text to anyone who cannot change them. The
+  user list does the same: Edit, Set Password, Delete and Reset MFA appear per person, only
+  for accounts you are allowed to act on, and Manage Roles only for administrators. Its two
+  links into Settings are shown only to people Settings will let in.
+- **The ticket status dropdown rejects a status that does not exist**, matching the same
+  fix on work orders.
+- **A negative price is refused instead of silently becoming no price at all.** Typing
+  -60.00 into a line item produced a line with no price, no error, and an unchanged total —
+  so anyone trying to record a discount got a worthless line and no hint that it had not
+  worked. Murphy's Bench has no discount line yet; it now says so rather than pretending.
+- **The work order status panel now rejects a status that does not exist.** It saved
+  whatever was submitted, so a stale page, a typo, or a retired status could leave a work
+  order in a state that no list, report or register recognised. The full edit form always
+  checked this; the inline panel did not.
+- **A finished job shows up under "Recently Closed" again, and leaves "My Work".** The
+  technician dashboard's Recently Closed panel looked for the retired "Closed" status and so
+  could never list a completed job. Separately, and for longer, the My Work sidebar excluded
+  cancelled work but not completed work, so finished jobs stayed on a technician's list
+  indefinitely. Both now use the same definition of a finished work order as everywhere else.
+- **The roadmap no longer says restoring a backup is command-line only.** Restore from
+  Settings shipped in v0.11.0.
+
+- **A role with "Manage Users" can now find the user list.** The only way into Settings —
+  where users are managed — was shown to Django staff accounts alone, so granting that
+  permission handed someone an ability with no route to it but typing the address. Such a
+  role now gets a Users link of its own. For the same reason, a role with "Manage Settings"
+  now sees the Admin link: it could always open Settings, but nothing offered the way in.
+
+### Changed
+
+- The weekly dependency-audit workflow now pins its GitHub Actions to exact commits, the
+  way the main CI workflow already did.
+
 ## v0.11.3 — 2026-08-05
 
 ### Fixed

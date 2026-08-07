@@ -420,11 +420,25 @@
             <div class="text-sm truncate" style="opacity:0.5">{{ user.role_obj.name|default:user.role|default:"" }}</div>
         </div>
 
-        {% if user.is_staff %}
+        {% comment %}
+        is_admin, not is_staff: a role holding can_manage_settings IS an admin
+        everywhere else in the app (see views._is_admin), so gating the only link to
+        Settings on Django staff alone hid the section from the very people the role
+        was created for. Below it, a delegated user manager who is not an admin gets a
+        direct Users link — the user list lives under Settings, which they cannot open,
+        so without this "Manage Users" granted an ability with no way to reach it.
+        {% endcomment %}
+        {% if is_admin %}
         <a href="{% url 'core:settings' %}" title="Admin Settings"
            class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-base transition-colors hover:bg-white/10"
            style="opacity:0.75">
             {% icon 'shield' 5 %}<span class="nav-label">Admin</span>
+        </a>
+        {% elif can_manage_users %}
+        <a href="{% url 'core:user_list' %}" title="Users"
+           class="nav-item flex items-center gap-3 px-2 py-2 rounded-lg text-base transition-colors hover:bg-white/10"
+           style="opacity:0.75">
+            {% icon 'user' 5 %}<span class="nav-label">Users</span>
         </a>
         {% endif %}
 

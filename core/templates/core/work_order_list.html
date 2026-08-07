@@ -10,10 +10,12 @@
             <h1 class="text-2xl font-bold text-gray-900 shrink-0">Work Orders</h1>
             <div class="flex-1"></div>
             {% include "core/partials/header_bell.html" %}
+            {% if can_create_workorder %}
             <a href="{% url 'core:work_order_create' %}"
                class="px-4 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium shrink-0">
                 + New Work Order
             </a>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -108,7 +110,7 @@
         {% else %}
             <div class="px-6 py-16 text-center">
                 <p class="text-gray-400 text-lg mb-2">No work orders found.</p>
-                <p class="text-gray-400 text-sm">Try clearing your filters or <a href="{% url 'core:work_order_create' %}" class="text-blue-600 hover:underline">create a new work order</a>.</p>
+                <p class="text-gray-400 text-sm">Try clearing your filters{% if can_create_workorder %} or <a href="{% url 'core:work_order_create' %}" class="text-blue-600 hover:underline">create a new work order</a>{% endif %}.</p>
             </div>
         {% endif %}
     </div>

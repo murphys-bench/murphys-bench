@@ -74,7 +74,13 @@ class Role(models.Model):
     # Permission flags
     can_manage_settings = models.BooleanField(default=False, help_text='Access admin panel and SiteSettings.')
     can_view_all_tickets = models.BooleanField(default=False, help_text='View all tickets (vs. own only).')
-    can_close_tickets = models.BooleanField(default=False, help_text='Resolve and close tickets.')
+    # ⚠ Default flipped False → True in migration 0102, which also backfilled True
+    # onto every existing role. Until v0.12.0 nothing enforced this flag, so every
+    # technician could close tickets regardless of what the box said. Enforcing it
+    # at the old default would have silently removed that from working shops on
+    # upgrade. True is what those shops already had; unchecking it is now the
+    # deliberate act. Do not "restore" the False default — that is the upgrade bug.
+    can_close_tickets = models.BooleanField(default=True, help_text='Resolve and close tickets.')
     can_manage_users = models.BooleanField(default=False, help_text='Create and manage user accounts.')
     can_view_reports = models.BooleanField(default=False, help_text='Access reporting section (Batch 6).')
     can_view_restricted_kb = models.BooleanField(default=False, help_text='View admin-only KB articles.')
@@ -1066,12 +1072,24 @@ class TicketWorkLog(models.Model):
 class WorkOrder(models.Model):
     """Repair job (main entity)"""
 
+    # ⚠ There is no 'closed' work order. A work order finishes as 'completed'
+    # (or 'cancelled' if it never happened) — Mike's decision, and the reason
+    # mark_completed() is the only terminal helper on this model. 'closed' used
+    # to sit between the two and belonged to neither: the Register settled it,
+    # Reports counted it as finished, the list tabs treated it as active, and a
+    # linked ticket was never told the work was done. It was already switched off
+    # in Settings → Statuses, so the dropdown had stopped offering it, but the
+    # views still accepted it from a posted form — which is how it survived long
+    # enough to become a permission bypass. Removed in migration 0104; any work
+    # order still holding it was moved to 'completed'.
+    #
+    # Tickets are unaffected and DO close. Ticket.STATUS_CHOICES keeps its own
+    # 'closed', and the migration is scoped to entity_type='workorder'.
     STATUS_CHOICES = [
         ('new', 'New'),
         ('assigned', 'Assigned'),
         ('in_progress', 'In Progress'),
         ('completed', 'Completed'),
-        ('closed', 'Closed'),
         ('cancelled', 'Cancelled'),
     ]
 

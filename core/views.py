@@ -167,6 +167,232 @@ def _can_reset_mfa(user):
     return user.is_superuser or user.has_perm_flag('can_reset_user_mfa')
 
 
+# --- Ticket / reply / work order capability flags -------------------------------
+#
+# ⚠ These eleven flags were displayed in Settings → Roles and in Django admin for
+# months while NO endpoint consulted them. An operator could uncheck "Close/Resolve
+# Tickets" on a role and that role's techs went on closing tickets; checking "Delete
+# Tickets" granted nothing, because deletion tested Django's is_staff instead. The
+# matrix was a picture of a permission system. Every helper below exists so a
+# checkbox means what it says, in both directions, and each has a flag-off/flag-on
+# test pair — the absence of those tests is what let the gap live.
+#
+# Admins (is_staff or can_manage_settings) bypass all of them, matching every other
+# gate in this file.
+
+def _role_flag(user, name):
+    """Read a role flag, falling back to the Role field's own default when the
+    user has no role_obj at all.
+
+    ⚠ Do NOT simplify this to a bare has_perm_flag() call. That returns False for
+    every flag when role_obj is None, and a user with no role assigned is an
+    ordinary state on existing installs — nothing has ever required one. Until
+    v0.12.0 none of these flags were enforced, so those users could create, edit,
+    assign, reply and close freely. Enforcing via has_perm_flag alone would lock
+    them out of their own tickets on upgrade, having changed nothing. The field
+    defaults are what those users effectively had, which is the same reasoning
+    migration 0102 applies to stored values on real roles.
+    """
+    if getattr(user, 'role_obj', None) is None and getattr(user, 'role', None) != 'admin':
+        from .models import Role
+        return Role._meta.get_field(name).default
+    return user.has_perm_flag(name)
+
+
+def _can_view_all_tickets(user):
+    """Whether a non-admin sees every ticket rather than their own + the unclaimed
+    pool. Off by default: the pool model is the norm and this is the opt-in."""
+    return _is_admin(user) or _role_flag(user, 'can_view_all_tickets')
+
+
+def _can_create_ticket(user):
+    return _is_admin(user) or _role_flag(user, 'can_create_ticket')
+
+
+def _can_edit_ticket(user):
+    return _is_admin(user) or _role_flag(user, 'can_edit_ticket')
+
+
+def _can_close_tickets(user):
+    """Resolve/close/reopen a ticket. ⚠ The model default was flipped False → True
+    in migration 0102 and backfilled onto existing roles, because every tech could
+    close before enforcement existed and an upgrade must not silently take that
+    away. Unchecking it is now a deliberate act by the operator."""
+    return _is_admin(user) or _role_flag(user, 'can_close_tickets')
+
+
+def _can_delete_ticket(user):
+    """⚠ This one GRANTS as well as denies. Deletion used to test is_staff, so the
+    checkbox could never hand a non-admin role the capability it named. It can now."""
+    return _is_admin(user) or _role_flag(user, 'can_delete_ticket')
+
+
+def _can_assign_ticket(user):
+    """Hand a ticket to someone else, or unassign one. Deliberately NOT consulted
+    for self-claiming out of the unclaimed pool: the pool only works if any tech
+    can pick work up, and claiming takes nothing away from anyone."""
+    return _is_admin(user) or _role_flag(user, 'can_assign_ticket')
+
+
+def _can_reply_internal(user):
+    return _is_admin(user) or _role_flag(user, 'can_reply_internal')
+
+
+def _can_reply_customer(user):
+    """Send a reply the client actually receives. Separate from the internal note
+    flag because "may write on the ticket" and "may speak to the customer" are
+    genuinely different grants in a shop with junior techs."""
+    return _is_admin(user) or _role_flag(user, 'can_reply_customer')
+
+
+def _can_create_workorder(user):
+    return _is_admin(user) or _role_flag(user, 'can_create_workorder')
+
+
+def _can_edit_workorder(user):
+    return _is_admin(user) or _role_flag(user, 'can_edit_workorder')
+
+
+def _can_close_workorder(user):
+    return _is_admin(user) or _role_flag(user, 'can_close_workorder')
+
+
+def _role_flag_names():
+    """Every permission flag on Role, read from the model.
+
+    Derived, never hand-listed. A hand-maintained list of "the sensitive ones"
+    is wrong the day someone adds a flag and forgets to update it — and that is
+    not hypothetical: the first version of _assignable_roles_for() excluded
+    exactly one flag, so a delegated manager could still hand themselves a role
+    carrying card charging, MFA reset, the credential vault or ticket deletion.
+    """
+    from .models import Role
+    return [
+        f.name for f in Role._meta.get_fields()
+        if getattr(f, 'get_internal_type', lambda: None)() == 'BooleanField'
+        and f.name.startswith('can_')
+    ]
+
+
+def _effective_flags(user):
+    """The permissions this user actually holds. Admins hold all of them."""
+    if _is_admin(user) or user.is_superuser:
+        return set(_role_flag_names())
+    return {f for f in _role_flag_names() if _role_flag(user, f)}
+
+
+def _role_grants(role):
+    """The permissions a role hands out."""
+    return {f for f in _role_flag_names() if getattr(role, f, False)}
+
+
+# Everything that makes one account outrank another, in ONE place.
+#
+# ⚠ THE HISTORY, because it is the reason this is a table and not a chain of ifs.
+# "You cannot act on someone who outranks you" has now been implemented three
+# times and been wrong twice. First it meant "is not an admin", and a reviewer
+# handed a manager a role carrying card charging. Then it also meant "holds no
+# permission I lack", and a reviewer reset an L3 technician's password from an L1
+# manager account — because escalation level is rank too: _scope_tickets_for()
+# shows a technician tickets escalated up to their level, so taking over an L3
+# account buys visibility an L1 was never granted.
+#
+# Each fix added the dimension that had just been exploited. Listing the
+# dimensions as data instead means the next one is added in one place, and
+# test_every_authority_dimension_is_compared fails if a dimension is declared
+# here but not actually compared.
+_AUTHORITY_DIMENSIONS = ('admin', 'flags', 'level')
+
+
+def _authority_of(user):
+    """What this account's rank is made of. Keys must match _AUTHORITY_DIMENSIONS."""
+    return {
+        'admin': _is_admin(user) or user.is_superuser,
+        'flags': _effective_flags(user),
+        'level': getattr(user, 'level', 1),
+    }
+
+
+def _outranks_or_equal(actor, target):
+    """True if `actor` holds at least everything `target` does, on every dimension."""
+    a, t = _authority_of(actor), _authority_of(target)
+    if t['admin'] and not a['admin']:
+        return False
+    if not (t['flags'] <= a['flags']):
+        return False
+    if t['level'] > a['level']:
+        return False
+    return True
+
+
+def _is_privileged_account(target):
+    """True if this account already holds administrative power.
+
+    Django staff, superusers, and anyone whose role can reach Settings — which
+    is what _is_admin() accepts, so it is what a non-admin user-manager must not
+    be able to touch or become.
+    """
+    return bool(
+        target.is_staff
+        or target.is_superuser
+        or (getattr(target, 'role_obj', None) and target.role_obj.can_manage_settings)
+    )
+
+
+def _may_act_on_user(actor, target):
+    """Whether `actor` may edit, delete or set the password of `target`.
+
+    ⚠ THE POINT OF THIS FUNCTION. "Manage Users" is a real permission now, and
+    without this it was a full administrator takeover in three separate ways: the
+    user form exposes `is_staff`, so a manager could tick it on their own account
+    and satisfy _is_admin(); it exposes `role_obj`, so they could assign
+    themselves a role carrying can_manage_settings and satisfy it that way; and
+    the set-password view took any target, so they could reset an admin's
+    password and simply log in as them. All three were reproduced by an outside
+    reviewer against the first version of this. I enforced the checkbox without
+    asking what the checkbox could reach.
+
+    The rule is the ordinary one for delegated user administration: you cannot
+    grant what you do not hold, and you cannot act on someone who outranks you.
+    Admins are unrestricted, as before.
+    """
+    return _is_admin(actor) or _outranks_or_equal(actor, target)
+
+
+def _assignable_roles_for(actor):
+    """Roles `actor` may hand out.
+
+    The rule is the general one: a role is assignable only if everything it
+    grants is something the actor already holds. This started as "exclude roles
+    with can_manage_settings", which was the rule stated in the docstring above
+    it implemented too narrowly — a reviewer showed a delegated manager handing
+    themselves card charging, MFA reset, the org credential vault or ticket
+    deletion, none of which touch Settings. Comparing the whole permission set
+    covers every flag now and every flag added later.
+    """
+    from .models import Role
+    qs = Role.objects.all().order_by('name')
+    if _is_admin(actor):
+        return qs
+    held = _effective_flags(actor)
+    allowed = [r.pk for r in qs if _role_grants(r) <= held]
+    return Role.objects.filter(pk__in=allowed).order_by('name')
+
+
+def _can_manage_users(user):
+    """Create, edit, delete user accounts and set passwords.
+
+    ⚠ This one GRANTS. User management was gated on _is_admin alone, so the
+    "Manage Users" box could never hand the capability to a non-admin role — the
+    twelfth decorative checkbox, left unfixed in v0.12.0's first pass because
+    enabling it widens who can create logins and that was Mike's call to make.
+    He made it: a checkbox and its enforcement must agree, so the flag now works.
+    Admins still qualify, so nothing an admin could do before is lost, and the
+    seeded Technician role has it False.
+    """
+    return _is_admin(user) or _role_flag(user, 'can_manage_users')
+
+
 class SettingsAdminMixin(LoginRequiredMixin):
     """The single administrative gate for everything under /settings/.
 
@@ -242,7 +468,12 @@ def _scope_tickets_for(qs, user):
     # below, so every technician saw "Backup failed: rclone auth error" in their
     # queue and could claim, answer or close it — none of which a technician can
     # act on, and closing one hides a real outage. Owner-facing only.
+    #
+    # ⚠ System tickets are excluded BEFORE the can_view_all_tickets branch, so
+    # "view all tickets" means all shop work, never the owner's own alert feed.
     qs = qs.exclude(source='system')
+    if user.has_perm_flag('can_view_all_tickets'):
+        return qs
     return qs.filter(
         Q(assigned_to=user)
         | Q(assigned_to__isnull=True)
@@ -473,8 +704,13 @@ class DashboardView(LoginRequiredMixin, View):
             wo_qs = wo_qs.filter(assigned_to=request.user)
         open_work_orders = wo_qs.order_by('-created_at')[:10]
 
+        # ⚠ Was ['closed', 'cancelled'] — a second hand-written list of what
+        # "finished" means, sitting three lines below the constant that exists to
+        # be the only one. Retiring the `closed` status left it naming a state
+        # nothing can hold, so a dashboard panel called "Recently Closed" could
+        # never show a completed job again.
         recently_closed = WorkOrder.objects.select_related('client', 'assigned_to').filter(
-            status__in=['closed', 'cancelled']
+            status__in=WO_CLOSED_STATUSES
         ).order_by('-updated_at')[:5]
 
         # Team workload (admin only)
@@ -560,6 +796,17 @@ class DashboardView(LoginRequiredMixin, View):
         return render(request, self.template_name, context)
 
 
+# Statuses that mean a work order is finished: off the active list, settleable at the
+# register, and — when a ticket is linked — ready for final client contact.
+#
+# ⚠ This list is now complete because 'closed' no longer exists as a work order status
+# (see WorkOrder.STATUS_CHOICES and migration 0104). It used to, and the resulting
+# three-way disagreement — the Register settled it, Reports counted it finished, this
+# constant called it active — is what let an edit-only role finish a work order by
+# posting status=closed. Two intermediate fixes tried to reconcile the disagreement,
+# first by gating permissions on a second constant, then by folding 'closed' in here.
+# Deleting the status removed the disagreement instead of managing it, and there is
+# nothing left to keep in step.
 WO_CLOSED_STATUSES = ['completed', 'cancelled']
 
 
@@ -667,7 +914,7 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         open_tickets = (
             Ticket.objects
             .filter(client=wo.client)
-            .exclude(status__in=('resolved', 'closed'))
+            .exclude(status__in=TICKET_CLOSED_STATUSES)
             .select_related('created_by')
             .prefetch_related('replies')
             .order_by('-created_at')
@@ -681,11 +928,23 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         # Billing
         invoice, _ = Invoice.objects.get_or_create(work_order=self.object)
         context['invoice'] = invoice
-        # Dynamic status choices for inline status dropdown
-        context['wo_status_choices'] = list(
+        # Dynamic status choices for inline status dropdown. Statuses that finish a
+        # WO are dropped for a user without the close grant, so the dropdown cannot
+        # offer a move the server will refuse.
+        choices = list(
             StatusDefinition.objects.filter(entity_type='workorder', is_active=True)
             .order_by('sort_order').values_list('slug', 'label')
         )
+        if not _can_close_workorder(self.request.user):
+            # The WO's CURRENT status always survives the filter even when it is a
+            # closing one. Dropping it would leave an already-completed WO showing
+            # some other status preselected, and the next save of an unrelated
+            # field would silently reopen it.
+            choices = [
+                c for c in choices
+                if c[0] not in WO_CLOSED_STATUSES or c[0] == self.object.status
+            ]
+        context['wo_status_choices'] = choices
         return context
 
 
@@ -713,6 +972,8 @@ class WorkOrderAddTimeView(LoginRequiredMixin, View):
     """Add minutes to a work order's time_spent_minutes. Returns updated display fragment."""
 
     def post(self, request, pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         wo = _get_scoped_wo_or_404(request, pk)
         try:
             minutes = max(0, int(request.POST.get('minutes', 0)))
@@ -733,6 +994,8 @@ class TicketAddTimeView(LoginRequiredMixin, View):
     """
 
     def post(self, request, pk):
+        if not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         try:
             minutes = max(0, int(request.POST.get('minutes', 0)))
@@ -754,6 +1017,58 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
     def post(self, request, pk):
         wo = _get_scoped_wo_or_404(request, pk)
         p = request.POST
+
+        # Same split as the ticket status dropdown: this one panel both edits a WO
+        # and finishes it, so the gate follows the move being made. Read the status
+        # before it is overwritten below, or the comparison tests the new value
+        # against itself and a role without close rights closes work orders here.
+        new_status = p.get('status', wo.status)
+
+        # ⚠ Validate the posted status against the statuses that actually exist.
+        # This panel used to assign request.POST['status'] straight onto the model,
+        # and WorkOrder.status is a plain CharField with no `choices=` (migration
+        # 0036 moved status definitions into the database so shops can add their
+        # own), so ANY string was accepted and saved. WorkOrderForm has always
+        # validated the same field against a ChoiceField built from these very
+        # rows; only this endpoint did not. That gap is what kept `closed`
+        # reachable by POST after it was switched off in Settings → Statuses, and
+        # it would equally accept a typo or a stale bookmark, leaving a work order
+        # in a status no list, report or register knows about. The WO's CURRENT
+        # status is always allowed through so a legacy value cannot make an
+        # unrelated edit unsavable.
+        valid_statuses = set(
+            StatusDefinition.objects.filter(entity_type='workorder', is_active=True)
+            .values_list('slug', flat=True)
+        )
+        valid_statuses.add(wo.status)
+        if new_status not in valid_statuses:
+            return HttpResponse('Forbidden', status=403)
+        closing = (
+            new_status in WO_CLOSED_STATUSES
+            and wo.status not in WO_CLOSED_STATUSES
+        )
+        if closing and not _can_close_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
+        if not closing and not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
+
+        # ⚠ Permission to FINISH a work order is not permission to rewrite it. This
+        # panel posts every field at once, so letting a closing request through
+        # wholesale handed a close-only role the priority, assignee, contact,
+        # device, repair type, schedule and invoice ref as well — a reviewer
+        # reproduced it by posting status=completed&priority=urgent. When the user
+        # may close but not edit, the status is the only thing that moves; the rest
+        # of the request is ignored rather than rejected, so the normal Complete
+        # button still works for them.
+        status_only = closing and not _can_edit_workorder(request.user)
+        if status_only:
+            wo.status = new_status
+            if wo.status == 'completed' and not wo.completed_date:
+                from django.utils import timezone as tz
+                wo.completed_date = tz.now()
+            wo.save()
+            _flag_ticket_wo_complete(wo)
+            return redirect('core:work_order_detail', pk=pk)
 
         wo.status       = p.get('status', wo.status)
         wo.priority     = p.get('priority', wo.priority)
@@ -799,6 +1114,46 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
         return redirect('core:work_order_detail', pk=pk)
 
 
+# Billing statuses that mean a number has already gone to the client.
+_BILLED_STATUSES = ('invoiced', 'paid', 'paid_direct')
+
+
+def _billing_divergence(wo):
+    """Has this work order's priced work drifted from what the client was billed?
+
+    MB's line items are what gets pushed to Invoice Ninja, and nothing stops them
+    being edited after the invoice goes out: a technician with no edit permission
+    at all can add a part, rewrite a price, or delete a line on a completed and
+    invoiced job. Every one of those was reproduced on a real request. The
+    invoice keeps its original figure, Invoice Ninja keeps its own copy, and
+    nothing anywhere says the three no longer agree.
+
+    Mike's ruling is to WARN, not block — shops legitimately adjust a finished
+    job when a part comes back or a labour line was wrong, and a closed ticket
+    frequently reopens on a client reply, so a hard stop would fight real work.
+    What was missing is not permission, it is that the divergence was silent.
+
+    Returns None when there is nothing to say: no invoice, nothing billed yet, no
+    amount recorded, or the numbers still agree.
+    """
+    invoice = getattr(wo, 'invoice', None)
+    if invoice is None or invoice.billing_status not in _BILLED_STATUSES:
+        return None
+    if invoice.amount is None:
+        return None
+    current = wo.line_items_total
+    if current == invoice.amount:
+        return None
+    return {
+        'billed': invoice.amount,
+        'current': current,
+        'difference': abs(current - invoice.amount),
+        'increased': current > invoice.amount,
+        'billing_status': invoice.get_billing_status_display(),
+        'in_ref': wo.invoice_ninja_ref or invoice.invoice_ninja_ref or '',
+    }
+
+
 def _flag_ticket_wo_complete(wo):
     """Arm wo_complete on linked ticket when WO is completed/closed; clear it if WO re-opened."""
     try:
@@ -831,6 +1186,8 @@ class WorkOrderAttachmentUploadView(LoginRequiredMixin, View):
     """Upload files directly to a work order (not tied to a note)."""
 
     def post(self, request, pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         wo = _get_scoped_wo_or_404(request, pk)
         _save_attachments(request, wo)
         return redirect('core:work_order_detail', pk=pk)
@@ -840,6 +1197,8 @@ class WorkOrderApplyChecklistView(LoginRequiredMixin, View):
     """Re-apply checklist items from the flat bank to an existing WO."""
 
     def post(self, request, pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         wo = _get_scoped_wo_or_404(request, pk)
         _apply_checklist_items(wo)
         return redirect('core:work_order_detail', pk=pk)
@@ -1141,6 +1500,8 @@ class WorkOrderNoteCreateView(LoginRequiredMixin, View):
     """Add a note to a work order — returns HTML fragment for HTMX"""
 
     def post(self, request, pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         work_order = _get_scoped_wo_or_404(request, pk)
         note_type = request.POST.get('note_type', 'internal')
         content = request.POST.get('content', '').strip()
@@ -1324,6 +1685,8 @@ class WorkOrderItemCheckView(LoginRequiredMixin, View):
     """HTMX: update pre_check or post_check on a checklist item, return full checklist."""
 
     def post(self, request, pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         item = get_object_or_404(
             WorkOrderItem.objects.filter(
                 work_order__in=_scope_assignable_for(WorkOrder.objects.all(), request.user)
@@ -1372,6 +1735,11 @@ class WorkOrderCreateView(LoginRequiredMixin, CreateView):
     model = WorkOrder
     form_class = WorkOrderForm
     template_name = 'core/work_order_form.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _can_create_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
+        return super().dispatch(request, *args, **kwargs)
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
@@ -1454,12 +1822,29 @@ class WorkOrderUpdateView(LoginRequiredMixin, UpdateView):
     def get_queryset(self):
         return _scope_assignable_for(WorkOrder.objects.all(), self.request.user)
 
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
+        return super().dispatch(request, *args, **kwargs)
+
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         kwargs['client_id'] = self.object.client_id
         return kwargs
 
     def form_valid(self, form):
+        # This form carries a status field too, so finishing a WO from here needs
+        # the close grant. `self.object.status` has already been overwritten by
+        # _post_clean(), so the previous status is read fresh from the DB — the
+        # same trap TicketUpdateView documents.
+        new_status = form.cleaned_data.get('status')
+        old_status = WorkOrder.objects.filter(pk=self.object.pk).values_list('status', flat=True).first()
+        if (
+            new_status in WO_CLOSED_STATUSES
+            and old_status not in WO_CLOSED_STATUSES
+            and not _can_close_workorder(self.request.user)
+        ):
+            return HttpResponse('Forbidden', status=403)
         response = super().form_valid(form)
         # Push any edited hardware specs back to the device master so it stays current
         self.object.sync_specs_to_device()
@@ -3595,7 +3980,7 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         open_wos = (
             WorkOrder.objects
             .filter(client=ticket.client)
-            .exclude(status__in=('completed', 'closed', 'cancelled'))
+            .exclude(status__in=WO_CLOSED_STATUSES)
             .select_related('assigned_to', 'repair_type')
             .prefetch_related('notes')
             .order_by('-created_at')
@@ -3633,6 +4018,11 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
     form_class = TicketForm
     template_name = 'core/ticket_form.html'
 
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _can_create_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
+        return super().dispatch(request, *args, **kwargs)
+
     def form_valid(self, form):
         form.instance.ticket_number = Ticket.generate_ticket_number()
         form.instance.created_by = self.request.user
@@ -3664,6 +4054,11 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
     def get_queryset(self):
         return _scope_tickets_for(Ticket.objects.all(), self.request.user)
 
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
+        return super().dispatch(request, *args, **kwargs)
+
     def form_valid(self, form):
         new_status = form.cleaned_data.get('status')
         # NOTE: MB deliberately does NOT block closing a ticket whose linked WO is
@@ -3684,6 +4079,19 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
         old_client_id, old_client_was_unsorted, old_status = Ticket.objects.filter(
             pk=self.object.pk
         ).values_list('client_id', 'client__is_unsorted', 'status').first()
+        # This form can also close a ticket, which is a separate grant from editing
+        # one, so a role that may edit but not close is refused rather than quietly
+        # let in through the side door. ⚠ The comparison uses `old_status` from the
+        # fresh query above, NOT self.object.status — _post_clean() has already
+        # written the new status onto self.object, so testing it would compare the
+        # new status against itself and never fire. That is the same in-memory
+        # mutation bug this method's own comment documents twice.
+        if (
+            new_status in Ticket.CLOSED_AT_STATUSES
+            and old_status not in Ticket.CLOSED_AT_STATUSES
+            and not _can_close_tickets(self.request.user)
+        ):
+            return HttpResponse('Forbidden', status=403)
         client_changed = bool(new_client) and old_client_id != new_client.pk
         if client_changed:
             new_device = form.cleaned_data.get('device')
@@ -3740,6 +4148,16 @@ class TicketReplyCreateView(LoginRequiredMixin, View):
         reply_type = request.POST.get('reply_type', 'internal')
         content = request.POST.get('content', '').strip()
 
+        # Writing a note on the ticket and speaking to the customer are different
+        # grants — a junior tech may be trusted with the first and not the second.
+        # The reply_type comes from the browser, so this is checked server-side on
+        # the value actually being saved, not on which button the UI showed.
+        if reply_type == 'customer_visible':
+            if not _can_reply_customer(request.user):
+                return HttpResponse('Forbidden', status=403)
+        elif not _can_reply_internal(request.user):
+            return HttpResponse('Forbidden', status=403)
+
         if not content:
             return HttpResponse(status=204)
 
@@ -3783,6 +4201,10 @@ class TicketReplyResendView(LoginRequiredMixin, View):
     """Resend a specific reply email to a chosen address."""
 
     def post(self, request, pk, reply_pk):
+        # A resend puts mail in front of the customer to an address chosen here,
+        # so it needs the customer-reply grant even though the text already exists.
+        if not _can_reply_customer(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         reply = get_object_or_404(TicketReply, pk=reply_pk, ticket=ticket)
         to_email = request.POST.get('to_email', '').strip()
@@ -3810,6 +4232,8 @@ class TicketDismissNeedsResponseView(LoginRequiredMixin, View):
     """Manually dismiss the needs_response flag with a required note."""
 
     def post(self, request, pk):
+        if not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         note = request.POST.get('note', '').strip()
         if not note:
@@ -3835,6 +4259,10 @@ class TicketReopenView(LoginRequiredMixin, View):
     the flag, same as any other needs_response ticket."""
 
     def post(self, request, pk):
+        # Reopening is the inverse of closing and rides the same grant: whoever
+        # decides a ticket is finished is who may decide it is not.
+        if not _can_close_tickets(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         if ticket.status not in Ticket.CLOSED_AT_STATUSES:
             messages.info(request, 'Ticket is not closed.')
@@ -3846,7 +4274,22 @@ class TicketReopenView(LoginRequiredMixin, View):
 
 
 class TicketConvertView(LoginRequiredMixin, View):
-    """Convert a ticket to a work order"""
+    """Convert a ticket to a work order.
+
+    Needs BOTH grants, because it does two things. It creates a WorkOrder, so a
+    role denied WO creation must not reach one through the ticket page. It also
+    drives the ticket to 'converted', a terminal state — so a role denied ticket
+    editing could otherwise finish a ticket here that it cannot finish anywhere
+    else. An outside reviewer spotted the second half; requiring only the WO grant
+    left "Edit Tickets" saying less than it meant.
+    """
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not (
+            _can_create_workorder(request.user) and _can_edit_ticket(request.user)
+        ):
+            return HttpResponse('Forbidden', status=403)
+        return super().dispatch(request, *args, **kwargs)
 
     def get(self, request, pk):
         ticket = _get_scoped_ticket_or_404(request, pk)
@@ -3916,6 +4359,8 @@ class TicketLinkAddView(LoginRequiredMixin, View):
     """Add a link between two tickets — returns updated linked tickets partial"""
 
     def post(self, request, pk):
+        if not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         ticket_number = request.POST.get('ticket_number', '').strip()
         link_type = request.POST.get('link_type', 'related')
@@ -3998,6 +4443,8 @@ class TicketLinkRemoveView(LoginRequiredMixin, View):
     """Remove a ticket link — returns updated linked tickets partial"""
 
     def post(self, request, pk):
+        if not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         link_id = request.POST.get('link_id')
         try:
@@ -4026,9 +4473,15 @@ class TicketAssignView(LoginRequiredMixin, View):
         # Can only act on a ticket the user is allowed to see.
         ticket = get_object_or_404(_scope_tickets_for(Ticket.objects.all(), request.user), pk=pk)
         if request.POST.get('claim'):
+            # Claiming is deliberately NOT gated on can_assign_ticket: the unclaimed
+            # pool only functions if any tech can pick work up, and taking an
+            # unowned ticket removes nothing from anyone. Handing work to someone
+            # else (below) is the act that needs the grant.
             ticket.assigned_to = request.user
             ticket.assignment_unseen = False
         else:
+            if not _can_assign_ticket(request.user):
+                return HttpResponse('Forbidden', status=403)
             uid = request.POST.get('assigned_to', '').strip()
             if uid:
                 ticket.assigned_to_id = int(uid)
@@ -4051,6 +4504,8 @@ class TicketEscalateView(LoginRequiredMixin, View):
     tech claims it — so the client is never left without a person."""
 
     def post(self, request, pk):
+        if not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = get_object_or_404(_scope_tickets_for(Ticket.objects.all(), request.user), pk=pk)
         if ticket.escalate():
             TicketReply.objects.create(
@@ -4073,6 +4528,8 @@ class TicketAcknowledgeOverdueView(LoginRequiredMixin, View):
         return render(request, 'core/partials/overdue_ack_form.html', {'ticket': ticket})
 
     def post(self, request, pk):
+        if not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         note_text = request.POST.get('note', '').strip()
         if not note_text:
@@ -4119,6 +4576,8 @@ class TicketCloseView(LoginRequiredMixin, View):
     """Set a ticket to 'resolved' status. Used when WO is complete and tech has contacted client."""
 
     def post(self, request, pk):
+        if not _can_close_tickets(request.user):
+            return HttpResponse('Forbidden', status=403)
         ticket = _get_scoped_ticket_or_404(request, pk)
         if ticket.status in TICKET_CLOSED_STATUSES:
             messages.info(request, 'Ticket is already closed.')
@@ -4131,10 +4590,17 @@ class TicketCloseView(LoginRequiredMixin, View):
 
 
 class TicketDeleteView(LoginRequiredMixin, View):
-    """Hard-delete a ticket. Admin only. Blocked if a work order is linked."""
+    """Hard-delete a ticket. Blocked if a work order is linked.
+
+    ⚠ This used to test Django's `is_staff` directly, which meant the role flag
+    named "Delete Tickets" could never actually grant the capability it advertised
+    — an operator could check it and nothing changed. It now honours the flag, so
+    a non-admin role CAN be given deletion deliberately. `_can_delete_ticket`
+    still lets any admin through, so nothing an admin could do before is lost.
+    """
 
     def post(self, request, pk):
-        if not request.user.is_staff:
+        if not _can_delete_ticket(request.user):
             return HttpResponse('Forbidden', status=403)
         ticket = get_object_or_404(Ticket, pk=pk)
         if WorkOrder.objects.filter(ticket=ticket).exists():
@@ -4364,7 +4830,7 @@ class SidebarFragmentView(LoginRequiredMixin, View):
         is_admin = _is_admin(request.user)
 
         ticket_qs = Ticket.objects.select_related('client').prefetch_related('replies').exclude(
-            status__in=['closed', 'resolved']
+            status__in=TICKET_CLOSED_STATUSES
         )
         if is_admin:
             ticket_qs = ticket_qs.order_by('-updated_at')
@@ -4373,8 +4839,12 @@ class SidebarFragmentView(LoginRequiredMixin, View):
                 Q(assigned_to=request.user) | Q(created_by=request.user)
             ).distinct().order_by('-updated_at')
 
+        # Pre-existing: this excluded 'closed' and 'cancelled' but never
+        # 'completed', which is the state technicians actually set — so finished
+        # jobs stayed in the My Work sidebar indefinitely, while the dashboard's
+        # own open-WO query excluded them correctly.
         wo_qs = WorkOrder.objects.select_related('client').prefetch_related('notes').exclude(
-            status__in=['closed', 'cancelled']
+            status__in=WO_CLOSED_STATUSES
         )
         if is_admin:
             wo_qs = wo_qs.order_by('-updated_at')
@@ -5202,7 +5672,7 @@ class UserListView(LoginRequiredMixin, View):
     """Admin-only: list all users with MFA status."""
 
     def dispatch(self, request, *args, **kwargs):
-        if request.user.is_authenticated and not _is_admin(request.user):
+        if request.user.is_authenticated and not _can_manage_users(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
@@ -5217,9 +5687,17 @@ class UserListView(LoginRequiredMixin, View):
                 'user': u,
                 'has_mfa': bool(devices),
                 'device_count': len(devices),
+                # Same rule the Edit / Set Password / Delete / Reset MFA views
+                # apply, evaluated per row. Computed here rather than re-derived
+                # in the template so the page cannot disagree with the server:
+                # every one of those actions calls _may_act_on_user() too.
+                'may_act': _may_act_on_user(request.user, u),
             })
         return render(request, 'core/user_list.html', {
             'user_rows': user_rows,
+            # Roles live in Settings and are admin-only; a delegated user manager
+            # may add people but not rewrite what a role can do.
+            'can_manage_roles': _is_admin(request.user),
             'require_mfa': SiteSettings.get().require_mfa,
             'can_reset_mfa': _can_reset_mfa(request.user),
         })
@@ -5242,6 +5720,13 @@ class AdminMFAResetView(LoginRequiredMixin, View):
         from django.contrib import messages
         from .models import reset_user_mfa
         target = get_object_or_404(User, pk=pk)
+        # ⚠ Holding can_reset_user_mfa says you may clear SOMEBODY's two-factor,
+        # not anybody's. Clearing it on an account that outranks you removes the
+        # one control standing between a stolen or reset password and that
+        # account. Same rule as edit, delete and set-password; this view was the
+        # only one acting on a user without it.
+        if not _may_act_on_user(request.user, target):
+            return HttpResponse('Forbidden', status=403)
         reset_user_mfa(target, actor=request.user, source='web')
         messages.success(
             request,
@@ -5257,13 +5742,15 @@ class UserDeleteView(LoginRequiredMixin, View):
     survive — those FKs are SET_NULL, so history is kept, just unattributed."""
 
     def dispatch(self, request, *args, **kwargs):
-        if request.user.is_authenticated and not _is_admin(request.user):
+        if request.user.is_authenticated and not _can_manage_users(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
 
     def post(self, request, pk):
         target = get_object_or_404(User, pk=pk)
+        if not _may_act_on_user(request.user, target):
+            return HttpResponse('Forbidden', status=403)
         if target.pk == request.user.pk:
             messages.error(request, 'You cannot delete your own account.')
             return redirect('core:user_list')
@@ -5282,7 +5769,7 @@ class UserDeleteView(LoginRequiredMixin, View):
 
 class UserCreateView(LoginRequiredMixin, View):
     def dispatch(self, request, *args, **kwargs):
-        if not _is_admin(request.user):
+        if not _can_manage_users(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
@@ -5290,14 +5777,14 @@ class UserCreateView(LoginRequiredMixin, View):
     def get(self, request):
         from .forms import UserCreateForm
         return render(request, 'core/user_form.html', {
-            'form': UserCreateForm(),
+            'form': UserCreateForm().restrict_for(request.user),
             'title': 'New User',
             'cancel_url': reverse_lazy('core:user_list'),
         })
 
     def post(self, request):
         from .forms import UserCreateForm
-        form = UserCreateForm(request.POST)
+        form = UserCreateForm(request.POST).restrict_for(request.user)
         if form.is_valid():
             user = form.save()
             messages.success(request, f'User {user.get_full_name() or user.username} created.')
@@ -5311,7 +5798,7 @@ class UserCreateView(LoginRequiredMixin, View):
 
 class UserEditView(LoginRequiredMixin, View):
     def dispatch(self, request, *args, **kwargs):
-        if not _is_admin(request.user):
+        if not _can_manage_users(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
@@ -5319,8 +5806,10 @@ class UserEditView(LoginRequiredMixin, View):
     def get(self, request, pk):
         from .forms import UserEditForm
         target = get_object_or_404(User, pk=pk)
+        if not _may_act_on_user(request.user, target):
+            return HttpResponse('Forbidden', status=403)
         return render(request, 'core/user_form.html', {
-            'form': UserEditForm(instance=target),
+            'form': UserEditForm(instance=target).restrict_for(request.user),
             'target': target,
             'title': f'Edit {target.get_full_name() or target.username}',
             'cancel_url': reverse_lazy('core:user_list'),
@@ -5329,7 +5818,9 @@ class UserEditView(LoginRequiredMixin, View):
     def post(self, request, pk):
         from .forms import UserEditForm
         target = get_object_or_404(User, pk=pk)
-        form = UserEditForm(request.POST, instance=target)
+        if not _may_act_on_user(request.user, target):
+            return HttpResponse('Forbidden', status=403)
+        form = UserEditForm(request.POST, instance=target).restrict_for(request.user)
         if form.is_valid():
             form.save()
             messages.success(request, f'User {target.get_full_name() or target.username} updated.')
@@ -5344,7 +5835,7 @@ class UserEditView(LoginRequiredMixin, View):
 
 class UserSetPasswordView(LoginRequiredMixin, View):
     def dispatch(self, request, *args, **kwargs):
-        if not _is_admin(request.user):
+        if not _can_manage_users(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
@@ -5352,6 +5843,8 @@ class UserSetPasswordView(LoginRequiredMixin, View):
     def get(self, request, pk):
         from .forms import UserSetPasswordForm
         target = get_object_or_404(User, pk=pk)
+        if not _may_act_on_user(request.user, target):
+            return HttpResponse('Forbidden', status=403)
         return render(request, 'core/user_set_password.html', {
             'form': UserSetPasswordForm(),
             'target': target,
@@ -5360,6 +5853,8 @@ class UserSetPasswordView(LoginRequiredMixin, View):
     def post(self, request, pk):
         from .forms import UserSetPasswordForm
         target = get_object_or_404(User, pk=pk)
+        if not _may_act_on_user(request.user, target):
+            return HttpResponse('Forbidden', status=403)
         form = UserSetPasswordForm(request.POST)
         if form.is_valid():
             target.set_password(form.cleaned_data['password1'])
@@ -5376,30 +5871,86 @@ class UserSetPasswordView(LoginRequiredMixin, View):
 # Role CRUD (admin only — lives in Settings)
 # ---------------------------------------------------------------------------
 
+# Role permissions, grouped for the Settings → Roles screen.
+#
+# There are 23 of these and they used to render as one flat 3-column grid of
+# identical-looking checkboxes. That is how "View All Tickets" sat ticked on the
+# stock Technician role in plain sight for months without anyone reading it, and
+# how a role called "Full access to all features" can be missing three
+# permissions without it being obvious. The count is not really the problem —
+# a shop with several technicians needs this many — but presenting a switch that
+# charges a customer's card identically to one that shows a list is.
+#
+# `sensitive=True` marks the permissions with a consequence outside Murphy's
+# Bench: real money moves, a stored password is revealed, someone's two-factor
+# is cleared, a login is created, or a record is destroyed. They are flagged in
+# the UI so the eye lands on them; they are not treated differently in code.
+#
+# Each entry is (flag, label, sensitive). Order within a group is workflow order,
+# not alphabetical.
+_ROLE_FLAG_GROUPS = [
+    {
+        'label': 'Tickets',
+        'note': 'What a role can do with tickets and client correspondence.',
+        'flags': [
+            ('can_view_all_tickets',       'View All Tickets', False),
+            ('can_create_ticket',          'Create Tickets', False),
+            ('can_edit_ticket',            'Edit Tickets', False),
+            ('can_close_tickets',          'Close/Resolve Tickets', False),
+            ('can_assign_ticket',          'Assign Tickets', False),
+            ('can_reply_internal',         'Internal Replies', False),
+            ('can_reply_customer',         'Customer Replies', False),
+            ('can_delete_ticket',          'Delete Tickets', True),
+        ],
+    },
+    {
+        'label': 'Work Orders',
+        'note': 'Bench work. A work order is completed, never closed.',
+        'flags': [
+            ('can_create_workorder',       'Create Work Orders', False),
+            ('can_edit_workorder',         'Edit Work Orders', False),
+            ('can_close_workorder',        'Close Work Orders', False),
+        ],
+    },
+    {
+        'label': 'Sales & Money',
+        'note': 'Quoting and the register.',
+        'flags': [
+            ('can_view_prospects',         'View Prospects', False),
+            ('can_view_estimates',         'View Estimates', False),
+            ('can_view_sales',             'View Sales', False),
+            ('can_process_payments',       'Process Payments', True),
+        ],
+    },
+    {
+        'label': 'Knowledge Base',
+        'note': 'Shop documentation.',
+        'flags': [
+            ('can_manage_kb',              'Manage KB', False),
+            ('can_view_restricted_kb',     'View Restricted KB', False),
+        ],
+    },
+    {
+        'label': 'Administration',
+        'note': 'Keep these to the people who run the shop.',
+        'flags': [
+            ('can_view_reports',           'View Reports', False),
+            ('can_manage_settings',        'Manage Settings', True),
+            ('can_manage_users',           'Manage Users', True),
+            ('can_view_device_credentials','View Device Credentials', True),
+            ('can_view_org_credentials',   'View Org Credential Vault', True),
+            ('can_reset_user_mfa',         'Reset User MFA', True),
+        ],
+    },
+]
+
+# Flat view of the same thing, for anything that just needs every flag once.
+# Derived, never hand-maintained — a second hand-written list is how the groups
+# would quietly stop covering every permission.
 _ROLE_FLAGS = [
-    ('can_manage_settings',        'Manage Settings'),
-    ('can_manage_users',           'Manage Users'),
-    ('can_view_all_tickets',       'View All Tickets'),
-    ('can_create_ticket',          'Create Tickets'),
-    ('can_edit_ticket',            'Edit Tickets'),
-    ('can_close_tickets',          'Close/Resolve Tickets'),
-    ('can_delete_ticket',          'Delete Tickets'),
-    ('can_assign_ticket',          'Assign Tickets'),
-    ('can_reply_internal',         'Internal Replies'),
-    ('can_reply_customer',         'Customer Replies'),
-    ('can_create_workorder',       'Create Work Orders'),
-    ('can_edit_workorder',         'Edit Work Orders'),
-    ('can_close_workorder',        'Close Work Orders'),
-    ('can_view_reports',           'View Reports'),
-    ('can_view_restricted_kb',     'View Restricted KB'),
-    ('can_manage_kb',              'Manage KB'),
-    ('can_view_device_credentials','View Device Credentials'),
-    ('can_view_org_credentials',   'View Org Credential Vault'),
-    ('can_reset_user_mfa',         'Reset User MFA'),
-    ('can_view_prospects',         'View Prospects'),
-    ('can_view_estimates',         'View Estimates'),
-    ('can_view_sales',             'View Sales'),
-    ('can_process_payments',       'Process Payments'),
+    (flag, label)
+    for group in _ROLE_FLAG_GROUPS
+    for flag, label, _sensitive in group['flags']
 ]
 
 
@@ -5417,7 +5968,7 @@ class RoleListView(LoginRequiredMixin, View):
         return render(request, 'core/role_list.html', {
             'roles': roles,
             'new_form': RoleForm(),
-            'role_flags': _ROLE_FLAGS,
+            'role_flag_groups': _ROLE_FLAG_GROUPS,
         })
 
 
@@ -5453,7 +6004,7 @@ class RoleEditView(LoginRequiredMixin, View):
         return render(request, 'core/role_form.html', {
             'form': RoleForm(instance=role),
             'role': role,
-            'role_flags': _ROLE_FLAGS,
+            'role_flag_groups': _ROLE_FLAG_GROUPS,
         })
 
     def post(self, request, pk):
@@ -5468,7 +6019,7 @@ class RoleEditView(LoginRequiredMixin, View):
         return render(request, 'core/role_form.html', {
             'form': form,
             'role': role,
-            'role_flags': _ROLE_FLAGS,
+            'role_flag_groups': _ROLE_FLAG_GROUPS,
         })
 
 
@@ -5531,8 +6082,24 @@ def _log_catalog_item(host, item, user):
     )
 
 
+class NegativePriceError(ValueError):
+    """A negative price was submitted. Discounts are not a thing MB has yet."""
+
+
 def _parse_price(val):
-    """Parse a money string to a non-negative Decimal, or None if blank/invalid."""
+    """Parse a money string to a non-negative Decimal, or None if blank/invalid.
+
+    ⚠ A negative value RAISES rather than returning None. It used to return None,
+    which meant a line was created with no price at all: typing -60.00 into the
+    custom-line form produced a line called "Goodwill discount" worth nothing,
+    HTTP 200, no message, and a total that had not moved. The operator had every
+    reason to believe they had recorded a discount.
+
+    MB has no discount concept — LineItem is labor or part, and how a price
+    reduction should be represented is a decision belonging to the native money
+    layer, not something to invent here. Until then the honest answer is to say
+    so, not to silently drop the number.
+    """
     from decimal import Decimal, InvalidOperation
     val = (val or '').strip()
     if not val:
@@ -5541,7 +6108,12 @@ def _parse_price(val):
         d = Decimal(val)
     except InvalidOperation:
         return None
-    return d if d >= 0 else None
+    if d < 0:
+        raise NegativePriceError(
+            'Prices cannot be negative — Murphy\'s Bench has no discount line yet. '
+            'Record the agreed price directly, or adjust it in your invoicing system.'
+        )
+    return d
 
 
 def _parse_qty(val):
@@ -5608,6 +6180,8 @@ class WorkPerformedLogView(LoginRequiredMixin, View):
     The item's optional default_price prefills the line price."""
 
     def post(self, request, wo_pk, item_pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         work_order = _get_scoped_wo_or_404(request, wo_pk)
         item = get_object_or_404(CatalogItem, pk=item_pk, is_active=True)
         _log_catalog_item(work_order, item, request.user)
@@ -5615,19 +6189,38 @@ class WorkPerformedLogView(LoginRequiredMixin, View):
 
 
 def _guard_line_host(request, host):
-    """The line-edit views (delete/update) are host-agnostic — shared by WorkOrder,
-    Estimate, and EstimateOption (login-only, techs edit those) as well as the
-    billing hosts Sale, Client-recurring, and Contract. For the billing hosts the
-    same role gate that protects the sales/contract views applies here too, so
-    editing managed-client pricing isn't a login-only backdoor around it."""
-    if isinstance(host, (Sale, Client, Contract)) and not _can_view_sales(request.user):
-        raise PermissionDenied
+    """Authorize a line-item edit against the record it actually belongs to.
+
+    The delete/update views are shared by six hosts — WorkOrder, Estimate,
+    EstimateOption, Sale, Client-recurring and Contract — so the permission has
+    to be chosen from the host, and this is the one place that knows it.
+
+    ⚠ Do NOT gate these views on a single flag before the host is loaded. A
+    blanket can_edit_workorder check was added here and it locked sales-only and
+    estimate-only roles out of their own line items: the check ran first, so this
+    function never got the chance to say which permission applied. An outside
+    reviewer reproduced both. Whatever the shared endpoint is called, the record
+    being edited decides who may edit it.
+
+    Each host maps to the permission that already protects its own screens, so
+    this cannot become a backdoor around them.
+    """
+    if isinstance(host, WorkOrder):
+        if not _can_edit_workorder(request.user):
+            raise PermissionDenied
+    elif isinstance(host, (Sale, Client, Contract)):
+        if not _can_view_sales(request.user):
+            raise PermissionDenied
+    elif isinstance(host, (Estimate, EstimateOption)):
+        if not _can_view_estimates(request.user):
+            raise PermissionDenied
 
 
 class WorkPerformedDeleteView(LoginRequiredMixin, View):
     """HTMX: remove a logged line item."""
 
     def post(self, request, pk):
+        # No flag check here — _guard_line_host picks the permission from the host.
         entry = get_object_or_404(LineItem, pk=pk)
         host = entry.content_object
         _guard_line_host(request, host)
@@ -5639,6 +6232,7 @@ class WorkPerformedUpdateView(LoginRequiredMixin, View):
     """HTMX: update label, notes, quantity and price on a logged line item."""
 
     def post(self, request, pk):
+        # No flag check here — _guard_line_host picks the permission from the host.
         entry = get_object_or_404(LineItem, pk=pk)
         _guard_line_host(request, entry.content_object)
         label = request.POST.get('custom_label', '').strip()
@@ -5656,6 +6250,8 @@ class WorkPerformedCustomLogView(LoginRequiredMixin, View):
     """HTMX: log a fully custom line item — labor or part — with optional price."""
 
     def post(self, request, wo_pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         work_order = _get_scoped_wo_or_404(request, wo_pk)
         label = request.POST.get('custom_label', '').strip()
         notes = request.POST.get('notes', '').strip()
@@ -5972,7 +6568,12 @@ class POSAccessMixin(LoginRequiredMixin):
 # real terminal state is 'completed' (mark_completed(); the status dropdown's
 # common choice); 'closed' is a rarely-used dropdown option that also means
 # "done". Both make a WO ready to ring up.
-POS_SETTLE_STATUSES = ('completed', 'closed')
+# Which work orders the Register will settle. 'closed' was accepted here because the
+# status existed and plainly meant finished; it no longer exists, so 'completed' is the
+# whole list. This constant was originally written as ('closed',) alone, which returned
+# zero results for every search because the state technicians actually set is
+# 'completed' — the bug that first showed 'closed' was decorative.
+POS_SETTLE_STATUSES = ('completed',)
 
 
 class POSHomeView(POSAccessMixin, View):
@@ -6581,6 +7182,8 @@ class WorkOrderBillingUpdateView(LoginRequiredMixin, View):
     """HTMX: update billing state inline on WO detail."""
 
     def post(self, request, pk):
+        if not _can_edit_workorder(request.user):
+            return HttpResponse('Forbidden', status=403)
         from django.utils import timezone
         wo = _get_scoped_wo_or_404(request, pk)
         invoice, _ = Invoice.objects.get_or_create(work_order=wo)
@@ -8366,6 +8969,32 @@ class TicketStatusUpdateView(LoginRequiredMixin, View):
             return redirect('core:ticket_detail', pk=pk)
         # No block on closing a ticket with an open linked WO — see TicketUpdateView.form_valid.
         old_status = ticket.status
+        # This one dropdown spans both grants: moving to resolved/closed is closing,
+        # anything else is ordinary editing. Gate on which move is being made, not
+        # on the endpoint, or a role without close rights closes tickets from here.
+        closing = (
+            new_status in Ticket.CLOSED_AT_STATUSES
+            and old_status not in Ticket.CLOSED_AT_STATUSES
+        )
+        if closing and not _can_close_tickets(request.user):
+            return HttpResponse('Forbidden', status=403)
+        if not closing and not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
+
+        # Validate against the statuses that actually exist — the ticket twin of
+        # the work-order fix above. Ticket.status is a plain CharField with no
+        # `choices=` (migration 0036 moved status definitions into the database),
+        # and apply_status_change() assigns whatever it is handed, so any string
+        # was accepted and saved. TicketForm has always validated this field; only
+        # the quick dropdown did not. The ticket's own current status is allowed
+        # through so a retired value cannot make it unsavable.
+        valid_statuses = set(
+            StatusDefinition.objects.filter(entity_type='ticket', is_active=True)
+            .values_list('slug', flat=True)
+        )
+        valid_statuses.add(ticket.status)
+        if new_status not in valid_statuses:
+            return HttpResponse('Forbidden', status=403)
         ticket.apply_status_change(new_status)
         if new_status in TICKET_CLOSED_STATUSES and ticket.wo_complete:
             ticket.wo_complete = False

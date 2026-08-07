@@ -974,6 +974,37 @@ class UserCreateForm(forms.ModelForm):
             self.add_error('password2', 'Passwords do not match.')
         return cleaned
 
+    def restrict_for(self, actor):
+        """Remove the privilege-granting fields when `actor` is not an admin.
+
+        ⚠ Fields are DELETED, not just hidden or disabled: a disabled input is
+        still accepted if it is posted, and this form is reachable by a plain
+        POST. Dropping them from self.fields means ModelForm never binds them, so
+        the instance keeps whatever it already had.
+
+        Without this, "Manage Users" was a full administrator takeover — tick
+        is_staff on your own account, or assign yourself a role that can reach
+        Settings, and _is_admin() lets you through. Both were reproduced.
+        """
+        from core.views import _is_admin, _assignable_roles_for
+        if _is_admin(actor):
+            return self
+        self.fields.pop('is_staff', None)
+        if 'role_obj' in self.fields:
+            self.fields['role_obj'].queryset = _assignable_roles_for(actor)
+        if 'level' in self.fields:
+            # ⚠ Escalation level is a permission, not profile decoration.
+            # _scope_tickets_for() lets a technician see tickets escalated up to
+            # THEIR level, so raising your own level widens what you can read. A
+            # reviewer set an L1 delegated manager to L3 through this form. Cap
+            # the choices at the actor's own level: you cannot grant a reach you
+            # do not have.
+            self.fields['level'].choices = [
+                (value, label) for value, label in self.fields['level'].choices
+                if not str(value).isdigit() or int(value) <= actor.level
+            ]
+        return self
+
     def save(self, commit=True):
         user = super().save(commit=False)
         user.set_password(self.cleaned_data['password1'])
@@ -1008,6 +1039,33 @@ class UserEditForm(forms.ModelForm):
         self.fields['is_staff'].label = 'Admin (can access Settings)'
         self.fields['phone'].required = False
         self.fields['email'].required = False
+
+    def restrict_for(self, actor):
+        """Remove the privilege-granting fields when `actor` is not an admin.
+
+        ⚠ Fields are DELETED, not disabled — a disabled input is still honoured
+        if it is posted, and this form is reachable by a plain POST. See the twin
+        on UserCreateForm; this is the one an outside reviewer used to make a
+        non-admin user-manager an administrator by posting is_staff=on.
+        """
+        from core.views import _is_admin, _assignable_roles_for
+        if _is_admin(actor):
+            return self
+        self.fields.pop('is_staff', None)
+        if 'role_obj' in self.fields:
+            self.fields['role_obj'].queryset = _assignable_roles_for(actor)
+        if 'level' in self.fields:
+            # ⚠ Escalation level is a permission, not profile decoration.
+            # _scope_tickets_for() lets a technician see tickets escalated up to
+            # THEIR level, so raising your own level widens what you can read. A
+            # reviewer set an L1 delegated manager to L3 through this form. Cap
+            # the choices at the actor's own level: you cannot grant a reach you
+            # do not have.
+            self.fields['level'].choices = [
+                (value, label) for value, label in self.fields['level'].choices
+                if not str(value).isdigit() or int(value) <= actor.level
+            ]
+        return self
 
 
 class UserSetPasswordForm(forms.Form):

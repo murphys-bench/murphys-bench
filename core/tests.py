@@ -3487,7 +3487,7 @@ def test_redirect_flow_renders_message_in_base(client, client_obj, admin_user):
     """
     from decimal import Decimal
     from core.models import LineItem
-    wo = WorkOrder.objects.create(client=client_obj, status='closed')
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
     LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
                             quantity=1, unit_price=Decimal('40.00'))
     client.force_login(admin_user)
@@ -6377,11 +6377,15 @@ from core.models import Invoice as _POSInvoice
 
 @pytest.mark.django_db
 def test_pos_home_search_finds_finished_wo_by_number_and_client(client, admin_user, client_obj):
-    """A finished WO is eligible for the register. MB's real terminal state is
-    'completed' (what techs actually set); 'closed' is also accepted. An
-    unfinished WO (in_progress) must not appear."""
+    """A finished WO is eligible for the register.
+
+    'completed' is the ONLY finished state now — 'closed' was removed as a work
+    order status in migration 0104. This test used to assert both were settleable,
+    which was the register quietly agreeing that a status the rest of the app
+    called active meant finished. A cancelled WO is not settleable either: it is
+    work that never happened, not work to be paid for."""
     completed = WorkOrder.objects.create(client=client_obj, status='completed')
-    closed = WorkOrder.objects.create(client=client_obj, status='closed')
+    cancelled = WorkOrder.objects.create(client=client_obj, status='cancelled')
     open_wo = WorkOrder.objects.create(client=client_obj, status='in_progress')
     client.force_login(admin_user)
 
@@ -6389,11 +6393,11 @@ def test_pos_home_search_finds_finished_wo_by_number_and_client(client, admin_us
     numbers = [w.work_order_number for w in resp.context['results']]
     assert completed.work_order_number in numbers
 
-    # Both completed and closed appear; in_progress does not (search by customer)
+    # Only the completed WO appears; neither cancelled nor in_progress is settleable.
     resp = client.get(reverse('core:pos_home'), {'q': client_obj.name})
     numbers = [w.work_order_number for w in resp.context['results']]
     assert completed.work_order_number in numbers
-    assert closed.work_order_number in numbers
+    assert cancelled.work_order_number not in numbers
     assert open_wo.work_order_number not in numbers
 
 
@@ -7118,20 +7122,24 @@ def test_reports_workorders_domain_shows_raw_activity_and_mileage(client, admin_
 
 
 @pytest.mark.django_db
-def test_reports_wo_status_includes_closed_work_orders(client, admin_user, client_obj):
+def test_reports_wo_status_includes_finished_work_orders(client, admin_user, client_obj):
     """Unlike Tickets' 'by status' view (which excludes closed on purpose),
-    Work Orders by Status must include closed/completed WOs — Mike's exact
-    report: 'no open WOs, but there are 5 closed ones, should I see them
-    here?' Hiding them would repeat the same gap."""
+    Work Orders by Status must include finished WOs — Mike's exact report: 'no
+    open WOs, but there are 5 closed ones, should I see them here?' Hiding them
+    would repeat the same gap.
+
+    Asserts 'Completed' and 'Cancelled' rather than the retired 'Closed': a work
+    order finishes as completed, and migration 0104 removed the third state.
+    """
     WorkOrder.objects.create(client=client_obj, status='completed')
-    WorkOrder.objects.create(client=client_obj, status='closed')
+    WorkOrder.objects.create(client=client_obj, status='cancelled')
     WorkOrder.objects.create(client=client_obj, status='new')
 
     client.force_login(admin_user)
     resp = client.get(reverse('core:reports'), {'domain': 'workorders'})
     labels = {row['label'] for row in resp.context['wo_status_counts']}
     assert 'Completed' in labels
-    assert 'Closed' in labels
+    assert 'Cancelled' in labels
     assert 'New' in labels
     numbers = [wo.work_order_number for wo in resp.context['wo_list']]
     assert len(numbers) == 3
@@ -11529,4 +11537,1843 @@ def test_the_incomplete_banner_does_not_diagnose_the_wrong_problem(settings, tmp
     assert 'scripts/install.sh' in body, 'the fix for THIS half must be shown'
     assert 'system services that code needs' not in body, (
         'the banner diagnosed missing services on a box whose services are fine'
+    )
+
+
+# ── Role flags are enforced, not decorative (v0.12.0) ───────────────────────
+#
+# Eleven Role flags were rendered in Settings → Roles and in Django admin while
+# NO endpoint consulted them. An outside review of the public repo found the six
+# ticket ones; checking the rest showed replies and work orders were the same.
+# The matrix was a picture of a permission system: unchecking "Close/Resolve
+# Tickets" changed nothing, and checking "Delete Tickets" granted nothing because
+# deletion tested Django's is_staff instead.
+#
+# The reason it survived a suite this size is that no test ever set one of these
+# flags. Volume is not coverage — a whole concept was missing, not a branch. So
+# every flag below gets a PAIR: off ⇒ 403 and the state is unchanged, on ⇒ the
+# action actually goes through. A one-sided test would still pass against a view
+# that denies everyone, which is its own bug.
+
+def _role_tech(username, **flags):
+    """A non-admin user whose role has exactly the flags passed.
+
+    Defaults every flag OFF so each test states the grants it depends on, rather
+    than inheriting model defaults that may change. can_manage_settings stays off
+    or the user would be an admin and bypass all of this.
+    """
+    from core.models import Role
+    base = dict(
+        can_manage_settings=False,
+        can_view_all_tickets=False, can_create_ticket=False, can_edit_ticket=False,
+        can_close_tickets=False, can_delete_ticket=False, can_assign_ticket=False,
+        can_reply_internal=False, can_reply_customer=False,
+        can_create_workorder=False, can_edit_workorder=False, can_close_workorder=False,
+    )
+    base.update(flags)
+    role = Role.objects.create(name=f'Role-{username}', **base)
+    return User.objects.create_user(username=username, password='x', is_staff=False, role_obj=role)
+
+
+def _ticket_for(tech, client_obj, **kwargs):
+    """A ticket assigned to `tech`, so visibility scoping is never what fails.
+
+    Without this the flag tests would pass for the wrong reason: an unassigned,
+    unscoped ticket 404s before any permission check runs.
+    """
+    kwargs.setdefault('status', 'open')
+    return Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(),
+        client=client_obj, subject='S', description='D',
+        assigned_to=tech, **kwargs
+    )
+
+
+@pytest.mark.django_db
+def test_close_ticket_denied_without_flag(client, client_obj):
+    tech = _role_tech('t_close_off')
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    resp = client.post(reverse('core:ticket_close', args=[ticket.pk]))
+    assert resp.status_code == 403
+    ticket.refresh_from_db()
+    assert ticket.status == 'open', 'ticket was closed despite the 403'
+
+
+@pytest.mark.django_db
+def test_close_ticket_allowed_with_flag(client, client_obj):
+    tech = _role_tech('t_close_on', can_close_tickets=True)
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    client.post(reverse('core:ticket_close', args=[ticket.pk]))
+    ticket.refresh_from_db()
+    assert ticket.status == 'resolved'
+
+
+@pytest.mark.django_db
+def test_reopen_ticket_denied_without_close_flag(client, client_obj):
+    tech = _role_tech('t_reopen_off')
+    ticket = _ticket_for(tech, client_obj, status='resolved')
+    client.force_login(tech)
+    resp = client.post(reverse('core:ticket_reopen', args=[ticket.pk]))
+    assert resp.status_code == 403
+    ticket.refresh_from_db()
+    assert ticket.status == 'resolved'
+
+
+@pytest.mark.django_db
+def test_reopen_ticket_allowed_with_close_flag(client, client_obj):
+    tech = _role_tech('t_reopen_on', can_close_tickets=True)
+    ticket = _ticket_for(tech, client_obj, status='resolved')
+    client.force_login(tech)
+    client.post(reverse('core:ticket_reopen', args=[ticket.pk]))
+    ticket.refresh_from_db()
+    assert ticket.status == 'open'
+
+
+@pytest.mark.django_db
+def test_status_dropdown_cannot_close_without_close_flag(client, client_obj):
+    """The quick-status dropdown is a second door onto the same act.
+
+    Gating only TicketCloseView would leave this one wide open, which is exactly
+    how the original gap spread: the permission was thought about per button
+    rather than per outcome.
+    """
+    tech = _role_tech('t_status_close', can_edit_ticket=True)
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    resp = client.post(reverse('core:ticket_status_update', args=[ticket.pk]), {'status': 'resolved'})
+    assert resp.status_code == 403
+    ticket.refresh_from_db()
+    assert ticket.status == 'open'
+
+
+@pytest.mark.django_db
+def test_status_dropdown_non_closing_move_needs_only_edit(client, client_obj):
+    tech = _role_tech('t_status_edit', can_edit_ticket=True)
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    client.post(reverse('core:ticket_status_update', args=[ticket.pk]), {'status': 'in_progress'})
+    ticket.refresh_from_db()
+    assert ticket.status == 'in_progress'
+
+
+@pytest.mark.django_db
+def test_edit_form_cannot_close_without_close_flag(client, client_obj):
+    """The full edit form carries a status field too — the third door.
+
+    ⚠ This test is why TicketUpdateView reads the old status from the DB instead
+    of self.object.status: by form_valid() time _post_clean() has already written
+    the new status onto the instance, so the naive check compares 'resolved' to
+    'resolved', never fires, and this test fails.
+    """
+    tech = _role_tech('t_edit_close', can_edit_ticket=True)
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    resp = client.post(reverse('core:ticket_edit', args=[ticket.pk]), {
+        'client': client_obj.pk, 'subject': 'S', 'description': 'D',
+        'source': 'email', 'status': 'resolved',
+    })
+    # A 200 here would mean the FORM was rejected, not the permission — the test
+    # would then pass for the wrong reason if the gate were removed.
+    assert resp.status_code == 403, f'expected a permission refusal, got {resp.status_code}'
+    ticket.refresh_from_db()
+    assert ticket.status == 'open'
+
+
+@pytest.mark.django_db
+def test_edit_ticket_denied_without_flag(client, client_obj):
+    tech = _role_tech('t_edit_off')
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    assert client.get(reverse('core:ticket_edit', args=[ticket.pk])).status_code == 403
+
+
+@pytest.mark.django_db
+def test_edit_ticket_allowed_with_flag(client, client_obj):
+    tech = _role_tech('t_edit_on', can_edit_ticket=True)
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    assert client.get(reverse('core:ticket_edit', args=[ticket.pk])).status_code == 200
+
+
+@pytest.mark.django_db
+def test_create_ticket_denied_without_flag(client, client_obj):
+    tech = _role_tech('t_new_off')
+    client.force_login(tech)
+    assert client.get(reverse('core:ticket_create')).status_code == 403
+
+
+@pytest.mark.django_db
+def test_create_ticket_allowed_with_flag(client, client_obj):
+    tech = _role_tech('t_new_on', can_create_ticket=True)
+    client.force_login(tech)
+    assert client.get(reverse('core:ticket_create')).status_code == 200
+
+
+@pytest.mark.django_db
+def test_delete_ticket_denied_without_flag(client, client_obj):
+    tech = _role_tech('t_del_off')
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    resp = client.post(reverse('core:ticket_delete', args=[ticket.pk]))
+    assert resp.status_code == 403
+    assert Ticket.objects.filter(pk=ticket.pk).exists()
+
+
+@pytest.mark.django_db
+def test_delete_ticket_flag_GRANTS_it_to_a_non_admin(client, client_obj):
+    """The direction that was impossible before.
+
+    Deletion tested is_staff, so ticking "Delete Tickets" on a role was inert —
+    an operator could grant a capability and nothing happened. That silent
+    no-op is the under-permission half of the defect and this locks it shut.
+    """
+    tech = _role_tech('t_del_on', can_delete_ticket=True)
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    client.post(reverse('core:ticket_delete', args=[ticket.pk]))
+    assert not Ticket.objects.filter(pk=ticket.pk).exists()
+
+
+@pytest.mark.django_db
+def test_transfer_ticket_denied_without_assign_flag(client, client_obj):
+    tech = _role_tech('t_assign_off')
+    other = _role_tech('t_assign_other')
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    resp = client.post(reverse('core:ticket_assign', args=[ticket.pk]), {'assigned_to': other.pk})
+    assert resp.status_code == 403
+    ticket.refresh_from_db()
+    assert ticket.assigned_to_id == tech.pk
+
+
+@pytest.mark.django_db
+def test_transfer_ticket_allowed_with_assign_flag(client, client_obj):
+    tech = _role_tech('t_assign_on', can_assign_ticket=True)
+    other = _role_tech('t_assign_on_other')
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    client.post(reverse('core:ticket_assign', args=[ticket.pk]), {'assigned_to': other.pk})
+    ticket.refresh_from_db()
+    assert ticket.assigned_to_id == other.pk
+
+
+@pytest.mark.django_db
+def test_claiming_is_deliberately_not_gated_on_assign_flag(client, client_obj):
+    """Claiming unowned work stays open to every tech — by design, not by omission.
+
+    The unclaimed pool only functions if any technician can pick work up, and
+    claiming takes nothing from anyone. If someone later "tightens" this to
+    require can_assign_ticket, THIS test is what should stop them, the same way
+    test_device_cred_unassigned_tech_can_write guards the credential asymmetry.
+    """
+    tech = _role_tech('t_claim')
+    ticket = Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(),
+        client=client_obj, subject='S', description='D', status='open',
+    )
+    client.force_login(tech)
+    client.post(reverse('core:ticket_assign', args=[ticket.pk]), {'claim': '1'})
+    ticket.refresh_from_db()
+    assert ticket.assigned_to_id == tech.pk
+
+
+@pytest.mark.django_db
+def test_customer_reply_denied_without_flag(client, client_obj):
+    tech = _role_tech('t_reply_cust_off', can_reply_internal=True)
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    resp = client.post(reverse('core:ticket_reply_add', args=[ticket.pk]), {
+        'reply_type': 'customer_visible', 'content': 'hello client',
+    })
+    assert resp.status_code == 403
+    assert ticket.replies.count() == 0, 'reply was stored despite the 403'
+
+
+@pytest.mark.django_db
+def test_internal_reply_denied_without_flag(client, client_obj):
+    tech = _role_tech('t_reply_int_off', can_reply_customer=True)
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    resp = client.post(reverse('core:ticket_reply_add', args=[ticket.pk]), {
+        'reply_type': 'internal', 'content': 'note',
+    })
+    assert resp.status_code == 403
+    assert ticket.replies.count() == 0
+
+
+@pytest.mark.django_db
+def test_each_reply_flag_allows_its_own_kind(client, client_obj):
+    tech = _role_tech('t_reply_both', can_reply_internal=True, can_reply_customer=True)
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    client.post(reverse('core:ticket_reply_add', args=[ticket.pk]), {
+        'reply_type': 'internal', 'content': 'note',
+    })
+    client.post(reverse('core:ticket_reply_add', args=[ticket.pk]), {
+        'reply_type': 'customer_visible', 'content': 'hello',
+    })
+    assert ticket.replies.count() == 2
+
+
+@pytest.mark.django_db
+def test_customer_only_replier_gets_a_usable_form(client, client_obj):
+    """A user with one grant must not be handed a form that 403s itself.
+
+    The view defaults reply_type to 'internal' when the POST omits it. Dropping
+    the radios for a customer-only replier without emitting a hidden field would
+    make every reply they send fall into the internal branch and be refused —
+    a permission bug dressed as a UI tidy-up.
+    """
+    tech = _role_tech('t_reply_cust_only', can_reply_customer=True)
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    body = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    assert 'name="reply_type" value="customer_visible"' in body, (
+        'the form must state which reply kind this user may send'
+    )
+
+
+@pytest.mark.django_db
+def test_view_all_tickets_flag_widens_visibility_both_ways(client, client_obj):
+    """Both directions in one test, because the flag is a widening, not a gate.
+
+    Off: the tech sees only their own plus the unclaimed pool (unchanged
+    behaviour). On: they see another tech's ticket too.
+    """
+    mine = _role_tech('t_vis_mine')
+    theirs = _role_tech('t_vis_theirs')
+    other_ticket = _ticket_for(theirs, client_obj)
+
+    client.force_login(mine)
+    assert client.get(reverse('core:ticket_detail', args=[other_ticket.pk])).status_code == 404
+
+    mine.role_obj.can_view_all_tickets = True
+    mine.role_obj.save()
+    assert client.get(reverse('core:ticket_detail', args=[other_ticket.pk])).status_code == 200
+
+
+@pytest.mark.django_db
+def test_view_all_tickets_never_exposes_system_alerts(client, client_obj):
+    """MB's own operational alerts stay owner-facing even under "view all".
+
+    They are written as tickets so they land somewhere watched, but a technician
+    can act on none of them and closing one hides a real outage. "All tickets"
+    means all shop work, not the owner's alert feed.
+    """
+    tech = _role_tech('t_vis_sys', can_view_all_tickets=True)
+    alert = Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(),
+        client=client_obj, subject='Backup failed', description='rclone auth error',
+        status='open', source='system',
+    )
+    client.force_login(tech)
+    assert client.get(reverse('core:ticket_detail', args=[alert.pk])).status_code == 404
+
+
+@pytest.mark.django_db
+def test_create_workorder_denied_without_flag(client, client_obj):
+    tech = _role_tech('t_wo_new_off')
+    client.force_login(tech)
+    assert client.get(reverse('core:work_order_create')).status_code == 403
+
+
+@pytest.mark.django_db
+def test_create_workorder_allowed_with_flag(client, client_obj):
+    tech = _role_tech('t_wo_new_on', can_create_workorder=True)
+    client.force_login(tech)
+    assert client.get(reverse('core:work_order_create')).status_code == 200
+
+
+@pytest.mark.django_db
+def test_ticket_convert_needs_the_workorder_create_flag(client, client_obj):
+    """Convert-to-WO is a WorkOrder creation wearing a ticket-page button.
+
+    Gating it on a ticket flag would let a role denied WO creation reach one
+    through the side door.
+    """
+    tech = _role_tech('t_convert', can_edit_ticket=True)
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    assert client.get(reverse('core:ticket_convert', args=[ticket.pk])).status_code == 403
+
+
+@pytest.mark.django_db
+def test_edit_workorder_denied_without_flag(client, client_obj):
+    tech = _role_tech('t_wo_edit_off')
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, assigned_to=tech, status='in_progress',
+    )
+    client.force_login(tech)
+    assert client.get(reverse('core:work_order_edit', args=[wo.pk])).status_code == 403
+
+
+@pytest.mark.django_db
+def test_quick_update_cannot_complete_a_wo_without_close_flag(client, client_obj):
+    """Same status-split as tickets, and the same in-memory trap.
+
+    WorkOrderQuickUpdateView reads the incoming status into a local BEFORE
+    assigning it onto the instance; comparing after the assignment would test
+    the new value against itself and let this through.
+    """
+    tech = _role_tech('t_wo_close_off', can_edit_workorder=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, assigned_to=tech, status='in_progress',
+    )
+    client.force_login(tech)
+    resp = client.post(reverse('core:work_order_quick_update', args=[wo.pk]), {'status': 'completed'})
+    assert resp.status_code == 403
+    wo.refresh_from_db()
+    assert wo.status == 'in_progress'
+
+
+@pytest.mark.django_db
+def test_quick_update_completes_a_wo_with_close_flag(client, client_obj):
+    tech = _role_tech('t_wo_close_on', can_edit_workorder=True, can_close_workorder=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, assigned_to=tech, status='in_progress',
+    )
+    client.force_login(tech)
+    client.post(reverse('core:work_order_quick_update', args=[wo.pk]), {'status': 'completed'})
+    wo.refresh_from_db()
+    assert wo.status == 'completed'
+
+
+@pytest.mark.django_db
+def test_existing_roles_keep_the_ability_to_close_tickets_after_upgrade():
+    """Migration 0102's whole reason for existing.
+
+    Before enforcement every technician could close tickets whatever the box
+    said, so enforcing at the old default=False would have taken that away from
+    working shops that changed no setting. A role created the ordinary way must
+    come out able to close.
+    """
+    from core.models import Role
+    role = Role.objects.create(name='FreshRole')
+    assert role.can_close_tickets is True
+
+
+@pytest.mark.django_db
+def test_every_role_flag_is_actually_consulted_somewhere():
+    """Structural guard: a flag that no code reads must not reach the UI.
+
+    This is the check whose absence let eleven decorative checkboxes ship. It is
+    deliberately structural rather than behavioural — a per-flag behaviour test
+    can only cover flags someone remembered to write one for, which is precisely
+    the failure being prevented. A new Role flag now fails the suite until it is
+    either enforced or removed.
+    """
+    import inspect
+    from pathlib import Path
+    from core.models import Role
+
+    flags = [
+        f.name for f in Role._meta.get_fields()
+        if getattr(f, 'get_internal_type', lambda: None)() == 'BooleanField'
+        and f.name.startswith('can_')
+    ]
+    root = Path(inspect.getfile(Role)).parent
+    # What counts as ENFORCEMENT is server-side Python only.
+    #
+    # ⚠ Templates and context_processors.py are deliberately NOT scanned. An
+    # outside reviewer pointed out that the first version of this test accepted
+    # any surviving mention of the flag, so a future flag that merely hides a
+    # button in a template — with no server-side check behind it — would satisfy
+    # the guard while granting nothing. Hiding a control is not a permission; the
+    # endpoint is. Excluded for the same reason: models.py (the field), forms.py
+    # (the role editor), admin.py (fieldsets), and tests.py, whose own exception
+    # list below would otherwise read as proof the flag was handled.
+    display_only = {'models.py', 'forms.py', 'admin.py', 'tests.py',
+                    'context_processors.py'}
+    enforcement = '\n'.join(
+        p.read_text()
+        for p in root.glob('*.py')
+        if p.name not in display_only
+    )
+    # views.py holds the role-editor's own label list, which is display too. Drop
+    # those lines so a flag cannot look enforced just by being labelled there.
+    enforcement = '\n'.join(
+        line for line in enforcement.splitlines()
+        if not re.match(r"\s*\('can_\w+',\s+'", line)
+    )
+    # ⚠ EMPTY, and it should stay that way. This list once held can_manage_users,
+    # the twelfth decorative flag this test found. Mike's ruling closed it: a
+    # checkbox and its enforcement must agree, so "Manage Users" now actually
+    # grants user management rather than being ignored in favour of an admin
+    # check. The guard below is what forced the list to be emptied — it fails
+    # while an entry is listed as dead but has since been enforced, so an
+    # exception cannot quietly outlive the problem it documented.
+    KNOWN_UNENFORCED = set()
+
+    unenforced = [f for f in flags if f not in enforcement and f not in KNOWN_UNENFORCED]
+    assert not unenforced, (
+        'these Role flags are shown to operators but no code reads them, so the '
+        f'checkbox does nothing: {unenforced}'
+    )
+    resolved = [f for f in KNOWN_UNENFORCED if f in enforcement]
+    assert not resolved, (
+        'a flag listed as known-unenforced is now enforced — remove it from '
+        f'KNOWN_UNENFORCED: {sorted(resolved)}'
+    )
+
+
+# ── Reviewer-found bypasses in the first cut of the enforcement work ────────
+#
+# Both were reproduced with live probes by an outside reviewer against e847228,
+# after the branch's own 30 tests were green. They are recorded here as their own
+# block because the lesson is not "two bugs" — it is that a permission constant
+# borrowed from a different question, and a whole-record write behind a narrow
+# gate, are the two shapes this kind of work fails in.
+
+@pytest.mark.django_db
+def test_there_is_no_closed_work_order_status():
+    """A work order finishes as 'completed'. There is no third terminal state.
+
+    'closed' existed for months as a status the app could not agree about: the
+    Register settled it, Reports counted it finished, the work order list called
+    it active, and a linked ticket was never told the work was done. It had
+    already been switched off in Settings → Statuses — SCS's own server had it
+    inactive with zero work orders holding it — but the views still accepted it
+    from a posted form, which is how it survived to become a permission bypass an
+    edit-only role could use to finish a job.
+
+    Two earlier fixes tried to reconcile the disagreement rather than end it.
+    Removing the status ended it.
+    """
+    from core.models import WorkOrder
+    slugs = [s for s, _ in WorkOrder.STATUS_CHOICES]
+    assert 'closed' not in slugs, (
+        "'closed' is back as a work order status; a work order completes, it does "
+        'not close (tickets close — that is Ticket.STATUS_CHOICES)'
+    )
+    assert 'completed' in slugs and 'cancelled' in slugs
+
+
+@pytest.mark.django_db
+def test_tickets_still_close(client, client_obj):
+    """⚠ The removal was scoped to work orders. Tickets close all day.
+
+    Migration 0104 filters on entity_type='workorder' precisely so it cannot
+    retire the ticket status half the ticket workflow depends on. If someone
+    widens that filter, this fails.
+    """
+    from core.models import Ticket, StatusDefinition
+    assert 'closed' in [s for s, _ in Ticket.STATUS_CHOICES]
+    assert StatusDefinition.objects.filter(entity_type='ticket', slug='closed').exists()
+    assert not StatusDefinition.objects.filter(entity_type='workorder', slug='closed').exists()
+
+    tech = _role_tech('t_ticket_still_closes', can_close_tickets=True)
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    client.post(reverse('core:ticket_close', args=[ticket.pk]))
+    ticket.refresh_from_db()
+    assert ticket.status == 'resolved'
+
+
+@pytest.mark.django_db
+def test_existing_closed_work_orders_became_completed(client_obj):
+    """Migration 0104 must not strand rows in a status that no longer exists.
+
+    Anything that WAS closed is work that got finished, so it lands on
+    'completed' — not 'cancelled', which means the job never happened.
+    """
+    from core.models import WorkOrder
+    assert not WorkOrder.objects.filter(status='closed').exists()
+
+
+@pytest.mark.django_db
+def test_close_only_role_cannot_rewrite_other_fields_while_closing(client_obj, client):
+    """Permission to FINISH a work order is not permission to rewrite it.
+
+    The quick-update panel posts every field in one request. Allowing a closing
+    request through wholesale handed a close-only role the priority, assignee,
+    contact, device, repair type, schedule and invoice ref as well. Reproduced by
+    the reviewer with status=completed&priority=urgent.
+    """
+    tech = _role_tech('t_wo_close_only', can_close_workorder=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, assigned_to=tech, status='in_progress', priority='normal',
+    )
+    client.force_login(tech)
+    client.post(reverse('core:work_order_quick_update', args=[wo.pk]), {
+        'status': 'completed', 'priority': 'urgent',
+    })
+    wo.refresh_from_db()
+    assert wo.status == 'completed', 'the close itself must still work'
+    assert wo.priority == 'normal', 'a close-only role rewrote a field it may not edit'
+
+
+@pytest.mark.django_db
+def test_close_only_role_still_gets_a_working_complete_button(client, client_obj):
+    """The narrowing must not break the legitimate path.
+
+    Ignoring the rest of the request rather than rejecting it means the ordinary
+    Complete action still works for a close-only user; a 403 here would have made
+    the grant useless in the UI that posts the whole panel.
+    """
+    tech = _role_tech('t_wo_close_works', can_close_workorder=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, assigned_to=tech, status='in_progress',
+    )
+    client.force_login(tech)
+    client.post(reverse('core:work_order_quick_update', args=[wo.pk]), {'status': 'completed'})
+    wo.refresh_from_db()
+    assert wo.status == 'completed'
+    assert wo.completed_date is not None, 'completing must still stamp the date'
+
+
+@pytest.mark.django_db
+def test_structural_flag_guard_does_not_accept_ui_only_references(tmp_path):
+    """The guard must require SERVER-side enforcement, not a hidden button.
+
+    Its first version scanned templates and the context processor too, so a flag
+    that only hid a control would have satisfied it while granting nothing —
+    precisely the defect the guard exists to catch, one level up. Verified by
+    planting a UI-exposed, never-enforced flag: the old scan passed it, the
+    current one fails it.
+    """
+    import inspect
+    from pathlib import Path
+    from core.models import Role
+
+    root = Path(inspect.getfile(Role)).parent
+    scanned = {
+        p.name for p in root.glob('*.py')
+        if p.name not in {'models.py', 'forms.py', 'admin.py', 'tests.py',
+                          'context_processors.py'}
+    }
+    assert 'views.py' in scanned, 'the guard must still read the views'
+    assert 'context_processors.py' not in scanned, (
+        'exposing a flag to templates is not enforcing it'
+    )
+
+
+@pytest.mark.django_db
+def test_closing_a_linked_wo_tells_its_ticket_the_work_is_done(client, client_obj):
+    """One definition of "finished", including the linked-ticket workflow.
+
+    A reviewer probed the ancestor of this: quick-updating a linked WO to the
+    then-existing `closed` status saved fine and left ticket.wo_complete False, so
+    the "work is complete — ready for final contact" banner and the Close Ticket
+    button never appeared and the ticket was stranded behind a work order the app
+    insisted was still open. `closed` is gone now, but the hole it came through —
+    a finishing status the ticket half does not know about — is reachable again
+    the moment someone adds a status without checking here.
+
+    Asserted for every finishing status, so adding a third cannot quietly skip it.
+    """
+    admin = User.objects.create_user(username='wo_done_admin', password='x',
+                                     is_staff=True, is_superuser=True)
+    client.force_login(admin)
+    for status in ('completed', 'cancelled'):
+        ticket = Ticket.objects.create(
+            ticket_number=Ticket.generate_ticket_number(),
+            client=client_obj, subject=f'S-{status}', description='D', status='open',
+        )
+        wo = WorkOrder.objects.create(
+            work_order_number=WorkOrder.generate_work_order_number(),
+            client=client_obj, ticket=ticket, status='in_progress',
+        )
+        client.post(reverse('core:work_order_quick_update', args=[wo.pk]), {'status': status})
+        ticket.refresh_from_db()
+        assert ticket.wo_complete is True, (
+            f'a linked WO moved to {status!r} left its ticket showing the work as unfinished'
+        )
+
+
+@pytest.mark.django_db
+def test_finished_work_order_statuses_stay_in_step_with_the_status_list():
+    """Every finishing status must be a status a work order can actually hold.
+
+    The `closed` saga was this invariant broken in both directions at once: a
+    status existed that the finished-list omitted, and later a finished-list
+    entry for a status being removed. Cheap to assert, and it fails the moment
+    the two drift again.
+    """
+    from core.models import WorkOrder
+    from core.views import WO_CLOSED_STATUSES
+    slugs = {s for s, _ in WorkOrder.STATUS_CHOICES}
+    stray = [s for s in WO_CLOSED_STATUSES if s not in slugs]
+    assert not stray, f'finished-status list names statuses a WO cannot hold: {stray}'
+
+
+@pytest.mark.django_db
+def test_only_one_definition_of_a_finished_work_order(client_obj):
+    """There must not be a second "finished" list that can drift from this one.
+
+    The first fix for the `closed` bypass added WO_FINISHING_STATUSES for
+    permissions while leaving the ticket workflow on the old constant, which is
+    how the linked-ticket half stayed broken. Two descriptions of one fact is the
+    failure mode deploy/manifest.sh and check_install.sh both exist to prevent.
+    """
+    import inspect
+    from core import views
+    src = inspect.getsource(views)
+    assert 'WO_FINISHING_STATUSES' not in src, (
+        'a second "finished work order" constant is back; fold it into '
+        'WO_CLOSED_STATUSES so the app cannot disagree with itself'
+    )
+
+
+@pytest.mark.django_db
+def test_upgrading_does_not_widen_technician_ticket_visibility(client, client_obj):
+    """The seeded Technician role must not start seeing every ticket on upgrade.
+
+    ⚠ This is the mirror image of migration 0102 and the more dangerous direction.
+    The Technician role has carried can_view_all_tickets=True since Batch 4, which
+    predates the ticket visibility model (own + unclaimed pool + escalations)
+    entirely. Nothing revisited it when that model arrived, because nothing read
+    the flag. Enforcing it in v0.12.0 without migration 0103 handed every
+    technician on every existing install sight of every ticket, silently undoing a
+    deliberate design, with no setting changed by the operator.
+
+    Found from a screenshot of the live Roles page, not from this suite — the flag
+    was ticked in plain sight and three review rounds went past it.
+    """
+    from core.models import Role
+    tech_role = Role.objects.get(name='Technician')
+    assert tech_role.can_view_all_tickets is False, (
+        'the seeded Technician role can see every ticket; migration 0103 is meant '
+        'to leave non-admin roles on the unclaimed-pool model'
+    )
+
+    mine = User.objects.create_user(username='pool_a', password='x', role_obj=tech_role)
+    theirs = User.objects.create_user(username='pool_b', password='x', role_obj=tech_role)
+    theirs_ticket = _ticket_for(theirs, client_obj)
+
+    client.force_login(mine)
+    assert client.get(reverse('core:ticket_detail', args=[theirs_ticket.pk])).status_code == 404
+    listing = client.get(reverse('core:ticket_list'))
+    numbers = [t.ticket_number for t in listing.context['tickets']]
+    assert theirs_ticket.ticket_number not in numbers
+
+
+@pytest.mark.django_db
+def test_admin_roles_keep_view_all_tickets_ticked():
+    """Migration 0103 deliberately skips admin roles, and this pins why.
+
+    _is_admin() short-circuits ticket scoping, so an admin role sees everything
+    whatever this flag says. Writing False there would leave the Roles page
+    showing an unticked box beside a role that plainly does see all tickets — a
+    checkbox that lies about what it does, which is the entire defect v0.12.0
+    exists to end. Honest display beats a tidy-looking backfill.
+    """
+    from core.models import Role
+    admin_role = Role.objects.get(name='Administrator')
+    assert admin_role.can_manage_settings is True
+    assert admin_role.can_view_all_tickets is True
+
+
+@pytest.mark.django_db
+def test_a_role_may_still_be_granted_view_all_tickets(client, client_obj):
+    """The migration preserves behaviour; it must not disable the capability.
+
+    Turning the box back on has to work, or 0103 would have replaced one lying
+    checkbox with another.
+    """
+    tech = _role_tech('t_widened', can_view_all_tickets=True)
+    other = _role_tech('t_widened_other')
+    theirs = _ticket_for(other, client_obj)
+    client.force_login(tech)
+    assert client.get(reverse('core:ticket_detail', args=[theirs.pk])).status_code == 200
+
+
+@pytest.mark.django_db
+def test_quick_update_rejects_a_status_that_does_not_exist(client, client_obj):
+    """The inline panel must not accept any string as a work order status.
+
+    It assigned request.POST['status'] straight onto the model, and the field has
+    no `choices=` (migration 0036 moved status definitions into the database), so
+    anything saved. WorkOrderForm validated the same field all along; only this
+    endpoint did not.
+
+    That is what kept `closed` reachable by POST after Settings → Statuses had
+    switched it off — removing it from the model and the table was not enough on
+    its own — and it accepts typos and stale bookmarks just as happily, leaving a
+    work order in a state no list, report or register recognises.
+    """
+    from core.models import StatusDefinition
+    admin = User.objects.create_user(username='qu_admin', password='x',
+                                     is_staff=True, is_superuser=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, status='in_progress',
+    )
+    client.force_login(admin)
+
+    assert not StatusDefinition.objects.filter(entity_type='workorder', slug='closed').exists()
+    for bogus in ('closed', 'banana', ''):
+        resp = client.post(reverse('core:work_order_quick_update', args=[wo.pk]),
+                           {'status': bogus})
+        wo.refresh_from_db()
+        assert wo.status == 'in_progress', (
+            f'posting status={bogus!r} was saved (HTTP {resp.status_code})'
+        )
+
+    # A real status still works — the guard must not break the panel.
+    client.post(reverse('core:work_order_quick_update', args=[wo.pk]), {'status': 'completed'})
+    wo.refresh_from_db()
+    assert wo.status == 'completed'
+
+
+@pytest.mark.django_db
+def test_quick_update_still_saves_a_wo_holding_a_retired_status(client, client_obj):
+    """A legacy status must not make the rest of the panel unusable.
+
+    If a row somehow still holds a status that has since been retired, refusing
+    every save would strand it — the operator could not even change its priority.
+    The WO's own current status is always allowed through.
+    """
+    admin = User.objects.create_user(username='qu_admin2', password='x',
+                                     is_staff=True, is_superuser=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, status='in_progress', priority='normal',
+    )
+    WorkOrder.objects.filter(pk=wo.pk).update(status='some_retired_status')
+    client.force_login(admin)
+    client.post(reverse('core:work_order_quick_update', args=[wo.pk]),
+                {'status': 'some_retired_status', 'priority': 'urgent'})
+    wo.refresh_from_db()
+    assert wo.priority == 'urgent', 'a legacy status blocked an unrelated edit'
+
+
+@pytest.mark.django_db
+def test_every_role_permission_appears_in_exactly_one_group():
+    """The grouped Roles screen must cover every permission, once.
+
+    Grouping is only an improvement if it is total. A flag left out of every
+    group would vanish from Settings → Roles entirely — still enforced, still
+    stored, but no longer configurable or visible, which is a worse version of
+    the decorative-checkbox problem it was introduced to fix. A flag in two
+    groups would render two checkboxes writing the same field.
+    """
+    from core.models import Role
+    from core.views import _ROLE_FLAG_GROUPS
+
+    declared = [f for g in _ROLE_FLAG_GROUPS for f, _label, _s in g['flags']]
+    model_flags = {
+        f.name for f in Role._meta.get_fields()
+        if getattr(f, 'get_internal_type', lambda: None)() == 'BooleanField'
+        and f.name.startswith('can_')
+    }
+
+    assert len(declared) == len(set(declared)), (
+        f'a permission is in more than one group: '
+        f'{sorted(f for f in declared if declared.count(f) > 1)}'
+    )
+    missing = model_flags - set(declared)
+    assert not missing, f'permissions missing from Settings → Roles entirely: {sorted(missing)}'
+    stray = set(declared) - model_flags
+    assert not stray, f'groups name permissions that do not exist: {sorted(stray)}'
+
+
+@pytest.mark.django_db
+def test_consequential_permissions_are_marked(client):
+    """The permissions with an effect outside MB carry the marker.
+
+    Twenty-three identical checkboxes is how a switch that charges a customer's
+    card came to look exactly like one that shows a list. Pinned so the marking
+    cannot quietly be dropped in a later restyle.
+    """
+    from core.views import _ROLE_FLAG_GROUPS
+    marked = {f for g in _ROLE_FLAG_GROUPS for f, _l, s in g['flags'] if s}
+    assert marked == {
+        'can_process_payments',          # charges a real card on file
+        'can_view_device_credentials',   # reveals a stored password
+        'can_view_org_credentials',      # reveals the shop's own passwords
+        'can_reset_user_mfa',            # clears someone's two-factor
+        'can_manage_settings',           # full run of the shop's configuration
+        'can_manage_users',              # creates logins
+        'can_delete_ticket',             # destroys a record permanently
+    }, 'the set of consequential permissions changed — deliberate, or an accident?'
+
+    admin = User.objects.create_user(username='rolegrid', password='x',
+                                     is_staff=True, is_superuser=True)
+    client.force_login(admin)
+    body = client.get(reverse('core:role_list')).content.decode()
+    # escape() because "Sales & Money" renders as "Sales &amp; Money" — comparing
+    # the raw label would fail on the ampersand and look like a missing group.
+    from django.utils.html import escape
+    for group in _ROLE_FLAG_GROUPS:
+        assert escape(group['label']) in body, f"group {group['label']!r} is not rendered"
+
+
+@pytest.mark.django_db
+def test_a_negative_price_is_refused_not_silently_dropped(client, client_obj):
+    """Typing a discount must not produce a line worth nothing.
+
+    `_parse_price` returned None for negatives, so the custom-line form saved a
+    line named "Goodwill discount" with NO price: HTTP 200, no message, total
+    unchanged. The operator had every reason to think a discount was recorded.
+
+    MB has no discount concept — LineItem is labor or part — and how a price
+    reduction should be represented belongs to the native money layer, not to an
+    invention here. Until then the honest answer is to refuse and say why.
+    """
+    admin = User.objects.create_user(username='negprice', password='x',
+                                     is_staff=True, is_superuser=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, status='in_progress',
+    )
+    client.force_login(admin)
+    resp = client.post(reverse('core:work_performed_custom', args=[wo.pk]), {
+        'custom_label': 'Goodwill discount', 'kind': 'part',
+        'quantity': '1', 'unit_price': '-60.00',
+    })
+    assert resp.status_code == 400, 'a negative price must be refused, not accepted'
+    assert b'negative' in resp.content.lower()
+    assert wo.line_items.count() == 0, 'a worthless line was created anyway'
+
+
+@pytest.mark.django_db
+def test_a_blank_price_still_means_unpriced(client, client_obj):
+    """Refusing negatives must not break the legitimate unpriced line.
+
+    A blank price is a real and supported case — work logged without a figure —
+    and it must keep returning None rather than being caught up in the new guard.
+    """
+    admin = User.objects.create_user(username='blankprice', password='x',
+                                     is_staff=True, is_superuser=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, status='in_progress',
+    )
+    client.force_login(admin)
+    resp = client.post(reverse('core:work_performed_custom', args=[wo.pk]), {
+        'custom_label': 'Diagnostics', 'kind': 'labor', 'quantity': '1', 'unit_price': '',
+    })
+    assert resp.status_code == 200
+    line = wo.line_items.get()
+    assert line.unit_price is None
+    assert wo.line_items_total == 0
+
+
+# ── Checkbox and enforcement must agree (Mike's ruling, Aug 6) ──────────────
+#
+# The first pass gated the obvious screens and left ~22 smaller actions open, so
+# "Edit Work Orders" could be off while a technician still added notes, logged
+# time, ticked checklists and rewrote priced lines. Mike's ruling: where a
+# checkbox and its enforcement disagree, fix the disagreement. These lock the
+# actions to the box that claims to cover them.
+
+@pytest.mark.django_db
+def test_work_order_actions_obey_the_edit_work_orders_box(client, client_obj):
+    """Every action that changes a work order needs the box that says so."""
+    from decimal import Decimal
+    from core.models import WorkOrderItem, LineItem
+    tech = _role_tech('t_wo_actions')          # can_edit_workorder = False
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, assigned_to=tech, status='in_progress',
+    )
+    item = WorkOrderItem.objects.create(work_order=wo, description='Check PSU')
+    line = LineItem.objects.create(content_object=wo, kind='labor',
+                                   description='Bench', quantity=1, unit_price='50.00')
+    client.force_login(tech)
+
+    attempts = [
+        ('add a note',        reverse('core:work_order_note_add', args=[wo.pk]),
+         {'content': 'x', 'note_type': 'internal'}),
+        ('log time',          reverse('core:work_order_add_time', args=[wo.pk]), {'minutes': '30'}),
+        ('apply a checklist', reverse('core:work_order_apply_checklist', args=[wo.pk]), {}),
+        ('tick a checklist item', reverse('core:work_order_item_check', args=[item.pk]), {}),
+        ('add a priced line', reverse('core:work_performed_custom', args=[wo.pk]),
+         {'custom_label': 'Extra', 'kind': 'part', 'quantity': '1', 'unit_price': '99.00'}),
+        ('rewrite a priced line', reverse('core:work_performed_update', args=[line.pk]),
+         {'description': 'Rewritten', 'quantity': '1', 'unit_price': '1.00'}),
+        ('delete a priced line', reverse('core:work_performed_delete', args=[line.pk]), {}),
+        ('change billing',    reverse('core:wo_billing_update', args=[wo.pk]),
+         {'billing_status': 'invoiced'}),
+    ]
+    for label, url, payload in attempts:
+        resp = client.post(url, payload)
+        assert resp.status_code == 403, f'a tech without edit rights could {label}'
+
+    wo.refresh_from_db(); line.refresh_from_db()
+    assert wo.line_items.count() == 1, 'line items changed despite the refusals'
+    assert line.unit_price == Decimal('50.00'), 'a price changed despite the refusal'
+    assert wo.notes.count() == 0
+
+
+@pytest.mark.django_db
+def test_work_order_actions_work_once_the_box_is_ticked(client, client_obj):
+    """The gate must not break the job — the same actions succeed when granted."""
+    tech = _role_tech('t_wo_actions_on', can_edit_workorder=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, assigned_to=tech, status='in_progress',
+    )
+    client.force_login(tech)
+    client.post(reverse('core:work_order_note_add', args=[wo.pk]),
+                {'content': 'real note', 'note_type': 'internal'})
+    client.post(reverse('core:work_performed_custom', args=[wo.pk]),
+                {'custom_label': 'Bench work', 'kind': 'labor',
+                 'quantity': '1', 'unit_price': '80.00'})
+    wo.refresh_from_db()
+    assert wo.notes.count() == 1
+    assert wo.line_items.count() == 1
+
+
+@pytest.mark.django_db
+def test_ticket_actions_obey_the_edit_tickets_box(client, client_obj):
+    """Every action that changes a ticket needs the box that says so."""
+    tech = _role_tech('t_tkt_actions')          # can_edit_ticket = False
+    ticket = _ticket_for(tech, client_obj, needs_response=True)
+    other = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+
+    attempts = [
+        ('escalate',              reverse('core:ticket_escalate', args=[ticket.pk]), {}),
+        ('dismiss needs-response', reverse('core:ticket_dismiss_response', args=[ticket.pk]),
+         {'note': 'x'}),
+        ('acknowledge overdue',   reverse('core:ticket_acknowledge_overdue', args=[ticket.pk]),
+         {'note': 'x'}),
+        ('log time',              reverse('core:ticket_add_time', args=[ticket.pk]), {'minutes': '15'}),
+        ('link a ticket',         reverse('core:ticket_link_add', args=[ticket.pk]),
+         {'ticket_number': other.ticket_number, 'link_type': 'related'}),
+    ]
+    for label, url, payload in attempts:
+        resp = client.post(url, payload)
+        assert resp.status_code == 403, f'a tech without edit rights could {label}'
+
+    ticket.refresh_from_db()
+    assert ticket.escalation_level == 1, 'the ticket was escalated despite the refusal'
+    assert ticket.needs_response is True, 'the flag was cleared despite the refusal'
+
+
+@pytest.mark.django_db
+def test_converting_a_ticket_needs_both_grants(client, client_obj):
+    """Convert creates a work order AND ends the ticket, so it needs both boxes."""
+    wo_only = _role_tech('t_conv_wo', can_create_workorder=True)   # no ticket edit
+    tkt_only = _role_tech('t_conv_tkt', can_edit_ticket=True)      # no WO create
+    both = _role_tech('t_conv_both', can_create_workorder=True, can_edit_ticket=True)
+
+    for user, expected in ((wo_only, 403), (tkt_only, 403), (both, 200)):
+        ticket = _ticket_for(user, client_obj)
+        client.force_login(user)
+        resp = client.get(reverse('core:ticket_convert', args=[ticket.pk]))
+        assert resp.status_code == expected, (
+            f'{user.username} got {resp.status_code}, expected {expected}'
+        )
+
+
+@pytest.mark.django_db
+def test_manage_users_box_now_grants_user_management(client):
+    """The twelfth decorative checkbox, closed.
+
+    User management tested _is_admin, so ticking "Manage Users" on a role did
+    nothing at all. Both directions are asserted: the box grants it, and a role
+    without it is refused.
+    """
+    granted = _role_tech('t_users_on')
+    granted.role_obj.can_manage_users = True
+    granted.role_obj.save()
+    denied = _role_tech('t_users_off')
+
+    client.force_login(granted)
+    assert client.get(reverse('core:user_list')).status_code == 200
+    assert client.get(reverse('core:user_create')).status_code == 200
+
+    client.force_login(denied)
+    assert client.get(reverse('core:user_list')).status_code == 403
+
+
+# ── "Manage Users" must not be a route to administrator ─────────────────────
+#
+# Enforcing the previously-dead can_manage_users checkbox created a full
+# privilege escalation, found by an outside reviewer who reproduced it live. The
+# user form exposes is_staff and role_obj, and the set-password view took any
+# target, so a non-admin user-manager had three independent ways to become or
+# impersonate an administrator. Each one gets its own test.
+
+def _user_manager(username):
+    """A non-admin whose only power is managing users."""
+    from core.models import Role
+    role = Role.objects.create(name=f'UserMgr-{username}', can_manage_settings=False,
+                               can_manage_users=True)
+    return User.objects.create_user(username=username, password='x',
+                                    is_staff=False, role_obj=role)
+
+
+@pytest.mark.django_db
+def test_user_manager_cannot_make_themselves_staff(client):
+    """The reviewer's exact reproduction: POST your own edit form with is_staff=on.
+
+    It returned 302 and is_staff became True, which satisfies _is_admin() and
+    hands over the whole application.
+    """
+    mgr = _user_manager('esc_staff')
+    client.force_login(mgr)
+    resp = client.post(reverse('core:user_edit', args=[mgr.pk]), {
+        'first_name': '', 'last_name': '', 'username': mgr.username,
+        'email': '', 'phone': '', 'level': mgr.level,
+        'role_obj': mgr.role_obj_id, 'is_staff': 'on', 'is_active': 'on',
+    })
+    mgr.refresh_from_db()
+    assert mgr.is_staff is False, (
+        f'a user-manager promoted themselves to admin (HTTP {resp.status_code})'
+    )
+
+
+@pytest.mark.django_db
+def test_user_manager_cannot_assign_themselves_an_admin_role(client):
+    """The same escalation wearing a different hat.
+
+    Dropping is_staff from the form is not enough on its own: any role carrying
+    can_manage_settings satisfies _is_admin() just as well.
+    """
+    from core.models import Role
+    mgr = _user_manager('esc_role')
+    admin_role = Role.objects.create(name='BackdoorAdmin', can_manage_settings=True)
+    client.force_login(mgr)
+    client.post(reverse('core:user_edit', args=[mgr.pk]), {
+        'first_name': '', 'last_name': '', 'username': mgr.username,
+        'email': '', 'phone': '', 'level': mgr.level,
+        'role_obj': admin_role.pk, 'is_active': 'on',
+    })
+    mgr.refresh_from_db()
+    assert mgr.role_obj_id != admin_role.pk, 'a user-manager gave themselves a Settings role'
+    assert not _is_admin_for_test(mgr)
+
+
+def _is_admin_for_test(user):
+    from core.views import _is_admin
+    return _is_admin(user)
+
+
+@pytest.mark.django_db
+def test_user_manager_cannot_reset_an_admins_password(client):
+    """Otherwise they simply log in as the owner.
+
+    Reported by inspection in the same review; the set-password view accepted any
+    target. Both the form and the POST are checked, since rendering the page to a
+    user who may not act is its own disclosure.
+    """
+    mgr = _user_manager('esc_pw')
+    owner = User.objects.create_user(username='the_owner', password='ownerpass',
+                                     is_staff=True, is_superuser=True)
+    client.force_login(mgr)
+    assert client.get(reverse('core:user_set_password', args=[owner.pk])).status_code == 403
+    resp = client.post(reverse('core:user_set_password', args=[owner.pk]),
+                       {'password1': 'hijacked-pw-1234', 'password2': 'hijacked-pw-1234'})
+    assert resp.status_code == 403
+    owner.refresh_from_db()
+    assert owner.check_password('ownerpass'), "an admin's password was reset"
+
+
+@pytest.mark.django_db
+def test_user_manager_cannot_edit_or_delete_an_admin(client):
+    mgr = _user_manager('esc_edit')
+    owner = User.objects.create_user(username='owner2', password='x',
+                                     is_staff=True, is_superuser=True)
+    client.force_login(mgr)
+    assert client.get(reverse('core:user_edit', args=[owner.pk])).status_code == 403
+    assert client.post(reverse('core:user_delete', args=[owner.pk])).status_code == 403
+    assert User.objects.filter(pk=owner.pk).exists()
+
+
+@pytest.mark.django_db
+def test_user_manager_cannot_create_an_admin(client):
+    """Creation is the same escalation one step removed — make an admin, log in as it."""
+    mgr = _user_manager('esc_create')
+    client.force_login(mgr)
+    client.post(reverse('core:user_create'), {
+        'first_name': '', 'last_name': '', 'username': 'plantedadmin',
+        'email': '', 'phone': '', 'level': 1, 'role_obj': '',
+        'is_staff': 'on', 'is_active': 'on',
+        'password1': 'a-long-enough-password-1', 'password2': 'a-long-enough-password-1',
+    })
+    planted = User.objects.filter(username='plantedadmin').first()
+    if planted is not None:
+        assert planted.is_staff is False, 'a user-manager created an administrator'
+
+
+@pytest.mark.django_db
+def test_a_real_admin_can_still_do_all_of_it(client):
+    """The guard must restrict delegation, not break administration."""
+    from core.models import Role
+    admin = User.objects.create_user(username='realadmin', password='x',
+                                     is_staff=True, is_superuser=True)
+    staff_role = Role.objects.create(name='SettingsRole', can_manage_settings=True)
+    target = User.objects.create_user(username='sometech', password='x')
+    client.force_login(admin)
+    resp = client.post(reverse('core:user_edit', args=[target.pk]), {
+        'first_name': '', 'last_name': '', 'username': target.username,
+        'email': '', 'phone': '', 'level': target.level,
+        'role_obj': staff_role.pk, 'is_staff': 'on', 'is_active': 'on',
+    })
+    target.refresh_from_db()
+    assert target.is_staff is True, f'an admin could not promote a user (HTTP {resp.status_code})'
+    assert target.role_obj_id == staff_role.pk
+
+
+@pytest.mark.django_db
+def test_line_item_edits_are_authorized_by_their_host_not_by_work_orders(client, client_obj):
+    """A shared endpoint must ask the record, not a single flag.
+
+    WorkPerformedUpdateView/DeleteView are shared by six hosts. A blanket
+    can_edit_workorder check was added ahead of the host-aware guard, which
+    locked sales-only and estimate-only roles out of their own line items —
+    reproduced by an outside reviewer on both. The permission has to come from
+    what is being edited.
+    """
+    from decimal import Decimal
+    from core.models import LineItem, Sale, Estimate
+
+    sale = Sale.objects.create(sale_number=Sale.generate_sale_number(), client=client_obj)
+    est = Estimate.objects.create(estimate_number=Estimate.generate_estimate_number(),
+                                  client=client_obj)
+    sale_line = LineItem.objects.create(content_object=sale, kind='part',
+                                        description='Counter part', quantity=1,
+                                        unit_price=Decimal('20.00'))
+    est_line = LineItem.objects.create(content_object=est, kind='labor',
+                                       description='Quoted work', quantity=1,
+                                       unit_price=Decimal('30.00'))
+
+    # Sales-only: no work-order rights at all, but must own its own sale lines.
+    seller = _role_tech('t_sales_only', can_view_sales=True)
+    client.force_login(seller)
+    resp = client.post(reverse('core:work_performed_update', args=[sale_line.pk]),
+                       {'custom_label': 'Counter part v2', 'quantity': '1', 'unit_price': '25.00'})
+    assert resp.status_code == 200, 'a sales role was refused its own sale line'
+    sale_line.refresh_from_db()
+    assert sale_line.unit_price == Decimal('25.00')
+
+    # Estimate-only: same, on a quote.
+    quoter = _role_tech('t_est_only', can_view_estimates=True)
+    client.force_login(quoter)
+    resp = client.post(reverse('core:work_performed_update', args=[est_line.pk]),
+                       {'custom_label': 'Quoted work v2', 'quantity': '1', 'unit_price': '35.00'})
+    assert resp.status_code == 200, 'an estimate role was refused its own quote line'
+
+
+@pytest.mark.django_db
+def test_the_shared_line_endpoint_is_not_a_backdoor_to_other_hosts(client, client_obj):
+    """Host-aware must still mean gated — the point is the right gate, not none.
+
+    A sales-only role has no work-order rights, so it must not reach a work
+    order's priced lines through the same shared endpoint.
+    """
+    from decimal import Decimal
+    from core.models import LineItem
+
+    wo = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                  client=client_obj, status='in_progress')
+    wo_line = LineItem.objects.create(content_object=wo, kind='labor', description='Bench',
+                                      quantity=1, unit_price=Decimal('50.00'))
+    seller = _role_tech('t_sales_backdoor', can_view_sales=True)
+    client.force_login(seller)
+    resp = client.post(reverse('core:work_performed_update', args=[wo_line.pk]),
+                       {'custom_label': 'hijacked', 'quantity': '1', 'unit_price': '1.00'})
+    assert resp.status_code == 403
+    wo_line.refresh_from_db()
+    assert wo_line.unit_price == Decimal('50.00')
+    assert client.post(reverse('core:work_performed_delete', args=[wo_line.pk])).status_code == 403
+
+
+@pytest.mark.django_db
+def test_ticket_quick_status_rejects_a_status_that_does_not_exist(client, client_obj):
+    """The ticket twin of the work-order status validation.
+
+    The quick dropdown gated close-vs-edit correctly but never checked that the
+    submitted status exists. Ticket.status has no `choices=` and
+    apply_status_change() assigns whatever it receives, so a user with edit
+    rights could invent a status by POST and leave the ticket in a state no
+    list, queue or report recognises.
+    """
+    tech = _role_tech('t_status_bogus', can_edit_ticket=True, can_close_tickets=True)
+    ticket = _ticket_for(tech, client_obj)
+    client.force_login(tech)
+    for bogus in ('banana', 'in-progress', ''):
+        client.post(reverse('core:ticket_status_update', args=[ticket.pk]), {'status': bogus})
+        ticket.refresh_from_db()
+        assert ticket.status == 'open', f'posting status={bogus!r} was saved'
+
+    client.post(reverse('core:ticket_status_update', args=[ticket.pk]), {'status': 'in_progress'})
+    ticket.refresh_from_db()
+    assert ticket.status == 'in_progress', 'a real status must still work'
+
+
+@pytest.mark.django_db
+def test_the_ui_does_not_offer_controls_the_server_refuses(client, client_obj):
+    """Buttons and the server must agree about what a role can do.
+
+    An outside reviewer noted the server denied correctly while the pages still
+    rendered Convert, Dismiss, Escalate, the ticket timer, Apply Checklist, the
+    line-item buttons and the checklist dropdowns. Not a security hole — the
+    server refuses — but every one of those is a control that fails when clicked,
+    which teaches people the app is broken rather than that they lack a permission.
+    """
+    from core.models import WorkOrderItem
+    tech = _role_tech('t_ui_matches')      # no edit rights of any kind
+    ticket = _ticket_for(tech, client_obj, needs_response=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, assigned_to=tech, status='in_progress',
+    )
+    # ⚠ item_type='checklist' matters: the detail view filters on it, so a
+    # default-type item renders no checklist at all and both assertions below
+    # would pass without proving anything.
+    WorkOrderItem.objects.create(work_order=wo, item_type='checklist',
+                                 description='Check PSU')
+    client.force_login(tech)
+
+    tb = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    wb = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
+
+    assert 'Convert to Work Order' not in tb
+    assert 'dismissOpen = !dismissOpen' not in tb
+    assert '/escalate/' not in tb
+    assert 'tk-timer-log-form' not in tb, 'the timer posts time and would be refused'
+    assert 'Apply Checklist' not in wb
+    assert '+ Custom' not in wb
+    assert '/items/' not in wb and '/check/' not in wb, (
+        'the checklist dropdowns post to a refused endpoint'
+    )
+
+
+@pytest.mark.django_db
+def test_the_ui_still_offers_everything_to_a_role_that_may_use_it(client, client_obj):
+    """The mirror: hiding must be driven by permission, not by hiding everything."""
+    from core.models import WorkOrderItem
+    tech = _role_tech('t_ui_full', can_edit_ticket=True, can_close_tickets=True,
+                      can_create_workorder=True, can_edit_workorder=True)
+    ticket = _ticket_for(tech, client_obj, needs_response=True)
+    wo = WorkOrder.objects.create(
+        work_order_number=WorkOrder.generate_work_order_number(),
+        client=client_obj, assigned_to=tech, status='in_progress',
+    )
+    # ⚠ item_type='checklist' matters: the detail view filters on it, so a
+    # default-type item renders no checklist at all and both assertions below
+    # would pass without proving anything.
+    WorkOrderItem.objects.create(work_order=wo, item_type='checklist',
+                                 description='Check PSU')
+    client.force_login(tech)
+
+    tb = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    wb = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
+
+    assert 'Convert to Work Order' in tb
+    assert 'dismissOpen = !dismissOpen' in tb
+    assert 'tk-timer-log-form' in tb
+    assert 'Apply Checklist' in wb
+    assert '+ Custom' in wb
+    assert '/check/' in wb, 'the checklist dropdowns must be offered to a role that may use them'
+
+
+@pytest.mark.django_db
+def test_user_manager_cannot_grant_a_role_carrying_powers_they_lack(client):
+    """The general rule, not a list of "sensitive" flags.
+
+    The first version excluded only can_manage_settings, so a delegated manager
+    could still hand themselves a role carrying card charging, MFA reset, the org
+    credential vault or ticket deletion — a reviewer reproduced it and the POST
+    returned 302 with role_obj changed. A role is assignable only if everything
+    it grants is something the actor already holds.
+    """
+    from core.models import Role
+    mgr = _user_manager('esc_flags')
+    for flag in ('can_process_payments', 'can_reset_user_mfa',
+                 'can_view_org_credentials', 'can_delete_ticket',
+                 'can_view_device_credentials'):
+        juicy = Role.objects.create(name=f'Juicy-{flag}', **{flag: True})
+        client.force_login(mgr)
+        client.post(reverse('core:user_edit', args=[mgr.pk]), {
+            'first_name': '', 'last_name': '', 'username': mgr.username,
+            'email': '', 'phone': '', 'level': mgr.level,
+            'role_obj': juicy.pk, 'is_active': 'on',
+        })
+        mgr.refresh_from_db()
+        assert mgr.role_obj_id != juicy.pk, f'a manager granted themselves {flag}'
+
+
+@pytest.mark.django_db
+def test_a_manager_can_still_assign_a_role_within_their_own_powers(client):
+    """The rule restricts delegation; it must not make delegation useless."""
+    from core.models import Role
+    mgr = _user_manager('deleg_ok')
+    mgr.role_obj.can_edit_ticket = True
+    mgr.role_obj.save()
+    plain = Role.objects.create(name='PlainBench', can_edit_ticket=True)
+    target = User.objects.create_user(username='benchie', password='x')
+    client.force_login(mgr)
+    client.post(reverse('core:user_edit', args=[target.pk]), {
+        'first_name': '', 'last_name': '', 'username': target.username,
+        'email': '', 'phone': '', 'level': 1,
+        'role_obj': plain.pk, 'is_active': 'on',
+    })
+    target.refresh_from_db()
+    assert target.role_obj_id == plain.pk, 'a manager could not assign a role within their powers'
+
+
+@pytest.mark.django_db
+def test_user_manager_cannot_raise_their_own_escalation_level(client):
+    """Level is a permission: ticket visibility reads it.
+
+    _scope_tickets_for() shows a technician tickets escalated up to their own
+    level, so raising it widens what they can read. A reviewer took an L1
+    delegated manager to L3 through this form; the POST returned 302.
+    """
+    mgr = _user_manager('esc_level')
+    assert mgr.level == 1
+    client.force_login(mgr)
+    client.post(reverse('core:user_edit', args=[mgr.pk]), {
+        'first_name': '', 'last_name': '', 'username': mgr.username,
+        'email': '', 'phone': '', 'level': 3,
+        'role_obj': mgr.role_obj_id, 'is_active': 'on',
+    })
+    mgr.refresh_from_db()
+    assert mgr.level == 1, 'a manager raised their own escalation level'
+
+
+@pytest.mark.django_db
+def test_user_manager_cannot_act_on_someone_holding_powers_they_lack(client):
+    """Half the rule is not the rule.
+
+    Blocking role assignment but still allowing a password reset on a
+    better-equipped colleague leaves the same door open: sign in as them and use
+    the capability. "Outranks" is measured across the whole permission set.
+    """
+    from core.models import Role
+    mgr = _user_manager('esc_lateral')
+    payer_role = Role.objects.create(name='Cashier', can_process_payments=True)
+    payer = User.objects.create_user(username='cashier_x', password='cashpass',
+                                     role_obj=payer_role)
+    client.force_login(mgr)
+    assert client.get(reverse('core:user_edit', args=[payer.pk])).status_code == 403
+    resp = client.post(reverse('core:user_set_password', args=[payer.pk]),
+                       {'password1': 'taken-over-1234', 'password2': 'taken-over-1234'})
+    assert resp.status_code == 403
+    payer.refresh_from_db()
+    assert payer.check_password('cashpass')
+
+
+@pytest.mark.django_db
+def test_an_admin_is_still_unrestricted_by_any_of_this(client):
+    from core.models import Role
+    admin = User.objects.create_user(username='boss_unrestricted', password='x',
+                                     is_staff=True, is_superuser=True)
+    juicy = Role.objects.create(name='EverythingRole', can_process_payments=True,
+                                can_manage_settings=True)
+    target = User.objects.create_user(username='promote_me', password='x')
+    client.force_login(admin)
+    client.post(reverse('core:user_edit', args=[target.pk]), {
+        'first_name': '', 'last_name': '', 'username': target.username,
+        'email': '', 'phone': '', 'level': 3,
+        'role_obj': juicy.pk, 'is_staff': 'on', 'is_active': 'on',
+    })
+    target.refresh_from_db()
+    assert target.role_obj_id == juicy.pk and target.level == 3 and target.is_staff
+
+
+@pytest.mark.django_db
+def test_user_manager_cannot_act_on_a_higher_level_account(client):
+    """Escalation level is rank, so it belongs in the outranks comparison.
+
+    Reproduced by a reviewer: an L1 delegated manager and an L3 technician on the
+    SAME non-admin role — identical flags, so the flag comparison passed — and
+    the manager reset the L3's password (200 on the page, 302 on the POST).
+    Taking over that account buys ticket visibility an L1 never had, because
+    _scope_tickets_for() shows tickets escalated up to the viewer's level.
+
+    Every view that acts on a user is covered, not just the one that was probed.
+    """
+    from core.models import Role
+    shared = Role.objects.create(name='SharedBench', can_manage_users=True)
+    mgr = User.objects.create_user(username='lvl1_mgr', password='x',
+                                   role_obj=shared, level=1)
+    senior = User.objects.create_user(username='lvl3_tech', password='seniorpass',
+                                      role_obj=shared, level=3)
+    client.force_login(mgr)
+
+    assert client.get(reverse('core:user_set_password', args=[senior.pk])).status_code == 403
+    assert client.post(reverse('core:user_set_password', args=[senior.pk]),
+                       {'password1': 'stolen-1234abcd',
+                        'password2': 'stolen-1234abcd'}).status_code == 403
+    assert client.get(reverse('core:user_edit', args=[senior.pk])).status_code == 403
+    assert client.post(reverse('core:user_delete', args=[senior.pk])).status_code == 403
+    assert client.post(reverse('core:user_mfa_reset', args=[senior.pk])).status_code == 403
+
+    senior.refresh_from_db()
+    assert senior.check_password('seniorpass'), "a higher-level account's password was reset"
+    assert User.objects.filter(pk=senior.pk).exists()
+
+
+@pytest.mark.django_db
+def test_a_manager_can_still_act_on_peers_and_juniors(client):
+    """Rank blocks upward, not sideways or down — delegation must stay usable."""
+    from core.models import Role
+    shared = Role.objects.create(name='SharedBench2', can_manage_users=True)
+    mgr = User.objects.create_user(username='lvl2_mgr', password='x',
+                                   role_obj=shared, level=2)
+    junior = User.objects.create_user(username='lvl1_tech', password='old',
+                                      role_obj=shared, level=1)
+    peer = User.objects.create_user(username='lvl2_tech', password='old',
+                                    role_obj=shared, level=2)
+    client.force_login(mgr)
+    for target in (junior, peer):
+        resp = client.post(reverse('core:user_set_password', args=[target.pk]),
+                           {'password1': 'newpass-1234abcd', 'password2': 'newpass-1234abcd'})
+        assert resp.status_code == 302, f'blocked on {target.username} (level {target.level})'
+        target.refresh_from_db()
+        assert target.check_password('newpass-1234abcd')
+
+
+@pytest.mark.django_db
+def test_mfa_reset_requires_outranking_the_target(client):
+    """Holding can_reset_user_mfa means you may clear somebody's, not anybody's.
+
+    This view acted on any target with no rank check at all — it was the only one
+    of the five that did. Clearing two-factor on an account above you removes the
+    last control between a stolen password and that account.
+    """
+    from core.models import Role
+    resetter_role = Role.objects.create(name='MFAHelper', can_reset_user_mfa=True)
+    helper = User.objects.create_user(username='mfa_helper', password='x',
+                                      role_obj=resetter_role, level=1)
+    owner = User.objects.create_user(username='mfa_owner', password='x',
+                                     is_staff=True, is_superuser=True)
+    client.force_login(helper)
+    assert client.post(reverse('core:user_mfa_reset', args=[owner.pk])).status_code == 403
+
+
+@pytest.mark.django_db
+def test_every_authority_dimension_is_compared():
+    """A dimension declared as rank must actually be enforced.
+
+    Three rounds of findings came from implementing "outranks" one dimension at a
+    time, each fix adding whichever had just been exploited. This asserts each
+    declared dimension independently blocks, so adding one to the list without
+    wiring it up fails here rather than in a review.
+    """
+    from core.models import Role
+    from core.views import _AUTHORITY_DIMENSIONS, _outranks_or_equal
+
+    assert set(_AUTHORITY_DIMENSIONS) == {'admin', 'flags', 'level'}
+
+    plain = Role.objects.create(name='DimPlain')
+    base = User.objects.create_user(username='dim_base', password='x',
+                                    role_obj=plain, level=1)
+
+    # admin
+    boss = User.objects.create_user(username='dim_admin', password='x',
+                                    is_staff=True, is_superuser=True)
+    assert not _outranks_or_equal(base, boss), 'admin status is not compared'
+
+    # flags
+    juicy = Role.objects.create(name='DimJuicy', can_process_payments=True)
+    payer = User.objects.create_user(username='dim_payer', password='x',
+                                     role_obj=juicy, level=1)
+    assert not _outranks_or_equal(base, payer), 'permission flags are not compared'
+
+    # level
+    senior = User.objects.create_user(username='dim_senior', password='x',
+                                      role_obj=plain, level=3)
+    assert not _outranks_or_equal(base, senior), 'escalation level is not compared'
+
+    # and an equal peer is fine in every direction
+    peer = User.objects.create_user(username='dim_peer', password='x',
+                                    role_obj=plain, level=1)
+    assert _outranks_or_equal(base, peer) and _outranks_or_equal(peer, base)
+
+
+@pytest.mark.django_db
+def test_user_list_only_offers_actions_the_server_will_allow(client):
+    """The user list must not draw buttons that 403 on click.
+
+    Every action was rendered for every account: Edit, Set Password, Delete,
+    Reset MFA, and Manage Roles. The server refuses them correctly, so this was
+    never a bypass — but in the one area of the app being hardened for privilege
+    escalation, showing a delegated manager a Set Password link for the owner is
+    the worst possible place to teach people that buttons lie.
+
+    Each row is now annotated with the same _may_act_on_user() result the views
+    use, so the page cannot disagree with them.
+    """
+    from core.models import Role
+    shared = Role.objects.create(name='ListMgr', can_manage_users=True)
+    mgr = User.objects.create_user(username='list_mgr', password='x',
+                                   role_obj=shared, level=1)
+    senior = User.objects.create_user(username='list_senior', password='x',
+                                      role_obj=shared, level=3)
+    owner = User.objects.create_user(username='list_owner', password='x',
+                                     is_staff=True, is_superuser=True)
+    junior = User.objects.create_user(username='list_junior', password='x',
+                                      role_obj=shared, level=1)
+
+    client.force_login(mgr)
+    body = client.get(reverse('core:user_list')).content.decode()
+
+    for unreachable in (senior, owner):
+        assert reverse('core:user_edit', args=[unreachable.pk]) not in body, (
+            f'Edit offered for {unreachable.username}, who outranks the manager'
+        )
+        assert reverse('core:user_set_password', args=[unreachable.pk]) not in body
+        assert reverse('core:user_delete', args=[unreachable.pk]) not in body
+        assert reverse('core:user_mfa_reset', args=[unreachable.pk]) not in body
+
+    # A peer stays fully actionable — this hides by rank, not by hiding everything.
+    assert reverse('core:user_edit', args=[junior.pk]) in body
+    assert reverse('core:user_set_password', args=[junior.pk]) in body
+
+    # Roles are Settings, and a delegated manager is not an admin.
+    assert reverse('core:role_list') not in body
+
+
+@pytest.mark.django_db
+def test_an_admin_still_sees_every_user_action(client):
+    """The mirror — the gating must be rank-driven, not blanket."""
+    from core.models import Role
+    admin = User.objects.create_user(username='list_admin', password='x',
+                                     is_staff=True, is_superuser=True)
+    other = User.objects.create_user(username='list_other', password='x',
+                                     role_obj=Role.objects.create(name='ListPlain'))
+    client.force_login(admin)
+    body = client.get(reverse('core:user_list')).content.decode()
+    assert reverse('core:user_edit', args=[other.pk]) in body
+    assert reverse('core:user_set_password', args=[other.pk]) in body
+    assert reverse('core:user_delete', args=[other.pk]) in body
+    assert reverse('core:role_list') in body, 'an admin must still reach Manage Roles'
+
+
+@pytest.mark.django_db
+def test_a_delegated_user_manager_can_actually_reach_the_user_list(client):
+    """A granted permission must have a route to it.
+
+    The only navigation to Settings was gated on Django `is_staff`, and the user
+    list lives under Settings — so a role granted "Manage Users" had no way to
+    reach the thing it had just been granted, short of typing the URL. That is
+    the same lying checkbox this branch exists to end, pointing the other way:
+    enforcement agreed with the box, the product never offered it.
+    """
+    mgr = _user_manager('nav_mgr')
+    client.force_login(mgr)
+    body = client.get(reverse('core:dashboard')).content.decode()
+    assert reverse('core:user_list') in body, (
+        'a user manager has no link to the user list'
+    )
+    assert reverse('core:settings') not in body, (
+        'Settings is admin-only; offering it here is a link to a 403'
+    )
+
+
+@pytest.mark.django_db
+def test_a_settings_admin_without_django_staff_can_reach_settings(client):
+    """`is_admin` is staff OR can_manage_settings — the nav only honoured the first.
+
+    views._is_admin() has always accepted a role carrying can_manage_settings, so
+    such a user could open Settings by URL while the app showed them no way in.
+    Pre-existing, and exactly the audience the role exists for.
+    """
+    from core.models import Role
+    role = Role.objects.create(name='SettingsAdminRole', can_manage_settings=True)
+    admin_by_role = User.objects.create_user(username='role_admin', password='x',
+                                             is_staff=False, role_obj=role)
+    client.force_login(admin_by_role)
+    body = client.get(reverse('core:dashboard')).content.decode()
+    assert reverse('core:settings') in body, (
+        'a can_manage_settings role has no link to Settings'
+    )
+    assert client.get(reverse('core:settings')).status_code == 200
+
+
+@pytest.mark.django_db
+def test_the_user_list_backlink_goes_somewhere_the_viewer_can_open(client):
+    """The reviewer's finding: ← Settings was drawn for people Settings refuses."""
+    mgr = _user_manager('backlink_mgr')
+    client.force_login(mgr)
+    body = client.get(reverse('core:user_list')).content.decode()
+    assert reverse('core:settings') not in body
+    assert reverse('core:dashboard') in body
+
+    admin = User.objects.create_user(username='backlink_admin', password='x',
+                                     is_staff=True, is_superuser=True)
+    client.force_login(admin)
+    body = client.get(reverse('core:user_list')).content.decode()
+    assert reverse('core:settings') in body, 'an admin should still go back to Settings'
+
+
+@pytest.mark.django_db
+def test_a_plain_technician_sees_neither_settings_nor_users(client, client_obj):
+    """The mirror — the new Users link must not leak to roles without the grant."""
+    tech = _role_tech('nav_plain')
+    client.force_login(tech)
+    body = client.get(reverse('core:dashboard')).content.decode()
+    assert reverse('core:settings') not in body
+    assert reverse('core:user_list') not in body
+
+
+@pytest.mark.django_db
+def test_the_chrome_and_the_server_agree_for_every_shape_of_user(client, rf):
+    """The UI's idea of a permission must BE the server's, not resemble it.
+
+    Twice now the context processor has paraphrased a rule and drifted from it.
+    `is_admin` was written as `is_staff or role_obj.can_manage_settings`, dropping
+    the legacy `role == 'admin'` fallback that has_perm_flag honours — so a legacy
+    admin got 200 from /settings/ while the nav offered no way in and the user list
+    drew them the non-admin backlink. `can_manage_users` used has_perm_flag where
+    the server uses _role_flag, which differ for a user with no role at all.
+
+    Rather than assert today's answers, this compares the context processor against
+    the view helper for every shape of account the app can produce. A new user
+    shape, or a new paraphrase, fails here.
+    """
+    from core.context_processors import site_settings
+    from core.models import Role
+    from core import views as v
+
+    settings_role = Role.objects.create(name='CtxSettings', can_manage_settings=True)
+    users_role = Role.objects.create(name='CtxUsers', can_manage_users=True)
+    plain_role = Role.objects.create(name='CtxPlain')
+
+    shapes = {
+        'django staff':      User.objects.create_user(username='ctx_staff', password='x', is_staff=True),
+        'superuser':         User.objects.create_user(username='ctx_super', password='x',
+                                                      is_staff=True, is_superuser=True),
+        'settings role':     User.objects.create_user(username='ctx_setrole', password='x',
+                                                      role_obj=settings_role),
+        'user-manager role': User.objects.create_user(username='ctx_umrole', password='x',
+                                                      role_obj=users_role),
+        'plain role':        User.objects.create_user(username='ctx_plain', password='x',
+                                                      role_obj=plain_role),
+        'no role at all':    User.objects.create_user(username='ctx_norole', password='x'),
+        # ⚠ The legacy path: role_obj is None and the old CharField carries 'admin'.
+        # has_perm_flag() still returns True for everything here, so the server
+        # treats this account as an admin. This is the shape the reviewer found.
+        'legacy admin':      User.objects.create_user(username='ctx_legacy', password='x',
+                                                      is_staff=False, role='admin'),
+    }
+    # ⚠ DERIVED from what the chrome actually publishes — not a list anyone has to
+    # remember to extend. Two earlier versions were hand-written: the first compared
+    # six values and omitted the eleven this branch is mostly about, so a reviewer
+    # probed those by hand; the second added the eleven but still named the six, so
+    # a NEW permission would have slipped through. Every boolean the context exposes
+    # must have a server helper of the same name, and must equal it.
+    probe = rf.get('/')
+    probe.user = User.objects.create_user(username='ctx_probe', password='x')
+    published = [
+        key for key, value in site_settings(probe).items()
+        if isinstance(value, bool)
+    ]
+    missing = [k for k in published if not hasattr(v, f'_{k}')]
+    assert not missing, (
+        'the chrome publishes permissions with no server helper to follow, so '
+        f'nothing can keep them in step: {missing}'
+    )
+    checks = {key: getattr(v, f'_{key}') for key in published}
+    assert len(checks) >= 17, (
+        f'expected at least the 17 known permissions, found {len(checks)} — has the '
+        'context stopped publishing some?'
+    )
+
+    mismatches = []
+    for shape, user in shapes.items():
+        request = rf.get('/')
+        request.user = user
+        ctx = site_settings(request)
+        for key, helper in checks.items():
+            if bool(ctx[key]) != bool(helper(user)):
+                mismatches.append(
+                    f'{shape}: template {key}={ctx[key]!r} but server says {helper(user)!r}'
+                )
+    assert not mismatches, (
+        'the chrome disagrees with the server about what these users may do:\n  '
+        + '\n  '.join(mismatches)
+    )
+
+
+@pytest.mark.django_db
+def test_a_legacy_admin_is_offered_the_settings_it_can_open(client):
+    """The reviewer's exact case, end to end rather than by helper comparison."""
+    legacy = User.objects.create_user(username='legacy_admin_nav', password='x',
+                                      is_staff=False, role='admin')
+    client.force_login(legacy)
+    assert client.get(reverse('core:settings')).status_code == 200, (
+        'precondition: the server treats a legacy admin as an admin'
+    )
+    body = client.get(reverse('core:dashboard')).content.decode()
+    assert reverse('core:settings') in body, 'the nav offered no way into Settings'
+    users_page = client.get(reverse('core:user_list')).content.decode()
+    assert reverse('core:settings') in users_page, 'sent back to a page it can open'
+    assert '← Dashboard' not in users_page, (
+        'a legacy admin was given the non-admin backlink'
+    )
+
+
+@pytest.mark.django_db
+def test_recently_closed_shows_completed_work(client, client_obj):
+    """The dashboard panel must show finished jobs, which means 'completed'.
+
+    It filtered a hand-written ['closed', 'cancelled'] — a second definition of
+    "finished" written three lines below the constant that exists to be the only
+    one. Retiring the `closed` status left it naming a state nothing can hold, so
+    "Recently Closed" could never show a completed job again.
+
+    ⚠ This panel is on the TECHNICIAN dashboard, not the owner's — admins get a
+    separate _admin_dashboard() that never builds this key. I first reported it
+    as "the dashboard", which would have had Mike looking for a panel his own
+    account never renders.
+    """
+    tech = _role_tech('rc_tech')
+    done = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                    client=client_obj, status='completed')
+    scrapped = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                        client=client_obj, status='cancelled')
+    live = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                    client=client_obj, status='in_progress')
+    client.force_login(tech)
+    shown = {w.work_order_number for w in client.get(reverse('core:dashboard')).context['recently_closed']}
+    assert done.work_order_number in shown, 'a completed job never reaches Recently Closed'
+    assert scrapped.work_order_number in shown
+    assert live.work_order_number not in shown
+
+
+@pytest.mark.django_db
+def test_finished_work_leaves_the_my_work_sidebar(client, client_obj):
+    """Pre-existing, same class: the sidebar never excluded 'completed'.
+
+    It excluded 'closed' and 'cancelled' only — so a finished job stayed in My
+    Work indefinitely, while the dashboard's own open-WO query excluded exactly
+    those jobs correctly. Two views, two definitions, one of them wrong.
+    """
+    tech = _role_tech('sidebar_tech', can_edit_workorder=True)
+    done = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                    client=client_obj, assigned_to=tech, status='completed')
+    live = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                    client=client_obj, assigned_to=tech, status='in_progress')
+    client.force_login(tech)
+    body = client.get(reverse('core:sidebar_fragment')).content.decode()
+    assert live.work_order_number in body
+    assert done.work_order_number not in body, 'a completed job stayed in My Work'
+
+
+@pytest.mark.django_db
+def test_no_view_keeps_its_own_copy_of_what_finished_means():
+    """One definition per record type, enforced.
+
+    Every regression in this area has been a second hand-written list drifting
+    from the constant beside it. This fails if a new one appears.
+    """
+    import inspect
+    from core import views
+    src = inspect.getsource(views)
+    # Strip the constants' own definitions and the commentary explaining the history.
+    body = '\n'.join(
+        line for line in src.splitlines()
+        if not line.lstrip().startswith('#')
+        and 'WO_CLOSED_STATUSES = ' not in line
+        and 'TICKET_CLOSED_STATUSES = ' not in line
+    )
+    strays = re.findall(r"status__in=[\(\[][^\)\]]*['\"](?:completed|cancelled)['\"][^\)\]]*[\)\]]", body)
+    assert not strays, (
+        'a view is carrying its own list of finished statuses instead of using '
+        f'WO_CLOSED_STATUSES: {strays}'
     )
