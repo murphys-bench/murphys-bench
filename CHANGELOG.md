@@ -41,9 +41,12 @@ the Unreleased entries move under that version and prod gets a single update.
   two-factor of anyone who outranks it — meaning anyone who is an administrator, holds a
   permission it lacks, or sits at a higher escalation level. Escalation level counts
   because a higher-level technician can see tickets escalated to them, so taking over such
-  an account would buy visibility the permission never granted. Without those limits the permission was a way to become the owner: tick
-  "Admin" on your own account, or reset the owner's password and sign in as them.
-  Administrators are unaffected. The stock Technician role does not have this permission.
+  an account would buy visibility the permission never granted.
+
+  Those limits are the whole point. Without them, this one permission was a way to become
+  the owner: tick "Admin" on your own account, give yourself a role that reaches Settings,
+  or reset the owner's password and sign in as them. Administrators are unaffected, and the
+  stock Technician role does not have this permission.
 - **Converting a ticket to a work order needs both "Create Work Orders" and "Edit
   Tickets".** Converting creates the work order and also ends the ticket, so it needs the
   permission for each. It previously asked only for the first, which let a role that could
