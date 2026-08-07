@@ -13251,22 +13251,28 @@ def test_the_chrome_and_the_server_agree_for_every_shape_of_user(client, rf):
         'legacy admin':      User.objects.create_user(username='ctx_legacy', password='x',
                                                       is_staff=False, role='admin'),
     }
-    # ⚠ EVERY value the chrome publishes, not a chosen few. The first version of
-    # this test compared six and left the eleven ticket/work-order flags out — the
-    # exact values the branch spends most of its time on — so a reviewer had to
-    # probe those by hand. Built from the context keys themselves so a value added
-    # later is covered without anyone remembering to list it here.
-    from core.context_processors import _TICKET_WO_FLAGS
-    checks = {
-        'is_admin': v._is_admin,
-        'can_view_prospects': v._can_view_prospects,
-        'can_view_estimates': v._can_view_estimates,
-        'can_view_sales': v._can_view_sales,
-        'can_process_payments': v._can_process_payments,
-        'can_manage_users': v._can_manage_users,
-        **{name: getattr(v, f'_{name}') for name in _TICKET_WO_FLAGS},
-    }
-    assert len(checks) == 17, f'expected every published permission, got {len(checks)}'
+    # ⚠ DERIVED from what the chrome actually publishes — not a list anyone has to
+    # remember to extend. Two earlier versions were hand-written: the first compared
+    # six values and omitted the eleven this branch is mostly about, so a reviewer
+    # probed those by hand; the second added the eleven but still named the six, so
+    # a NEW permission would have slipped through. Every boolean the context exposes
+    # must have a server helper of the same name, and must equal it.
+    probe = rf.get('/')
+    probe.user = User.objects.create_user(username='ctx_probe', password='x')
+    published = [
+        key for key, value in site_settings(probe).items()
+        if isinstance(value, bool)
+    ]
+    missing = [k for k in published if not hasattr(v, f'_{k}')]
+    assert not missing, (
+        'the chrome publishes permissions with no server helper to follow, so '
+        f'nothing can keep them in step: {missing}'
+    )
+    checks = {key: getattr(v, f'_{key}') for key in published}
+    assert len(checks) >= 17, (
+        f'expected at least the 17 known permissions, found {len(checks)} — has the '
+        'context stopped publishing some?'
+    )
 
     mismatches = []
     for shape, user in shapes.items():
