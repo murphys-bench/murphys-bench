@@ -12972,3 +12972,114 @@ def test_an_admin_is_still_unrestricted_by_any_of_this(client):
     })
     target.refresh_from_db()
     assert target.role_obj_id == juicy.pk and target.level == 3 and target.is_staff
+
+
+@pytest.mark.django_db
+def test_user_manager_cannot_act_on_a_higher_level_account(client):
+    """Escalation level is rank, so it belongs in the outranks comparison.
+
+    Reproduced by a reviewer: an L1 delegated manager and an L3 technician on the
+    SAME non-admin role — identical flags, so the flag comparison passed — and
+    the manager reset the L3's password (200 on the page, 302 on the POST).
+    Taking over that account buys ticket visibility an L1 never had, because
+    _scope_tickets_for() shows tickets escalated up to the viewer's level.
+
+    Every view that acts on a user is covered, not just the one that was probed.
+    """
+    from core.models import Role
+    shared = Role.objects.create(name='SharedBench', can_manage_users=True)
+    mgr = User.objects.create_user(username='lvl1_mgr', password='x',
+                                   role_obj=shared, level=1)
+    senior = User.objects.create_user(username='lvl3_tech', password='seniorpass',
+                                      role_obj=shared, level=3)
+    client.force_login(mgr)
+
+    assert client.get(reverse('core:user_set_password', args=[senior.pk])).status_code == 403
+    assert client.post(reverse('core:user_set_password', args=[senior.pk]),
+                       {'password1': 'stolen-1234abcd',
+                        'password2': 'stolen-1234abcd'}).status_code == 403
+    assert client.get(reverse('core:user_edit', args=[senior.pk])).status_code == 403
+    assert client.post(reverse('core:user_delete', args=[senior.pk])).status_code == 403
+    assert client.post(reverse('core:user_mfa_reset', args=[senior.pk])).status_code == 403
+
+    senior.refresh_from_db()
+    assert senior.check_password('seniorpass'), "a higher-level account's password was reset"
+    assert User.objects.filter(pk=senior.pk).exists()
+
+
+@pytest.mark.django_db
+def test_a_manager_can_still_act_on_peers_and_juniors(client):
+    """Rank blocks upward, not sideways or down — delegation must stay usable."""
+    from core.models import Role
+    shared = Role.objects.create(name='SharedBench2', can_manage_users=True)
+    mgr = User.objects.create_user(username='lvl2_mgr', password='x',
+                                   role_obj=shared, level=2)
+    junior = User.objects.create_user(username='lvl1_tech', password='old',
+                                      role_obj=shared, level=1)
+    peer = User.objects.create_user(username='lvl2_tech', password='old',
+                                    role_obj=shared, level=2)
+    client.force_login(mgr)
+    for target in (junior, peer):
+        resp = client.post(reverse('core:user_set_password', args=[target.pk]),
+                           {'password1': 'newpass-1234abcd', 'password2': 'newpass-1234abcd'})
+        assert resp.status_code == 302, f'blocked on {target.username} (level {target.level})'
+        target.refresh_from_db()
+        assert target.check_password('newpass-1234abcd')
+
+
+@pytest.mark.django_db
+def test_mfa_reset_requires_outranking_the_target(client):
+    """Holding can_reset_user_mfa means you may clear somebody's, not anybody's.
+
+    This view acted on any target with no rank check at all — it was the only one
+    of the five that did. Clearing two-factor on an account above you removes the
+    last control between a stolen password and that account.
+    """
+    from core.models import Role
+    resetter_role = Role.objects.create(name='MFAHelper', can_reset_user_mfa=True)
+    helper = User.objects.create_user(username='mfa_helper', password='x',
+                                      role_obj=resetter_role, level=1)
+    owner = User.objects.create_user(username='mfa_owner', password='x',
+                                     is_staff=True, is_superuser=True)
+    client.force_login(helper)
+    assert client.post(reverse('core:user_mfa_reset', args=[owner.pk])).status_code == 403
+
+
+@pytest.mark.django_db
+def test_every_authority_dimension_is_compared():
+    """A dimension declared as rank must actually be enforced.
+
+    Three rounds of findings came from implementing "outranks" one dimension at a
+    time, each fix adding whichever had just been exploited. This asserts each
+    declared dimension independently blocks, so adding one to the list without
+    wiring it up fails here rather than in a review.
+    """
+    from core.models import Role
+    from core.views import _AUTHORITY_DIMENSIONS, _outranks_or_equal
+
+    assert set(_AUTHORITY_DIMENSIONS) == {'admin', 'flags', 'level'}
+
+    plain = Role.objects.create(name='DimPlain')
+    base = User.objects.create_user(username='dim_base', password='x',
+                                    role_obj=plain, level=1)
+
+    # admin
+    boss = User.objects.create_user(username='dim_admin', password='x',
+                                    is_staff=True, is_superuser=True)
+    assert not _outranks_or_equal(base, boss), 'admin status is not compared'
+
+    # flags
+    juicy = Role.objects.create(name='DimJuicy', can_process_payments=True)
+    payer = User.objects.create_user(username='dim_payer', password='x',
+                                     role_obj=juicy, level=1)
+    assert not _outranks_or_equal(base, payer), 'permission flags are not compared'
+
+    # level
+    senior = User.objects.create_user(username='dim_senior', password='x',
+                                      role_obj=plain, level=3)
+    assert not _outranks_or_equal(base, senior), 'escalation level is not compared'
+
+    # and an equal peer is fine in every direction
+    peer = User.objects.create_user(username='dim_peer', password='x',
+                                    role_obj=plain, level=1)
+    assert _outranks_or_equal(base, peer) and _outranks_or_equal(peer, base)

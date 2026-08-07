@@ -36,9 +36,12 @@ the Unreleased entries move under that version and prod gets a single update.
   works now, and a role that has it can add, edit and remove users and set their passwords
   — but only within its own authority. It cannot make anyone an administrator, cannot give
   out a role carrying any permission it does not itself hold (charging a card, resetting
-  two-factor, the credential vault, deleting tickets), cannot raise anyone's escalation
-  level above its own, and cannot edit, delete or reset the password of anyone who is
-  already an administrator or who holds a permission it lacks. Without those limits the permission was a way to become the owner: tick
+  two-factor, the credential vault, deleting tickets), and cannot raise anyone's escalation
+  level above its own. It also cannot edit, delete, reset the password of, or clear the
+  two-factor of anyone who outranks it — meaning anyone who is an administrator, holds a
+  permission it lacks, or sits at a higher escalation level. Escalation level counts
+  because a higher-level technician can see tickets escalated to them, so taking over such
+  an account would buy visibility the permission never granted. Without those limits the permission was a way to become the owner: tick
   "Admin" on your own account, or reset the owner's password and sign in as them.
   Administrators are unaffected. The stock Technician role does not have this permission.
 - **Converting a ticket to a work order needs both "Create Work Orders" and "Edit

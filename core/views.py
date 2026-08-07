@@ -286,6 +286,45 @@ def _role_grants(role):
     return {f for f in _role_flag_names() if getattr(role, f, False)}
 
 
+# Everything that makes one account outrank another, in ONE place.
+#
+# ⚠ THE HISTORY, because it is the reason this is a table and not a chain of ifs.
+# "You cannot act on someone who outranks you" has now been implemented three
+# times and been wrong twice. First it meant "is not an admin", and a reviewer
+# handed a manager a role carrying card charging. Then it also meant "holds no
+# permission I lack", and a reviewer reset an L3 technician's password from an L1
+# manager account — because escalation level is rank too: _scope_tickets_for()
+# shows a technician tickets escalated up to their level, so taking over an L3
+# account buys visibility an L1 was never granted.
+#
+# Each fix added the dimension that had just been exploited. Listing the
+# dimensions as data instead means the next one is added in one place, and
+# test_every_authority_dimension_is_compared fails if a dimension is declared
+# here but not actually compared.
+_AUTHORITY_DIMENSIONS = ('admin', 'flags', 'level')
+
+
+def _authority_of(user):
+    """What this account's rank is made of. Keys must match _AUTHORITY_DIMENSIONS."""
+    return {
+        'admin': _is_admin(user) or user.is_superuser,
+        'flags': _effective_flags(user),
+        'level': getattr(user, 'level', 1),
+    }
+
+
+def _outranks_or_equal(actor, target):
+    """True if `actor` holds at least everything `target` does, on every dimension."""
+    a, t = _authority_of(actor), _authority_of(target)
+    if t['admin'] and not a['admin']:
+        return False
+    if not (t['flags'] <= a['flags']):
+        return False
+    if t['level'] > a['level']:
+        return False
+    return True
+
+
 def _is_privileged_account(target):
     """True if this account already holds administrative power.
 
@@ -317,15 +356,7 @@ def _may_act_on_user(actor, target):
     grant what you do not hold, and you cannot act on someone who outranks you.
     Admins are unrestricted, as before.
     """
-    if _is_admin(actor):
-        return True
-    if _is_privileged_account(target):
-        return False
-    # ⚠ And the target must not hold a permission the actor lacks. Otherwise the
-    # rule is only half applied: set that person's password, sign in as them, and
-    # you are using a capability you were never granted. "Outranks" has to be
-    # measured against the whole permission set, not just the Settings flag.
-    return _effective_flags(target) <= _effective_flags(actor)
+    return _is_admin(actor) or _outranks_or_equal(actor, target)
 
 
 def _assignable_roles_for(actor):
@@ -5672,6 +5703,13 @@ class AdminMFAResetView(LoginRequiredMixin, View):
         from django.contrib import messages
         from .models import reset_user_mfa
         target = get_object_or_404(User, pk=pk)
+        # ⚠ Holding can_reset_user_mfa says you may clear SOMEBODY's two-factor,
+        # not anybody's. Clearing it on an account that outranks you removes the
+        # one control standing between a stolen or reset password and that
+        # account. Same rule as edit, delete and set-password; this view was the
+        # only one acting on a user without it.
+        if not _may_act_on_user(request.user, target):
+            return HttpResponse('Forbidden', status=403)
         reset_user_mfa(target, actor=request.user, source='web')
         messages.success(
             request,
