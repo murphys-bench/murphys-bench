@@ -13209,3 +13209,86 @@ def test_a_plain_technician_sees_neither_settings_nor_users(client, client_obj):
     body = client.get(reverse('core:dashboard')).content.decode()
     assert reverse('core:settings') not in body
     assert reverse('core:user_list') not in body
+
+
+@pytest.mark.django_db
+def test_the_chrome_and_the_server_agree_for_every_shape_of_user(client, rf):
+    """The UI's idea of a permission must BE the server's, not resemble it.
+
+    Twice now the context processor has paraphrased a rule and drifted from it.
+    `is_admin` was written as `is_staff or role_obj.can_manage_settings`, dropping
+    the legacy `role == 'admin'` fallback that has_perm_flag honours — so a legacy
+    admin got 200 from /settings/ while the nav offered no way in and the user list
+    drew them the non-admin backlink. `can_manage_users` used has_perm_flag where
+    the server uses _role_flag, which differ for a user with no role at all.
+
+    Rather than assert today's answers, this compares the context processor against
+    the view helper for every shape of account the app can produce. A new user
+    shape, or a new paraphrase, fails here.
+    """
+    from core.context_processors import site_settings
+    from core.models import Role
+    from core import views as v
+
+    settings_role = Role.objects.create(name='CtxSettings', can_manage_settings=True)
+    users_role = Role.objects.create(name='CtxUsers', can_manage_users=True)
+    plain_role = Role.objects.create(name='CtxPlain')
+
+    shapes = {
+        'django staff':      User.objects.create_user(username='ctx_staff', password='x', is_staff=True),
+        'superuser':         User.objects.create_user(username='ctx_super', password='x',
+                                                      is_staff=True, is_superuser=True),
+        'settings role':     User.objects.create_user(username='ctx_setrole', password='x',
+                                                      role_obj=settings_role),
+        'user-manager role': User.objects.create_user(username='ctx_umrole', password='x',
+                                                      role_obj=users_role),
+        'plain role':        User.objects.create_user(username='ctx_plain', password='x',
+                                                      role_obj=plain_role),
+        'no role at all':    User.objects.create_user(username='ctx_norole', password='x'),
+        # ⚠ The legacy path: role_obj is None and the old CharField carries 'admin'.
+        # has_perm_flag() still returns True for everything here, so the server
+        # treats this account as an admin. This is the shape the reviewer found.
+        'legacy admin':      User.objects.create_user(username='ctx_legacy', password='x',
+                                                      is_staff=False, role='admin'),
+    }
+    checks = {
+        'is_admin': v._is_admin,
+        'can_view_prospects': v._can_view_prospects,
+        'can_view_estimates': v._can_view_estimates,
+        'can_view_sales': v._can_view_sales,
+        'can_process_payments': v._can_process_payments,
+        'can_manage_users': v._can_manage_users,
+    }
+
+    mismatches = []
+    for shape, user in shapes.items():
+        request = rf.get('/')
+        request.user = user
+        ctx = site_settings(request)
+        for key, helper in checks.items():
+            if bool(ctx[key]) != bool(helper(user)):
+                mismatches.append(
+                    f'{shape}: template {key}={ctx[key]!r} but server says {helper(user)!r}'
+                )
+    assert not mismatches, (
+        'the chrome disagrees with the server about what these users may do:\n  '
+        + '\n  '.join(mismatches)
+    )
+
+
+@pytest.mark.django_db
+def test_a_legacy_admin_is_offered_the_settings_it_can_open(client):
+    """The reviewer's exact case, end to end rather than by helper comparison."""
+    legacy = User.objects.create_user(username='legacy_admin_nav', password='x',
+                                      is_staff=False, role='admin')
+    client.force_login(legacy)
+    assert client.get(reverse('core:settings')).status_code == 200, (
+        'precondition: the server treats a legacy admin as an admin'
+    )
+    body = client.get(reverse('core:dashboard')).content.decode()
+    assert reverse('core:settings') in body, 'the nav offered no way into Settings'
+    users_page = client.get(reverse('core:user_list')).content.decode()
+    assert reverse('core:settings') in users_page, 'sent back to a page it can open'
+    assert '← Dashboard' not in users_page, (
+        'a legacy admin was given the non-admin backlink'
+    )

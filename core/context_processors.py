@@ -21,47 +21,55 @@ _TICKET_WO_FLAGS = (
 
 
 def site_settings(request):
+    """Template context for the chrome: who this user is allowed to see and do.
+
+    ⚠ EVERY value here is computed by CALLING the view helper that guards the
+    corresponding server action. Nothing in this file re-states a permission rule,
+    because every time it has, the UI and the server have drifted:
+
+      - `is_admin` was hand-written as `is_staff or role_obj.can_manage_settings`,
+        which silently dropped the legacy `role == 'admin'` fallback that
+        has_perm_flag still honours. A legacy admin got 200 from /settings/ while
+        the nav offered them no way in and the user list drew them the non-admin
+        backlink. Found by a reviewer, on the fix for the previous instance of
+        this same class.
+      - `can_manage_users` used has_perm_flag where the server uses _role_flag,
+        which differ for a user with no role at all.
+
+    The file already carried a warning about this for the ticket/work-order flags.
+    The rule it describes is now applied to all of them: import the helper, call
+    it, never paraphrase it.
+    """
     user = getattr(request, 'user', None)
-    is_admin = False
-    can_view_prospects = False
-    can_view_estimates = False
-    can_view_sales = False
-    can_process_payments = False
-    can_manage_users = False
-    flags = {name: False for name in _TICKET_WO_FLAGS}
-    if user is not None and user.is_authenticated:
-        is_admin = bool(
-            user.is_staff
-            or (getattr(user, 'role_obj', None) and user.role_obj.can_manage_settings)
-        )
-        # Prospects/Estimates/Sales show for everyone unless a role turns the flag off.
-        can_view_prospects = is_admin or user.has_perm_flag('can_view_prospects')
-        can_view_estimates = is_admin or user.has_perm_flag('can_view_estimates')
-        can_view_sales = is_admin or user.has_perm_flag('can_view_sales')
-        # Charging money is opt-in, NOT admin-by-default (unlike the flags above) —
-        # gated on superuser or the dedicated flag, same bar as MFA reset.
-        can_process_payments = user.is_superuser or user.has_perm_flag('can_process_payments')
-        # Needed in the chrome, not just on the users page: the ONLY navigation to
-        # Settings — and therefore to the user list living under it — was gated on
-        # is_staff, so a role granted "Manage Users" had no way to reach the thing it
-        # had just been granted. A permission with no route to it is the same lying
-        # checkbox as one that is never enforced, pointing the other way.
-        can_manage_users = is_admin or user.has_perm_flag('can_manage_users')
-        # ⚠ Must go through views._role_flag, not has_perm_flag, or the UI and the
-        # server disagree for a user with no role_obj: the view would allow the
-        # action (field default) while the button that triggers it stayed hidden.
-        from .views import _role_flag
-        flags = {
-            name: is_admin or _role_flag(user, name)
-            for name in _TICKET_WO_FLAGS
-        }
-    return {
+    context = {
         'site_settings': SiteSettings.get(),
-        'is_admin': is_admin,
-        'can_view_prospects': can_view_prospects,
-        'can_view_estimates': can_view_estimates,
-        'can_view_sales': can_view_sales,
-        'can_process_payments': can_process_payments,
-        'can_manage_users': can_manage_users,
-        **flags,
+        'is_admin': False,
+        'can_view_prospects': False,
+        'can_view_estimates': False,
+        'can_view_sales': False,
+        'can_process_payments': False,
+        'can_manage_users': False,
+        **{name: False for name in _TICKET_WO_FLAGS},
     }
+    if user is None or not user.is_authenticated:
+        return context
+
+    from .views import (
+        _is_admin, _role_flag, _can_view_prospects, _can_view_estimates,
+        _can_view_sales, _can_process_payments, _can_manage_users,
+    )
+    context.update({
+        'is_admin': _is_admin(user),
+        'can_view_prospects': _can_view_prospects(user),
+        'can_view_estimates': _can_view_estimates(user),
+        'can_view_sales': _can_view_sales(user),
+        'can_process_payments': _can_process_payments(user),
+        'can_manage_users': _can_manage_users(user),
+    })
+    # The ticket/work-order flags have no single-purpose helper each; they follow
+    # the same shape every one of those helpers uses.
+    context.update({
+        name: context['is_admin'] or _role_flag(user, name)
+        for name in _TICKET_WO_FLAGS
+    })
+    return context
