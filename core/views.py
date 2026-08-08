@@ -7394,7 +7394,8 @@ class EmailTestOutboundView(SettingsAdminMixin, View):
             return render(request, 'core/partials/settings_test_result.html', {
                 'ok': False,
                 'message': ('Could not send. Check the host, port and credentials in '
-                            'Outbound Email; the full error is in the application log.'),
+                            'Outbound Email; the full error is in logs/murphys_bench.log '
+                            'in the install folder.'),
             })
 
 
@@ -7437,8 +7438,8 @@ class EmailTestInboundView(SettingsAdminMixin, View):
             return render(request, 'core/partials/settings_test_result.html', {
                 'ok': False,
                 'message': ('Could not connect. Check the host, port, protocol and '
-                            'credentials in Inbound Email; the full error is in the '
-                            'application log.'),
+                            'credentials in Inbound Email; the full error is in '
+                            'logs/murphys_bench.log in the install folder.'),
             })
 
 
