@@ -8,7 +8,7 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
-## Unreleased
+## v0.12.1 — 2026-08-08
 
 ### Fixed
 
@@ -21,6 +21,13 @@ the Unreleased entries move under that version and prod gets a single update.
   anyone troubleshooting could have found a manufactured failure and chased it. Test runs now
   log to a temporary file that is deleted when they finish. Nothing about where the running
   application logs has changed.
+
+- **`git status` in your install folder is quiet again.** Murphy's Bench writes runtime files
+  into `logs/` (status files the Updates and Backups cards read, last-run markers, rotated log
+  copies), and Git was told to ignore log files but not those, so every install permanently
+  reported `logs/` as an unexpected leftover. Only relevant if you look at your install with
+  Git, but that check is how you spot a file edited directly on the server, and constant noise
+  made a clean install and a modified one look the same.
 
 - **The email test buttons now name the file the error is written to.** When a test send or
   a test mailbox connection fails, Murphy's Bench deliberately keeps the raw error off the
