@@ -1,5 +1,42 @@
 """Pytest fixtures shared across the suite."""
+import atexit
+import os
+import shutil
+import tempfile
+
 import pytest
+
+# Send the application log somewhere disposable for the duration of this run.
+#
+# Why: the log path is fixed per install, so a full run appended ~15 records to
+# logs/murphys_bench.log, several indistinguishable from genuine failures ("Outbound email
+# test failed for host smtp.example.com: 535 ... auth failed"). Running the suite on a real
+# box is normal here, and mb-test's log had eight such lines. That file is what the product
+# tells an operator to read when outbound email breaks, so test fiction in it is the product
+# lying to whoever reads it.
+#
+# Where this has to happen: pytest-django calls django.setup() from pytest_load_initial_conftests,
+# which runs BEFORE this file is imported, and Django applies LOGGING once via dictConfig at
+# setup. So neither an env var set here at import time nor a per-test `settings` override can
+# move the handler; by then it is already open on the real file. pytest_configure runs after
+# setup, so that is where the handler gets rebuilt.
+_TEST_LOG_DIR = tempfile.mkdtemp(prefix='mb-test-logs-')
+_TEST_LOG_FILE = os.path.join(_TEST_LOG_DIR, 'murphys_bench.log')
+atexit.register(shutil.rmtree, _TEST_LOG_DIR, True)
+
+
+def pytest_configure(config):
+    import logging.config
+
+    from django.conf import settings
+
+    # Also exported so anything the suite shells out to (manage.py subprocesses) logs to the
+    # temp file too rather than inheriting the install's real path.
+    os.environ['MB_LOG_FILE'] = _TEST_LOG_FILE
+
+    settings.LOG_FILE = _TEST_LOG_FILE
+    settings.LOGGING['handlers']['file']['filename'] = _TEST_LOG_FILE
+    logging.config.dictConfig(settings.LOGGING)
 
 
 @pytest.fixture(autouse=True)

@@ -12,6 +12,16 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ### Fixed
 
+- **Running the test suite no longer writes fake failures into the application log.** Every
+  test run appended about fifteen records to `logs/murphys_bench.log`, and several of them
+  were indistinguishable from real ones, including "Outbound email test failed for host
+  smtp.example.com" and "Backup failed: destination unreachable". None of it ever happened.
+  This only affects people who run the tests on the same machine Murphy's Bench is installed
+  on, but that is the same file the app now tells you to read when outbound email fails, so
+  anyone troubleshooting could have found a manufactured failure and chased it. Test runs now
+  log to a temporary file that is deleted when they finish. Nothing about where the running
+  application logs has changed.
+
 - **The email test buttons now name the file the error is written to.** When a test send or
   a test mailbox connection fails, Murphy's Bench deliberately keeps the raw error off the
   screen, because mail server failures often quote the server's own banner, its software

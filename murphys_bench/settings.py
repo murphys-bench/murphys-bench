@@ -345,6 +345,15 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # Logging
+#
+# Where the application log is written. This is a seam for the TEST SUITE ONLY: the path used
+# to be fixed, so every run appended its own manufactured failures ("Outbound email test failed
+# for host smtp.example.com") to the exact file Murphy's Bench tells an operator to read when
+# something breaks. conftest.py points MB_LOG_FILE at a temp file for the duration of a run.
+# No install sets it, so every real deployment logs exactly where it always has.
+_log_file = config('MB_LOG_FILE', default='')
+LOG_FILE = Path(_log_file) if _log_file else BASE_DIR / 'logs' / 'murphys_bench.log'
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -375,7 +384,7 @@ LOGGING = {
         'file': {
             'level': 'INFO',
             'class': 'logging.handlers.RotatingFileHandler',
-            'filename': BASE_DIR / 'logs' / 'murphys_bench.log',
+            'filename': LOG_FILE,
             'maxBytes': 1024 * 1024 * 10,  # 10MB
             'backupCount': 5,
             'formatter': 'verbose',

@@ -13377,3 +13377,53 @@ def test_no_view_keeps_its_own_copy_of_what_finished_means():
         'a view is carrying its own list of finished statuses instead of using '
         f'WO_CLOSED_STATUSES: {strays}'
     )
+
+
+def test_the_suite_never_writes_into_the_real_application_log():
+    """A test run must not append to logs/murphys_bench.log.
+
+    The log path used to be fixed per install, so every full run put ~15 records into
+    the app's own log, several of them indistinguishable from genuine failures:
+
+        WARNING ... views ... Outbound email test failed for host smtp.example.com:
+        535 mail.internal.example: auth failed
+
+    Running the suite on a real box is normal here, and mb-test's log had eight such
+    lines in it. That file is what the product now points an operator at when outbound
+    email fails, so a manufactured failure sitting in it is the product lying to whoever
+    reads it. conftest.py redirects MB_LOG_FILE for the duration of a run.
+
+    The marker assertion below is not decoration: without it this test would also pass
+    if logging were broken or silenced entirely, which is the vacuous-pass shape that
+    has bitten this suite before.
+    """
+    import uuid
+    from pathlib import Path
+    from django.conf import settings
+
+    real_log = _repo_root() / 'logs' / 'murphys_bench.log'
+    existed = real_log.exists()
+    size_before = real_log.stat().st_size if existed else None
+
+    assert settings.LOG_FILE != real_log, (
+        'the log seam is not in effect: settings.LOG_FILE still points at the real '
+        f'application log ({real_log}). conftest.py should have redirected it.'
+    )
+
+    marker = f'log-isolation-guard-{uuid.uuid4()}'
+    logging.getLogger('core').warning(marker)
+    for handler in logging.getLogger('core').handlers:
+        handler.flush()
+
+    # The write really happened, just somewhere disposable.
+    assert marker in Path(settings.LOG_FILE).read_text(), (
+        'the core logger did not write to the redirected log, so this test proves '
+        'nothing about where log records go'
+    )
+
+    if existed:
+        assert real_log.stat().st_size == size_before, (
+            f'the test run appended to {real_log}'
+        )
+    else:
+        assert not real_log.exists(), f'the test run created {real_log}'
