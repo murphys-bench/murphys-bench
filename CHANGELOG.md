@@ -8,6 +8,18 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Fixed
+
+- **The email test buttons now name the file the error is written to.** When a test send or
+  a test mailbox connection fails, Murphy's Bench deliberately keeps the raw error off the
+  screen, because mail server failures often quote the server's own banner, its software
+  version and sometimes your login name. The message said the details were "in the
+  application log" without saying where that is, so the first person to hit it had to ask.
+  It now names the file: `logs/murphys_bench.log`, inside the folder Murphy's Bench is
+  installed in. The error itself still stays out of the browser.
+
 ## v0.12.0 — 2026-08-06
 
 ### Security
