@@ -26,6 +26,12 @@ MANIFEST
 
 # Django
 *.log
+# Everything an install writes at runtime lands in logs/: status JSON the Updates and Backups
+# cards read, last-run markers, rotated copies (backup.log.1, gunicorn-access.log.2.gz — the
+# *.log rule above does not match those). None of it is source. Without this line every server
+# reports `?? logs/` forever, and `git status` on a box is how we catch code edited directly on
+# it, which is how prod was found running an uncommitted line for six weeks.
+logs/
 local_settings.py
 db.sqlite3
 /media
