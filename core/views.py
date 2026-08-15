@@ -3990,8 +3990,11 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         context['client_open_wos'] = open_wos
         context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
         context['is_admin'] = _is_admin(self.request.user)
+        # The quick dropdown offers only statuses a person may set. 'Converted to
+        # Work Order' is set by TicketConvertView, never by hand: offered here it
+        # renamed the ticket, created nothing, and hid the button that converts.
         context['ticket_statuses'] = StatusDefinition.objects.filter(
-            entity_type='ticket', is_active=True
+            entity_type='ticket', is_active=True, operator_selectable=True,
         ).order_by('sort_order')
         return context
 
@@ -9021,9 +9024,12 @@ class TicketStatusUpdateView(LoginRequiredMixin, View):
         # the quick dropdown did not. The ticket's own current status is allowed
         # through so a retired value cannot make it unsavable.
         valid_statuses = set(
-            StatusDefinition.objects.filter(entity_type='ticket', is_active=True)
-            .values_list('slug', flat=True)
+            StatusDefinition.objects.filter(
+                entity_type='ticket', is_active=True, operator_selectable=True,
+            ).values_list('slug', flat=True)
         )
+        # The ticket's own status stays allowed so a retired (or action-owned)
+        # value cannot make the ticket unsavable. Re-posting it is a no-op.
         valid_statuses.add(ticket.status)
         if new_status not in valid_statuses:
             return HttpResponse('Forbidden', status=403)

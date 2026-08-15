@@ -11965,6 +11965,63 @@ def test_ticket_convert_needs_the_workorder_create_flag(client, client_obj):
 
 
 @pytest.mark.django_db
+def test_converted_is_not_offered_in_the_ticket_status_dropdowns(client, admin_user, client_obj):
+    """Mike's Aug 14 ruling: remove it from the dropdown.
+
+    'Converted to Work Order' named an action it could not perform. Picking it
+    renamed the ticket, created no work order, and drove the ticket into a state
+    that hid the real Convert button.
+    """
+    from core.models import StatusDefinition
+    from core.forms import TicketForm
+    sd = StatusDefinition.objects.get(entity_type='ticket', slug='converted')
+    assert sd.operator_selectable is False, 'migration 0105 should have cleared this'
+
+    # Not in the full edit form's choices...
+    slugs = [s for s, _ in TicketForm().fields['status'].choices]
+    assert 'converted' not in slugs
+
+    # ...and not in the ticket detail quick dropdown.
+    ticket = Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(), client=client_obj,
+        subject='x', description='x', status='new',
+    )
+    client.force_login(admin_user)
+    body = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    assert '<option value="converted"' not in body
+
+    # Posting it by hand is refused rather than silently saved.
+    resp = client.post(reverse('core:ticket_status_update', args=[ticket.pk]),
+                       {'status': 'converted'})
+    assert resp.status_code == 403
+    ticket.refresh_from_db()
+    assert ticket.status == 'new'
+
+
+@pytest.mark.django_db
+def test_an_already_converted_ticket_stays_editable(client, admin_user, client_obj):
+    """Removing a status from the dropdown must not make records holding it
+    unsavable. The ticket's own current status is always a valid choice."""
+    from core.forms import TicketForm
+    ticket = Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(), client=client_obj,
+        subject='Already converted', description='x', status='converted',
+    )
+    slugs = [s for s, _ in TicketForm(instance=ticket).fields['status'].choices]
+    assert 'converted' in slugs, 'a converted ticket could not keep its own status'
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:ticket_edit', args=[ticket.pk]), {
+        'client': client_obj.pk, 'subject': 'Edited while converted',
+        'description': 'x', 'source': 'web', 'status': 'converted',
+    })
+    assert resp.status_code == 302, 'editing a converted ticket must not fail validation'
+    ticket.refresh_from_db()
+    assert ticket.subject == 'Edited while converted'
+    assert ticket.status == 'converted'
+
+
+@pytest.mark.django_db
 def test_a_hand_marked_converted_ticket_can_still_be_converted(client, admin_user, client_obj):
     """The trap from TKT-00041.
 

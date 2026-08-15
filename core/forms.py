@@ -488,10 +488,21 @@ class TicketForm(forms.ModelForm):
         self.fields['sla_plan'].required = False
         self.fields['assigned_to'].queryset = UserModel.objects.filter(is_active=True).order_by('first_name', 'last_name')
         self.fields['assigned_to'].required = False
-        # Dynamic status choices from StatusDefinition
+        # Dynamic status choices from StatusDefinition. operator_selectable=False
+        # statuses belong to an action, not to a person, so they are not offered.
         ticket_statuses = list(StatusDefinition.objects.filter(
-            entity_type='ticket', is_active=True
+            entity_type='ticket', is_active=True, operator_selectable=True,
         ).order_by('sort_order').values_list('slug', 'label'))
+        # The ticket's OWN status is always included, even when it is one of the
+        # action-owned ones. A converted ticket must stay editable; without this
+        # its current value is not a valid choice and every save of that ticket
+        # fails validation on a field the user never touched.
+        current = instance.status if instance and instance.pk else None
+        if current and current not in dict(ticket_statuses):
+            label = StatusDefinition.objects.filter(
+                entity_type='ticket', slug=current,
+            ).values_list('label', flat=True).first() or current
+            ticket_statuses.append((current, label))
         self.fields['status'] = forms.ChoiceField(
             choices=ticket_statuses,
             widget=forms.Select(attrs=SELECT_WIDGET),
