@@ -6559,6 +6559,71 @@ def test_pos_wo_settle_draft_does_not_mark_paid(client, admin_user, client_obj, 
 
 
 @pytest.mark.django_db
+def test_pos_wo_settle_draft_records_invoiced_on_mbs_own_invoice(client, admin_user, client_obj, monkeypatch):
+    """Bill Later must land on MB's Invoice too, not just the WO.
+
+    The bug this covers (found on prod WO-00017, Aug 14): the draft push wrote
+    invoice_ninja_id onto the WORK ORDER and never touched MB's Invoice row, so
+    a job sitting in Invoice Ninja as invoice #1931 still read as 'uninvoiced'
+    here and stayed in the billing-ready queue with no amount recorded."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('225.00'))
+
+    monkeypatch.setattr(invoice_ninja, '_request',
+                        lambda method, path, **kw: {'data': {'id': 931, 'number': '1931'}})
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'draft'})
+    assert resp.status_code == 302
+
+    wo.refresh_from_db()
+    inv = wo.invoice
+    inv.refresh_from_db()
+    assert inv.billing_status == 'invoiced'
+    assert inv.amount == Decimal('225.00')
+    assert inv.invoiced_date is not None
+    assert inv.invoice_ninja_id == wo.invoice_ninja_id
+    # Still not a payment.
+    assert inv.paid_at is None
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_draft_self_heals_a_stranded_record(client, admin_user, client_obj, monkeypatch):
+    """A WO already pushed to IN but left 'uninvoiced' locally corrects itself.
+
+    Records stranded by the original bug are fixed by revisiting Bill Later; no
+    data migration needed. The push is NOT repeated (one job = one invoice)."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='completed',
+                                  invoice_ninja_id='931', invoice_ninja_ref='1931')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('225.00'))
+    assert wo.invoice.billing_status == 'uninvoiced'
+
+    def fake_request(method, path, **kwargs):
+        raise AssertionError(f'Must not push a second invoice: {method} {path}')
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'draft'})
+    assert resp.status_code == 302
+
+    inv = wo.invoice
+    inv.refresh_from_db()
+    assert inv.billing_status == 'invoiced'
+    assert inv.invoice_ninja_id == '931'
+
+
+@pytest.mark.django_db
 def test_pos_wo_settle_cash_without_in_records_locally(client, admin_user, client_obj, monkeypatch):
     """MB stands alone: with Invoice Ninja OFF, settling a WO in cash records the
     payment on MB's own Invoice, generates MB's receipt, and never calls IN — no

@@ -6751,6 +6751,28 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
                 newly_pushed = True
 
             if action == 'draft':
+                # Record the draft on MB's OWN Invoice as well. Without this the
+                # work order keeps its invoice_ninja_id while MB's billing_status
+                # stays 'uninvoiced', so a job that really is in Invoice Ninja
+                # still reads here as never invoiced and never leaves the
+                # billing-ready queue. Found on WO-00017 (Aug 14): invoice #1931
+                # existed in IN while MB's own record was untouched.
+                #
+                # Only promotes from 'uninvoiced', which also self-heals records
+                # stranded by this bug the next time the WO is opened. It will
+                # not overwrite a later state (paid/disputed), and it will not
+                # re-sync an amount that changed after the push, because IN was
+                # not updated either and the local copy must not claim otherwise.
+                invoice = wo.invoice
+                if invoice.billing_status == 'uninvoiced':
+                    invoice.billing_status = 'invoiced'
+                    invoice.amount = amount
+                    invoice.invoiced_date = timezone.localdate()
+                    invoice.invoice_ninja_id = wo.invoice_ninja_id
+                    invoice.save(update_fields=[
+                        'billing_status', 'amount', 'invoiced_date',
+                        'invoice_ninja_id', 'updated_at',
+                    ])
                 if newly_pushed:
                     messages.success(
                         request,
