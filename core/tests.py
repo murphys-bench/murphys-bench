@@ -11965,6 +11965,73 @@ def test_ticket_convert_needs_the_workorder_create_flag(client, client_obj):
 
 
 @pytest.mark.django_db
+def test_a_hand_marked_converted_ticket_can_still_be_converted(client, admin_user, client_obj):
+    """The trap from TKT-00041.
+
+    "Converted to Work Order" is also a plain status in the quick dropdown, and
+    picking it there creates nothing. The convert view used to refuse any ticket
+    whose status was 'converted', so a ticket mislabelled that way could never be
+    converted for real, and the ticket page hid the working button at the same
+    time. Nothing on the screen led anywhere.
+    """
+    ticket = Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(), client=client_obj,
+        subject='Marked converted by hand', description='x', status='converted',
+    )
+    client.force_login(admin_user)
+
+    # The real route must still open, and still work.
+    assert client.get(reverse('core:ticket_convert', args=[ticket.pk])).status_code == 200
+    resp = client.post(reverse('core:ticket_convert', args=[ticket.pk]), {})
+    assert resp.status_code == 302
+    ticket.refresh_from_db()
+    assert ticket.work_order_created is not None
+    assert ticket.work_order_created.client_id == client_obj.pk
+
+
+@pytest.mark.django_db
+def test_converted_ticket_offers_a_route_to_its_work_order(client, admin_user, client_obj):
+    """Never a dead end: once a WO exists the button becomes a link to it."""
+    ticket = Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(), client=client_obj,
+        subject='Converted', description='x', status='new',
+    )
+    client.force_login(admin_user)
+    client.post(reverse('core:ticket_convert', args=[ticket.pk]), {})
+    ticket.refresh_from_db()
+    wo = ticket.work_order_created
+
+    body = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    assert f'Go to {wo.work_order_number}' in body
+    assert reverse('core:work_order_detail', args=[wo.pk]) in body
+    # And it must not offer a second conversion.
+    assert 'Convert to Work Order</a>' not in body
+
+    # A second attempt at the convert view is refused, on the work order's
+    # existence rather than on the status string.
+    assert client.get(reverse('core:ticket_convert', args=[ticket.pk])).status_code == 302
+
+
+@pytest.mark.django_db
+def test_ticket_device_picker_includes_a_device_promoted_to_an_asset(client_obj):
+    """Promotion to a managed Asset retires the Device row. Filtering the picker
+    on is_active therefore emptied it for exactly the managed clients (22 of 33
+    devices on prod), while the same machine stayed pickable on a work order."""
+    from core.forms import TicketForm, WorkOrderForm
+    device = Device.objects.create(client=client_obj, name='Reception PC')
+    device.promote_to_asset()
+    device.refresh_from_db()
+    assert device.is_active is False and device.promoted_to_asset_id is not None
+
+    # Note the different plumbing: TicketForm scopes from the posted/instance
+    # client, WorkOrderForm takes client_id as an explicit kwarg.
+    ticket_choices = TicketForm(data={'client': client_obj.pk}).fields['device'].queryset
+    wo_choices = WorkOrderForm(client_id=client_obj.pk).fields['device'].queryset
+    assert device in ticket_choices, 'the ticket picker hid a machine that is still real'
+    assert device in wo_choices, 'the work order picker never hid it, and must not start'
+
+
+@pytest.mark.django_db
 def test_edit_workorder_denied_without_flag(client, client_obj):
     tech = _role_tech('t_wo_edit_off')
     wo = WorkOrder.objects.create(

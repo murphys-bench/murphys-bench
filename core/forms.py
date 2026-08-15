@@ -470,7 +470,14 @@ class TicketForm(forms.ModelForm):
         effective_client_id = posted_client_id or (instance.client_id if instance else None)
         if effective_client_id:
             self.fields['contact'].queryset = Contact.objects.filter(client_id=effective_client_id, is_active=True).order_by('last_name', 'first_name')
-            self.fields['device'].queryset = Device.objects.filter(client_id=effective_client_id, is_active=True).order_by('name')
+            # No is_active filter, deliberately, and WorkOrderForm never had one.
+            # Promoting a device to a managed Asset retires the Device row
+            # (is_active=False), so filtering here emptied the ticket's device
+            # picker for exactly the managed clients: on prod, 22 of 33 devices
+            # were hidden, every one of them because it had become an Asset. The
+            # same machine stayed selectable on a work order, which is how the
+            # asymmetry surfaced. Interim, pending the Device/Asset merge.
+            self.fields['device'].queryset = Device.objects.filter(client_id=effective_client_id).order_by('name')
         else:
             self.fields['contact'].queryset = Contact.objects.none()
             self.fields['device'].queryset = Device.objects.none()

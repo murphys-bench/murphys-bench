@@ -4291,16 +4291,25 @@ class TicketConvertView(LoginRequiredMixin, View):
             return HttpResponse('Forbidden', status=403)
         return super().dispatch(request, *args, **kwargs)
 
+    # Guard on the WORK ORDER, not the status. 'Converted to Work Order' is also a
+    # plain status in the dropdown, and choosing it there creates nothing. Gating on
+    # the status meant a ticket marked converted by hand could never be converted for
+    # real: the only working route refused to open. Gating on the actual work order
+    # still prevents a duplicate, and lets a mislabelled ticket recover.
+    @staticmethod
+    def _existing_work_order(ticket):
+        return getattr(ticket, 'work_order_created', None)
+
     def get(self, request, pk):
         ticket = _get_scoped_ticket_or_404(request, pk)
-        if ticket.status == 'converted':
+        if self._existing_work_order(ticket):
             return redirect('core:ticket_detail', pk=pk)
         form = TicketConvertForm()
         return render(request, 'core/ticket_convert.html', {'ticket': ticket, 'form': form})
 
     def post(self, request, pk):
         ticket = _get_scoped_ticket_or_404(request, pk)
-        if ticket.status == 'converted':
+        if self._existing_work_order(ticket):
             return redirect('core:ticket_detail', pk=pk)
 
         form = TicketConvertForm(request.POST)
