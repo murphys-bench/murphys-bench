@@ -3993,8 +3993,16 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         # The quick dropdown offers only statuses a person may set. 'Converted to
         # Work Order' is set by TicketConvertView, never by hand: offered here it
         # renamed the ticket, created nothing, and hid the button that converts.
+        #
+        # The ticket's OWN status is always included even when action-owned:
+        # without it a converted ticket has no matching <option>, the browser
+        # silently displays the first choice instead, and clicking Set moves the
+        # ticket out of 'converted' by accident. Present only when current, it
+        # renders selected and re-posting it is a no-op.
         context['ticket_statuses'] = StatusDefinition.objects.filter(
-            entity_type='ticket', is_active=True, operator_selectable=True,
+            entity_type='ticket', is_active=True,
+        ).filter(
+            Q(operator_selectable=True) | Q(slug=self.object.status)
         ).order_by('sort_order')
         return context
 
@@ -6772,19 +6780,27 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
                 #
                 # Only promotes from 'uninvoiced', which also self-heals records
                 # stranded by this bug the next time the WO is opened. It will
-                # not overwrite a later state (paid/disputed), and it will not
-                # re-sync an amount that changed after the push, because IN was
-                # not updated either and the local copy must not claim otherwise.
+                # not overwrite a later state (paid/disputed).
+                #
+                # The amount is written ONLY on a fresh push, where it is exactly
+                # what IN was just sent. On a self-heal the lines may have changed
+                # since the original push, and Invoice Ninja is the money
+                # authority: recording today's total against yesterday's draft
+                # would make MB claim a figure IN does not hold. A healed record
+                # keeps its amount blank for the operator to reconcile against IN.
                 invoice = wo.invoice
                 if invoice.billing_status == 'uninvoiced':
                     invoice.billing_status = 'invoiced'
-                    invoice.amount = amount
                     invoice.invoiced_date = timezone.localdate()
                     invoice.invoice_ninja_id = wo.invoice_ninja_id
-                    invoice.save(update_fields=[
-                        'billing_status', 'amount', 'invoiced_date',
+                    update_fields = [
+                        'billing_status', 'invoiced_date',
                         'invoice_ninja_id', 'updated_at',
-                    ])
+                    ]
+                    if newly_pushed:
+                        invoice.amount = amount
+                        update_fields.append('amount')
+                    invoice.save(update_fields=update_fields)
                 if newly_pushed:
                     messages.success(
                         request,

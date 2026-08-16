@@ -6598,13 +6598,18 @@ def test_pos_wo_settle_draft_self_heals_a_stranded_record(client, admin_user, cl
     """A WO already pushed to IN but left 'uninvoiced' locally corrects itself.
 
     Records stranded by the original bug are fixed by revisiting Bill Later; no
-    data migration needed. The push is NOT repeated (one job = one invoice)."""
+    data migration needed. The push is NOT repeated (one job = one invoice), and
+    the AMOUNT is deliberately not written: the lines may have changed since the
+    original push, and Invoice Ninja is the money authority — MB must not record
+    a figure IN was never sent. A healed record's amount stays blank for the
+    operator to reconcile (outside-review finding, Aug 15)."""
     from decimal import Decimal
     from core import invoice_ninja
     from core.models import LineItem
     _enable_in()
     wo = WorkOrder.objects.create(client=client_obj, status='completed',
                                   invoice_ninja_id='931', invoice_ninja_ref='1931')
+    # A line added AFTER the original push — today's total is not IN's total.
     LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
                             quantity=1, unit_price=Decimal('225.00'))
     assert wo.invoice.billing_status == 'uninvoiced'
@@ -6621,6 +6626,7 @@ def test_pos_wo_settle_draft_self_heals_a_stranded_record(client, admin_user, cl
     inv.refresh_from_db()
     assert inv.billing_status == 'invoiced'
     assert inv.invoice_ninja_id == '931'
+    assert inv.amount is None, 'a self-heal must not invent an amount IN does not hold'
 
 
 @pytest.mark.django_db
@@ -11999,6 +12005,38 @@ def test_converted_is_not_offered_in_the_ticket_status_dropdowns(client, admin_u
 
 
 @pytest.mark.django_db
+def test_quick_dropdown_on_a_converted_ticket_shows_converted_selected(client, admin_user, client_obj):
+    """Outside-review finding (Aug 15): hiding 'converted' from the quick
+    dropdown left a converted ticket with NO matching <option>, so the browser
+    silently displayed the first choice ('New') and clicking Set moved the
+    ticket out of 'converted' by accident. The ticket's own status must render
+    as the selected option even when it is action-owned."""
+    ticket = Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(), client=client_obj,
+        subject='Converted for real', description='x', status='converted',
+    )
+    client.force_login(admin_user)
+    body = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    assert '<option value="converted" selected>' in body
+
+    # Re-posting the pre-selected current status is an allowed no-op, so an
+    # operator who clicks Set without touching the dropdown changes nothing.
+    resp = client.post(reverse('core:ticket_status_update', args=[ticket.pk]),
+                       {'status': 'converted'})
+    assert resp.status_code in (200, 302)
+    ticket.refresh_from_db()
+    assert ticket.status == 'converted'
+
+    # And a ticket NOT at 'converted' still never sees it offered.
+    other = Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(), client=client_obj,
+        subject='Plain', description='x', status='open',
+    )
+    body = client.get(reverse('core:ticket_detail', args=[other.pk])).content.decode()
+    assert '<option value="converted"' not in body
+
+
+@pytest.mark.django_db
 def test_an_already_converted_ticket_stays_editable(client, admin_user, client_obj):
     """Removing a status from the dropdown must not make records holding it
     unsavable. The ticket's own current status is always a valid choice."""
@@ -12070,22 +12108,22 @@ def test_converted_ticket_offers_a_route_to_its_work_order(client, admin_user, c
 
 
 @pytest.mark.django_db
-def test_ticket_device_picker_includes_a_device_promoted_to_an_asset(client_obj):
-    """Promotion to a managed Asset retires the Device row. Filtering the picker
-    on is_active therefore emptied it for exactly the managed clients (22 of 33
-    devices on prod), while the same machine stayed pickable on a work order."""
-    from core.forms import TicketForm, WorkOrderForm
-    device = Device.objects.create(client=client_obj, name='Reception PC')
-    device.promote_to_asset()
-    device.refresh_from_db()
-    assert device.is_active is False and device.promoted_to_asset_id is not None
+def test_ticket_device_picker_hides_retired_devices(client_obj):
+    """The ticket picker offers only active devices, matching the HTMX cascade
+    endpoint. A promoted-to-Asset device is therefore unpickable on a ticket
+    until the Device/Asset merge un-retires it — the ruled fix for the Aug-14
+    empty-picker defect. This pins the interim behavior so the merge, when it
+    lands, changes it deliberately rather than by accident."""
+    from core.forms import TicketForm
+    active = Device.objects.create(client=client_obj, name='Front Desk PC')
+    retired = Device.objects.create(client=client_obj, name='Reception PC')
+    retired.promote_to_asset()
+    retired.refresh_from_db()
+    assert retired.is_active is False
 
-    # Note the different plumbing: TicketForm scopes from the posted/instance
-    # client, WorkOrderForm takes client_id as an explicit kwarg.
-    ticket_choices = TicketForm(data={'client': client_obj.pk}).fields['device'].queryset
-    wo_choices = WorkOrderForm(client_id=client_obj.pk).fields['device'].queryset
-    assert device in ticket_choices, 'the ticket picker hid a machine that is still real'
-    assert device in wo_choices, 'the work order picker never hid it, and must not start'
+    choices = TicketForm(data={'client': client_obj.pk}).fields['device'].queryset
+    assert active in choices
+    assert retired not in choices
 
 
 @pytest.mark.django_db

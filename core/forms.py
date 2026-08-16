@@ -470,14 +470,13 @@ class TicketForm(forms.ModelForm):
         effective_client_id = posted_client_id or (instance.client_id if instance else None)
         if effective_client_id:
             self.fields['contact'].queryset = Contact.objects.filter(client_id=effective_client_id, is_active=True).order_by('last_name', 'first_name')
-            # No is_active filter, deliberately, and WorkOrderForm never had one.
-            # Promoting a device to a managed Asset retires the Device row
-            # (is_active=False), so filtering here emptied the ticket's device
-            # picker for exactly the managed clients: on prod, 22 of 33 devices
-            # were hidden, every one of them because it had become an Asset. The
-            # same machine stayed selectable on a work order, which is how the
-            # asymmetry surfaced. Interim, pending the Device/Asset merge.
-            self.fields['device'].queryset = Device.objects.filter(client_id=effective_client_id).order_by('name')
+            # is_active=True is correct here and matches the HTMX cascade
+            # endpoint. The Aug-14 defect (promoted-to-Asset devices vanishing
+            # from this picker) is NOT fixed by widening this filter: the ruled
+            # fix is the Device/Asset merge, after which promotion no longer
+            # retires the Device row and this filter stops hiding real machines.
+            # Until that ships, a promoted device stays unpickable on a ticket.
+            self.fields['device'].queryset = Device.objects.filter(client_id=effective_client_id, is_active=True).order_by('name')
         else:
             self.fields['contact'].queryset = Contact.objects.none()
             self.fields['device'].queryset = Device.objects.none()
