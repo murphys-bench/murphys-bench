@@ -156,11 +156,26 @@ class DeviceTypeAdmin(admin.ModelAdmin):
         # delete so the same refusal applies; report the refusal instead of 500ing.
         from django.db.models import ProtectedError
         from django.contrib import messages
+        deleted, refused = 0, []
         for dt in queryset:
             try:
                 dt.delete()
+                deleted += 1
             except ProtectedError as e:
-                messages.error(request, str(e.args[0]))
+                refused.append(str(e.args[0]))
+        for msg in refused:
+            messages.error(request, msg)
+        # Django's stock action reports "deleted N" for the ORIGINAL selection
+        # regardless of what happened here (round-3 review). Say what really
+        # happened, and suppress the stock message so the two never disagree.
+        if deleted:
+            messages.success(request, f'Deleted {deleted} device type(s).')
+        request._mb_bulk_delete_reported = True
+
+    def message_user(self, request, message, *args, **kwargs):
+        if getattr(request, '_mb_bulk_delete_reported', False) and 'Successfully deleted' in str(message):
+            return
+        return super().message_user(request, message, *args, **kwargs)
 
 
 # Contract Admin

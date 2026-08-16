@@ -8559,7 +8559,12 @@ def test_device_type_admin_bulk_delete_cannot_bypass_the_guard(client, admin_use
     assert resp.status_code == 200
     assert DeviceType.objects.filter(pk=dt_used.pk).exists(), 'in-use type must survive bulk delete'
     assert not DeviceType.objects.filter(pk=dt_free.pk).exists(), 'unused type deletes'
-    assert 'still used by' in resp.content.decode()
+    body = resp.content.decode()
+    assert 'still used by' in body
+    # Round-3 polish: the stock "Successfully deleted 2" must not appear
+    # beside a refusal; the count reported is what really happened.
+    assert 'Successfully deleted' not in body
+    assert 'Deleted 1 device type' in body
 
 
 @pytest.mark.django_db
