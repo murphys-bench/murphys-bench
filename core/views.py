@@ -7241,23 +7241,25 @@ class WorkOrderBillingUpdateView(LoginRequiredMixin, View):
         billing_status = request.POST.get('billing_status', '').strip()
         valid_statuses = dict(Invoice.BILLING_STATUS_CHOICES)
 
-        # An invoiced record with NO amount (a self-healed IN draft: the heal
-        # deliberately leaves the amount blank rather than claim a figure IN was
-        # never sent) must not one-click into 'paid, no amount' — a paid job
-        # with no amount silently drops out of every revenue total, which is the
-        # TKT-00041 defect shape all over again. The quick action is refused;
-        # the full edit records the amount and is the intended path. Server-side
-        # because a hidden button is not a mechanism (outside review, Aug 15).
+        # No one-click into a paid status with NO amount, from ANY status: a
+        # paid job with no amount silently drops out of every revenue total
+        # (reports count paid records with amounts only), which is the
+        # TKT-00041 defect shape all over again. Prod already held 3 such
+        # records when this shipped. The two shapes this refuses: a self-healed
+        # IN draft (the heal deliberately leaves the amount blank rather than
+        # claim a figure IN was never sent), and quick Paid Direct on an
+        # uninvoiced record. The full edit records the amount and is the path
+        # through; the Register computes its own amounts and never hits this.
+        # Server-side because a hidden button is not a mechanism (outside
+        # review rounds 2 and 3, Aug 15; guard widened on Mike's call).
         if (billing_status in ('paid', 'paid_direct')
                 and not request.POST.get('full_edit')
-                and invoice.billing_status == 'invoiced'
                 and invoice.amount is None):
             return render(request, 'core/partials/billing_card.html', {
                 'work_order': wo,
                 'invoice': invoice,
-                'billing_error': 'Enter the amount first (Edit). This job is in '
-                                 'Invoice Ninja with no amount recorded here; '
-                                 'marked paid without one, it drops out of '
+                'billing_error': 'Enter the amount first (Edit). Marked paid '
+                                 'without an amount, this job drops out of '
                                  'revenue totals.',
             })
 

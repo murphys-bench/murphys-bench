@@ -6678,6 +6678,51 @@ def test_invoiced_with_no_amount_cannot_be_quick_marked_paid(client, admin_user,
 
 
 @pytest.mark.django_db
+def test_uninvoiced_with_no_amount_cannot_be_quick_paid_direct(client, admin_user, client_obj):
+    """Round-3 review finding: the same 'paid with no amount' shape existed via
+    the uninvoiced record's quick Paid Direct button, and prod held 3 such
+    records, all invisible to revenue totals. Guard widened on Mike's call: no
+    one-click paid status with a blank amount from ANY status. Paid Direct with
+    an amount recorded still works."""
+    from decimal import Decimal
+    from core.models import Invoice
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
+    assert wo.invoice.billing_status == 'uninvoiced' and wo.invoice.amount is None
+
+    client.force_login(admin_user)
+    url = reverse('core:wo_billing_update', args=[wo.pk])
+
+    # Quick Paid Direct with no amount: refused, record unchanged.
+    resp = client.post(url, {'billing_status': 'paid_direct'})
+    assert resp.status_code == 200
+    assert 'Enter the amount first' in resp.content.decode()
+    inv = wo.invoice
+    inv.refresh_from_db()
+    assert inv.billing_status == 'uninvoiced'
+    assert inv.paid_date is None
+
+    # The card offers guidance instead of the quick Paid Direct button.
+    body = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
+    assert 'Paid Direct needs an amount' in body
+
+    # Mark Invoiced (no money claim) is still one click.
+    resp = client.post(url, {'billing_status': 'invoiced'})
+    inv.refresh_from_db()
+    assert inv.billing_status == 'invoiced'
+
+    # And with an amount on record, uninvoiced quick Paid Direct still works.
+    wo2 = WorkOrder.objects.create(client=client_obj, status='completed')
+    Invoice.objects.filter(work_order=wo2).update(amount=Decimal('45.00'))
+    resp = client.post(reverse('core:wo_billing_update', args=[wo2.pk]),
+                       {'billing_status': 'paid_direct'})
+    assert resp.status_code == 200
+    inv2 = wo2.invoice
+    inv2.refresh_from_db()
+    assert inv2.billing_status == 'paid_direct'
+    assert inv2.paid_date is not None
+
+
+@pytest.mark.django_db
 def test_pos_wo_settle_cash_without_in_records_locally(client, admin_user, client_obj, monkeypatch):
     """MB stands alone: with Invoice Ninja OFF, settling a WO in cash records the
     payment on MB's own Invoice, generates MB's receipt, and never calls IN — no

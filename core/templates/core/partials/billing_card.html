@@ -91,6 +91,7 @@
                     Mark Invoiced
                 </button>
             </form>
+            {% if invoice.amount is not None %}
             <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}"
                   hx-target="#billing-card" hx-swap="outerHTML">
                 {% csrf_token %}
@@ -100,6 +101,14 @@
                     Paid Direct
                 </button>
             </form>
+            {% else %}
+            {% comment %}Same invariant as the invoiced branch below: no paid
+            status without an amount, or the job drops out of revenue totals.
+            The server refuses the quick action regardless of this markup.{% endcomment %}
+            <span class="text-xs text-amber-700 self-center">
+                Paid Direct needs an amount; enter it with Edit.
+            </span>
+            {% endif %}
             {% elif invoice.billing_status == 'invoiced' %}
             {% if invoice.amount is not None %}
             <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}"
