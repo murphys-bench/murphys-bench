@@ -149,6 +149,19 @@ class DeviceTypeAdmin(admin.ModelAdmin):
     def get_readonly_fields(self, request, obj=None):
         return ['slug'] if obj else []
 
+    def delete_queryset(self, request, queryset):
+        # The admin bulk action deletes the QUERYSET, which never calls
+        # DeviceType.delete(), so the in-use guard was bypassable from the
+        # changelist (round-2 review). Route each row through the model's own
+        # delete so the same refusal applies; report the refusal instead of 500ing.
+        from django.db.models import ProtectedError
+        from django.contrib import messages
+        for dt in queryset:
+            try:
+                dt.delete()
+            except ProtectedError as e:
+                messages.error(request, str(e.args[0]))
+
 
 # Contract Admin
 @admin.register(Contract)

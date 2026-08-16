@@ -642,6 +642,10 @@ class Device(models.Model):
             owner_id = Contract.objects.filter(pk=self.contract_id).values_list('client_id', flat=True).first()
             if owner_id is None or owner_id != self.client_id:
                 raise ValueError('A device can only be covered by a contract belonging to its own client.')
+        if self.assigned_contact_id is not None:
+            owner_id = Contact.objects.filter(pk=self.assigned_contact_id).values_list('client_id', flat=True).first()
+            if owner_id is None or owner_id != self.client_id:
+                raise ValueError("A device's assigned contact must belong to the device's own client.")
         super().save(*args, **kwargs)
 
     @property

@@ -8530,6 +8530,63 @@ def test_device_type_delete_refused_at_the_model_too():
 
 
 @pytest.mark.django_db
+def test_device_type_admin_bulk_delete_cannot_bypass_the_guard(client, admin_user):
+    """Round-2 review: the admin changelist's bulk 'delete selected' deletes the
+    QUERYSET, never calling DeviceType.delete(), so the in-use guard did not
+    apply there. delete_queryset now routes each row through the model's own
+    delete. Driven through the real admin action, not a unit call."""
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    dt_used = DeviceType.objects.get(slug='printer')
+    dt_free = DeviceType.objects.create(slug='fax', label='Fax')
+    Device.objects.create(name='Front printer', device_type='printer')
+
+    # Admin needs OTP-verified session; give the superuser a confirmed device
+    # and mark the session verified the way django_otp does.
+    admin_user.is_staff = True
+    admin_user.save()
+    TOTPDevice.objects.create(user=admin_user, name='t', confirmed=True)
+    client.force_login(admin_user)
+    session = client.session
+    from django_otp import DEVICE_ID_SESSION_KEY
+    session[DEVICE_ID_SESSION_KEY] = TOTPDevice.objects.get(user=admin_user).persistent_id
+    session.save()
+
+    resp = client.post('/admin/core/devicetype/', {
+        'action': 'delete_selected',
+        '_selected_action': [str(dt_used.pk), str(dt_free.pk)],
+        'post': 'yes',
+    }, follow=True)
+    assert resp.status_code == 200
+    assert DeviceType.objects.filter(pk=dt_used.pk).exists(), 'in-use type must survive bulk delete'
+    assert not DeviceType.objects.filter(pk=dt_free.pk).exists(), 'unused type deletes'
+    assert 'still used by' in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_device_cannot_carry_another_clients_contact(client, client_obj, admin_user):
+    """Round-2 review: same stale-client pattern as the contract bug, on
+    assigned_contact. Now scoped from the posted client, rejected in clean(),
+    and refused at Device.save()."""
+    from core.forms import DeviceForm
+    contact_a = Contact.objects.create(client=client_obj, first_name='A', last_name='Person', email='a@example.com')
+    client_b = Client.objects.create(name='Client B')
+    device = Device.objects.create(client=client_obj, name='PC', assigned_contact=contact_a)
+
+    form = DeviceForm(instance=device, client_id=client_obj.pk, data={
+        'client': client_b.pk, 'name': 'PC', 'device_type': 'laptop',
+        'assigned_contact': contact_a.pk, 'is_active': 'on',
+    })
+    assert not form.is_valid()
+    assert 'assigned_contact' in form.errors
+    assert list(form.fields['assigned_contact'].queryset) == []
+
+    device.client = client_b
+    device.assigned_contact = contact_a
+    with pytest.raises(ValueError):
+        device.save()
+
+
+@pytest.mark.django_db
 def test_admin_device_form_offers_only_known_device_types():
     """Outside review P2: DeviceAdmin exposed device_type as a raw text field,
     so an admin could assign a slug no DeviceType row defines. The admin form

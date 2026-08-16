@@ -356,28 +356,31 @@ class DeviceForm(forms.ModelForm):
         self.fields['condition_at_intake'].required = False
         self.fields['notes'].required = False
 
-        # Filter assigned_contact to the selected client's contacts
-        if client_id:
+        # assigned_contact follows the SAME effective client as contract (posted
+        # client first). Round-2 review: it was still scoped from the pre-edit
+        # client, so a device moved to client B could keep client A's contact.
+        # Every per-client field on this form must derive from one client id.
+        if effective_client_id:
             self.fields['assigned_contact'].queryset = Contact.objects.filter(
-                client_id=client_id
-            ).order_by('last_name', 'first_name')
-        elif self.instance and self.instance.pk:
-            self.fields['assigned_contact'].queryset = Contact.objects.filter(
-                client=self.instance.client
+                client_id=effective_client_id
             ).order_by('last_name', 'first_name')
         else:
             self.fields['assigned_contact'].queryset = Contact.objects.none()
 
     def clean(self):
         cleaned = super().clean()
-        contract = cleaned.get('contract')
         client = cleaned.get('client')
-        # A device is covered only by its own client's contract. Enforced here,
-        # not only by the dropdown's queryset, so no request shape (a stale
-        # form, a hand-built POST) can attach another client's coverage.
+        # Every per-client field on a device must belong to the device's own
+        # client. Enforced here, not only by the dropdown querysets, so no
+        # request shape (a stale form, a hand-built POST) can cross clients.
+        contract = cleaned.get('contract')
         if contract is not None and (client is None or contract.client_id != client.pk):
             self.add_error('contract', 'That contract belongs to a different client. '
                                        'Pick one of this device\'s own client\'s contracts, or leave it uncovered.')
+        contact = cleaned.get('assigned_contact')
+        if contact is not None and (client is None or contact.client_id != client.pk):
+            self.add_error('assigned_contact', 'That contact belongs to a different client. '
+                                               'Pick one of this device\'s own client\'s contacts, or leave it blank.')
         return cleaned
 
 
