@@ -8,6 +8,24 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## v0.13.0 — 2026-08-16
+
+One machine, one record. Outside-reviewed over three rounds; the migration was drilled
+against production snapshots and the rollback path exercised before release.
+
+### Changed
+
+- Assets are gone. Every machine is a Device; a device can be marked as covered by one
+  of its client's contracts. Existing assets are merged back onto their devices on
+  update, coverage links carried over, nothing typed by hand lost.
+- Device types are now editable in Settings (add, rename, remove). A type still used by
+  a device or checklist item cannot be deleted. "Network Device" added for routers,
+  modems, and switches.
+
+### Removed
+
+- The Assets card, asset pages, and the "Promote to Asset" button.
+
 ## v0.12.2 — 2026-08-15
 
 Fixes from real ticket TKT-00041, outside-reviewed before release.
