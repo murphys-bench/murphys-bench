@@ -8,6 +8,43 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## v0.12.2 — 2026-08-15
+
+Four fixes from one real ticket worked end to end (TKT-00041), reviewed by an outside
+reviewer over four rounds before release.
+
+### Fixed
+
+- **"Bill Later" now records the invoice on Murphy's Bench's own books, not just in
+  Invoice Ninja.** Pushing a draft used to mark the work order as sent to Invoice Ninja
+  while MB's own billing record stayed "uninvoiced" with no amount, so the job sat in
+  the billing-ready queue forever even though the invoice existed. The draft push now
+  records it locally too. Work orders already stranded this way fix themselves the next
+  time Bill Later is used on them, with one deliberate limit: a self-corrected record
+  gets its status and dates but not an amount, because the job's lines may have changed
+  since the original push and Invoice Ninja holds the real figure. Enter the amount
+  from Invoice Ninja when you reconcile it.
+
+- **A ticket can no longer lose its route to conversion.** Picking "Converted to Work
+  Order" from the status dropdown only renamed the ticket; it created no work order,
+  and it hid the button that does. One click removed the only working way to convert,
+  with no way back. Three changes: the button no longer hides based on status (if a
+  work order exists it becomes a link to it, otherwise conversion is offered), the
+  convert action checks whether a work order actually exists rather than trusting the
+  status label, and "Converted to Work Order" is no longer offered in the status
+  dropdowns at all, since it names an action it cannot perform. The status itself is
+  unchanged: converting still sets it, existing tickets keep it, it still displays and
+  filters, and the Settings status list marks it "set by an action, not by hand".
+  Tickets already at that status stay fully editable. Applied automatically on update.
+
+- **A work order can no longer be marked paid with no amount recorded.** The one-click
+  Mark Paid and Paid Direct buttons quietly accepted a record with a blank amount, and
+  a paid job with no amount is invisible to every revenue report. The quick buttons now
+  require an amount on record; the card says so and points at Edit, which takes the
+  amount and goes through. Marking a job Invoiced is still one click, and the Register
+  is unaffected because it always computes the amount itself. Records already paid with
+  no amount are left as they are.
+
 ## v0.12.1 — 2026-08-08
 
 ### Fixed
