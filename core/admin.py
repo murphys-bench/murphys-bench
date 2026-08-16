@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django import forms
 from .models import (
     User, Client, Contact, Device, DeviceType, Contract, Ticket, TicketReply, WorkOrder, WorkOrderNote,
     WorkOrderItem, Mileage, RepairType, Checklist, ChecklistItem, CannedResponse, CannedResponseCategory,
@@ -109,8 +110,22 @@ class ContactAdmin(admin.ModelAdmin):
 
 
 # Device Admin
+class DeviceAdminForm(forms.ModelForm):
+    """Admin edits device_type through the same table-driven choices the app
+    forms use, so an unknown slug cannot be typed in raw (outside review, Aug 15)."""
+    class Meta:
+        model = Device
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['device_type'] = forms.ChoiceField(
+            choices=list(DeviceType.objects.values_list('slug', 'label')))
+
+
 @admin.register(Device)
 class DeviceAdmin(admin.ModelAdmin):
+    form = DeviceAdminForm
     list_display = ['name', 'client', 'device_type', 'serial_number', 'is_active']
     list_filter = ['device_type', 'is_active', 'client']
     search_fields = ['name', 'serial_number', 'model', 'manufacturer', 'client__name']
@@ -124,11 +139,15 @@ class DeviceAdmin(admin.ModelAdmin):
     readonly_fields = ['created_at', 'updated_at']
 
 
-# DeviceType Admin
+# DeviceType Admin. The slug is what devices and checklist scoping reference,
+# so it is read-only once created; the model's delete() refuses while in use.
 @admin.register(DeviceType)
 class DeviceTypeAdmin(admin.ModelAdmin):
     list_display = ['label', 'slug', 'icon', 'sort_order']
     ordering = ['sort_order']
+
+    def get_readonly_fields(self, request, obj=None):
+        return ['slug'] if obj else []
 
 
 # Contract Admin

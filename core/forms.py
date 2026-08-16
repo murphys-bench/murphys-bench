@@ -331,7 +331,13 @@ class DeviceForm(forms.ModelForm):
         # a client there is nothing to cover the device under.
         self.fields['contract'].required = False
         self.fields['contract'].empty_label = '— Not covered —'
-        effective_client_id = client_id or (self.instance.client_id if self.instance and self.instance.pk else None)
+        # The POSTED client wins: an edit can move the device to another client
+        # in the same request, and the coverage list must follow it (outside
+        # review, Aug 15: scoping only from the instance let a device land on
+        # client B still covered by client A's contract).
+        posted_client_id = str(self.data.get('client') or '').strip() if self.is_bound else None
+        effective_client_id = (posted_client_id or client_id
+                               or (self.instance.client_id if self.instance and self.instance.pk else None))
         if effective_client_id:
             self.fields['contract'].queryset = Contract.objects.filter(
                 client_id=effective_client_id).order_by('-created_at')
@@ -361,6 +367,18 @@ class DeviceForm(forms.ModelForm):
             ).order_by('last_name', 'first_name')
         else:
             self.fields['assigned_contact'].queryset = Contact.objects.none()
+
+    def clean(self):
+        cleaned = super().clean()
+        contract = cleaned.get('contract')
+        client = cleaned.get('client')
+        # A device is covered only by its own client's contract. Enforced here,
+        # not only by the dropdown's queryset, so no request shape (a stale
+        # form, a hand-built POST) can attach another client's coverage.
+        if contract is not None and (client is None or contract.client_id != client.pk):
+            self.add_error('contract', 'That contract belongs to a different client. '
+                                       'Pick one of this device\'s own client\'s contracts, or leave it uncovered.')
+        return cleaned
 
 
 class DeviceQuickAddForm(forms.ModelForm):

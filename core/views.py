@@ -8282,10 +8282,7 @@ class DeviceTypeDeleteView(SettingsAdminMixin, View):
 
     def post(self, request, pk):
         dt = get_object_or_404(DeviceType, pk=pk)
-        device_count = Device.objects.filter(device_type=dt.slug).count()
-        checklist_count = sum(
-            1 for item in ChecklistItem.objects.all()
-            if dt.slug in (item.device_types or []))
+        device_count, checklist_count = dt.usage()
         if device_count or checklist_count:
             parts = []
             if device_count:

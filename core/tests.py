@@ -8465,6 +8465,142 @@ def test_device_coverage_scoped_to_own_clients_contracts(client, client_obj, adm
 
 
 @pytest.mark.django_db
+def test_device_cannot_carry_another_clients_contract(client, client_obj, admin_user):
+    """Outside review P1: an edit could move a device to client B while keeping
+    client A's contract, because the contract dropdown was scoped from the
+    instance's OLD client. Three layers now refuse it: the form scopes from the
+    POSTED client, the form's clean() rejects a mismatch outright, and
+    Device.save() raises so admin/shell cannot bypass either."""
+    from core.forms import DeviceForm
+    from core.models import Contract
+    contract_a = Contract.objects.create(client=client_obj, title='A MSP', status='active')
+    client_b = Client.objects.create(name='Client B')
+    device = Device.objects.create(client=client_obj, name='PC', contract=contract_a)
+
+    # 1. Editing: move to B while still posting A's contract. Refused, and the
+    #    posted client's (empty) contract list is what the form offers.
+    form = DeviceForm(instance=device, client_id=client_obj.pk, data={
+        'client': client_b.pk, 'name': 'PC', 'device_type': 'laptop',
+        'contract': contract_a.pk, 'is_active': 'on',
+    })
+    assert not form.is_valid()
+    assert 'contract' in form.errors
+    assert list(form.fields['contract'].queryset) == []
+
+    # 2. Same move with contract cleared goes through.
+    form = DeviceForm(instance=device, client_id=client_obj.pk, data={
+        'client': client_b.pk, 'name': 'PC', 'device_type': 'laptop',
+        'contract': '', 'is_active': 'on',
+    })
+    assert form.is_valid(), form.errors
+    device = form.save()
+    assert device.client_id == client_b.pk and device.contract_id is None
+
+    # 3. Model-level: a direct save with a foreign contract raises.
+    device.contract = contract_a
+    with pytest.raises(ValueError):
+        device.save()
+
+    # 4. Through the real edit view, the mismatch never lands.
+    device.refresh_from_db()
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:device_edit', args=[device.pk]), {
+        'client': client_b.pk, 'name': 'PC', 'device_type': 'laptop',
+        'contract': contract_a.pk, 'is_active': 'on',
+    })
+    assert resp.status_code == 200  # re-rendered with errors, no redirect
+    device.refresh_from_db()
+    assert device.contract_id is None
+
+
+@pytest.mark.django_db
+def test_device_type_delete_refused_at_the_model_too():
+    """Outside review P2: the Settings view refused deletion while in use, but
+    Django admin and the shell went straight to Model.delete(). The refusal now
+    lives on the model, so every path is covered."""
+    from django.db.models import ProtectedError
+    dt = DeviceType.objects.get(slug='tablet')
+    Device.objects.create(name='iPad', device_type='tablet')
+    with pytest.raises(ProtectedError):
+        dt.delete()
+    assert DeviceType.objects.filter(pk=dt.pk).exists()
+    Device.objects.filter(device_type='tablet').delete()
+    dt.delete()
+    assert not DeviceType.objects.filter(pk=dt.pk).exists()
+
+
+@pytest.mark.django_db
+def test_admin_device_form_offers_only_known_device_types():
+    """Outside review P2: DeviceAdmin exposed device_type as a raw text field,
+    so an admin could assign a slug no DeviceType row defines. The admin form
+    now builds its choices from the table like the app forms."""
+    from core.admin import DeviceAdminForm
+    form = DeviceAdminForm(data={'name': 'x', 'device_type': 'not_a_real_type'})
+    form.is_valid()
+    assert 'device_type' in form.errors
+    form = DeviceAdminForm(data={'name': 'x', 'device_type': 'laptop', 'is_active': 'on'})
+    form.is_valid()
+    assert 'device_type' not in form.errors
+
+
+@pytest.mark.django_db
+def test_merge_migration_never_erases_device_values(migrator_state=None):
+    """Outside review P2, and confirmed against production before fixing: the
+    one divergent promoted pair on prod had a device with model + notes and an
+    asset with neither, so 'asset wins' would have BLANKED the model. The merge
+    now copies an asset value only when it holds one and it differs, appends
+    notes rather than replacing, and preserves a displaced device value in
+    notes. Nothing typed by a person is lost.
+
+    Exercised by importing the migration's function and running it against
+    live models via a stand-in apps registry, since the Asset model no longer
+    exists to build a real historical state cheaply."""
+    import importlib
+    from types import SimpleNamespace
+    mig = importlib.import_module('core.migrations.0107_merge_assets_into_devices')
+
+    class FakeAsset:
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+    fake_asset = FakeAsset(
+        id=1, name="Vickie's Laptop", manufacturer='HP', model='', notes='',
+        is_active=True, contract=None, asset_type='workstation', identifier='',
+        client=None,
+    )
+    src = Device.objects.create(
+        name="Vickie's Laptop", manufacturer='HP', model='HP Laptop 17-cp2xxx',
+        notes='Only 8GB RAM.', is_active=False)
+    fake_asset.client = src.client
+
+    # Minimal apps stand-in: only what the function touches.
+    class AssetQS:
+        def all(self): return self
+        def select_related(self, *a): return [fake_asset]
+    class DeviceMgr:
+        def filter(self, **kw):
+            if 'promoted_to_asset' in kw:
+                return SimpleNamespace(order_by=lambda *a: SimpleNamespace(first=lambda: src))
+            return Device.objects.filter(**kw)
+        def create(self, **kw): return Device.objects.create(**kw)
+    class WOMgr:
+        def filter(self, **kw): return SimpleNamespace(update=lambda **k: 0)
+    class Apps:
+        def get_model(self, app, name):
+            return {
+                'Asset': SimpleNamespace(objects=AssetQS()),
+                'Device': SimpleNamespace(objects=DeviceMgr()),
+                'WorkOrder': SimpleNamespace(objects=WOMgr()),
+            }[name]
+
+    # The function sets source.contract = asset.contract; asset.contract is None here.
+    mig.merge_assets_into_devices(Apps(), None)
+    src.refresh_from_db()
+    assert src.model == 'HP Laptop 17-cp2xxx', 'blank asset must not erase the device model'
+    assert 'Only 8GB RAM.' in src.notes
+    assert src.is_active is True
+
+
+@pytest.mark.django_db
 def test_covered_device_shows_on_contract_and_client(client, client_obj, admin_user):
     from core.models import Contract
     contract = Contract.objects.create(client=client_obj, title='MSP', status='active')

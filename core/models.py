@@ -528,6 +528,25 @@ class DeviceType(models.Model):
     def labels_by_slug(cls):
         return dict(cls.objects.values_list('slug', 'label'))
 
+    def usage(self):
+        """(device_count, checklist_count) referencing this slug."""
+        device_count = Device.objects.filter(device_type=self.slug).count()
+        checklist_count = sum(
+            1 for item in ChecklistItem.objects.all()
+            if self.slug in (item.device_types or []))
+        return device_count, checklist_count
+
+    def delete(self, *args, **kwargs):
+        # Refused at the model, not only in the Settings view, so Django admin
+        # and the shell cannot orphan devices or silently un-scope checklist
+        # items (outside review, Aug 15).
+        device_count, checklist_count = self.usage()
+        if device_count or checklist_count:
+            raise models.ProtectedError(
+                f'Device type "{self.label}" is still used by {device_count} device(s) '
+                f'and {checklist_count} checklist item(s).', [])
+        return super().delete(*args, **kwargs)
+
 
 class Device(models.Model):
     """Equipment being serviced"""
@@ -616,6 +635,13 @@ class Device(models.Model):
         # serial-less devices (NULLs are distinct; empty strings are not).
         if not self.serial_number:
             self.serial_number = None
+        # Coverage invariant, enforced at the model so no path (form, admin,
+        # shell) can attach another client's contract: a device is covered
+        # only by a contract belonging to its own client.
+        if self.contract_id is not None:
+            owner_id = Contract.objects.filter(pk=self.contract_id).values_list('client_id', flat=True).first()
+            if owner_id is None or owner_id != self.client_id:
+                raise ValueError('A device can only be covered by a contract belonging to its own client.')
         super().save(*args, **kwargs)
 
     @property

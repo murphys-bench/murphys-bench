@@ -5,11 +5,12 @@
 # repair-intake fields) stays on the one record.
 #
 # Data movement, in order, BEFORE any column is dropped:
-#   1. An asset that came from a promoted device: the asset was the live record
-#      since promotion, so its editable fields (name/manufacturer/model/notes)
-#      are copied back, the device is un-retired, and the coverage link carried
-#      over. The device keeps its own device_type (finer-grained than
-#      asset_type) and its own serial.
+#   1. An asset that came from a promoted device: the two are MERGED. A value the
+#      asset holds wins where they differ, but a blank asset field never erases
+#      what the device kept, and a device value that is displaced is preserved
+#      in notes rather than dropped. Nothing a person typed is lost. The device
+#      is un-retired and the coverage link carried over; it keeps its own
+#      device_type and serial.
 #   2. An asset created directly (no device behind it): a Device row is built
 #      for it, asset_type mapped onto a device type; its identifier becomes the
 #      serial when that would not collide, otherwise it is kept in notes.
@@ -42,11 +43,28 @@ def merge_assets_into_devices(apps, schema_editor):
     for asset in Asset.objects.all().select_related('client', 'contract'):
         source = Device.objects.filter(promoted_to_asset=asset).order_by('id').first()
         if source is not None:
-            source.name = asset.name
-            source.manufacturer = asset.manufacturer
-            source.model = asset.model
-            if asset.notes:
-                source.notes = asset.notes
+            # Merge, never overwrite blindly. The asset was the record people
+            # edited after promotion, so a value it HOLDS wins; but a blank on
+            # the asset never erases what the device kept (on prod, the one
+            # divergent pair was exactly that shape: device had model+notes,
+            # asset had neither). When both hold different text, the device's
+            # value is preserved in notes rather than discarded, so nothing a
+            # person typed is lost by this migration.
+            preserved = []
+            for field in ('name', 'manufacturer', 'model'):
+                a_val = (getattr(asset, field) or '').strip()
+                d_val = (getattr(source, field) or '').strip()
+                if a_val and a_val != d_val:
+                    if d_val:
+                        preserved.append(f'{field} before merge: {d_val}')
+                    setattr(source, field, a_val)
+            a_notes = (asset.notes or '').strip()
+            d_notes = (source.notes or '').strip()
+            if a_notes and a_notes != d_notes:
+                source.notes = (d_notes + '\n\n' + a_notes) if d_notes else a_notes
+            if preserved:
+                source.notes = ((source.notes or '').rstrip() + '\n\n' if source.notes else '') \
+                    + 'Merged from managed asset. ' + '; '.join(preserved)
             source.is_active = asset.is_active
             source.contract = asset.contract
             source.save()
