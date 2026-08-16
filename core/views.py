@@ -39,14 +39,14 @@ from .models import (
     BlockedSender,
     SLAPlan, HelpTopic, TechSkill,
     Notification, Prospect, Estimate, Sale, EstimateOption, PaymentChargeAttempt,
-    Asset, Contract,
+    DeviceType, Contract,
 )
 from .forms import (WorkOrderForm, ClientForm, ContactForm, DeviceForm, DeviceQuickAddForm,
                     TicketForm, TicketConvertForm, KBArticleForm, TicketQueueForm, MileageForm,
                     CompanySettingsForm, OutboundEmailSettingsForm, InboundEmailSettingsForm,
                     AttachmentSettingsForm, SecuritySettingsForm, MileageSettingsForm,
                     ColorSettingsForm, InvoiceNinjaSettingsForm, BackupSettingsForm,
-                    ProspectForm, EstimateForm, SaleForm, SaleCheckoutForm, AssetForm,
+                    ProspectForm, EstimateForm, SaleForm, SaleCheckoutForm,
                     ContractForm)
 
 logger = logging.getLogger('core')
@@ -1295,7 +1295,7 @@ class DeviceListView(LoginRequiredMixin, ListView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['device_type_choices'] = Device.DEVICE_TYPE_CHOICES
+        context['device_type_choices'] = list(DeviceType.objects.values_list('slug', 'label'))
         return context
 
 
@@ -1924,6 +1924,7 @@ class ClientCreateView(LoginRequiredMixin, CreateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context.setdefault('device_form', DeviceQuickAddForm(prefix='device'))
+        context['device_types'] = DeviceType.objects.all()
         context['title'] = 'New Client'
         context['cancel_url'] = reverse_lazy('core:client_list')
         return context
@@ -1962,6 +1963,7 @@ class ClientUpdateView(LoginRequiredMixin, UpdateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['title'] = f'Edit {self.object.name}'
+        context['device_types'] = DeviceType.objects.all()
         context['cancel_url'] = reverse_lazy('core:client_detail', kwargs={'pk': self.object.pk})
         context['client'] = self.object
         context['wo_count'] = self.object.work_orders.count()
@@ -3340,6 +3342,7 @@ class DeviceCreateView(LoginRequiredMixin, CreateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['title'] = 'New Device'
+        context['device_types'] = DeviceType.objects.all()
         next_url = self.request.GET.get('next', '')
         context['cancel_url'] = next_url or str(reverse_lazy('core:device_list'))
         context['next_url'] = next_url
@@ -3369,6 +3372,7 @@ class DeviceUpdateView(LoginRequiredMixin, UpdateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['title'] = f'Edit {self.object.name}'
+        context['device_types'] = DeviceType.objects.all()
         context['cancel_url'] = reverse_lazy('core:device_detail', kwargs={'pk': self.object.pk})
         return context
 
@@ -3396,115 +3400,6 @@ class DeviceDeleteView(LoginRequiredMixin, View):
                     f'but no longer link to a device.')
         messages.success(request, msg)
         return redirect('core:client_detail', pk=client_pk)
-
-
-# ── Assets (managed inventory) ───────────────────────────────────────────
-# An Asset always belongs to a Client, so CRUD is client-scoped: the client
-# comes from the URL, never an editable form field. All three views redirect
-# back to the owning client detail (the managed-client hub).
-
-class AssetCreateView(LoginRequiredMixin, CreateView):
-    model = Asset
-    form_class = AssetForm
-    template_name = 'core/asset_form.html'
-
-    def dispatch(self, request, *args, **kwargs):
-        self.client = get_object_or_404(Client, pk=kwargs['client_pk'])
-        return super().dispatch(request, *args, **kwargs)
-
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        kwargs['client'] = self.client
-        return kwargs
-
-    def form_valid(self, form):
-        form.instance.client = self.client
-        self.object = form.save()
-        messages.success(self.request, f'Asset "{self.object.name}" added.')
-        return redirect('core:client_detail', pk=self.client.pk)
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = 'New Asset'
-        context['client'] = self.client
-        context['cancel_url'] = reverse_lazy('core:client_detail', kwargs={'pk': self.client.pk})
-        return context
-
-
-class AssetUpdateView(LoginRequiredMixin, UpdateView):
-    model = Asset
-    form_class = AssetForm
-    template_name = 'core/asset_form.html'
-
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        kwargs['client'] = self.object.client
-        return kwargs
-
-    def form_valid(self, form):
-        self.object = form.save()
-        messages.success(self.request, f'Asset "{self.object.name}" updated.')
-        return redirect('core:client_detail', pk=self.object.client_id)
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = f'Edit {self.object.name}'
-        context['client'] = self.object.client
-        context['cancel_url'] = reverse_lazy('core:client_detail', kwargs={'pk': self.object.client_id})
-        return context
-
-
-class AssetDeleteView(LoginRequiredMixin, View):
-    """Hard-delete a managed asset. Admin only.
-
-    An asset carries no dependent records in Slice 1 (no WorkOrder link yet), so
-    this is a plain delete. Redirects back to the owning client.
-    """
-
-    def post(self, request, pk):
-        if not _is_admin(request.user):
-            return HttpResponse('Forbidden', status=403)
-        asset = get_object_or_404(Asset, pk=pk)
-        client_pk = asset.client_id
-        name = asset.name
-        asset.delete()
-        messages.success(request, f'Asset "{name}" deleted.')
-        return redirect('core:client_detail', pk=client_pk)
-
-
-class AssetDetailView(LoginRequiredMixin, DetailView):
-    model = Asset
-    template_name = 'core/asset_detail.html'
-    context_object_name = 'asset'
-
-    def get_queryset(self):
-        return Asset.objects.select_related('client', 'contract')
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['work_orders'] = self.object.work_orders.select_related('assigned_to').order_by('-created_at')
-        return context
-
-
-class DevicePromoteToAssetView(LoginRequiredMixin, View):
-    """Promote a client-owned Device into a managed Asset (one-directional). The
-    machine's repair history follows onto the Asset and the device retires."""
-
-    def post(self, request, pk):
-        device = get_object_or_404(Device, pk=pk)
-        if device.client_id is None:
-            messages.error(request, 'A walk-in device has no client and cannot become an asset.')
-            return redirect('core:device_detail', pk=pk)
-        if device.is_promoted:
-            messages.info(request, f'"{device.name}" is already a managed asset.')
-            return redirect('core:asset_detail', pk=device.promoted_to_asset_id)
-        asset = device.promote_to_asset(request.user)
-        messages.success(
-            request,
-            f'"{device.name}" is now a managed asset. Its repair history moved with it; '
-            'the old device record was retired.',
-        )
-        return redirect('core:asset_detail', pk=asset.pk)
 
 
 # ── Contracts (managed-client layer) ─────────────────────────────────────
@@ -3544,13 +3439,13 @@ class ContractDetailView(SaleAccessMixin, DetailView):
     context_object_name = 'contract'
 
     def get_queryset(self):
-        return Contract.objects.select_related('client').prefetch_related('assets', 'line_items')
+        return Contract.objects.select_related('client').prefetch_related('devices', 'line_items')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['catalog_by_category'] = _catalog_by_category()
         context['entries'] = _line_items_for(self.object)
-        context['covered_assets'] = self.object.assets.all()
+        context['covered_devices'] = self.object.devices.order_by('name')
         return context
 
 
@@ -3601,8 +3496,8 @@ class ContractUpdateView(SaleAccessMixin, UpdateView):
 
 class ContractDeleteView(LoginRequiredMixin, View):
     """Hard-delete a Contract. Admin only. Its recurring line items cascade (the
-    GenericRelation); any Assets pointing at it keep existing but lose the coverage
-    link (contract FK is SET_NULL). Redirects back to the owning client."""
+    GenericRelation); any covered devices keep existing but lose the
+    coverage link (contract FK is SET_NULL). Redirects back to the owning client."""
 
     def post(self, request, pk):
         if not _is_admin(request.user):
@@ -7329,6 +7224,7 @@ SETTINGS_TABS = [
     ('repair_types',     'Repair Types',     None),
     ('canned_responses', 'Canned Responses', None),
     ('checklist_items',  'Checklist Items',  None),
+    ('device_types',     'Device Types',     None),
     ('colors',           'Colors',           ColorSettingsForm),
     ('display',          'Display',          None),
     ('credentials',      'Credentials',      None),
@@ -7357,7 +7253,7 @@ SETTINGS_TAB_GROUPS = [
     ('Company & Branding', ['company', 'colors', 'display']),
     ('Email', ['outbound', 'inbound', 'email_templates']),
     ('Tickets & Work Orders', [
-        'repair_types', 'checklist_items', 'canned_responses', 'statuses',
+        'repair_types', 'device_types', 'checklist_items', 'canned_responses', 'statuses',
         'help_topics', 'sla_plans', 'tech_skills', 'custom_fields',
         'dashboard_tiles', 'kb_categories',
     ]),
@@ -7786,6 +7682,8 @@ class SettingsView(SettingsAdminMixin, View):
             ctx.update(_canned_responses_context())
         if active_tab == 'checklist_items':
             ctx.update(_checklist_items_context())
+        if active_tab == 'device_types':
+            ctx.update(_device_types_context())
         if active_tab == 'colors':
             ctx.update(_colors_context(forms_map.get('colors')))
         if active_tab == 'display':
@@ -8249,22 +8147,13 @@ class CatalogDeleteView(CatalogAdminMixin, View):
 CLI_REDIRECT = 'core:settings'
 CLI_TAB = '?tab=checklist_items'
 
-DEVICE_TYPE_CHOICES = [
-    ('laptop', 'Laptop'),
-    ('desktop', 'Desktop'),
-    ('server', 'Server'),
-    ('mobile', 'Mobile Phone'),
-    ('tablet', 'Tablet'),
-    ('printer', 'Printer'),
-    ('other', 'Other'),
-]
 
 
 def _checklist_items_context():
     items = ChecklistItem.objects.order_by('sort_order', 'name')
     return {
         'cli_items': items,
-        'cli_device_types': DEVICE_TYPE_CHOICES,
+        'cli_device_types': list(DeviceType.objects.values_list('slug', 'label')),
     }
 
 
@@ -8320,6 +8209,94 @@ def _display_context():
         'display_font_sizes': font_sizes,
         'display_nav_sizes':  nav_sizes,
     }
+
+
+# --- Device Types (Settings) ---
+# Operator-editable machine categories (Mike's Aug 15 2026 ruling). Slugs are
+# permanent once created: devices and checklist scoping reference the slug, so
+# only the label and icon are editable, and deletion is refused while anything
+# still uses the slug.
+
+DT_REDIRECT = 'core:settings'
+DT_TAB = '?tab=device_types'
+
+# Icons that make sense for a machine category; offered in the picker.
+DEVICE_TYPE_ICONS = [
+    'laptop', 'desktop', 'server', 'mobile', 'tablet', 'printer', 'wifi',
+    'computer', 'key', 'tag', 'cog', 'question',
+]
+
+
+def _device_types_context():
+    types = list(DeviceType.objects.all())
+    in_use_devices = dict(
+        Device.objects.values_list('device_type').annotate(n=Count('id')))
+    checklist_use = {}
+    for item in ChecklistItem.objects.all():
+        for slug in (item.device_types or []):
+            checklist_use[slug] = checklist_use.get(slug, 0) + 1
+    rows = [{
+        'obj': dt,
+        'device_count': in_use_devices.get(dt.slug, 0),
+        'checklist_count': checklist_use.get(dt.slug, 0),
+    } for dt in types]
+    return {'dt_rows': rows, 'dt_icons': DEVICE_TYPE_ICONS}
+
+
+class DeviceTypeCreateView(SettingsAdminMixin, View):
+    def post(self, request):
+        from django.utils.text import slugify
+        label = request.POST.get('label', '').strip()
+        icon = request.POST.get('icon', '').strip() or 'question'
+        if label:
+            slug = slugify(label).replace('-', '_')[:50] or 'type'
+            base, n = slug, 2
+            while DeviceType.objects.filter(slug=slug).exists():
+                slug = f'{base}_{n}'
+                n += 1
+            last = DeviceType.objects.order_by('-sort_order').first()
+            DeviceType.objects.create(
+                slug=slug, label=label, icon=icon,
+                sort_order=(last.sort_order + 10) if last else 0,
+            )
+        return redirect(reverse_lazy(DT_REDIRECT) + DT_TAB)
+
+
+class DeviceTypeUpdateView(SettingsAdminMixin, View):
+    def post(self, request, pk):
+        dt = get_object_or_404(DeviceType, pk=pk)
+        label = request.POST.get('label', '').strip()
+        icon = request.POST.get('icon', '').strip()
+        if label:
+            dt.label = label
+            if icon:
+                dt.icon = icon
+            dt.save(update_fields=['label', 'icon'])
+        return redirect(reverse_lazy(DT_REDIRECT) + DT_TAB)
+
+
+class DeviceTypeDeleteView(SettingsAdminMixin, View):
+    """Refused while in use. A deleted slug would silently un-scope every
+    checklist item pointing at it and leave devices with an unlabeled type, so
+    the counts are shown instead of a broken state."""
+
+    def post(self, request, pk):
+        dt = get_object_or_404(DeviceType, pk=pk)
+        device_count, checklist_count = dt.usage()
+        if device_count or checklist_count:
+            parts = []
+            if device_count:
+                parts.append(f'{device_count} device(s)')
+            if checklist_count:
+                parts.append(f'{checklist_count} checklist item(s)')
+            messages.error(
+                request,
+                f'"{dt.label}" is still used by {" and ".join(parts)}. '
+                'Reassign them first, then delete the type.')
+        else:
+            messages.success(request, f'Device type "{dt.label}" deleted.')
+            dt.delete()
+        return redirect(reverse_lazy(DT_REDIRECT) + DT_TAB)
 
 
 class ChecklistItemCreateView(SettingsAdminMixin, View):

@@ -1,6 +1,7 @@
 from django.contrib import admin
+from django import forms
 from .models import (
-    User, Client, Contact, Device, Asset, Contract, Ticket, TicketReply, WorkOrder, WorkOrderNote,
+    User, Client, Contact, Device, DeviceType, Contract, Ticket, TicketReply, WorkOrder, WorkOrderNote,
     WorkOrderItem, Mileage, RepairType, Checklist, ChecklistItem, CannedResponse, CannedResponseCategory,
     SiteSettings, Attachment, EmailTemplate, SuppressedAddress, EmailSendLog,
     Role, TechSkill, SLAPlan, HelpTopic, KBCategory, KBArticle,
@@ -109,8 +110,22 @@ class ContactAdmin(admin.ModelAdmin):
 
 
 # Device Admin
+class DeviceAdminForm(forms.ModelForm):
+    """Admin edits device_type through the same table-driven choices the app
+    forms use, so an unknown slug cannot be typed in raw (outside review, Aug 15)."""
+    class Meta:
+        model = Device
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['device_type'] = forms.ChoiceField(
+            choices=list(DeviceType.objects.values_list('slug', 'label')))
+
+
 @admin.register(Device)
 class DeviceAdmin(admin.ModelAdmin):
+    form = DeviceAdminForm
     list_display = ['name', 'client', 'device_type', 'serial_number', 'is_active']
     list_filter = ['device_type', 'is_active', 'client']
     search_fields = ['name', 'serial_number', 'model', 'manufacturer', 'client__name']
@@ -124,20 +139,43 @@ class DeviceAdmin(admin.ModelAdmin):
     readonly_fields = ['created_at', 'updated_at']
 
 
-# Asset Admin
-@admin.register(Asset)
-class AssetAdmin(admin.ModelAdmin):
-    list_display = ['name', 'client', 'asset_type', 'identifier', 'is_active']
-    list_filter = ['asset_type', 'is_active', 'client']
-    search_fields = ['name', 'identifier', 'model', 'manufacturer', 'client__name']
-    fieldsets = (
-        ('Asset Info', {'fields': ('client', 'name', 'asset_type', 'identifier')}),
-        ('Details', {'fields': ('manufacturer', 'model')}),
-        ('Status', {'fields': ('is_active',)}),
-        ('Notes', {'fields': ('notes',), 'classes': ('collapse',)}),
-        ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
-    )
-    readonly_fields = ['created_at', 'updated_at']
+# DeviceType Admin. The slug is what devices and checklist scoping reference,
+# so it is read-only once created; the model's delete() refuses while in use.
+@admin.register(DeviceType)
+class DeviceTypeAdmin(admin.ModelAdmin):
+    list_display = ['label', 'slug', 'icon', 'sort_order']
+    ordering = ['sort_order']
+
+    def get_readonly_fields(self, request, obj=None):
+        return ['slug'] if obj else []
+
+    def delete_queryset(self, request, queryset):
+        # The admin bulk action deletes the QUERYSET, which never calls
+        # DeviceType.delete(), so the in-use guard was bypassable from the
+        # changelist (round-2 review). Route each row through the model's own
+        # delete so the same refusal applies; report the refusal instead of 500ing.
+        from django.db.models import ProtectedError
+        from django.contrib import messages
+        deleted, refused = 0, []
+        for dt in queryset:
+            try:
+                dt.delete()
+                deleted += 1
+            except ProtectedError as e:
+                refused.append(str(e.args[0]))
+        for msg in refused:
+            messages.error(request, msg)
+        # Django's stock action reports "deleted N" for the ORIGINAL selection
+        # regardless of what happened here (round-3 review). Say what really
+        # happened, and suppress the stock message so the two never disagree.
+        if deleted:
+            messages.success(request, f'Deleted {deleted} device type(s).')
+        request._mb_bulk_delete_reported = True
+
+    def message_user(self, request, message, *args, **kwargs):
+        if getattr(request, '_mb_bulk_delete_reported', False) and 'Successfully deleted' in str(message):
+            return
+        return super().message_user(request, message, *args, **kwargs)
 
 
 # Contract Admin

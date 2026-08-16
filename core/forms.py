@@ -1,7 +1,7 @@
 from django import forms
 from django.core.files.uploadedfile import UploadedFile
 from django.urls import reverse
-from .models import WorkOrder, Client, Contact, ContactPhone, Device, Ticket, RepairType, HelpTopic, SLAPlan, KBCategory, KBArticle, Mileage, SiteSettings, Prospect, Estimate, Asset, Contract
+from .models import WorkOrder, Client, Contact, ContactPhone, Device, Ticket, RepairType, HelpTopic, SLAPlan, KBCategory, KBArticle, Mileage, SiteSettings, Prospect, Estimate, DeviceType, Contract
 
 
 MAX_LOGO_DIMENSION = 2000  # px on either side — generous; we display-fit anything under this
@@ -296,7 +296,7 @@ class DeviceForm(forms.ModelForm):
             'client', 'assigned_contact', 'name', 'device_type', 'repair_type',
             'manufacturer', 'model', 'serial_number',
             'os', 'os_version', 'cpu', 'ram', 'storage', 'condition_at_intake',
-            'notes', 'is_active',
+            'contract', 'notes', 'is_active',
         ]
         widgets = {
             'client': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
@@ -313,13 +313,36 @@ class DeviceForm(forms.ModelForm):
             'ram': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'e.g. 16 GB'}),
             'storage': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'e.g. 512 GB SSD'}),
             'condition_at_intake': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
+            'contract': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
             'notes': forms.Textarea(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'rows': 3}),
             'is_active': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
         }
 
     def __init__(self, *args, client_id=None, **kwargs):
         super().__init__(*args, **kwargs)
+        # Dynamic choices from DeviceType rows, so operator-added types validate
+        # without a code change (same pattern as the DB-backed statuses).
+        self.fields['device_type'] = forms.ChoiceField(
+            choices=list(DeviceType.objects.values_list('slug', 'label')),
+            widget=self.fields['device_type'].widget,
+        )
         self.fields['client'].queryset = Client.objects.filter(is_active=True).order_by('name')
+        # "Covered by" is scoped to the effective client's own contracts; without
+        # a client there is nothing to cover the device under.
+        self.fields['contract'].required = False
+        self.fields['contract'].empty_label = '— Not covered —'
+        # The POSTED client wins: an edit can move the device to another client
+        # in the same request, and the coverage list must follow it (outside
+        # review, Aug 15: scoping only from the instance let a device land on
+        # client B still covered by client A's contract).
+        posted_client_id = str(self.data.get('client') or '').strip() if self.is_bound else None
+        effective_client_id = (posted_client_id or client_id
+                               or (self.instance.client_id if self.instance and self.instance.pk else None))
+        if effective_client_id:
+            self.fields['contract'].queryset = Contract.objects.filter(
+                client_id=effective_client_id).order_by('-created_at')
+        else:
+            self.fields['contract'].queryset = Contract.objects.none()
         self.fields['repair_type'].required = False
         self.fields['assigned_contact'].required = False
         self.fields['manufacturer'].required = False
@@ -333,17 +356,32 @@ class DeviceForm(forms.ModelForm):
         self.fields['condition_at_intake'].required = False
         self.fields['notes'].required = False
 
-        # Filter assigned_contact to the selected client's contacts
-        if client_id:
+        # assigned_contact follows the SAME effective client as contract (posted
+        # client first). Round-2 review: it was still scoped from the pre-edit
+        # client, so a device moved to client B could keep client A's contact.
+        # Every per-client field on this form must derive from one client id.
+        if effective_client_id:
             self.fields['assigned_contact'].queryset = Contact.objects.filter(
-                client_id=client_id
-            ).order_by('last_name', 'first_name')
-        elif self.instance and self.instance.pk:
-            self.fields['assigned_contact'].queryset = Contact.objects.filter(
-                client=self.instance.client
+                client_id=effective_client_id
             ).order_by('last_name', 'first_name')
         else:
             self.fields['assigned_contact'].queryset = Contact.objects.none()
+
+    def clean(self):
+        cleaned = super().clean()
+        client = cleaned.get('client')
+        # Every per-client field on a device must belong to the device's own
+        # client. Enforced here, not only by the dropdown querysets, so no
+        # request shape (a stale form, a hand-built POST) can cross clients.
+        contract = cleaned.get('contract')
+        if contract is not None and (client is None or contract.client_id != client.pk):
+            self.add_error('contract', 'That contract belongs to a different client. '
+                                       'Pick one of this device\'s own client\'s contracts, or leave it uncovered.')
+        contact = cleaned.get('assigned_contact')
+        if contact is not None and (client is None or contact.client_id != client.pk):
+            self.add_error('assigned_contact', 'That contact belongs to a different client. '
+                                               'Pick one of this device\'s own client\'s contacts, or leave it blank.')
+        return cleaned
 
 
 class DeviceQuickAddForm(forms.ModelForm):
@@ -374,40 +412,13 @@ class DeviceQuickAddForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields['device_type'] = forms.ChoiceField(
+            choices=list(DeviceType.objects.values_list('slug', 'label')),
+            widget=self.fields['device_type'].widget,
+        )
         for field_name in self.fields:
             self.fields[field_name].required = False
 
-
-class AssetForm(forms.ModelForm):
-    """Create/edit a managed Asset. Always belongs to a Client (no walk-in assets).
-    The client is set from the URL context, not exposed as an editable field. The
-    contract dropdown ("covered by") is scoped to that same client's contracts."""
-    class Meta:
-        model = Asset
-        fields = ['name', 'asset_type', 'identifier', 'manufacturer', 'model', 'contract', 'notes', 'is_active']
-        widgets = {
-            'name': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': "e.g. Reception PC"}),
-            'asset_type': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
-            'identifier': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'placeholder': 'Asset tag, hostname, or serial'}),
-            'manufacturer': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
-            'model': forms.TextInput(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
-            'contract': forms.Select(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'}),
-            'notes': forms.Textarea(attrs={'class': 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500', 'rows': 3}),
-            'is_active': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'}),
-        }
-
-    def __init__(self, *args, client=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        for field_name in ('identifier', 'manufacturer', 'model', 'notes'):
-            self.fields[field_name].required = False
-        self.fields['contract'].required = False
-        self.fields['contract'].empty_label = '— Not covered —'
-        # Scope "covered by" to this client's own contracts.
-        owner = client or (self.instance.client if self.instance and self.instance.pk else None)
-        if owner is not None:
-            self.fields['contract'].queryset = Contract.objects.filter(client=owner).order_by('-created_at')
-        else:
-            self.fields['contract'].queryset = Contract.objects.none()
 
 
 class ContractForm(forms.ModelForm):

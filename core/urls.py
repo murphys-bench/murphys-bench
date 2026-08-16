@@ -23,12 +23,6 @@ urlpatterns = [
     path('devices/<int:pk>/', views.DeviceDetailView.as_view(), name='device_detail'),
     path('devices/<int:pk>/edit/', views.DeviceUpdateView.as_view(), name='device_edit'),
     path('devices/<int:pk>/delete/', views.DeviceDeleteView.as_view(), name='device_delete'),
-    # Assets (managed inventory — client-scoped)
-    path('clients/<int:client_pk>/assets/new/', views.AssetCreateView.as_view(), name='asset_create'),
-    path('assets/<int:pk>/', views.AssetDetailView.as_view(), name='asset_detail'),
-    path('assets/<int:pk>/edit/', views.AssetUpdateView.as_view(), name='asset_edit'),
-    path('assets/<int:pk>/delete/', views.AssetDeleteView.as_view(), name='asset_delete'),
-    path('devices/<int:pk>/promote-to-asset/', views.DevicePromoteToAssetView.as_view(), name='device_promote_asset'),
     # Contracts (managed-client layer)
     path('contracts/', views.ContractListView.as_view(), name='contract_list'),
     path('clients/<int:client_pk>/contracts/new/', views.ContractCreateView.as_view(), name='contract_create'),
@@ -252,6 +246,11 @@ urlpatterns = [
     path('catalog/new/', views.CatalogCreateView.as_view(), name='catalog_create'),
     path('catalog/<int:pk>/edit/', views.CatalogUpdateView.as_view(), name='catalog_update'),
     path('catalog/<int:pk>/delete/', views.CatalogDeleteView.as_view(), name='catalog_delete'),
+
+    # Settings — Device Types CRUD
+    path('settings/device-types/new/', views.DeviceTypeCreateView.as_view(), name='device_type_create'),
+    path('settings/device-types/<int:pk>/edit/', views.DeviceTypeUpdateView.as_view(), name='device_type_update'),
+    path('settings/device-types/<int:pk>/delete/', views.DeviceTypeDeleteView.as_view(), name='device_type_delete'),
 
     # Settings — Checklist Items CRUD
     path('settings/checklist-items/new/', views.ChecklistItemCreateView.as_view(), name='cli_create'),

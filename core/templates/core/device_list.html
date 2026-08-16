@@ -50,7 +50,7 @@
                                 {% endif %}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                {{ device.get_device_type_display }}
+                                {{ device.type_label }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                                 {{ device.manufacturer|default:"" }} {{ device.model|default:"—" }}
