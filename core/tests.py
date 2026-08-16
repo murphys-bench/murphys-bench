@@ -6559,6 +6559,170 @@ def test_pos_wo_settle_draft_does_not_mark_paid(client, admin_user, client_obj, 
 
 
 @pytest.mark.django_db
+def test_pos_wo_settle_draft_records_invoiced_on_mbs_own_invoice(client, admin_user, client_obj, monkeypatch):
+    """Bill Later must land on MB's Invoice too, not just the WO.
+
+    The bug this covers (found on prod WO-00017, Aug 14): the draft push wrote
+    invoice_ninja_id onto the WORK ORDER and never touched MB's Invoice row, so
+    a job sitting in Invoice Ninja as invoice #1931 still read as 'uninvoiced'
+    here and stayed in the billing-ready queue with no amount recorded."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('225.00'))
+
+    monkeypatch.setattr(invoice_ninja, '_request',
+                        lambda method, path, **kw: {'data': {'id': 931, 'number': '1931'}})
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'draft'})
+    assert resp.status_code == 302
+
+    wo.refresh_from_db()
+    inv = wo.invoice
+    inv.refresh_from_db()
+    assert inv.billing_status == 'invoiced'
+    assert inv.amount == Decimal('225.00')
+    assert inv.invoiced_date is not None
+    assert inv.invoice_ninja_id == wo.invoice_ninja_id
+    # Still not a payment.
+    assert inv.paid_at is None
+
+
+@pytest.mark.django_db
+def test_pos_wo_settle_draft_self_heals_a_stranded_record(client, admin_user, client_obj, monkeypatch):
+    """A WO already pushed to IN but left 'uninvoiced' locally corrects itself.
+
+    Records stranded by the original bug are fixed by revisiting Bill Later; no
+    data migration needed. The push is NOT repeated (one job = one invoice), and
+    the AMOUNT is deliberately not written: the lines may have changed since the
+    original push, and Invoice Ninja is the money authority — MB must not record
+    a figure IN was never sent. A healed record's amount stays blank for the
+    operator to reconcile (outside-review finding, Aug 15)."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    _enable_in()
+    wo = WorkOrder.objects.create(client=client_obj, status='completed',
+                                  invoice_ninja_id='931', invoice_ninja_ref='1931')
+    # A line added AFTER the original push — today's total is not IN's total.
+    LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
+                            quantity=1, unit_price=Decimal('225.00'))
+    assert wo.invoice.billing_status == 'uninvoiced'
+
+    def fake_request(method, path, **kwargs):
+        raise AssertionError(f'Must not push a second invoice: {method} {path}')
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'draft'})
+    assert resp.status_code == 302
+
+    inv = wo.invoice
+    inv.refresh_from_db()
+    assert inv.billing_status == 'invoiced'
+    assert inv.invoice_ninja_id == '931'
+    assert inv.amount is None, 'a self-heal must not invent an amount IN does not hold'
+
+
+@pytest.mark.django_db
+def test_invoiced_with_no_amount_cannot_be_quick_marked_paid(client, admin_user, client_obj):
+    """Round-2 review finding: the self-heal's deliberately blank amount could
+    still one-click into 'paid, no amount' via the billing card's Mark Paid,
+    silently dropping the job from every revenue total. The quick action is
+    refused server-side (a hidden button is not a mechanism); the full edit,
+    which records the amount, remains the path through."""
+    from decimal import Decimal
+    from core.models import Invoice
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
+    Invoice.objects.filter(work_order=wo).update(billing_status='invoiced', amount=None)
+
+    client.force_login(admin_user)
+    url = reverse('core:wo_billing_update', args=[wo.pk])
+
+    # Quick Mark Paid: refused, status unchanged, card explains why.
+    resp = client.post(url, {'billing_status': 'paid'})
+    assert resp.status_code == 200
+    assert 'Enter the amount first' in resp.content.decode()
+    inv = wo.invoice
+    inv.refresh_from_db()
+    assert inv.billing_status == 'invoiced'
+    assert inv.paid_date is None
+
+    # The card renders the guidance instead of the quick Mark Paid button.
+    body = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
+    assert 'no amount recorded' in body
+
+    # Full edit with an amount goes through.
+    resp = client.post(url, {'billing_status': 'paid', 'full_edit': '1',
+                             'amount': '150.00', 'payment_method': 'check'})
+    assert resp.status_code == 200
+    inv.refresh_from_db()
+    assert inv.billing_status == 'paid'
+    assert inv.amount == Decimal('150.00')
+
+    # Regression: an invoiced record WITH an amount still quick-marks paid.
+    wo2 = WorkOrder.objects.create(client=client_obj, status='completed')
+    Invoice.objects.filter(work_order=wo2).update(billing_status='invoiced',
+                                                  amount=Decimal('60.00'))
+    resp = client.post(reverse('core:wo_billing_update', args=[wo2.pk]),
+                       {'billing_status': 'paid'})
+    assert resp.status_code == 200
+    inv2 = wo2.invoice
+    inv2.refresh_from_db()
+    assert inv2.billing_status == 'paid'
+
+
+@pytest.mark.django_db
+def test_uninvoiced_with_no_amount_cannot_be_quick_paid_direct(client, admin_user, client_obj):
+    """Round-3 review finding: the same 'paid with no amount' shape existed via
+    the uninvoiced record's quick Paid Direct button, and prod held 3 such
+    records, all invisible to revenue totals. Guard widened on Mike's call: no
+    one-click paid status with a blank amount from ANY status. Paid Direct with
+    an amount recorded still works."""
+    from decimal import Decimal
+    from core.models import Invoice
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
+    assert wo.invoice.billing_status == 'uninvoiced' and wo.invoice.amount is None
+
+    client.force_login(admin_user)
+    url = reverse('core:wo_billing_update', args=[wo.pk])
+
+    # Quick Paid Direct with no amount: refused, record unchanged.
+    resp = client.post(url, {'billing_status': 'paid_direct'})
+    assert resp.status_code == 200
+    assert 'Enter the amount first' in resp.content.decode()
+    inv = wo.invoice
+    inv.refresh_from_db()
+    assert inv.billing_status == 'uninvoiced'
+    assert inv.paid_date is None
+
+    # The card offers guidance instead of the quick Paid Direct button.
+    body = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
+    assert 'Paid Direct needs an amount' in body
+
+    # Mark Invoiced (no money claim) is still one click.
+    resp = client.post(url, {'billing_status': 'invoiced'})
+    inv.refresh_from_db()
+    assert inv.billing_status == 'invoiced'
+
+    # And with an amount on record, uninvoiced quick Paid Direct still works.
+    wo2 = WorkOrder.objects.create(client=client_obj, status='completed')
+    Invoice.objects.filter(work_order=wo2).update(amount=Decimal('45.00'))
+    resp = client.post(reverse('core:wo_billing_update', args=[wo2.pk]),
+                       {'billing_status': 'paid_direct'})
+    assert resp.status_code == 200
+    inv2 = wo2.invoice
+    inv2.refresh_from_db()
+    assert inv2.billing_status == 'paid_direct'
+    assert inv2.paid_date is not None
+
+
+@pytest.mark.django_db
 def test_pos_wo_settle_cash_without_in_records_locally(client, admin_user, client_obj, monkeypatch):
     """MB stands alone: with Invoice Ninja OFF, settling a WO in cash records the
     payment on MB's own Invoice, generates MB's receipt, and never calls IN — no
@@ -11897,6 +12061,162 @@ def test_ticket_convert_needs_the_workorder_create_flag(client, client_obj):
     ticket = _ticket_for(tech, client_obj)
     client.force_login(tech)
     assert client.get(reverse('core:ticket_convert', args=[ticket.pk])).status_code == 403
+
+
+@pytest.mark.django_db
+def test_converted_is_not_offered_in_the_ticket_status_dropdowns(client, admin_user, client_obj):
+    """Mike's Aug 14 ruling: remove it from the dropdown.
+
+    'Converted to Work Order' named an action it could not perform. Picking it
+    renamed the ticket, created no work order, and drove the ticket into a state
+    that hid the real Convert button.
+    """
+    from core.models import StatusDefinition
+    from core.forms import TicketForm
+    sd = StatusDefinition.objects.get(entity_type='ticket', slug='converted')
+    assert sd.operator_selectable is False, 'migration 0105 should have cleared this'
+
+    # Not in the full edit form's choices...
+    slugs = [s for s, _ in TicketForm().fields['status'].choices]
+    assert 'converted' not in slugs
+
+    # ...and not in the ticket detail quick dropdown.
+    ticket = Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(), client=client_obj,
+        subject='x', description='x', status='new',
+    )
+    client.force_login(admin_user)
+    body = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    assert '<option value="converted"' not in body
+
+    # Posting it by hand is refused rather than silently saved.
+    resp = client.post(reverse('core:ticket_status_update', args=[ticket.pk]),
+                       {'status': 'converted'})
+    assert resp.status_code == 403
+    ticket.refresh_from_db()
+    assert ticket.status == 'new'
+
+
+@pytest.mark.django_db
+def test_quick_dropdown_on_a_converted_ticket_shows_converted_selected(client, admin_user, client_obj):
+    """Outside-review finding (Aug 15): hiding 'converted' from the quick
+    dropdown left a converted ticket with NO matching <option>, so the browser
+    silently displayed the first choice ('New') and clicking Set moved the
+    ticket out of 'converted' by accident. The ticket's own status must render
+    as the selected option even when it is action-owned."""
+    ticket = Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(), client=client_obj,
+        subject='Converted for real', description='x', status='converted',
+    )
+    client.force_login(admin_user)
+    body = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    assert '<option value="converted" selected>' in body
+
+    # Re-posting the pre-selected current status is an allowed no-op, so an
+    # operator who clicks Set without touching the dropdown changes nothing.
+    resp = client.post(reverse('core:ticket_status_update', args=[ticket.pk]),
+                       {'status': 'converted'})
+    assert resp.status_code in (200, 302)
+    ticket.refresh_from_db()
+    assert ticket.status == 'converted'
+
+    # And a ticket NOT at 'converted' still never sees it offered.
+    other = Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(), client=client_obj,
+        subject='Plain', description='x', status='open',
+    )
+    body = client.get(reverse('core:ticket_detail', args=[other.pk])).content.decode()
+    assert '<option value="converted"' not in body
+
+
+@pytest.mark.django_db
+def test_an_already_converted_ticket_stays_editable(client, admin_user, client_obj):
+    """Removing a status from the dropdown must not make records holding it
+    unsavable. The ticket's own current status is always a valid choice."""
+    from core.forms import TicketForm
+    ticket = Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(), client=client_obj,
+        subject='Already converted', description='x', status='converted',
+    )
+    slugs = [s for s, _ in TicketForm(instance=ticket).fields['status'].choices]
+    assert 'converted' in slugs, 'a converted ticket could not keep its own status'
+
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:ticket_edit', args=[ticket.pk]), {
+        'client': client_obj.pk, 'subject': 'Edited while converted',
+        'description': 'x', 'source': 'web', 'status': 'converted',
+    })
+    assert resp.status_code == 302, 'editing a converted ticket must not fail validation'
+    ticket.refresh_from_db()
+    assert ticket.subject == 'Edited while converted'
+    assert ticket.status == 'converted'
+
+
+@pytest.mark.django_db
+def test_a_hand_marked_converted_ticket_can_still_be_converted(client, admin_user, client_obj):
+    """The trap from TKT-00041.
+
+    "Converted to Work Order" is also a plain status in the quick dropdown, and
+    picking it there creates nothing. The convert view used to refuse any ticket
+    whose status was 'converted', so a ticket mislabelled that way could never be
+    converted for real, and the ticket page hid the working button at the same
+    time. Nothing on the screen led anywhere.
+    """
+    ticket = Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(), client=client_obj,
+        subject='Marked converted by hand', description='x', status='converted',
+    )
+    client.force_login(admin_user)
+
+    # The real route must still open, and still work.
+    assert client.get(reverse('core:ticket_convert', args=[ticket.pk])).status_code == 200
+    resp = client.post(reverse('core:ticket_convert', args=[ticket.pk]), {})
+    assert resp.status_code == 302
+    ticket.refresh_from_db()
+    assert ticket.work_order_created is not None
+    assert ticket.work_order_created.client_id == client_obj.pk
+
+
+@pytest.mark.django_db
+def test_converted_ticket_offers_a_route_to_its_work_order(client, admin_user, client_obj):
+    """Never a dead end: once a WO exists the button becomes a link to it."""
+    ticket = Ticket.objects.create(
+        ticket_number=Ticket.generate_ticket_number(), client=client_obj,
+        subject='Converted', description='x', status='new',
+    )
+    client.force_login(admin_user)
+    client.post(reverse('core:ticket_convert', args=[ticket.pk]), {})
+    ticket.refresh_from_db()
+    wo = ticket.work_order_created
+
+    body = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    assert f'Go to {wo.work_order_number}' in body
+    assert reverse('core:work_order_detail', args=[wo.pk]) in body
+    # And it must not offer a second conversion.
+    assert 'Convert to Work Order</a>' not in body
+
+    # A second attempt at the convert view is refused, on the work order's
+    # existence rather than on the status string.
+    assert client.get(reverse('core:ticket_convert', args=[ticket.pk])).status_code == 302
+
+
+@pytest.mark.django_db
+def test_ticket_device_picker_hides_retired_devices(client_obj):
+    """The ticket picker offers only active devices, matching the HTMX cascade
+    endpoint. A promoted-to-Asset device is therefore unpickable on a ticket
+    until the Device/Asset merge un-retires it — the ruled fix for the Aug-14
+    empty-picker defect. This pins the interim behavior so the merge, when it
+    lands, changes it deliberately rather than by accident."""
+    from core.forms import TicketForm
+    active = Device.objects.create(client=client_obj, name='Front Desk PC')
+    retired = Device.objects.create(client=client_obj, name='Reception PC')
+    retired.promote_to_asset()
+    retired.refresh_from_db()
+    assert retired.is_active is False
+
+    choices = TicketForm(data={'client': client_obj.pk}).fields['device'].queryset
+    assert active in choices
+    assert retired not in choices
 
 
 @pytest.mark.django_db

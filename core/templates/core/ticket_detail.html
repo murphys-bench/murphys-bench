@@ -483,11 +483,26 @@ window.addEventListener('beforeunload', function() {
                         Edit Ticket
                     </a>
                     {% endif %}
-                    {% if ticket.status != 'converted' and can_create_workorder and can_edit_ticket %}
-                    <a href="{% url 'core:ticket_convert' ticket.pk %}"
-                       class="block w-full text-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">
-                        Convert to Work Order
-                    </a>
+                    {% comment %}
+                    Always leave a route. Previously this was hidden whenever the
+                    status was 'converted', and the status dropdown offers
+                    "Converted to Work Order" as a plain status that creates
+                    nothing. Setting it that way removed the only working control
+                    and left no way back. Now: if a work order exists, link to it;
+                    if it does not, offer the conversion regardless of status.
+                    {% endcomment %}
+                    {% if can_create_workorder and can_edit_ticket %}
+                        {% if ticket.work_order_created %}
+                        <a href="{% url 'core:work_order_detail' ticket.work_order_created.pk %}"
+                           class="block w-full text-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">
+                            Go to {{ ticket.work_order_created.work_order_number }}
+                        </a>
+                        {% else %}
+                        <a href="{% url 'core:ticket_convert' ticket.pk %}"
+                           class="block w-full text-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">
+                            Convert to Work Order
+                        </a>
+                        {% endif %}
                     {% endif %}
                     {% if ticket.wo_complete and can_close_tickets %}
                     <form method="post" action="{% url 'core:ticket_close' ticket.pk %}">

@@ -470,6 +470,12 @@ class TicketForm(forms.ModelForm):
         effective_client_id = posted_client_id or (instance.client_id if instance else None)
         if effective_client_id:
             self.fields['contact'].queryset = Contact.objects.filter(client_id=effective_client_id, is_active=True).order_by('last_name', 'first_name')
+            # is_active=True is correct here and matches the HTMX cascade
+            # endpoint. The Aug-14 defect (promoted-to-Asset devices vanishing
+            # from this picker) is NOT fixed by widening this filter: the ruled
+            # fix is the Device/Asset merge, after which promotion no longer
+            # retires the Device row and this filter stops hiding real machines.
+            # Until that ships, a promoted device stays unpickable on a ticket.
             self.fields['device'].queryset = Device.objects.filter(client_id=effective_client_id, is_active=True).order_by('name')
         else:
             self.fields['contact'].queryset = Contact.objects.none()
@@ -481,10 +487,21 @@ class TicketForm(forms.ModelForm):
         self.fields['sla_plan'].required = False
         self.fields['assigned_to'].queryset = UserModel.objects.filter(is_active=True).order_by('first_name', 'last_name')
         self.fields['assigned_to'].required = False
-        # Dynamic status choices from StatusDefinition
+        # Dynamic status choices from StatusDefinition. operator_selectable=False
+        # statuses belong to an action, not to a person, so they are not offered.
         ticket_statuses = list(StatusDefinition.objects.filter(
-            entity_type='ticket', is_active=True
+            entity_type='ticket', is_active=True, operator_selectable=True,
         ).order_by('sort_order').values_list('slug', 'label'))
+        # The ticket's OWN status is always included, even when it is one of the
+        # action-owned ones. A converted ticket must stay editable; without this
+        # its current value is not a valid choice and every save of that ticket
+        # fails validation on a field the user never touched.
+        current = instance.status if instance and instance.pk else None
+        if current and current not in dict(ticket_statuses):
+            label = StatusDefinition.objects.filter(
+                entity_type='ticket', slug=current,
+            ).values_list('label', flat=True).first() or current
+            ticket_statuses.append((current, label))
         self.fields['status'] = forms.ChoiceField(
             choices=ticket_statuses,
             widget=forms.Select(attrs=SELECT_WIDGET),

@@ -27,8 +27,14 @@
             </span>
             {% if invoice.amount %}
             <span class="text-sm font-medium text-gray-700">${{ invoice.amount }}</span>
+            {% elif invoice.billing_status == 'invoiced' %}
+            <span class="text-xs text-amber-700">no amount recorded</span>
             {% endif %}
         </div>
+
+        {% if billing_error %}
+        <div class="text-xs text-red-700 bg-red-50 rounded px-2 py-1.5 mb-3">{{ billing_error }}</div>
+        {% endif %}
 
         <!-- Dates + payment method -->
         {% if invoice.invoiced_date or invoice.paid_date %}
@@ -85,6 +91,7 @@
                     Mark Invoiced
                 </button>
             </form>
+            {% if invoice.amount is not None %}
             <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}"
                   hx-target="#billing-card" hx-swap="outerHTML">
                 {% csrf_token %}
@@ -94,7 +101,16 @@
                     Paid Direct
                 </button>
             </form>
+            {% else %}
+            {% comment %}Same invariant as the invoiced branch below: no paid
+            status without an amount, or the job drops out of revenue totals.
+            The server refuses the quick action regardless of this markup.{% endcomment %}
+            <span class="text-xs text-amber-700 self-center">
+                Paid Direct needs an amount; enter it with Edit.
+            </span>
+            {% endif %}
             {% elif invoice.billing_status == 'invoiced' %}
+            {% if invoice.amount is not None %}
             <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}"
                   hx-target="#billing-card" hx-swap="outerHTML">
                 {% csrf_token %}
@@ -104,6 +120,15 @@
                     Mark Paid
                 </button>
             </form>
+            {% else %}
+            {% comment %}A self-healed IN draft: invoiced, amount deliberately
+            blank. One-click Mark Paid would record 'paid, no amount', which
+            drops the job from revenue totals. The full edit records the amount
+            from IN first; the server refuses the quick action regardless.{% endcomment %}
+            <span class="text-xs text-amber-700">
+                Enter the amount (Edit) before marking paid; without one this job drops out of revenue totals.
+            </span>
+            {% endif %}
             {% elif invoice.billing_status == 'disputed' %}
             <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}"
                   hx-target="#billing-card" hx-swap="outerHTML">

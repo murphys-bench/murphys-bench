@@ -3990,8 +3990,19 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         context['client_open_wos'] = open_wos
         context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
         context['is_admin'] = _is_admin(self.request.user)
+        # The quick dropdown offers only statuses a person may set. 'Converted to
+        # Work Order' is set by TicketConvertView, never by hand: offered here it
+        # renamed the ticket, created nothing, and hid the button that converts.
+        #
+        # The ticket's OWN status is always included even when action-owned:
+        # without it a converted ticket has no matching <option>, the browser
+        # silently displays the first choice instead, and clicking Set moves the
+        # ticket out of 'converted' by accident. Present only when current, it
+        # renders selected and re-posting it is a no-op.
         context['ticket_statuses'] = StatusDefinition.objects.filter(
-            entity_type='ticket', is_active=True
+            entity_type='ticket', is_active=True,
+        ).filter(
+            Q(operator_selectable=True) | Q(slug=self.object.status)
         ).order_by('sort_order')
         return context
 
@@ -4291,16 +4302,25 @@ class TicketConvertView(LoginRequiredMixin, View):
             return HttpResponse('Forbidden', status=403)
         return super().dispatch(request, *args, **kwargs)
 
+    # Guard on the WORK ORDER, not the status. 'Converted to Work Order' is also a
+    # plain status in the dropdown, and choosing it there creates nothing. Gating on
+    # the status meant a ticket marked converted by hand could never be converted for
+    # real: the only working route refused to open. Gating on the actual work order
+    # still prevents a duplicate, and lets a mislabelled ticket recover.
+    @staticmethod
+    def _existing_work_order(ticket):
+        return getattr(ticket, 'work_order_created', None)
+
     def get(self, request, pk):
         ticket = _get_scoped_ticket_or_404(request, pk)
-        if ticket.status == 'converted':
+        if self._existing_work_order(ticket):
             return redirect('core:ticket_detail', pk=pk)
         form = TicketConvertForm()
         return render(request, 'core/ticket_convert.html', {'ticket': ticket, 'form': form})
 
     def post(self, request, pk):
         ticket = _get_scoped_ticket_or_404(request, pk)
-        if ticket.status == 'converted':
+        if self._existing_work_order(ticket):
             return redirect('core:ticket_detail', pk=pk)
 
         form = TicketConvertForm(request.POST)
@@ -6751,6 +6771,36 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
                 newly_pushed = True
 
             if action == 'draft':
+                # Record the draft on MB's OWN Invoice as well. Without this the
+                # work order keeps its invoice_ninja_id while MB's billing_status
+                # stays 'uninvoiced', so a job that really is in Invoice Ninja
+                # still reads here as never invoiced and never leaves the
+                # billing-ready queue. Found on WO-00017 (Aug 14): invoice #1931
+                # existed in IN while MB's own record was untouched.
+                #
+                # Only promotes from 'uninvoiced', which also self-heals records
+                # stranded by this bug the next time the WO is opened. It will
+                # not overwrite a later state (paid/disputed).
+                #
+                # The amount is written ONLY on a fresh push, where it is exactly
+                # what IN was just sent. On a self-heal the lines may have changed
+                # since the original push, and Invoice Ninja is the money
+                # authority: recording today's total against yesterday's draft
+                # would make MB claim a figure IN does not hold. A healed record
+                # keeps its amount blank for the operator to reconcile against IN.
+                invoice = wo.invoice
+                if invoice.billing_status == 'uninvoiced':
+                    invoice.billing_status = 'invoiced'
+                    invoice.invoiced_date = timezone.localdate()
+                    invoice.invoice_ninja_id = wo.invoice_ninja_id
+                    update_fields = [
+                        'billing_status', 'invoiced_date',
+                        'invoice_ninja_id', 'updated_at',
+                    ]
+                    if newly_pushed:
+                        invoice.amount = amount
+                        update_fields.append('amount')
+                    invoice.save(update_fields=update_fields)
                 if newly_pushed:
                     messages.success(
                         request,
@@ -7190,6 +7240,29 @@ class WorkOrderBillingUpdateView(LoginRequiredMixin, View):
 
         billing_status = request.POST.get('billing_status', '').strip()
         valid_statuses = dict(Invoice.BILLING_STATUS_CHOICES)
+
+        # No one-click into a paid status with NO amount, from ANY status: a
+        # paid job with no amount silently drops out of every revenue total
+        # (reports count paid records with amounts only), which is the
+        # TKT-00041 defect shape all over again. Prod already held 3 such
+        # records when this shipped. The two shapes this refuses: a self-healed
+        # IN draft (the heal deliberately leaves the amount blank rather than
+        # claim a figure IN was never sent), and quick Paid Direct on an
+        # uninvoiced record. The full edit records the amount and is the path
+        # through; the Register computes its own amounts and never hits this.
+        # Server-side because a hidden button is not a mechanism (outside
+        # review rounds 2 and 3, Aug 15; guard widened on Mike's call).
+        if (billing_status in ('paid', 'paid_direct')
+                and not request.POST.get('full_edit')
+                and invoice.amount is None):
+            return render(request, 'core/partials/billing_card.html', {
+                'work_order': wo,
+                'invoice': invoice,
+                'billing_error': 'Enter the amount first (Edit). Marked paid '
+                                 'without an amount, this job drops out of '
+                                 'revenue totals.',
+            })
+
         if billing_status in valid_statuses:
             invoice.billing_status = billing_status
 
@@ -8990,9 +9063,12 @@ class TicketStatusUpdateView(LoginRequiredMixin, View):
         # the quick dropdown did not. The ticket's own current status is allowed
         # through so a retired value cannot make it unsavable.
         valid_statuses = set(
-            StatusDefinition.objects.filter(entity_type='ticket', is_active=True)
-            .values_list('slug', flat=True)
+            StatusDefinition.objects.filter(
+                entity_type='ticket', is_active=True, operator_selectable=True,
+            ).values_list('slug', flat=True)
         )
+        # The ticket's own status stays allowed so a retired (or action-owned)
+        # value cannot make the ticket unsavable. Re-posting it is a no-op.
         valid_statuses.add(ticket.status)
         if new_status not in valid_statuses:
             return HttpResponse('Forbidden', status=403)

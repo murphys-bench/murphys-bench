@@ -1984,6 +1984,18 @@ class StatusDefinition(models.Model):
     color       = models.CharField(max_length=7, default='#E5E7EB', help_text='Background color hex (e.g. #DBEAFE)')
     is_system   = models.BooleanField(default=False, help_text='System statuses cannot be deleted.')
     is_active   = models.BooleanField(default=True)
+    # A status an ACTION owns, which a person must not set by hand. "Converted to
+    # Work Order" is the case this exists for: it was offered in the ticket status
+    # dropdown, where choosing it renamed the ticket and created no work order,
+    # while also hiding the button that does the real thing. A status that names an
+    # action has to perform it or not be offered. Still shown on the ticket, still
+    # filterable, still visible in Settings; just not hand-settable.
+    operator_selectable = models.BooleanField(
+        default=True,
+        help_text='Uncheck for statuses only an action may set (e.g. Converted to '
+                  'Work Order). Hidden from the status dropdowns; still displayed '
+                  'and still filterable.',
+    )
     sort_order  = models.IntegerField(default=0)
 
     class Meta:
