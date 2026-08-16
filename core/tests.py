@@ -6630,6 +6630,54 @@ def test_pos_wo_settle_draft_self_heals_a_stranded_record(client, admin_user, cl
 
 
 @pytest.mark.django_db
+def test_invoiced_with_no_amount_cannot_be_quick_marked_paid(client, admin_user, client_obj):
+    """Round-2 review finding: the self-heal's deliberately blank amount could
+    still one-click into 'paid, no amount' via the billing card's Mark Paid,
+    silently dropping the job from every revenue total. The quick action is
+    refused server-side (a hidden button is not a mechanism); the full edit,
+    which records the amount, remains the path through."""
+    from decimal import Decimal
+    from core.models import Invoice
+    wo = WorkOrder.objects.create(client=client_obj, status='completed')
+    Invoice.objects.filter(work_order=wo).update(billing_status='invoiced', amount=None)
+
+    client.force_login(admin_user)
+    url = reverse('core:wo_billing_update', args=[wo.pk])
+
+    # Quick Mark Paid: refused, status unchanged, card explains why.
+    resp = client.post(url, {'billing_status': 'paid'})
+    assert resp.status_code == 200
+    assert 'Enter the amount first' in resp.content.decode()
+    inv = wo.invoice
+    inv.refresh_from_db()
+    assert inv.billing_status == 'invoiced'
+    assert inv.paid_date is None
+
+    # The card renders the guidance instead of the quick Mark Paid button.
+    body = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
+    assert 'no amount recorded' in body
+
+    # Full edit with an amount goes through.
+    resp = client.post(url, {'billing_status': 'paid', 'full_edit': '1',
+                             'amount': '150.00', 'payment_method': 'check'})
+    assert resp.status_code == 200
+    inv.refresh_from_db()
+    assert inv.billing_status == 'paid'
+    assert inv.amount == Decimal('150.00')
+
+    # Regression: an invoiced record WITH an amount still quick-marks paid.
+    wo2 = WorkOrder.objects.create(client=client_obj, status='completed')
+    Invoice.objects.filter(work_order=wo2).update(billing_status='invoiced',
+                                                  amount=Decimal('60.00'))
+    resp = client.post(reverse('core:wo_billing_update', args=[wo2.pk]),
+                       {'billing_status': 'paid'})
+    assert resp.status_code == 200
+    inv2 = wo2.invoice
+    inv2.refresh_from_db()
+    assert inv2.billing_status == 'paid'
+
+
+@pytest.mark.django_db
 def test_pos_wo_settle_cash_without_in_records_locally(client, admin_user, client_obj, monkeypatch):
     """MB stands alone: with Invoice Ninja OFF, settling a WO in cash records the
     payment on MB's own Invoice, generates MB's receipt, and never calls IN — no
