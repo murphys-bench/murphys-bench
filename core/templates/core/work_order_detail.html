@@ -143,7 +143,7 @@
 
             <!-- Device card -->
             {% url 'core:work_order_quick_update' work_order.pk as wo_quick_update_url %}
-            {% include "core/partials/device_card.html" with device=work_order.device spec_cpu=work_order.cpu spec_ram=work_order.ram spec_storage=work_order.storage asset=work_order.asset change_action=wo_quick_update_url client_devices=client_devices current_device_id=work_order.device_id show_credentials=True cred_work_order=work_order %}
+            {% include "core/partials/device_card.html" with device=work_order.device spec_cpu=work_order.cpu spec_ram=work_order.ram spec_storage=work_order.storage change_action=wo_quick_update_url client_devices=client_devices current_device_id=work_order.device_id show_credentials=True cred_work_order=work_order %}
         </div>
 
         <!-- Reported Issue / Work Requested -->

@@ -13,7 +13,7 @@
             <a href="{% url 'core:device_list' %}" class="text-gray-400 hover:text-gray-600 text-sm">← Walk-in devices</a>
             {% endif %}
             <h1 class="text-2xl font-bold text-gray-900 mt-1">{{ device.name }}</h1>
-            <p class="text-gray-500 text-sm">{{ device.get_device_type_display }}</p>
+            <p class="text-gray-500 text-sm">{{ device.type_label }}</p>
         </div>
         <div class="flex items-center gap-3">
             {% include "core/partials/header_bell.html" %}
@@ -26,21 +26,6 @@
                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
                 Edit
             </a>
-            {% if device.is_promoted %}
-            <a href="{% url 'core:asset_detail' device.promoted_to_asset_id %}"
-               class="px-4 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md hover:bg-indigo-100 text-sm font-medium">
-                Managed asset →
-            </a>
-            {% elif device.client %}
-            <form method="post" action="{% url 'core:device_promote_asset' device.pk %}" class="inline"
-                  onsubmit="return confirm('Promote &quot;{{ device.name|escapejs }}&quot; to a managed asset? Its repair history moves with it and this device record is retired. This is one-directional.');">
-                {% csrf_token %}
-                <button type="submit"
-                        class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium">
-                    Promote to Asset
-                </button>
-            </form>
-            {% endif %}
             {% if is_admin %}
             {% with wo_count=device.work_orders.count %}
             <form method="post" action="{% url 'core:device_delete' device.pk %}" class="inline"
@@ -141,8 +126,18 @@
                 </div>
                 <div>
                     <dt class="text-xs font-medium text-gray-500 uppercase">Type</dt>
-                    <dd class="text-sm text-gray-900 mt-1">{{ device.get_device_type_display }}</dd>
+                    <dd class="text-sm text-gray-900 mt-1">{{ device.type_label }}</dd>
                 </div>
+                {% if device.contract %}
+                <div>
+                    <dt class="text-xs font-medium text-gray-500 uppercase">Covered By</dt>
+                    <dd class="text-sm mt-1">
+                        <a href="{% url 'core:contract_detail' device.contract.pk %}" class="text-indigo-600 hover:underline">
+                            {{ device.contract.contract_number }} · {{ device.contract.title }}
+                        </a>
+                    </dd>
+                </div>
+                {% endif %}
                 {% if device.manufacturer %}
                 <div>
                     <dt class="text-xs font-medium text-gray-500 uppercase">Manufacturer</dt>

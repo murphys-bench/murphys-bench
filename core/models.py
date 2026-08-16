@@ -499,9 +499,41 @@ class RepairType(models.Model):
         return self.name
 
 
+class DeviceType(models.Model):
+    """An operator-editable device type (Settings → Device Types).
+
+    Replaces the old hardcoded DEVICE_TYPE_CHOICES (and the hand-copied duplicate
+    of it that lived in views.py for the checklist-items tab — the drift those
+    two copies invited is why this is a table). Mike's ruling, Aug 15 2026: he can
+    freely add, subtract, or modify device types. Devices and checklist scoping
+    reference types by slug, so renaming a LABEL is always safe; deleting a type
+    is refused while devices or checklist items still use its slug."""
+
+    slug = models.SlugField(max_length=50, unique=True)
+    label = models.CharField(max_length=100)
+    icon = models.CharField(
+        max_length=50, default='question',
+        help_text="Icon name from the built-in set (e.g. laptop, desktop, wifi).",
+    )
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = 'device_types'
+        ordering = ['sort_order', 'label']
+
+    def __str__(self):
+        return self.label
+
+    @classmethod
+    def labels_by_slug(cls):
+        return dict(cls.objects.values_list('slug', 'label'))
+
+
 class Device(models.Model):
     """Equipment being serviced"""
 
+    # Retired as the source of truth (DeviceType rows are, seeded by mig 0106);
+    # kept only as the legacy fallback for labels and as seed data.
     DEVICE_TYPE_CHOICES = [
         ('laptop', 'Laptop'),
         ('desktop', 'Desktop'),
@@ -538,7 +570,9 @@ class Device(models.Model):
     repair_type = models.ForeignKey(RepairType, on_delete=models.SET_NULL, null=True, related_name='devices')
     assigned_contact = models.ForeignKey('Contact', on_delete=models.SET_NULL, null=True, blank=True, related_name='devices')
     name = models.CharField(max_length=255, help_text="e.g., 'Mike\'s Laptop'")
-    device_type = models.CharField(max_length=50, choices=DEVICE_TYPE_CHOICES, default='laptop')
+    # Slug of a DeviceType row; validated in forms (choices deliberately not
+    # baked in, so operator-added types work without a code change).
+    device_type = models.CharField(max_length=50, default='laptop')
     serial_number = models.CharField(max_length=100, blank=True, null=True, unique=True)
     model = models.CharField(max_length=100, blank=True)
     manufacturer = models.CharField(max_length=100, blank=True)
@@ -555,10 +589,12 @@ class Device(models.Model):
     device_password = EncryptedCharField(max_length=255, blank=True)
     credential_notes = EncryptedTextField(blank=True)
     is_active = models.BooleanField(default=True)
-    # One-directional Device → Asset promotion (managed-client layer). When a device
-    # you start managing is promoted, an Asset is created, this device's repair history
-    # follows onto it, and the device is retired (is_active=False) and linked here.
-    promoted_to_asset = models.ForeignKey('Asset', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    # "Covered by" — which recurring Contract this machine falls under, if any.
+    # One machine = one Device record (Mike's Aug 15 2026 ruling; mig 0107 merged
+    # the old Asset model back in). Being covered carries no billing of its own:
+    # recurring charges live on the Contract's lines, one-off work bills through
+    # the work order or sale.
+    contract = models.ForeignKey('Contract', on_delete=models.SET_NULL, null=True, blank=True, related_name='devices')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -583,94 +619,12 @@ class Device(models.Model):
         super().save(*args, **kwargs)
 
     @property
-    def is_promoted(self):
-        return self.promoted_to_asset_id is not None
-
-    def promote_to_asset(self, user=None):
-        """Promote this (client-owned) Device into a managed Asset — the same machine
-        becoming managed. Copies the identifying fields into a new Asset, moves this
-        device's repair history onto it (each WorkOrder gains the asset link), then
-        retires the device (is_active=False) and links it to the asset. One-directional
-        and idempotent: an already-promoted device returns its existing Asset. A
-        walk-in (client-less) device cannot be promoted (an asset must belong to a
-        client). The device row is retained as retired history (it may hold encrypted
-        credentials); it just leaves the active roster."""
-        from django.db import transaction
-
-        if self.promoted_to_asset_id:
-            return self.promoted_to_asset
-        if self.client_id is None:
-            raise ValueError('A walk-in device has no client and cannot become an asset.')
-
-        with transaction.atomic():
-            asset = Asset.objects.create(
-                client=self.client,
-                name=self.name,
-                identifier=self.serial_number or '',
-                manufacturer=self.manufacturer,
-                model=self.model,
-                notes=self.notes,
-            )
-            # History follows the machine: re-point this device's work orders.
-            self.work_orders.update(asset=asset)
-            self.is_active = False
-            self.promoted_to_asset = asset
-            self.save(update_fields=['is_active', 'promoted_to_asset', 'updated_at'])
-        return asset
-
-
-class Asset(models.Model):
-    """A managed inventory item at a client (managed-services layer).
-
-    DELIBERATELY separate from Device: a Device is repair-intake-shaped (walk-in
-    nullable, condition_at_intake, repair history), whereas an Asset is owned/managed
-    equipment that belongs to a managed client and whose count can drive contract
-    billing later. The two overlap by design — different lifecycles. An Asset always
-    belongs to a Client (no walk-in assets); a WorkOrder may reference one for managed
-    work history in a later slice.
-
-    Slice 1 (this): the model + client-detail CRUD. The `contract` "covered by" FK
-    and any asset-count-driven pricing land in later slices."""
-
-    ASSET_TYPE_CHOICES = [
-        ('workstation', 'Workstation'),
-        ('server', 'Server'),
-        ('network', 'Network Device'),
-        ('mobile', 'Mobile Device'),
-        ('printer', 'Printer'),
-        ('other', 'Other'),
-    ]
-
-    id = models.AutoField(primary_key=True)
-    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='assets')
-    # "Covered by" — which recurring Contract this asset falls under. Nullable: a
-    # managed client may have assets not yet attached to a specific contract.
-    contract = models.ForeignKey('Contract', on_delete=models.SET_NULL, null=True, blank=True, related_name='assets')
-    name = models.CharField(max_length=255, help_text="e.g. 'Reception PC' or 'DC01'")
-    asset_type = models.CharField(max_length=50, choices=ASSET_TYPE_CHOICES, default='workstation')
-    # Free text — an asset tag, hostname, or serial; values vary too widely to constrain.
-    identifier = models.CharField(
-        max_length=255, blank=True,
-        help_text='Asset tag, hostname, or serial number.',
-    )
-    manufacturer = models.CharField(max_length=100, blank=True)
-    model = models.CharField(max_length=100, blank=True)
-    notes = models.TextField(blank=True)
-    # Drives future count-based contract billing; informational for now.
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = 'assets'
-        ordering = ['client', 'name']
-        indexes = [
-            models.Index(fields=['client', 'is_active']),
-            models.Index(fields=['asset_type']),
-        ]
-
-    def __str__(self):
-        return f"{self.name} ({self.client.name})"
+    def type_label(self):
+        """Display label for device_type, looked up from DeviceType rows (with the
+        legacy hardcoded list as fallback for a slug that lost its row)."""
+        labels = DeviceType.labels_by_slug()
+        return labels.get(self.device_type) or dict(self.DEVICE_TYPE_CHOICES).get(
+            self.device_type, self.device_type)
 
 
 class SLAPlan(models.Model):
@@ -1113,10 +1067,6 @@ class WorkOrder(models.Model):
     # (never a shared placeholder that would accumulate every one-off repair).
     client = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
     device = models.ForeignKey(Device, on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
-    # Managed-asset link (managed-client layer). Set when a Device is promoted to an
-    # Asset — the machine's repair history follows it onto the Asset. A WorkOrder can
-    # carry a device link, an asset link, or neither (walk-in).
-    asset = models.ForeignKey('Asset', on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
     contact = models.ForeignKey('Contact', on_delete=models.SET_NULL, null=True, blank=True, related_name='work_orders')
     repair_type = models.ForeignKey(RepairType, on_delete=models.SET_NULL, null=True, related_name='work_orders')
     # Free-text presenting problem + any ad-hoc work the client requested. Not every
@@ -2073,7 +2023,7 @@ class ChecklistItem(models.Model):
 
     id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=255)
-    # JSON list of device_type keys from Device.DEVICE_TYPE_CHOICES, e.g. ["laptop","desktop"]
+    # JSON list of DeviceType slugs, e.g. ["laptop","desktop"]. Empty = applies to all.
     # Empty list means "applies to all device types"
     device_types = models.JSONField(default=list, blank=True)
     sort_order = models.IntegerField(default=0)

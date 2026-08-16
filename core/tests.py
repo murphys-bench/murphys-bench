@@ -8377,66 +8377,103 @@ def test_backup_run_view_queues_out_of_band(admin_user, client, settings, tmp_pa
     assert backup_ops.trigger_path().exists()
 
 
-# ── Assets (managed inventory — Slice 1) ────────────────────────────────
+# ── Device types (operator-editable) + coverage (Device/Asset merge) ────
 
-from core.models import Asset
-
-
-@pytest.mark.django_db
-def test_asset_create_attaches_to_client(client, client_obj, admin_user):
-    client.force_login(admin_user)
-    resp = client.post(
-        reverse('core:asset_create', args=[client_obj.pk]),
-        {'name': 'Reception PC', 'asset_type': 'workstation',
-         'identifier': 'RCP-01', 'is_active': 'on'},
-    )
-    assert resp.status_code == 302
-    asset = Asset.objects.get(name='Reception PC')
-    assert asset.client_id == client_obj.pk
-    assert asset.asset_type == 'workstation'
-    assert asset.identifier == 'RCP-01'
-    assert asset.is_active is True
+from core.models import DeviceType
 
 
 @pytest.mark.django_db
-def test_asset_edit_updates_fields(client, client_obj, admin_user):
-    asset = Asset.objects.create(client=client_obj, name='DC01', asset_type='server')
-    client.force_login(admin_user)
-    resp = client.post(
-        reverse('core:asset_edit', args=[asset.pk]),
-        {'name': 'DC01', 'asset_type': 'server', 'identifier': 'srv-dc01',
-         'is_active': 'on'},
-    )
-    assert resp.status_code == 302
-    asset.refresh_from_db()
-    assert asset.identifier == 'srv-dc01'
+def test_device_types_are_seeded_and_drive_form_choices(client_obj):
+    """Mig 0106 seeds the eight starting types (network is new). The device
+    forms build their choices from the table, so an operator-added type is
+    immediately valid with no code change."""
+    from core.forms import DeviceForm
+    slugs = set(DeviceType.objects.values_list('slug', flat=True))
+    assert {'laptop', 'desktop', 'server', 'mobile', 'tablet',
+            'printer', 'network', 'other'} <= slugs
+
+    DeviceType.objects.create(slug='pos_terminal', label='POS Terminal', sort_order=99)
+    form = DeviceForm(data={'client': client_obj.pk, 'name': 'Front register',
+                            'device_type': 'pos_terminal'})
+    assert form.is_valid(), form.errors
+    device = form.save()
+    assert device.device_type == 'pos_terminal'
+    assert device.type_label == 'POS Terminal'
 
 
 @pytest.mark.django_db
-def test_asset_delete_requires_admin(client, client_obj, admin_user, tech_user):
-    asset = Asset.objects.create(client=client_obj, name='Old Printer')
+def test_device_type_delete_refused_while_in_use(client, client_obj, admin_user):
+    """Deleting a type in use would silently un-scope checklist items and leave
+    devices with an unlabeled type, so it is refused with the counts named."""
+    from core.models import ChecklistItem
+    dt = DeviceType.objects.get(slug='printer')
+    Device.objects.create(client=client_obj, name='Front printer', device_type='printer')
+    ChecklistItem.objects.create(name='Clean rollers', device_types=['printer'])
 
-    # A non-admin tech is forbidden and the asset survives.
-    client.force_login(tech_user)
-    resp = client.post(reverse('core:asset_delete', args=[asset.pk]))
-    assert resp.status_code == 403
-    assert Asset.objects.filter(pk=asset.pk).exists()
-
-    # An admin can delete it.
     client.force_login(admin_user)
-    resp = client.post(reverse('core:asset_delete', args=[asset.pk]))
-    assert resp.status_code == 302
-    assert not Asset.objects.filter(pk=asset.pk).exists()
-
-
-@pytest.mark.django_db
-def test_asset_card_renders_on_client_detail(client, client_obj, admin_user):
-    Asset.objects.create(client=client_obj, name='Reception PC', identifier='RCP-01')
-    client.force_login(admin_user)
-    resp = client.get(reverse('core:client_detail', args=[client_obj.pk]))
+    resp = client.post(reverse('core:device_type_delete', args=[dt.pk]), follow=True)
     assert resp.status_code == 200
-    assert b'Reception PC' in resp.content
-    assert b'RCP-01' in resp.content
+    assert DeviceType.objects.filter(pk=dt.pk).exists()
+    body = resp.content.decode()
+    assert '1 device(s)' in body and '1 checklist item(s)' in body
+
+    # Unused type deletes fine.
+    unused = DeviceType.objects.create(slug='fax', label='Fax Machine')
+    resp = client.post(reverse('core:device_type_delete', args=[unused.pk]))
+    assert not DeviceType.objects.filter(pk=unused.pk).exists()
+
+
+@pytest.mark.django_db
+def test_device_type_create_and_rename(client, admin_user):
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:device_type_create'),
+                       {'label': 'NAS', 'icon': 'server'})
+    assert resp.status_code == 302
+    dt = DeviceType.objects.get(label='NAS')
+    assert dt.slug == 'nas' and dt.icon == 'server'
+
+    # Renaming changes the label only; the slug (what devices reference) is fixed.
+    client.post(reverse('core:device_type_update', args=[dt.pk]),
+                {'label': 'NAS / Storage', 'icon': 'server'})
+    dt.refresh_from_db()
+    assert dt.label == 'NAS / Storage' and dt.slug == 'nas'
+
+
+@pytest.mark.django_db
+def test_device_coverage_scoped_to_own_clients_contracts(client, client_obj, admin_user):
+    """One machine = one Device record: coverage is the contract FK on Device.
+    The form offers only the device's own client's contracts."""
+    from core.forms import DeviceForm
+    from core.models import Contract
+    own = Contract.objects.create(client=client_obj, title='MSP', status='active')
+    other_client = Client.objects.create(name='Someone Else LLC')
+    foreign = Contract.objects.create(client=other_client, title='Not yours', status='active')
+
+    form = DeviceForm(client_id=client_obj.pk)
+    contracts = form.fields['contract'].queryset
+    assert own in contracts and foreign not in contracts
+
+    device = Device.objects.create(client=client_obj, name='DC01', contract=own)
+    assert list(own.devices.all()) == [device]
+
+    # Deleting the contract nulls the coverage link; the device survives.
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:contract_delete', args=[own.pk]))
+    assert resp.status_code == 302
+    device.refresh_from_db()
+    assert device.contract_id is None
+
+
+@pytest.mark.django_db
+def test_covered_device_shows_on_contract_and_client(client, client_obj, admin_user):
+    from core.models import Contract
+    contract = Contract.objects.create(client=client_obj, title='MSP', status='active')
+    Device.objects.create(client=client_obj, name='Reception PC', contract=contract)
+    client.force_login(admin_user)
+    body = client.get(reverse('core:contract_detail', args=[contract.pk])).content.decode()
+    assert 'Covered devices' in body and 'Reception PC' in body
+    body = client.get(reverse('core:client_detail', args=[client_obj.pk])).content.decode()
+    assert 'covered' in body
 
 
 # ── Contracts (managed-client layer — Slice 2) ──────────────────────────
@@ -8479,21 +8516,6 @@ def test_contract_recurring_line_and_total(client, client_obj, admin_user):
     assert contract.line_items.count() == 1
     from decimal import Decimal
     assert contract.line_items_total == Decimal('30')
-
-
-@pytest.mark.django_db
-def test_contract_covers_asset_and_delete_unlinks(client, client_obj, admin_user):
-    contract = Contract.objects.create(client=client_obj, title='MSP')
-    asset = Asset.objects.create(client=client_obj, name='PC1', contract=contract)
-    assert list(contract.assets.all()) == [asset]
-
-    # Deleting the contract nulls the asset's coverage link (SET_NULL), asset survives.
-    client.force_login(admin_user)
-    resp = client.post(reverse('core:contract_delete', args=[contract.pk]))
-    assert resp.status_code == 302
-    asset.refresh_from_db()
-    assert asset.contract_id is None
-    assert not Contract.objects.filter(pk=contract.pk).exists()
 
 
 @pytest.mark.django_db
@@ -8621,65 +8643,10 @@ def test_contract_billing_list_renders(client, client_obj, admin_user):
     assert b'Contract Billing' in r.content
 
 
-# ── Device → Asset promotion (Slice 5) ──────────────────────────────────
-
-
-@pytest.mark.django_db
-def test_device_promote_to_asset_moves_history_and_retires(client, client_obj, admin_user):
-    device = Device.objects.create(client=client_obj, name='Reception PC',
-                                   serial_number='SN123', manufacturer='Dell', model='7090')
-    wo = WorkOrder.objects.create(client=client_obj, device=device)
-    client.force_login(admin_user)
-    resp = client.post(reverse('core:device_promote_asset', args=[device.pk]))
-    assert resp.status_code == 302
-    device.refresh_from_db()
-    asset = device.promoted_to_asset
-    assert asset is not None
-    assert asset.client_id == client_obj.pk
-    assert asset.name == 'Reception PC'
-    assert asset.identifier == 'SN123'
-    assert asset.manufacturer == 'Dell'
-    # History followed the machine onto the asset.
-    wo.refresh_from_db()
-    assert wo.asset_id == asset.pk
-    assert list(asset.work_orders.all()) == [wo]
-    # Device retired, not deleted.
-    assert device.is_active is False
-    assert Device.objects.filter(pk=device.pk).exists()
-
-
-@pytest.mark.django_db
-def test_device_promote_is_idempotent(client_obj):
-    device = Device.objects.create(client=client_obj, name='PC')
-    a1 = device.promote_to_asset()
-    a2 = device.promote_to_asset()
-    assert a1.pk == a2.pk
-    from core.models import Asset
-    assert Asset.objects.filter(client=client_obj).count() == 1
-
-
-@pytest.mark.django_db
-def test_walkin_device_cannot_be_promoted(client, admin_user):
-    device = Device.objects.create(client=None, name='Walk-in laptop')
-    client.force_login(admin_user)
-    resp = client.post(reverse('core:device_promote_asset', args=[device.pk]))
-    assert resp.status_code == 302  # redirected with an error message
-    device.refresh_from_db()
-    assert device.promoted_to_asset_id is None
-    with pytest.raises(ValueError):
-        device.promote_to_asset()
-
-
-@pytest.mark.django_db
-def test_asset_detail_shows_recent_work(client, client_obj, admin_user):
-    from core.models import Asset
-    asset = Asset.objects.create(client=client_obj, name='DC01')
-    WorkOrder.objects.create(client=client_obj, asset=asset)
-    client.force_login(admin_user)
-    resp = client.get(reverse('core:asset_detail', args=[asset.pk]))
-    assert resp.status_code == 200
-    assert b'DC01' in resp.content
-    assert b'Recent work' in resp.content
+# ── Device/Asset merge (Aug 15 2026) ────────────────────────────────────
+# Promotion is gone: one machine = one Device record, coverage is a contract
+# link on the device. The merge migration itself (0107) is drilled against a
+# copy of the production database before release, not unit-tested here.
 
 
 # ── Contract billing hardening (P2-1/2/3) ───────────────────────────────
@@ -11319,7 +11286,7 @@ def test_reset_operational_data_actually_clears_seeded_demo_data(settings):
         'Client', 'Contact', 'ContactPhone', 'Device', 'Ticket', 'TicketReply',
         'TicketLink', 'TicketLock', 'TicketWorkLog', 'WorkOrder', 'WorkOrderNote',
         'WorkOrderItem', 'Invoice', 'Mileage', 'Sale', 'Estimate', 'EstimateOption',
-        'Prospect', 'Contract', 'Asset', 'PaymentChargeAttempt', 'Notification',
+        'Prospect', 'Contract', 'PaymentChargeAttempt', 'Notification',
         'LineItem', 'Attachment', 'CustomFieldValue', 'DeviceCredentialAccessLog',
     }
     survivors = {
@@ -12203,16 +12170,11 @@ def test_converted_ticket_offers_a_route_to_its_work_order(client, admin_user, c
 @pytest.mark.django_db
 def test_ticket_device_picker_hides_retired_devices(client_obj):
     """The ticket picker offers only active devices, matching the HTMX cascade
-    endpoint. A promoted-to-Asset device is therefore unpickable on a ticket
-    until the Device/Asset merge un-retires it — the ruled fix for the Aug-14
-    empty-picker defect. This pins the interim behavior so the merge, when it
-    lands, changes it deliberately rather than by accident."""
+    endpoint. Since the Device/Asset merge nothing retires a device except a
+    person deciding it is gone, so hiding retired devices is simply correct."""
     from core.forms import TicketForm
     active = Device.objects.create(client=client_obj, name='Front Desk PC')
-    retired = Device.objects.create(client=client_obj, name='Reception PC')
-    retired.promote_to_asset()
-    retired.refresh_from_db()
-    assert retired.is_active is False
+    retired = Device.objects.create(client=client_obj, name='Reception PC', is_active=False)
 
     choices = TicketForm(data={'client': client_obj.pk}).fields['device'].queryset
     assert active in choices

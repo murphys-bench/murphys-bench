@@ -981,6 +981,104 @@
         {% endif %}
 
         <!-- ── Checklist Items ───────────────────────────────────────── -->
+        {% if active_tab == 'device_types' %}
+        <div class="space-y-6">
+
+            <!-- Add New Type -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-1">Device Types</h2>
+                <p class="text-sm text-gray-500 mb-5">
+                    The machine categories offered when logging a device. Add, rename, or remove them
+                    freely; a type still used by devices or checklist items cannot be deleted until
+                    they are reassigned.
+                </p>
+
+                <form method="post" action="{% url 'core:device_type_create' %}">
+                    {% csrf_token %}
+                    <div class="flex flex-wrap gap-3 items-end">
+                        <div class="flex-1 min-w-48">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Type Name</label>
+                            <input type="text" name="label" required placeholder="e.g. Network Device"
+                                   class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Icon</label>
+                            <select name="icon" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
+                                {% for name in dt_icons %}
+                                <option value="{{ name }}">{{ name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <button type="submit"
+                                    class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded">
+                                + Add Type
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Type List -->
+            <div class="bg-white rounded-lg shadow">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-xs text-gray-500 uppercase tracking-wide bg-gray-50 border-b border-gray-100">
+                            <th class="px-5 py-2 text-left font-medium">Type</th>
+                            <th class="px-5 py-2 text-left font-medium">Icon</th>
+                            <th class="px-4 py-2 text-center font-medium">In Use</th>
+                            <th class="px-4 py-2 w-24"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-50">
+                        {% for row in dt_rows %}
+                        <tr x-data="{ editing: false }" class="hover:bg-gray-50">
+                            <td x-show="!editing" class="px-5 py-2.5 font-medium text-gray-800">{{ row.obj.label }}</td>
+                            <td x-show="!editing" class="px-5 py-2.5 text-gray-500">
+                                <span class="inline-flex items-center gap-1.5">{% icon row.obj.icon "4" %} {{ row.obj.icon }}</span>
+                            </td>
+                            <td x-show="!editing" class="px-4 py-2.5 text-center text-xs text-gray-500">
+                                {% if row.device_count or row.checklist_count %}
+                                    {{ row.device_count }} device{{ row.device_count|pluralize }}{% if row.checklist_count %}, {{ row.checklist_count }} checklist item{{ row.checklist_count|pluralize }}{% endif %}
+                                {% else %}
+                                    <span class="text-gray-300">unused</span>
+                                {% endif %}
+                            </td>
+                            <td x-show="!editing" class="px-4 py-2.5 text-right space-x-3">
+                                <button @click="editing = true" class="text-blue-500 hover:text-blue-700 text-xs">Edit</button>
+                                {% if not row.device_count and not row.checklist_count %}
+                                <form method="post" action="{% url 'core:device_type_delete' row.obj.pk %}" class="inline"
+                                      onsubmit="return confirm('Delete {{ row.obj.label|escapejs }}?')">
+                                    {% csrf_token %}
+                                    <button type="submit" class="text-red-400 hover:text-red-600 text-xs">Delete</button>
+                                </form>
+                                {% endif %}
+                            </td>
+
+                            <!-- Edit row -->
+                            <td x-show="editing" x-cloak colspan="4" class="px-5 py-2.5">
+                                <form method="post" action="{% url 'core:device_type_update' row.obj.pk %}"
+                                      class="flex flex-wrap gap-2 items-center">
+                                    {% csrf_token %}
+                                    <input type="text" name="label" value="{{ row.obj.label }}" required
+                                           class="border border-gray-300 rounded px-3 py-1.5 text-sm flex-1 min-w-40">
+                                    <select name="icon" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
+                                        {% for name in dt_icons %}
+                                        <option value="{{ name }}" {% if name == row.obj.icon %}selected{% endif %}>{{ name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-1.5 rounded">Save</button>
+                                    <button type="button" @click="editing = false" class="text-gray-400 hover:text-gray-600 text-xs">Cancel</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
         {% if active_tab == 'checklist_items' %}
         <div class="space-y-6">
 
