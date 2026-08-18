@@ -212,12 +212,12 @@ class TicketReplyInline(admin.TabularInline):
 
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
-    list_display = ['ticket_number', 'client', 'subject', 'status', 'assigned_to', 'source', 'created_at']
-    list_filter = ['status', 'source', 'assigned_to', 'created_at']
+    list_display = ['ticket_number', 'client', 'subject', 'status', 'priority', 'assigned_to', 'source', 'created_at']
+    list_filter = ['status', 'priority', 'source', 'assigned_to', 'created_at']
     search_fields = ['ticket_number', 'subject', 'client__name', 'description']
     inlines = [TicketReplyInline]
     fieldsets = (
-        ('Ticket Info', {'fields': ('ticket_number', 'client', 'device', 'source')}),
+        ('Ticket Info', {'fields': ('ticket_number', 'client', 'device', 'source', 'priority')}),
         ('Issue', {'fields': ('subject', 'description')}),
         ('Status', {'fields': ('status', 'assigned_to', 'created_by')}),
         ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),

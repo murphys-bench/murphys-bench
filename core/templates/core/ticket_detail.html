@@ -188,6 +188,28 @@ window.addEventListener('beforeunload', function() {
                     </dd>
                 </div>
                 {% endif %}
+                <div x-data="{ editingPriority: false }">
+                    <dt class="text-xs font-medium text-gray-500 uppercase flex items-center justify-between">
+                        Priority
+                        {% if can_edit_ticket %}
+                        <button @click="editingPriority = !editingPriority" class="text-xs text-blue-500 hover:text-blue-400 underline normal-case">Change</button>
+                        {% endif %}
+                    </dt>
+                    <dd class="text-gray-900 mt-1">
+                        <span x-show="!editingPriority" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700" id="ticket-priority-badge">{{ ticket.get_priority_display }}</span>
+                        {% if can_edit_ticket %}
+                        <form x-show="editingPriority" x-cloak method="post" action="{% url 'core:ticket_priority_update' ticket.pk %}" class="flex gap-2 mt-1">
+                            {% csrf_token %}
+                            <select name="priority" class="flex-1 text-sm px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+                                {% for value, label in ticket.PRIORITY_CHOICES %}
+                                <option value="{{ value }}" {% if ticket.priority == value %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" class="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
+                        </form>
+                        {% endif %}
+                    </dd>
+                </div>
                 <div x-data="{ editing: false }" class="col-span-2">
                     <dt class="text-xs font-medium text-gray-500 uppercase flex items-center justify-between">
                         Assigned To

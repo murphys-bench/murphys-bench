@@ -124,6 +124,7 @@ urlpatterns = [
     path('tickets/<int:pk>/escalate/', views.TicketEscalateView.as_view(), name='ticket_escalate'),
     path('tickets/<int:pk>/close/', views.TicketCloseView.as_view(), name='ticket_close'),
     path('tickets/<int:pk>/status/', views.TicketStatusUpdateView.as_view(), name='ticket_status_update'),
+    path('tickets/<int:pk>/priority/', views.TicketPriorityUpdateView.as_view(), name='ticket_priority_update'),
     path('tickets/<int:pk>/delete/', views.TicketDeleteView.as_view(), name='ticket_delete'),
     path('tickets/contacts-by-client/', views.TicketContactsByClientView.as_view(), name='ticket_contacts_by_client'),
     path('kb/', views.KBListView.as_view(), name='kb_list'),

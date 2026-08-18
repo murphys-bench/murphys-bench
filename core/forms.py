@@ -454,7 +454,7 @@ TEXTAREA_WIDGET = {'class': 'w-full px-3 py-2 border border-gray-300 rounded-md 
 class TicketForm(forms.ModelForm):
     class Meta:
         model = Ticket
-        fields = ['client', 'contact', 'device', 'help_topic', 'sla_plan', 'assigned_to', 'subject', 'description', 'source', 'status']
+        fields = ['client', 'contact', 'device', 'help_topic', 'sla_plan', 'assigned_to', 'subject', 'description', 'source', 'priority', 'status']
         widgets = {
             'client': forms.Select(attrs=SELECT_WIDGET),
             'contact': forms.Select(attrs=SELECT_WIDGET),
@@ -465,6 +465,7 @@ class TicketForm(forms.ModelForm):
             'subject': forms.TextInput(attrs=TEXT_WIDGET),
             'description': forms.Textarea(attrs=TEXTAREA_WIDGET),
             'source': forms.Select(attrs=SELECT_WIDGET),
+            'priority': forms.Select(attrs=SELECT_WIDGET),
             'status': forms.Select(attrs=SELECT_WIDGET),
         }
 
@@ -498,6 +499,10 @@ class TicketForm(forms.ModelForm):
         self.fields['sla_plan'].required = False
         self.fields['assigned_to'].queryset = UserModel.objects.filter(is_active=True).order_by('first_name', 'last_name')
         self.fields['assigned_to'].required = False
+        # The select always submits a value in the browser; a POST that omits it
+        # (a partial programmatic edit) keeps the ticket's current priority
+        # rather than failing validation on a field the caller never touched.
+        self.fields['priority'].required = False
         # Dynamic status choices from StatusDefinition. operator_selectable=False
         # statuses belong to an action, not to a person, so they are not offered.
         ticket_statuses = list(StatusDefinition.objects.filter(
@@ -534,6 +539,14 @@ class TicketForm(forms.ModelForm):
         if commit:
             ticket.save()
         return ticket
+
+    def clean_priority(self):
+        value = self.cleaned_data.get('priority')
+        if value:
+            return value
+        if self.instance and self.instance.pk:
+            return self.instance.priority
+        return 'normal'
 
 
 class KBArticleForm(forms.ModelForm):

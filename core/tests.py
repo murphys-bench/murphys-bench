@@ -13907,3 +13907,158 @@ def test_the_suite_never_writes_into_the_real_application_log():
         )
     else:
         assert not real_log.exists(), f'the test run created {real_log}'
+
+
+# ── Ticket priority (Aug 18 2026, Station 3 ruling) ─────────────────────────
+# Priority is set at intake (form, or what the SOURCE declares: T2 selections),
+# adjusted internally, never client-facing. WorkOrder had it; Ticket did not.
+
+def _raw_t2_email_with_selections(selections, message_id='<t2-sel@tier2tickets.com>'):
+    """A T2 relay email whose body carries the requester's [selections] picks."""
+    import email.message
+    body = (
+        '---------- Forwarded message ---------\n'
+        'From: "Jane Doe" <jane.doe@example.com>\n'
+        'Date: Fri, Aug 14, 2026 at 02:13 PM\n'
+        'Subject: Help\n'
+        'To: "Button Ticket" <email-connector@tier2tickets.com>\n\n'
+        'hostname: LAPTOP-1\nusername: Jane Doe\n\n'
+        '[message]\nSomething is wrong.\n\n'
+        '[selections]\n' + ''.join(f'{line}\n' for line in selections)
+    )
+    msg = email.message.EmailMessage()
+    msg['Subject'] = 'Fwd: E.SELTEST Help'
+    msg['From'] = '"Button Ticket" <email-connector@tier2tickets.com>'
+    msg['To'] = 'support@example.com'
+    msg['Message-ID'] = message_id
+    msg.set_content(body)
+    return msg.as_bytes()
+
+
+def test_t2_selections_map_to_priority_unit():
+    from core.management.commands.fetch_inbound_email import _t2_priority_from_selections as f
+    assert f('[selections]\nThis is an emergency!\n') == 'urgent'
+    assert f('[selections]\nI am unable to use my system.\n') == 'urgent'
+    assert f('[selections]\nI can work around it for now.\n') == 'normal'
+    assert f("[selections]\nIt's just a question I have.\n") == 'low'
+    # Highest pick wins when several are ticked (real TKT-00041 shape).
+    assert f('[selections]\nThis is a recurring issue.\nThis is an emergency!\n'
+             'Call me before remoting in.\nI am unable to use my system.\n') == 'urgent'
+    # Picks with no urgency meaning say nothing about priority.
+    assert f('[selections]\nThis is a recurring issue.\nCall me before remoting in.\n') is None
+    assert f('[message]\nThis is an emergency!\n') is None, 'Only the [selections] block counts.'
+    assert f('') is None and f(None) is None
+    # The block ends at the first blank line after it starts; later text is not read.
+    assert f("[selections]\nIt's just a question I have.\n\nP.S. this is an emergency really\n") == 'low'
+
+
+@pytest.mark.django_db
+def test_t2_ticket_takes_priority_from_selections(client_obj):
+    from core.management.commands.fetch_inbound_email import _process_message
+    Contact.objects.create(client=client_obj, first_name='Jane', last_name='Doe',
+                           email='jane.doe@example.com', is_primary=True)
+    site = SiteSettings.get()
+
+    status, _, urgent = _process_message(
+        _raw_t2_email_with_selections(['This is a recurring issue.', 'This is an emergency!'],
+                                      message_id='<t2-a@tier2tickets.com>'), site, verbosity=0)
+    assert status == 'new_ticket' and urgent.priority == 'urgent'
+
+    status, _, low = _process_message(
+        _raw_t2_email_with_selections(["It's just a question I have."],
+                                      message_id='<t2-b@tier2tickets.com>'), site, verbosity=0)
+    assert status == 'new_ticket' and low.priority == 'low'
+
+    status, _, plain = _process_message(
+        _raw_t2_email_with_selections(['Remotely access my computer to fix the issue.'],
+                                      message_id='<t2-c@tier2tickets.com>'), site, verbosity=0)
+    assert status == 'new_ticket' and plain.priority == 'normal', \
+        'A T2 ticket with no urgency pick lands at the default.'
+
+
+@pytest.mark.django_db
+def test_plain_inbound_email_ticket_priority_defaults_normal(client_obj):
+    from core.management.commands.fetch_inbound_email import _process_message
+    Contact.objects.create(client=client_obj, first_name='A', last_name='B',
+                           email='someone@example.com', is_primary=True)
+    site = SiteSettings.get()
+    status, _, ticket = _process_message(_raw_new_email(
+        from_email="someone@example.com", subject="Plain question", body="This is an emergency!"),
+        site, verbosity=0)
+    assert status == 'new_ticket'
+    assert ticket.priority == 'normal', \
+        'Only a source that declares urgency sets it; words in a plain email do not.'
+
+
+@pytest.mark.django_db
+def test_new_ticket_form_sets_priority_and_omission_keeps_current(client, client_obj, admin_user):
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:ticket_create'), {
+        'client': client_obj.pk, 'subject': 'S', 'description': 'D',
+        'source': 'phone', 'status': 'open', 'priority': 'high',
+    })
+    assert resp.status_code == 302, resp.content[:300]
+    ticket = Ticket.objects.get(subject='S')
+    assert ticket.priority == 'high'
+
+    # An edit that omits the field (partial programmatic POST) keeps it.
+    resp = client.post(reverse('core:ticket_edit', args=[ticket.pk]), {
+        'client': client_obj.pk, 'subject': 'S2', 'description': 'D',
+        'source': 'phone', 'status': 'open',
+    })
+    assert resp.status_code == 302
+    ticket.refresh_from_db()
+    assert ticket.subject == 'S2' and ticket.priority == 'high'
+
+    # And a fresh ticket with nothing said is Normal.
+    resp = client.post(reverse('core:ticket_create'), {
+        'client': client_obj.pk, 'subject': 'S3', 'description': 'D',
+        'source': 'phone', 'status': 'open',
+    })
+    assert resp.status_code == 302
+    assert Ticket.objects.get(subject='S3').priority == 'normal'
+
+
+@pytest.mark.django_db
+def test_ticket_priority_quick_update_gated_and_validated(client, client_obj):
+    from unittest.mock import patch
+    editor = _role_tech('t_prio_on', can_edit_ticket=True)
+    ticket = _ticket_for(editor, client_obj)
+    client.force_login(editor)
+    url = reverse('core:ticket_priority_update', args=[ticket.pk])
+
+    with patch('core.email_utils.send_ticket_email') as mock_send:
+        resp = client.post(url, {'priority': 'urgent'})
+    assert resp.status_code == 302
+    ticket.refresh_from_db()
+    assert ticket.priority == 'urgent'
+    mock_send.assert_not_called(), 'Priority is internal: no client email, ever.'
+
+    # Unknown value refused, nothing saved.
+    resp = client.post(url, {'priority': 'ludicrous'})
+    assert resp.status_code == 403
+    ticket.refresh_from_db()
+    assert ticket.priority == 'urgent'
+
+    # Without the edit grant it is forbidden.
+    viewer = _role_tech('t_prio_off')
+    t2 = _ticket_for(viewer, client_obj)
+    client.force_login(viewer)
+    resp = client.post(reverse('core:ticket_priority_update', args=[t2.pk]), {'priority': 'high'})
+    assert resp.status_code == 403
+    t2.refresh_from_db()
+    assert t2.priority == 'normal'
+
+
+@pytest.mark.django_db
+def test_ticket_priority_renders_on_list_and_detail(client, client_obj, admin_user):
+    ticket = Ticket.objects.create(client=client_obj, subject='Prio render', description='D',
+                                   status='open', priority='urgent')
+    client.force_login(admin_user)
+    detail = client.get(reverse('core:ticket_detail', args=[ticket.pk]))
+    assert detail.status_code == 200
+    assert b'ticket-priority-badge' in detail.content and b'>Urgent<' in detail.content
+    assert reverse('core:ticket_priority_update', args=[ticket.pk]).encode() in detail.content
+    listing = client.get(reverse('core:ticket_list'))
+    assert listing.status_code == 200
+    assert b'>Priority<' in listing.content and b'Urgent' in listing.content

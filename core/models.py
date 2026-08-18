@@ -727,6 +727,18 @@ class Ticket(models.Model):
         ('converted', 'Converted to Work Order'),
     ]
 
+    # Same four levels as WorkOrder. Priority is set at intake (the requester or
+    # the source declares how badly it hurts: T2 selections, an RMM severity, or
+    # the New Ticket form) and adjusted internally as the tech works it. It is an
+    # INTERNAL fact: it never emails the client and never moves the SLA clock.
+    # (Ruled Aug 18 2026; see mb-docs MANAGED-LANE-PASS.md, Station 3.)
+    PRIORITY_CHOICES = [
+        ('low', 'Low'),
+        ('normal', 'Normal'),
+        ('high', 'High'),
+        ('urgent', 'Urgent'),
+    ]
+
     id = models.AutoField(primary_key=True)
     ticket_number = models.CharField(max_length=20, unique=True, db_index=True)
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='tickets')
@@ -762,6 +774,7 @@ class Ticket(models.Model):
     subject = models.CharField(max_length=255)
     description = models.TextField()
     source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='email')
+    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='normal')
     status = models.CharField(max_length=50, default='open', db_index=True)
     closed_at = models.DateTimeField(
         null=True, blank=True,
