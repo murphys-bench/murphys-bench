@@ -14062,3 +14062,23 @@ def test_ticket_priority_renders_on_list_and_detail(client, client_obj, admin_us
     listing = client.get(reverse('core:ticket_list'))
     assert listing.status_code == 200
     assert b'>Priority<' in listing.content and b'Urgent' in listing.content
+
+
+def test_t2_selections_unknown_line_warns_but_neutral_lines_do_not(caplog):
+    """Review P3 (Aug 18): if T2 rewords an urgent pick, the ticket would land at
+    Normal with no trace. A line neither the urgency table nor the known-neutral
+    table recognises must be logged; known-neutral picks must stay silent."""
+    import logging
+    from core.management.commands.fetch_inbound_email import _t2_priority_from_selections as f
+    with caplog.at_level(logging.WARNING, logger='core'):
+        assert f('[selections]\nThis is a recurring issue.\nCall me before remoting in.\n'
+                 'Remotely access my computer to fix the issue.\n'
+                 'The issue is with another device I have.\n') is None
+    assert not [r for r in caplog.records if 'selections' in r.getMessage()], \
+        'Known-neutral picks must not warn.'
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger='core'):
+        assert f('[selections]\nThis is a recurring issue.\nMy building is on fire right now.\n') is None
+    warned = [r for r in caplog.records if 'selections' in r.getMessage()]
+    assert warned and 'on fire' in warned[0].getMessage(), \
+        'An unrecognised pick must be logged, naming the line.'

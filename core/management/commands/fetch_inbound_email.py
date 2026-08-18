@@ -330,12 +330,22 @@ _T2_SELECTION_PRIORITY = (
     ('work around it', 'normal'),
     ('just a question', 'low'),
 )
+# Picks that say nothing about urgency. Listed so a line that matches NEITHER
+# table can be reported: if T2 rewords an urgent choice, the ticket would
+# silently land at Normal, and the only trace would be this warning.
+_T2_SELECTION_NEUTRAL = (
+    'recurring issue',
+    'call me before remoting',
+    'remotely access my computer',
+    'issue is with another device',
+)
 _PRIORITY_RANK = {'low': 0, 'normal': 1, 'high': 2, 'urgent': 3}
 
 
 def _t2_priority_from_selections(body):
     """Return the ticket priority implied by a T2 body's [selections] block, or
-    None when the block is absent or carries no urgency line."""
+    None when the block is absent or carries no urgency line. Logs a warning
+    when the block holds a line neither table recognises (fail loud on drift)."""
     if not body:
         return None
     marker = body.find('[selections]')
@@ -343,6 +353,7 @@ def _t2_priority_from_selections(body):
         return None
     best = None
     seen_any = False
+    unknown = []
     for line in body[marker + len('[selections]'):].splitlines():
         text = line.strip().lower()
         if not text:
@@ -352,9 +363,19 @@ def _t2_priority_from_selections(body):
         if text.startswith('['):
             break  # next T2 section
         seen_any = True
+        matched = False
         for needle, level in _T2_SELECTION_PRIORITY:
-            if needle in text and (best is None or _PRIORITY_RANK[level] > _PRIORITY_RANK[best]):
-                best = level
+            if needle in text:
+                matched = True
+                if best is None or _PRIORITY_RANK[level] > _PRIORITY_RANK[best]:
+                    best = level
+        if not matched and not any(n in text for n in _T2_SELECTION_NEUTRAL):
+            unknown.append(line.strip())
+    if unknown:
+        logger.warning(
+            'T2 [selections] contained %d line(s) the priority mapping does not '
+            'recognise; ticket priority may be under-ranked until the mapping is '
+            'updated: %r', len(unknown), unknown[:5])
     return best
 
 
