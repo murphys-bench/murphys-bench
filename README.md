@@ -210,7 +210,8 @@ Murphy's Bench is a self-hosted application rather than a library, so "breaking"
 mean a changed API. It means **an upgrade that is not automatic** — one needing a new `.env`
 key, a migration with manual steps, or a removed feature.
 
-- **Patch** (`0.9.0` → `0.9.1`) — bug fixes and internal changes. Update without reading.
+- **Patch** (`0.9.0` → `0.9.1`) — bug fixes and internal changes, including a missing field or
+  control that closes an oversight. Update without reading.
 - **Minor** (`0.9.0` → `0.10.0`) — new capability, or a change that is not a clean upgrade.
   Skim the changelog first.
 - **Major** — reserved. It will be a deliberate announcement, not a milestone reached by
