@@ -8,7 +8,9 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
-## Unreleased
+## v0.14.0 — 2026-08-18
+
+Tickets get a priority. Outside-reviewed (two rounds, one P3 fixed).
 
 ### Added
 
