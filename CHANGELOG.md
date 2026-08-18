@@ -8,6 +8,17 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Added
+
+- Tickets now carry a priority (Low / Normal / High / Urgent). Set on the New Ticket
+  form, changed on the ticket page, shown as a list column. Internal only: it never
+  emails the client and does not affect the SLA clock.
+- Helpdesk Buttons (T2) tickets take their priority from the requester's own picks:
+  "emergency" or "unable to use my system" arrive Urgent, "just a question" arrives Low.
+  Existing tickets and other sources start at Normal.
+
 ## v0.13.0 — 2026-08-16
 
 One machine, one record. Outside-reviewed over three rounds; the migration was drilled

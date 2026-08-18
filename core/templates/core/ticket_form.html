@@ -100,10 +100,15 @@
         <!-- Source & Status -->
         <div class="bg-white rounded-lg shadow p-6">
             <h2 class="text-base font-semibold text-gray-900 mb-4">Source & Status</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Source <span class="text-red-500">*</span></label>
                     {{ form.source }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Priority <span class="text-red-500">*</span></label>
+                    {{ form.priority }}
+                    <p class="mt-1 text-xs text-gray-400">Internal only. Never shown to the client.</p>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Status <span class="text-red-500">*</span></label>

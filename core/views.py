@@ -9062,6 +9062,25 @@ class TicketStatusUpdateView(LoginRequiredMixin, View):
         return redirect('core:ticket_detail', pk=pk)
 
 
+class TicketPriorityUpdateView(LoginRequiredMixin, View):
+    """Quick priority change from the ticket page. Priority is an internal
+    working fact: no client email, no SLA effect. Gated on can_edit_ticket, the
+    same grant as any other ordinary ticket edit."""
+    def post(self, request, pk):
+        ticket = _get_scoped_ticket_or_404(request, pk)
+        if not _can_edit_ticket(request.user):
+            return HttpResponse('Forbidden', status=403)
+        new_priority = request.POST.get('priority', '').strip()
+        valid = {value for value, _label in Ticket.PRIORITY_CHOICES}
+        if new_priority not in valid:
+            return HttpResponse('Forbidden', status=403)
+        if new_priority != ticket.priority:
+            ticket.priority = new_priority
+            ticket.save(update_fields=['priority', 'updated_at'])
+        messages.success(request, f'Priority set to {ticket.get_priority_display()}.')
+        return redirect('core:ticket_detail', pk=pk)
+
+
 class MFASetupView(TwoFactorSetupView):
     """Hardens two_factor's SetupView against a real, reproducible enrollment
     failure on this app.

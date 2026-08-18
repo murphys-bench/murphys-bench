@@ -317,10 +317,74 @@ def _extract_forwarded_sender(body):
     return (name or ''), addr
 
 
-def _create_new_ticket(subject, body, from_email, from_name, settings, msg):
+# T2 / Helpdesk Buttons lets the requester tick urgency boxes before sending;
+# they arrive as plain lines under a "[selections]" heading in the body. Map the
+# ones that say how badly it hurts onto a ticket priority. Verified against real
+# T2 mail on prod (Aug 18 2026): the block holds only the requester's OWN picks.
+# Matched by lowercase substring so T2 rewording punctuation does not break it;
+# the highest matched level wins. Lines with no urgency meaning ("recurring
+# issue", "call me before remoting in") map to nothing.
+_T2_SELECTION_PRIORITY = (
+    ('emergency', 'urgent'),
+    ('unable to use my system', 'urgent'),
+    ('work around it', 'normal'),
+    ('just a question', 'low'),
+)
+# Picks that say nothing about urgency. Listed so a line that matches NEITHER
+# table can be reported: if T2 rewords an urgent choice, the ticket would
+# silently land at Normal, and the only trace would be this warning.
+_T2_SELECTION_NEUTRAL = (
+    'recurring issue',
+    'call me before remoting',
+    'remotely access my computer',
+    'issue is with another device',
+)
+_PRIORITY_RANK = {'low': 0, 'normal': 1, 'high': 2, 'urgent': 3}
+
+
+def _t2_priority_from_selections(body):
+    """Return the ticket priority implied by a T2 body's [selections] block, or
+    None when the block is absent or carries no urgency line. Logs a warning
+    when the block holds a line neither table recognises (fail loud on drift)."""
+    if not body:
+        return None
+    marker = body.find('[selections]')
+    if marker == -1:
+        return None
+    best = None
+    seen_any = False
+    unknown = []
+    for line in body[marker + len('[selections]'):].splitlines():
+        text = line.strip().lower()
+        if not text:
+            if seen_any:
+                break  # the block is the run of non-blank lines under the heading
+            continue
+        if text.startswith('['):
+            break  # next T2 section
+        seen_any = True
+        matched = False
+        for needle, level in _T2_SELECTION_PRIORITY:
+            if needle in text:
+                matched = True
+                if best is None or _PRIORITY_RANK[level] > _PRIORITY_RANK[best]:
+                    best = level
+        if not matched and not any(n in text for n in _T2_SELECTION_NEUTRAL):
+            unknown.append(line.strip())
+    if unknown:
+        logger.warning(
+            'T2 [selections] contained %d line(s) the priority mapping does not '
+            'recognise; ticket priority may be under-ranked until the mapping is '
+            'updated: %r', len(unknown), unknown[:5])
+    return best
+
+
+def _create_new_ticket(subject, body, from_email, from_name, settings, msg, priority=None):
     """Resolve client/contact and create a fresh ticket from an inbound email.
     Shared by the no-subject-match path and the past-reopen-window path
-    (Slice 4) — same ticket-creation logic either way."""
+    (Slice 4) — same ticket-creation logic either way. `priority` is what the
+    SOURCE declared (T2 selections today); None means the source said nothing
+    and the model default (normal) applies."""
     client, contact = _resolve_client_contact(from_email, from_name, settings)
 
     if client.suppress_emails:
@@ -333,6 +397,7 @@ def _create_new_ticket(subject, body, from_email, from_name, settings, msg):
         subject=subject[:255],
         description=body,
         source='email',
+        priority=priority or 'normal',
         status='new',
         created_by=None,
     )
@@ -364,7 +429,11 @@ def _process_message(raw_msg_bytes, settings, verbosity):
     # stripping) and attribute to them — that's what makes replies route to the
     # actual contact instead of the relay. If we can't parse it, fall back to the
     # relay address but log loudly so the bad attribution is visible.
+    inbound_priority = None
     if from_email in _T2_RELAY_ADDRESSES:
+        # Read the requester's urgency picks from the RAW body, before any quote
+        # stripping, for the same reason the sender is unwrapped here.
+        inbound_priority = _t2_priority_from_selections(body)
         real_name, real_email = _extract_forwarded_sender(body)
         if real_email:
             from_name, from_email = real_name, real_email.lower().strip()
@@ -421,7 +490,7 @@ def _process_message(raw_msg_bytes, settings, verbosity):
                 # Past the reopen window — the original context is stale
                 # enough that reviving it isn't useful; start a fresh ticket
                 # but link it to the old one so the history isn't lost.
-                status, detail, new_ticket = _create_new_ticket(subject, body, from_email, from_name, settings, msg)
+                status, detail, new_ticket = _create_new_ticket(subject, body, from_email, from_name, settings, msg, priority=inbound_priority)
                 if new_ticket:
                     TicketLink.objects.create(ticket_a=ticket, ticket_b=new_ticket, link_type='related')
                     return (
@@ -452,7 +521,7 @@ def _process_message(raw_msg_bytes, settings, verbosity):
             return 'reply', f'Added reply to {ticket_number}', ticket
 
     # --- New ticket ---
-    return _create_new_ticket(subject, body, from_email, from_name, settings, msg)
+    return _create_new_ticket(subject, body, from_email, from_name, settings, msg, priority=inbound_priority)
 
 
 class Command(BaseCommand):
