@@ -1,0 +1,59 @@
+# Direct dependencies only — the packages MB itself imports or runs.
+# The installable file is requirements.txt, GENERATED from this one so that every
+# transitive dependency is pinned too (all boxes run byte-for-byte the same set,
+# and the CVE gate audits exactly what production runs).
+#
+# To change a dependency: edit the pin HERE, then regenerate the lock:
+#     venv/bin/pip install pip-tools
+#     venv/bin/pip-compile --strip-extras requirements.in -o requirements.txt
+# then run the test suite and ship the change as a normal PR.
+
+# Core
+Django==5.2.17          # 5.2 LTS (security support to Apr 2028); 4.2 LTS went EOL Apr 2026
+python-decouple==3.8
+gunicorn==26.0.0
+
+# Frontend
+django-crispy-forms==2.1
+crispy-tailwind==1.0.3
+django-htmx==1.17.3
+
+# Testing
+pytest==9.0.3
+pytest-django==4.12.0
+pytest-cov==4.1.0
+factory-boy==3.3.0   # core/factories.py — demo/test data (seed_demo_data)
+
+# Development
+django-extensions==3.2.3
+black==26.3.1
+flake8==7.0.0
+isort==5.13.2
+
+# Security
+django-encrypted-model-fields==0.6.5
+django-cors-headers==4.3.1
+django-two-factor-auth==1.18.1
+django-otp==1.7.0
+qrcode==8.2
+django-formtools==2.6.1
+
+# Audit log
+django-auditlog==3.3.0
+
+# Attachments / Storage
+django-storages==1.14.6
+boto3==1.42.97
+
+# PDF generation (customer documents: repair reports, quotes)
+# Needs system libs (pango/cairo/glib) — apt on Ubuntu, brew on macOS dev.
+# See INSTALL.md + scripts/setup.sh. Imported lazily so a missing lib can't crash boot.
+weasyprint==69.0
+
+# Utilities
+Pillow==12.3.0          # security: clears CVE-2023-50447/2024-28219/2026-42310 + PYSEC-2026-165, PYSEC-2026-2253..2257
+requests==2.33.0        # security: clears CVE-2024-35195/2024-47081/2026-25645 (carries the IN API token)
+cryptography==50.0.0    # security: clears PYSEC-2026-3552/3553/3554; underpins field encryption
+markdown==3.10.2        # PyPI "Markdown" (Python-Markdown); pinned — an unpinned name is the one line a substituted package could ride in on
+bleach==6.4.0            # sanitizes markdownify()'s HTML output against a fixed allowlist
+django-axes==8.0.0
