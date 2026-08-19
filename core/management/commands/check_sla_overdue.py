@@ -10,7 +10,6 @@ Example crontab:
     */15 * * * * /path/to/venv/bin/python /path/to/manage.py check_sla_overdue
 """
 import logging
-from datetime import timedelta
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
@@ -24,30 +23,34 @@ def auto_close_resolved(now=None):
 
     Ruling (Aug 19 2026): the shop sets one window (Settings > Reopen Window).
     Inside it a client reply threads in and flags the still-Resolved ticket;
-    once it has run out the ticket is Closed automatically, silently: no
-    client email, no status-changed notice, nothing for a tech to remember.
-    Resolved and Closed are treated identically everywhere else in MB, so the
-    only visible change is the label.
+    once it has run out the ticket is Closed automatically with no client
+    email and nothing for a tech to remember. "Silent" means no email: each
+    flip IS recorded, in the ticket's audit history (Settings > Logs > Record
+    Changes) and the app log.
 
-    Uses the same age rule as the inbound reply path (closed_at + window
-    days). Tickets with no closed_at (pre-reopen-window history) are treated
-    there as forever inside the window, so they are left alone here too.
-    A queryset update is deliberate: updated_at must NOT move, or the
-    "closed in period" report numbers would shift on a timer tick.
-    Returns the number of tickets closed."""
+    The window rule is shared with the inbound reply path
+    (Ticket.past_reopen_window / within_reopen_window), so the instant a
+    reply would start a new linked ticket is the instant auto-close applies.
+    Tickets with no closed_at are inside the window forever there, so they are
+    left alone here too.
+
+    Each ticket is saved individually with update_fields=['status'] so the
+    auditlog post_save hook records the change, while updated_at stays put
+    (it is not in update_fields), so the "closed in period" report numbers do
+    not shift on a timer tick. Returns the number of tickets closed."""
     now = now or timezone.now()
     window_days = SiteSettings.get().ticket_reopen_window_days
-    cutoff = now - timedelta(days=window_days)
-    qs = Ticket.objects.filter(status='resolved', closed_at__lt=cutoff)
-    numbers = list(qs.values_list('ticket_number', flat=True))
-    if not numbers:
-        return 0
-    closed = qs.update(status='closed')
-    logger.info(
-        'Auto-closed %d resolved ticket(s) past the %d-day reopen window: %s',
-        closed, window_days, ', '.join(numbers),
-    )
-    return closed
+    closed = []
+    for ticket in Ticket.past_reopen_window(now, window_days):
+        ticket.status = 'closed'
+        ticket.save(update_fields=['status'])
+        closed.append(ticket.ticket_number)
+    if closed:
+        logger.info(
+            'Auto-closed %d resolved ticket(s) past the %d-day reopen window: %s',
+            len(closed), window_days, ', '.join(closed),
+        )
+    return len(closed)
 
 
 class Command(BaseCommand):
@@ -55,9 +58,19 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         now = timezone.now()
-        closed = auto_close_resolved(now)
-        if closed:
-            self.stdout.write(f'[CLOSE] {now:%Y-%m-%d %H:%M} — {closed} resolved ticket(s) closed (reopen window expired).')
+        self._sla_report(now)
+        # Auto-close runs AFTER the SLA report and inside its own guard, so a
+        # fault here can never stop the existing SLA job from doing its work.
+        try:
+            closed = auto_close_resolved(now)
+        except Exception:
+            logger.exception('Auto-close of resolved tickets failed; SLA check unaffected.')
+            self.stderr.write('[CLOSE] auto-close failed; see app log.')
+        else:
+            if closed:
+                self.stdout.write(f'[CLOSE] {now:%Y-%m-%d %H:%M} — {closed} resolved ticket(s) closed (reopen window expired).')
+
+    def _sla_report(self, now):
         # Single source of truth — mirrors Ticket.is_overdue (incl. first_responded_at).
         overdue_qs = Ticket.overdue_queryset()
 

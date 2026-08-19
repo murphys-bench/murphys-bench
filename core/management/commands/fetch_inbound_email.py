@@ -472,9 +472,9 @@ def _process_message(raw_msg_bytes, settings, verbosity):
                 # polluted any reopen-rate metric. Now: thread in + flag, but
                 # stay closed — a human explicitly Reopens or Dismisses.
                 window_days = SiteSettings.get().ticket_reopen_window_days
-                closed_at = ticket.closed_at
-                within_window = closed_at is None or (timezone.now() - closed_at).days < window_days
-                if within_window:
+                # Same rule as auto-close (Ticket.past_reopen_window): a ticket
+                # the timer would close is one a reply must not thread into.
+                if ticket.within_reopen_window(window_days=window_days):
                     reply = TicketReply.objects.create(
                         ticket=ticket, reply_type='customer_visible',
                         content=body, created_by=None,

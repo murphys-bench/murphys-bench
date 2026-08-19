@@ -882,6 +882,35 @@ class Ticket(models.Model):
             self.closed_at = None
         self.status = new_status
 
+    # --- Reopen window: ONE rule, used by the inbound reply path AND auto-close ---
+    # Inside the window a late client reply threads in and flags the done ticket;
+    # once it has run out, auto-close marks Resolved tickets Closed and a reply
+    # starts a new linked ticket instead. The two paths must agree at the exact
+    # boundary, so both go through these helpers. A ticket with no closed_at
+    # (history from before the stamp existed) is treated as inside forever.
+
+    @staticmethod
+    def reopen_window_cutoff(now=None, window_days=None):
+        """Instant before which a done ticket is OUT of the reopen window."""
+        from datetime import timedelta
+        now = now or timezone.now()
+        if window_days is None:
+            window_days = SiteSettings.get().ticket_reopen_window_days
+        return now - timedelta(days=window_days)
+
+    def within_reopen_window(self, now=None, window_days=None):
+        if self.closed_at is None:
+            return True
+        return self.closed_at > self.reopen_window_cutoff(now, window_days)
+
+    @classmethod
+    def past_reopen_window(cls, now=None, window_days=None):
+        """Resolved tickets whose reopen window has run out: the auto-close set.
+        Mirrors within_reopen_window exactly (closed_at <= cutoff is out)."""
+        return cls.objects.filter(
+            status='resolved', closed_at__lte=cls.reopen_window_cutoff(now, window_days),
+        )
+
     @classmethod
     def generate_ticket_number(cls):
         """Generate sequential ticket number like TKT-00001"""

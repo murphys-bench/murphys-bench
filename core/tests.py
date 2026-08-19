@@ -14117,6 +14117,50 @@ def test_auto_close_flips_resolved_past_window_silently(client_obj, mailoutbox):
     assert old.closed_at == before_closed_at
     assert old.updated_at == before_updated_at, 'a timer tick must not move updated_at (reports key on it)'
     assert len(mailoutbox) == 0
+    # Silent means no email, NOT no record: the flip lands in the ticket's audit history.
+    from auditlog.models import LogEntry
+    entry = LogEntry.objects.get_for_object(old).order_by('-timestamp').first()
+    assert entry is not None and 'status' in entry.changes_dict
+    assert entry.changes_dict['status'] == ['resolved', 'closed']
+
+
+@pytest.mark.django_db
+def test_auto_close_and_inbound_reply_agree_at_the_exact_boundary(client_obj):
+    """At closed_at == now - window, the reply path says OUT (new linked ticket)
+    and auto-close must say OUT too, so the two never disagree for a tick."""
+    from django.utils import timezone as _tz
+    from core.management.commands.check_sla_overdue import auto_close_resolved
+    site = SiteSettings.get()
+    site.ticket_reopen_window_days = 14
+    site.save(update_fields=['ticket_reopen_window_days'])
+    now = _tz.now()
+    t = Ticket.objects.create(client=client_obj, subject='S', description='D',
+                              ticket_number='TKT-90007', status='resolved')
+    Ticket.objects.filter(pk=t.pk).update(closed_at=now - _tz.timedelta(days=14))
+    t.refresh_from_db()
+    assert t.within_reopen_window(now=now) is False
+    assert auto_close_resolved(now) == 1
+    # One second inside: both say IN.
+    t2 = Ticket.objects.create(client=client_obj, subject='S', description='D',
+                               ticket_number='TKT-90008', status='resolved')
+    Ticket.objects.filter(pk=t2.pk).update(closed_at=now - _tz.timedelta(days=14) + _tz.timedelta(seconds=1))
+    t2.refresh_from_db()
+    assert t2.within_reopen_window(now=now) is True
+    assert auto_close_resolved(now) == 0
+
+
+@pytest.mark.django_db
+def test_auto_close_failure_does_not_stop_sla_check(client_obj, monkeypatch):
+    from django.core.management import call_command
+    from io import StringIO
+    import core.management.commands.check_sla_overdue as mod
+    def boom(now=None):
+        raise RuntimeError('planted')
+    monkeypatch.setattr(mod, 'auto_close_resolved', boom)
+    out, err = StringIO(), StringIO()
+    call_command('check_sla_overdue', stdout=out, stderr=err)
+    assert '[SLA]' in out.getvalue()
+    assert 'auto-close failed' in err.getvalue()
 
 
 @pytest.mark.django_db

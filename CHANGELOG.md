@@ -13,8 +13,9 @@ the Unreleased entries move under that version and prod gets a single update.
 ### Changed
 
 - Resolved tickets are marked Closed automatically once the reopen window
-  (Settings > Inbound Email) has run out. No email is sent. Runs on the existing
-  15-minute timer; the first run closes every resolved ticket already past the window.
+  (Settings > Inbound Email) has run out. No email is sent; each flip is recorded in
+  the ticket's Record Changes history. Runs on the existing 15-minute timer; the first
+  run closes every resolved ticket already past the window.
 
 ## v0.13.1 — 2026-08-18
 
