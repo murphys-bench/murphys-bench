@@ -363,7 +363,7 @@
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Reopen Window (days)</label>
                         {{ forms.inbound.ticket_reopen_window_days }}
-                        <p class="text-xs text-gray-400 mt-1">A reply to a closed/resolved ticket within this many days threads in and flags it for review but leaves it closed — a tech reopens or dismisses it. Past the window, the reply starts a new linked ticket instead.</p>
+                        <p class="text-xs text-gray-400 mt-1">A reply to a resolved ticket within this many days threads in and flags it for review but leaves it resolved; a tech reopens or dismisses it. When the window runs out, the ticket is marked Closed automatically with no email to the client, and a later reply starts a new linked ticket instead.</p>
                     </div>
 
                     <div class="space-y-2">

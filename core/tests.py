@@ -14082,3 +14082,82 @@ def test_t2_selections_unknown_line_warns_but_neutral_lines_do_not(caplog):
     warned = [r for r in caplog.records if 'selections' in r.getMessage()]
     assert warned and 'on fire' in warned[0].getMessage(), \
         'An unrecognised pick must be logged, naming the line.'
+
+
+# ---------------------------------------------------------------------------
+# Auto-close: Resolved -> Closed when the reopen window expires (Aug 19 2026 ruling)
+# ---------------------------------------------------------------------------
+
+def _resolved_ticket(client_obj, number, days_ago):
+    from django.utils import timezone as _tz
+    t = Ticket.objects.create(
+        client=client_obj, subject='S', description='D',
+        ticket_number=number, status='resolved',
+    )
+    closed_at = None if days_ago is None else _tz.now() - _tz.timedelta(days=days_ago)
+    Ticket.objects.filter(pk=t.pk).update(closed_at=closed_at)
+    t.refresh_from_db()
+    return t
+
+
+@pytest.mark.django_db
+def test_auto_close_flips_resolved_past_window_silently(client_obj, mailoutbox):
+    """Past the window: Resolved becomes Closed, closed_at and updated_at are
+    untouched, and nothing is emailed."""
+    from core.management.commands.check_sla_overdue import auto_close_resolved
+    site = SiteSettings.get()
+    site.ticket_reopen_window_days = 14
+    site.save(update_fields=['ticket_reopen_window_days'])
+    old = _resolved_ticket(client_obj, 'TKT-90001', days_ago=15)
+    before_closed_at, before_updated_at = old.closed_at, old.updated_at
+
+    assert auto_close_resolved() == 1
+    old.refresh_from_db()
+    assert old.status == 'closed'
+    assert old.closed_at == before_closed_at
+    assert old.updated_at == before_updated_at, 'a timer tick must not move updated_at (reports key on it)'
+    assert len(mailoutbox) == 0
+
+
+@pytest.mark.django_db
+def test_auto_close_leaves_inside_window_unknown_age_and_other_statuses(client_obj):
+    from core.management.commands.check_sla_overdue import auto_close_resolved
+    site = SiteSettings.get()
+    site.ticket_reopen_window_days = 14
+    site.save(update_fields=['ticket_reopen_window_days'])
+    inside = _resolved_ticket(client_obj, 'TKT-90002', days_ago=13)
+    unknown = _resolved_ticket(client_obj, 'TKT-90003', days_ago=None)
+    open_t = Ticket.objects.create(client=client_obj, subject='S', description='D',
+                                   ticket_number='TKT-90004', status='open')
+    Ticket.objects.filter(pk=open_t.pk).update(closed_at=None)
+
+    assert auto_close_resolved() == 0
+    for t, expected in ((inside, 'resolved'), (unknown, 'resolved'), (open_t, 'open')):
+        t.refresh_from_db()
+        assert t.status == expected, t.ticket_number
+
+
+@pytest.mark.django_db
+def test_auto_close_respects_shop_window_setting(client_obj):
+    """The shop's own number governs: a 3-day window closes a 4-day-old ticket
+    that a 14-day window would leave alone."""
+    from core.management.commands.check_sla_overdue import auto_close_resolved
+    site = SiteSettings.get()
+    site.ticket_reopen_window_days = 3
+    site.save(update_fields=['ticket_reopen_window_days'])
+    t = _resolved_ticket(client_obj, 'TKT-90005', days_ago=4)
+    assert auto_close_resolved() == 1
+    t.refresh_from_db()
+    assert t.status == 'closed'
+
+
+@pytest.mark.django_db
+def test_check_sla_overdue_command_runs_auto_close(client_obj):
+    from django.core.management import call_command
+    from io import StringIO
+    t = _resolved_ticket(client_obj, 'TKT-90006', days_ago=40)
+    out = StringIO()
+    call_command('check_sla_overdue', stdout=out)
+    t.refresh_from_db()
+    assert t.status == 'closed'
+    assert '[CLOSE]' in out.getvalue()

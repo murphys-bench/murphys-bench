@@ -2317,10 +2317,11 @@ class SiteSettings(models.Model):
     )
     ticket_reopen_window_days = models.PositiveIntegerField(
         default=14,
-        help_text='A client reply to a closed/resolved ticket within this many days '
-                  'threads in and flags it for review, but leaves it closed — a tech '
-                  'reopens or dismisses it explicitly. Past the window, the reply '
-                  'starts a new ticket linked to the old one for context instead.',
+        help_text='A client reply to a resolved ticket within this many days '
+                  'threads in and flags it for review, but leaves it resolved; a tech '
+                  'reopens or dismisses it explicitly. When the window runs out the '
+                  'ticket is marked Closed automatically (no email to the client), '
+                  'and a later reply starts a new ticket linked to the old one.',
     )
 
     # MFA enforcement
