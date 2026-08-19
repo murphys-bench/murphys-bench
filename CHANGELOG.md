@@ -8,7 +8,9 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
-## Unreleased
+## v0.13.3 — 2026-08-19
+
+Security patch release.
 
 ### Security
 
