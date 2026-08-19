@@ -8,6 +8,14 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Changed
+
+- Dependencies are now fully locked: requirements.txt pins every package including
+  transitive ones (generated from requirements.in), so every install runs the identical
+  set and the CVE audit covers exactly what production runs.
+
 ## v0.13.3 — 2026-08-19
 
 Security patch release.
