@@ -8,6 +8,13 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Security
+
+- Django 5.2.16 -> 5.2.17 (CVE-2026-15830, GeoDjango crash on crafted input). MB does not
+  use GeoDjango; routine pin bump so the CVE gate stays green.
+
 ## v0.13.2 — 2026-08-19
 
 Resolved tickets close themselves when the reopen window runs out. Outside-reviewed
