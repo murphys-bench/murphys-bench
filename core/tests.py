@@ -14356,7 +14356,7 @@ def test_work_record_is_one_page_for_ticket_and_work_order(client, client_obj, a
     t = Ticket.objects.create(client=client_obj, subject='Record subject', description='D', created_by=admin_user)
     tb = client.get(reverse('core:ticket_detail', args=[t.pk])).content.decode()
     assert 'tabler.min' in tb and 'css/app.' not in tb
-    for section in ('>Who<', '>Request<', 'Conversation', 'Work order', 'Timer', 'Attachments &amp; related'):
+    for section in ('>Customer<', '>Request<', 'Conversation', 'Work order', 'Timer', 'Attachments &amp; related'):
         assert section in tb, section
     assert 'No work order yet' in tb and 'Convert to Work Order' in tb
     assert 'Owner / Device' in tb and 'Work Item' in tb and '>Print<' in tb and '>Email<' in tb   # the bar
@@ -14384,3 +14384,15 @@ def test_work_record_thread_carries_status_events(client, client_obj, admin_user
     client.post(reverse('core:ticket_status_update', args=[t.pk]), {'status': 'in_progress'})
     body = client.get(reverse('core:ticket_detail', args=[t.pk])).content.decode()
     assert 'Status open &rarr; in_progress' in body or 'Status open → in_progress' in body
+
+
+@pytest.mark.django_db
+def test_work_record_names_standing_as_client_or_customer(client, client_obj, admin_user):
+    """The Who section is headed Client when the owner holds an active Service
+    Agreement and Customer otherwise (Mike, Aug 21: the word carries standing)."""
+    from core.models import Contract
+    client.force_login(admin_user)
+    t = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    assert '>Customer<' in client.get(reverse('core:ticket_detail', args=[t.pk])).content.decode()
+    Contract.objects.create(client=client_obj, title='Managed', status='active')
+    assert '>Client<' in client.get(reverse('core:ticket_detail', args=[t.pk])).content.decode()

@@ -144,13 +144,13 @@ status control sits with the reply.
 
     {# ══ WHO ═══════════════════════════════════════════════════════════ #}
     <div class="accordion-item">
-        <h2 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#sec-who" aria-expanded="true">Who</button></h2>
+        <h2 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#sec-who" aria-expanded="true">{{ record_standing }}</button></h2>
         <div id="sec-who" class="accordion-collapse collapse show">
             <div class="accordion-body">
                 <div class="row g-3">
                     <div class="col-md-6">
                         {% with client=record_client contact=record_contact %}
-                        <div class="subheader">Client</div>
+                        <div class="subheader">{{ record_standing }}</div>
                         {% if client %}
                         <div class="fw-medium"><a href="{% url 'core:client_detail' client.pk %}" class="text-reset">{{ client.name }}</a></div>
                         {% if contact %}<div>{{ contact.first_name }} {{ contact.last_name }}{% if contact.email %} &middot; {{ contact.email }}{% endif %}</div>{% endif %}

@@ -751,8 +751,13 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
 def _record_identity(ticket, wo):
     """Who/what the record is about, resolved once so templates never do a
     `|default:` across two objects that may each be None."""
+    client = ticket.client if ticket else (wo.client if wo else None)
+    # Standing is the WORD, not a chip (Mike, Aug 21): a Client has a Service
+    # Agreement; everyone else, walk-ins included, is a Customer.
+    has_sa = bool(client) and (client.is_managed or client.contracts.filter(status='active').exists())
     return {
-        'record_client': ticket.client if ticket else (wo.client if wo else None),
+        'record_client': client,
+        'record_standing': 'Client' if has_sa else 'Customer',
         'record_contact': (ticket.contact if ticket else None) or (wo.contact if wo else None),
         'record_device': (wo.device if wo else None) or (ticket.device if ticket else None),
     }
