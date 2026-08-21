@@ -24,6 +24,7 @@ from django.utils.html import escape
 from two_factor.views import SetupView as TwoFactorSetupView
 from .middleware import mfa_setup_is_mandatory
 from .models import (
+    FollowUp,
     WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, ChecklistItem,
     Ticket, TicketReply, TicketWorkLog, TicketLock, TicketLink, Attachment, SiteSettings,
     KBCategory, KBArticle, TicketQueue, DashboardTile, User,
@@ -663,6 +664,8 @@ class BoardView(LoginRequiredMixin, View):
             'work_orders': wos,
             'wo_total': open_wos.count(),
             'unsorted': list(unsorted[:self.REGION_CAP]),
+            'follow_ups': list(FollowUp.objects.due().select_related('client', 'prospect', 'ticket', 'work_order')[:self.REGION_CAP]),
+            'follow_up_total': FollowUp.objects.due().count(),
             'unsorted_total': unsorted.count(),
             'region_cap': self.REGION_CAP,
         }
@@ -1153,6 +1156,11 @@ class ClientDetailView(LoginRequiredMixin, DetailView):
         context['outstanding_balance'] = outstanding
         # Standing is the word: Client (active Service Agreement) or Customer.
         context['has_sa'] = self.object.is_managed or self.object.contracts.filter(status='active').exists()
+        from .models import FollowUp
+        context['follow_ups'] = list(FollowUp.objects.filter(client=self.object).open().select_related('template', 'ticket', 'work_order'))
+        context['done_follow_ups'] = list(FollowUp.objects.filter(client=self.object, done_at__isnull=False).order_by('-done_at')[:5])
+        context['custom_templates'] = EmailTemplate.objects.filter(trigger__isnull=True, is_active=True)
+        context['follow_up_kinds'] = FollowUp.KIND_CHOICES
         context['open_tickets'] = (_scope_tickets_for(Ticket.objects.filter(client=self.object), self.request.user)
                                    .exclude(status__in=TICKET_CLOSED_STATUSES).order_by('-created_at'))
         context['open_wos'] = (_scope_assignable_for(WorkOrder.objects.filter(client=self.object), self.request.user)
@@ -1950,6 +1958,14 @@ class ProspectDetailView(ProspectAccessMixin, DetailView):
     model = Prospect
     template_name = 'core/prospect_detail.html'
     context_object_name = 'prospect'
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['follow_ups'] = list(FollowUp.objects.filter(prospect=self.object).open().select_related('template'))
+        ctx['done_follow_ups'] = list(FollowUp.objects.filter(prospect=self.object, done_at__isnull=False).order_by('-done_at')[:5])
+        ctx['custom_templates'] = EmailTemplate.objects.filter(trigger__isnull=True, is_active=True)
+        ctx['follow_up_kinds'] = FollowUp.KIND_CHOICES
+        return ctx
 
 
 class ProspectCreateView(ProspectAccessMixin, CreateView):
@@ -7700,7 +7716,8 @@ class SettingsView(SettingsAdminMixin, View):
                         'is_active': False,
                     }
                 )
-            ctx['email_templates'] = EmailTemplate.objects.select_related('signature').all()
+            ctx['email_templates'] = EmailTemplate.objects.filter(trigger__isnull=False).select_related('signature')
+            ctx['custom_templates'] = EmailTemplate.objects.filter(trigger__isnull=True).select_related('signature').order_by('name')
             ctx['email_signatures'] = EmailSignature.objects.all()
             from .forms import EmailBrandingForm
             from .email_utils import _email_header_color
@@ -8532,13 +8549,15 @@ class EmailTemplateUpdateView(SettingsAdminMixin, View):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         tmpl = get_object_or_404(EmailTemplate, pk=pk)
+        if tmpl.is_custom and (request.POST.get('name') or '').strip():
+            tmpl.name = request.POST.get('name').strip()
         tmpl.subject_template = request.POST.get('subject_template', tmpl.subject_template).strip()
         tmpl.body_template = request.POST.get('body_template', tmpl.body_template).strip()
         tmpl.is_active = request.POST.get('is_active') == '1'
         sig_id = request.POST.get('signature')
         tmpl.signature_id = int(sig_id) if sig_id else None
         tmpl.save()
-        messages.success(request, f'Email template "{tmpl.get_trigger_display()}" saved.')
+        messages.success(request, f'Email template "{tmpl.label}" saved.')
         return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
 
 
@@ -9168,3 +9187,224 @@ class MySecurityView(LoginRequiredMixin, View):
             'has_device': bool(devices),
             'mfa_required': SiteSettings.get().require_mfa,
         })
+
+
+# ── Relationship Desk: follow-ups and hand-sent customer email (batch 6) ────
+
+def _follow_up_target(request):
+    """Resolve who a follow-up (or email) is about from query/POST params.
+    Returns (client, prospect, ticket, work_order)."""
+    src = request.POST if request.method == 'POST' else request.GET
+    client = prospect = ticket = work_order = None
+    if src.get('ticket'):
+        ticket = get_object_or_404(Ticket, pk=src.get('ticket'))
+        client = ticket.client
+    if src.get('work_order'):
+        work_order = get_object_or_404(WorkOrder, pk=src.get('work_order'))
+        client = work_order.client or client
+    if src.get('client'):
+        client = get_object_or_404(Client, pk=src.get('client'))
+    if src.get('prospect'):
+        prospect = get_object_or_404(Prospect, pk=src.get('prospect'))
+    return client, prospect, ticket, work_order
+
+
+class FollowUpListView(LoginRequiredMixin, View):
+    """Worklist of planned touches. Segments: Due (today or past), Upcoming, Done."""
+    template_name = 'core/follow_up_list.html'
+
+    def get(self, request):
+        from .models import FollowUp
+        from django.utils import timezone
+        seg = request.GET.get('show', 'due')
+        qs = FollowUp.objects.select_related('client', 'prospect', 'ticket', 'work_order', 'template', 'created_by')
+        today = timezone.localdate()
+        if seg == 'upcoming':
+            qs = qs.open().filter(due_on__gt=today)
+        elif seg == 'done':
+            qs = qs.filter(done_at__isnull=False).order_by('-done_at')
+        elif seg == 'all':
+            qs = qs.open()
+        else:
+            seg = 'due'
+            qs = qs.due()
+        return render(request, self.template_name, {
+            'follow_ups': list(qs[:200]), 'segment': seg, 'today': today,
+            'due_count': FollowUp.objects.due().count(),
+            'upcoming_count': FollowUp.objects.open().filter(due_on__gt=today).count(),
+            'kinds': FollowUp.KIND_CHOICES,
+            'custom_templates': EmailTemplate.objects.filter(trigger__isnull=True, is_active=True),
+        })
+
+
+class FollowUpCreateView(LoginRequiredMixin, View):
+    """POST from a Client Hub, Prospect page, Work Record or the list. Returns
+    to where it came from (`next`), else the Follow-ups list."""
+
+    def post(self, request):
+        from .models import FollowUp
+        from datetime import date
+        client, prospect, ticket, work_order = _follow_up_target(request)
+        if not client and not prospect:
+            messages.error(request, 'A follow-up needs a customer or a prospect.')
+            return redirect(request.POST.get('next') or 'core:follow_up_list')
+        try:
+            due_on = date.fromisoformat(request.POST.get('due_on', ''))
+        except ValueError:
+            messages.error(request, 'Pick a date for the follow-up.')
+            return redirect(request.POST.get('next') or 'core:follow_up_list')
+        kind = request.POST.get('kind') or 'planned'
+        if kind not in dict(FollowUp.KIND_CHOICES):
+            kind = 'other'
+        tmpl_id = request.POST.get('template') or None
+        fu = FollowUp.objects.create(
+            client=client, prospect=prospect, ticket=ticket, work_order=work_order,
+            kind=kind, note=(request.POST.get('note') or '').strip(), due_on=due_on,
+            template_id=int(tmpl_id) if tmpl_id else None, created_by=request.user,
+        )
+        messages.success(request, f'{fu.get_kind_display()} planned for {fu.who_name} on {due_on:%b %-d}.')
+        return redirect(request.POST.get('next') or 'core:follow_up_list')
+
+
+class FollowUpDoneView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        from .models import FollowUp
+        from django.utils import timezone
+        fu = get_object_or_404(FollowUp, pk=pk)
+        if fu.done_at is None:
+            fu.done_at = timezone.now(); fu.done_by = request.user; fu.save(update_fields=['done_at', 'done_by'])
+        messages.success(request, f'{fu.get_kind_display()} for {fu.who_name} marked done.')
+        return redirect(request.POST.get('next') or 'core:follow_up_list')
+
+
+class FollowUpDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        from .models import FollowUp
+        fu = get_object_or_404(FollowUp, pk=pk)
+        fu.delete()
+        messages.success(request, 'Follow-up removed.')
+        return redirect(request.POST.get('next') or 'core:follow_up_list')
+
+
+class CustomerEmailView(LoginRequiredMixin, View):
+    """Compose and send one of the shop's own (custom) email templates to a
+    customer, from a Work Record, a Client Hub, or a follow-up. GET shows the
+    rendered template (editable); POST sends the edited text. Nothing goes out
+    without a person reading it first."""
+    template_name = 'core/customer_email.html'
+
+    def _context(self, request):
+        from .models import FollowUp
+        from .email_utils import email_context, render_email_template
+        client, prospect, ticket, work_order = _follow_up_target(request)
+        src = request.POST if request.method == 'POST' else request.GET
+        follow_up = get_object_or_404(FollowUp, pk=src.get('follow_up')) if src.get('follow_up') else None
+        if follow_up is not None:
+            client = client or follow_up.client; prospect = prospect or follow_up.prospect
+            ticket = ticket or follow_up.ticket; work_order = work_order or follow_up.work_order
+        if not client and not prospect:
+            raise Http404('No customer to email.')
+        templates = list(EmailTemplate.objects.filter(trigger__isnull=True, is_active=True).select_related('signature'))
+        chosen = None
+        tid = src.get('template') or (follow_up.template_id if follow_up and follow_up.template_id else None)
+        if tid:
+            chosen = next((t for t in templates if str(t.pk) == str(tid)), None)
+        contacts = list(client.contacts.filter(is_active=True)) if client else []
+        default_contact = next((c for c in contacts if c.is_primary and c.email), None) or next((c for c in contacts if c.email), None)
+        default_email = (prospect.email if prospect else '') or (client.email if client else '')
+        subject = body = ''
+        render_error = ''
+        if chosen is not None:
+            # Prospects render against a stand-in "client" so the same variables work.
+            who = client or prospect
+            try:
+                subject, body = render_email_template(chosen, email_context(
+                    client=who, contact=default_contact, ticket=ticket, work_order=work_order, user=request.user))
+            except Exception:
+                render_error = 'This template has a syntax error; fix it in Settings, Email Templates.'
+        return {
+            'client': client, 'prospect': prospect, 'ticket': ticket, 'work_order': work_order,
+            'follow_up': follow_up, 'templates': templates, 'chosen': chosen,
+            'contacts': contacts, 'default_contact': default_contact, 'default_email': default_email,
+            'subject': subject, 'body': body, 'render_error': render_error,
+            'back_url': (reverse('core:work_order_detail', args=[work_order.pk]) if work_order
+                         else reverse('core:ticket_detail', args=[ticket.pk]) if ticket
+                         else reverse('core:client_detail', args=[client.pk]) if client
+                         else reverse('core:prospect_detail', args=[prospect.pk])),
+        }
+
+    def get(self, request):
+        return render(request, self.template_name, self._context(request))
+
+    def post(self, request):
+        from .email_utils import send_custom_email
+        from .models import TicketReply
+        from django.utils import timezone
+        ctx = self._context(request)
+        chosen = ctx['chosen']
+        if chosen is None:
+            messages.error(request, 'Pick a template first.')
+            return render(request, self.template_name, ctx)
+        to_email = (request.POST.get('custom_email') or '').strip()
+        contact = None
+        if not to_email and request.POST.get('contact') and ctx['client']:
+            contact = ctx['client'].contacts.filter(pk=request.POST.get('contact')).first()
+            to_email = contact.email if contact else ''
+        if not to_email:
+            to_email = ctx['default_email']
+        if not to_email:
+            messages.error(request, 'Choose a contact or enter an email address.')
+            return render(request, self.template_name, ctx)
+        subject = (request.POST.get('subject') or '').strip()
+        body = request.POST.get('body') or ''
+        if not subject or not body.strip():
+            messages.error(request, 'Subject and body cannot be empty.')
+            return render(request, self.template_name, ctx)
+        who = ctx['client'] or ctx['prospect']
+        log = send_custom_email(chosen, to_email=to_email, client=who, contact=contact,
+                                ticket=ctx['ticket'], work_order=ctx['work_order'], user=request.user,
+                                subject=subject, body=body)
+        if log.status == 'sent':
+            messages.success(request, f'Sent "{subject}" to {to_email}.')
+            if ctx['ticket'] is not None:
+                TicketReply.objects.create(ticket=ctx['ticket'], reply_type='internal', created_by=request.user,
+                                           content=f'Emailed {to_email}: {subject}')
+            if ctx['follow_up'] is not None and ctx['follow_up'].done_at is None:
+                fu = ctx['follow_up']; fu.done_at = timezone.now(); fu.done_by = request.user
+                fu.save(update_fields=['done_at', 'done_by'])
+            return redirect(ctx['back_url'])
+        reason = dict(log.REASON_CHOICES).get(log.reason, log.reason)
+        messages.error(request, f'Not sent: {reason}. {log.detail}'.strip())
+        return render(request, self.template_name, ctx)
+
+
+class EmailTemplateCreateView(SettingsAdminMixin, View):
+    """Settings: add a custom (named, hand-sent) template."""
+
+    def post(self, request):
+        name = (request.POST.get('name') or '').strip()
+        if not name:
+            messages.error(request, 'Give the template a name.')
+            return redirect(f"{reverse('core:settings')}?tab=email_templates")
+        sig_id = request.POST.get('signature')
+        EmailTemplate.objects.create(
+            name=name,
+            subject_template=(request.POST.get('subject_template') or '').strip() or '{{ site_name }}: a note about your recent service',
+            body_template=(request.POST.get('body_template') or '').strip() or 'Hi {{ customer_name }},\n\n\n\nThank you,\n{{ tech_name }}',
+            signature_id=int(sig_id) if sig_id else None, is_active=True,
+        )
+        messages.success(request, f'Email template "{name}" added.')
+        return redirect(f"{reverse('core:settings')}?tab=email_templates")
+
+
+class EmailTemplateDeleteView(SettingsAdminMixin, View):
+    """Settings: delete a custom template. Event templates cannot be deleted."""
+
+    def post(self, request, pk):
+        tmpl = get_object_or_404(EmailTemplate, pk=pk)
+        if not tmpl.is_custom:
+            messages.error(request, 'Event templates stay; turn one off instead.')
+        else:
+            tmpl.delete()
+            messages.success(request, f'Email template "{tmpl.name}" deleted.')
+        return redirect(f"{reverse('core:settings')}?tab=email_templates")

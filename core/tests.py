@@ -14464,3 +14464,123 @@ def test_new_device_can_take_in_a_new_customer(client, admin_user):
     r = client.post(reverse('core:device_create'), {'name': 'Second', 'device_type': 'laptop', 'is_active': 'on', 'new_client_name': 'Fresh Face Co'})
     assert r.status_code == 200 and b'already exists' in r.content
     assert Client.objects.filter(name='Fresh Face Co').count() == 1
+
+
+# ── Batch 6: Relationship Desk, custom email templates and follow-ups ─────────
+from django.utils import timezone  # noqa: E402
+
+@pytest.mark.django_db
+def test_custom_email_templates_can_be_added_edited_and_deleted(client, admin_user):
+    """Mike, Aug 21 2026: "what if I want 5, or 8?" A template no longer has to
+    be a code event. Event templates stay locked to their events."""
+    from core.models import EmailTemplate
+    client.force_login(admin_user)
+    r = client.post(reverse('core:email_template_create'), {'name': 'Satisfaction follow-up', 'subject_template': 'How did we do, {{ customer_name }}?', 'body_template': 'Hi {{ customer_name }},\n\nAll good?'})
+    assert r.status_code == 302
+    t = EmailTemplate.objects.get(name='Satisfaction follow-up')
+    assert t.is_custom and t.trigger is None and t.label == 'Satisfaction follow-up'
+    body = client.get('/settings/?tab=email_templates').content.decode()
+    assert 'Your templates' in body and 'Satisfaction follow-up' in body
+    client.post(reverse('core:email_template_update', args=[t.pk]), {'name': 'Follow-up', 'subject_template': 's', 'body_template': 'b', 'is_active': '1'})
+    t.refresh_from_db(); assert t.name == 'Follow-up'
+    # A second custom template does not collide (trigger NULL is not unique-violating).
+    client.post(reverse('core:email_template_create'), {'name': 'Thank-you'})
+    assert EmailTemplate.objects.filter(trigger__isnull=True).count() == 2
+    client.post(reverse('core:email_template_delete', args=[t.pk]))
+    assert not EmailTemplate.objects.filter(pk=t.pk).exists()
+    ev, _ = EmailTemplate.objects.get_or_create(trigger='ticket_created', defaults={'subject_template': 's', 'body_template': 'b'})
+    client.post(reverse('core:email_template_delete', args=[ev.pk]))
+    assert EmailTemplate.objects.filter(pk=ev.pk).exists(), 'event templates cannot be deleted'
+
+
+@pytest.mark.django_db
+def test_customer_email_compose_renders_template_and_sends_edited_text(client, admin_user, monkeypatch):
+    from core.models import Client, Contact, EmailTemplate, EmailSendLog, SiteSettings, TicketReply, FollowUp
+    from core import email_utils
+    client.force_login(admin_user)
+    site = SiteSettings.get(); site.email_enabled = True; site.save()
+    c = Client.objects.create(name='Acme', client_type='business')
+    Contact.objects.create(client=c, first_name='Pat', last_name='Q', email='pat@example.com', is_primary=True)
+    t = EmailTemplate.objects.create(name='Thank-you', subject_template='Thanks, {{ customer_name }}', body_template='Hi {{ customer_name }}, from {{ site_name }}.')
+    ticket = Ticket.objects.create(client=c, subject='S', description='D')
+    fu = FollowUp.objects.create(client=c, ticket=ticket, kind='thank_you', due_on=timezone.localdate(), template=t, created_by=admin_user)
+    # GET: the template is rendered for this customer, editable.
+    r = client.get(reverse('core:customer_email') + f'?follow_up={fu.pk}')
+    assert r.status_code == 200
+    body = r.content.decode()
+    assert 'value="Thanks, Pat"' in body and 'Hi Pat, from' in body
+    # POST: the edited text goes, not a fresh render; the ticket gets an internal note; the follow-up is done.
+    sent = {}
+    def fake_smtp(site, subject, plain_body, html_body, logo_data, logo_mime, to_email, cc=None, bcc=None, label=''):
+        sent.update(subject=subject, body=plain_body, to=to_email); return 'sent', '', ''
+    monkeypatch.setattr(email_utils, '_smtp_send', fake_smtp)
+    r = client.post(reverse('core:customer_email'), {'follow_up': fu.pk, 'template': t.pk, 'contact': c.contacts.first().pk, 'subject': 'Thanks, Pat (edited)', 'body': 'Edited body.'})
+    assert r.status_code == 302
+    assert sent['to'] == 'pat@example.com' and sent['subject'] == 'Thanks, Pat (edited)' and sent['body'].startswith('Edited body.')
+    log = EmailSendLog.objects.get(ticket=ticket)
+    assert log.status == 'sent' and log.trigger.startswith('custom:')
+    assert TicketReply.objects.filter(ticket=ticket, reply_type='internal', content__startswith='Emailed pat@example.com').exists()
+    fu.refresh_from_db(); assert fu.done_at is not None and fu.done_by == admin_user
+
+
+@pytest.mark.django_db
+def test_customer_email_honors_suppression_and_does_not_mark_follow_up_done(client, admin_user):
+    from core.models import Client, EmailTemplate, EmailSendLog, SiteSettings, FollowUp
+    client.force_login(admin_user)
+    site = SiteSettings.get(); site.email_enabled = False; site.save()
+    c = Client.objects.create(name='Acme', client_type='business', email='a@example.com')
+    t = EmailTemplate.objects.create(name='T', subject_template='s', body_template='b')
+    fu = FollowUp.objects.create(client=c, kind='planned', due_on=timezone.localdate(), template=t)
+    r = client.post(reverse('core:customer_email'), {'follow_up': fu.pk, 'template': t.pk, 'custom_email': 'x@example.com', 'subject': 's', 'body': 'b'})
+    assert r.status_code == 200 and b'Not sent' in r.content
+    assert EmailSendLog.objects.get().status == 'suppressed'
+    fu.refresh_from_db(); assert fu.done_at is None
+
+
+@pytest.mark.django_db
+def test_follow_up_lifecycle_hub_board_list_done(client, admin_user):
+    from core.models import Client, FollowUp, Prospect
+    from datetime import timedelta
+    client.force_login(admin_user)
+    c = Client.objects.create(name='Acme', client_type='business')
+    today = timezone.localdate()
+    # Plan from the Client Hub (returns there).
+    r = client.post(reverse('core:follow_up_create'), {'client': c.pk, 'kind': 'satisfaction', 'due_on': today.isoformat(), 'note': 'Ask about the laptop', 'next': f'/clients/{c.pk}/#relationship'})
+    assert r.status_code == 302 and r['Location'].endswith('#relationship')
+    fu = FollowUp.objects.get(); assert fu.client == c and fu.created_by == admin_user and not fu.is_overdue
+    # Upcoming one for a prospect.
+    p = Prospect.objects.create(contact_first_name='Lee', contact_last_name='P', email='lee@example.com')
+    client.post(reverse('core:follow_up_create'), {'prospect': p.pk, 'kind': 'planned', 'due_on': (today + timedelta(days=3)).isoformat()})
+    assert FollowUp.objects.due().count() == 1 and FollowUp.objects.open().count() == 2
+    # Board region, hub panel, nav pulse, list segments.
+    body = client.get('/').content.decode()
+    assert 'Follow-ups due' in body and 'Ask about the laptop' in body
+    assert 'badge bg-purple ms-auto">1<' in body
+    hub = client.get(reverse('core:client_detail', args=[c.pk])).content.decode()
+    assert 'Satisfaction check' in hub and 'Plan it' in hub
+    assert 'Lee' in client.get(reverse('core:follow_up_list') + '?show=upcoming').content.decode()
+    assert 'Nothing planned ahead' not in client.get(reverse('core:follow_up_list') + '?show=upcoming').content.decode()
+    # Done, then it leaves the Board and lands under Done.
+    client.post(reverse('core:follow_up_done', args=[fu.pk]))
+    fu.refresh_from_db(); assert fu.done_at is not None
+    assert 'Ask about the laptop' not in client.get('/').content.decode()
+    assert 'Ask about the laptop' in client.get(reverse('core:follow_up_list') + '?show=done').content.decode()
+    # A follow-up without a customer or prospect is refused.
+    client.post(reverse('core:follow_up_create'), {'kind': 'other', 'due_on': today.isoformat()})
+    assert FollowUp.objects.count() == 2
+
+
+@pytest.mark.django_db
+def test_work_record_offers_email_customer_and_plan_follow_up(client, admin_user):
+    from core.models import Client, EmailTemplate
+    client.force_login(admin_user)
+    c = Client.objects.create(name='Acme', client_type='business')
+    wo = WorkOrder.objects.create(client=c)
+    body = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
+    assert 'Email customer (your templates)' in body and 'Plan a follow-up' in body
+    # With no custom template yet, the compose page says so and points at Settings.
+    r = client.get(reverse('core:customer_email') + f'?work_order={wo.pk}')
+    assert r.status_code == 200 and b'No email templates of your own yet' in r.content
+    EmailTemplate.objects.create(name='T', subject_template='{{ work_order.work_order_number }}', body_template='b')
+    r = client.get(reverse('core:customer_email') + f'?work_order={wo.pk}&template={EmailTemplate.objects.get(name="T").pk}')
+    assert wo.work_order_number.encode() in r.content

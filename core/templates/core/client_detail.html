@@ -253,6 +253,8 @@ agreement). Every card present; empty states say something real.
         </div>
     </div>
 
+    <div class="col-12">{% include "core/partials/relationship_card.html" with who_kind="client" who=client %}</div>
+
     {% if client.notes %}
     <div class="col-12"><div class="card"><div class="card-header"><h3 class="card-title">Notes</h3></div><div class="card-body" style="white-space: pre-wrap;">{{ client.notes }}</div></div></div>
     {% endif %}

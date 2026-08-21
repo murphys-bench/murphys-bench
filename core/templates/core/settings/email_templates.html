@@ -23,6 +23,35 @@
         </div>
     </div>
 </div>
+<div class="card mb-3">
+    <div class="card-header"><div><h3 class="card-title">Your templates</h3><div class="card-subtitle">Emails a person sends by hand from a work record, a customer's Relationship panel, or a follow-up: a thank-you, a satisfaction check, anything. Same variables as the event templates below.</div></div><div class="card-actions"><button type="button" class="btn btn-primary btn-sm" data-bs-toggle="collapse" data-bs-target="#tmpl-new">{% ticon 'plus' 'icon-sm' %} Template</button></div></div>
+    <form method="post" action="{% url 'core:email_template_create' %}" class="collapse" id="tmpl-new">{% csrf_token %}
+        <div class="card-body border-top">
+            <div class="mb-3"><label class="form-label required">Name</label><input type="text" name="name" class="form-control" placeholder="e.g. Satisfaction follow-up" required></div>
+            <div class="mb-3"><label class="form-label">Subject</label><input type="text" name="subject_template" class="form-control font-monospace" placeholder="How did we do on {% templatetag openvariable %} ticket.ticket_number {% templatetag closevariable %}?"></div>
+            <div class="mb-3"><label class="form-label">Body</label><textarea name="body_template" rows="6" class="form-control font-monospace" placeholder="Hi {% templatetag openvariable %} customer_name {% templatetag closevariable %},"></textarea></div>
+            <div class="mb-0"><label class="form-label">Signature</label><select name="signature" class="form-select" style="max-width: 20rem;"><option value="">Use the default signature</option>{% for sig in email_signatures %}<option value="{{ sig.pk }}">{{ sig.name }}</option>{% endfor %}</select></div>
+        </div>
+        <div class="card-footer"><button type="submit" class="btn btn-primary">Add template</button></div>
+    </form>
+    {% for tmpl in custom_templates %}
+    <form method="post" action="{% url 'core:email_template_update' tmpl.pk %}" class="border-top">{% csrf_token %}
+        <div class="card-body">
+            <div class="row g-2">
+                <div class="col-md-8"><label class="form-label">Name</label><input type="text" name="name" value="{{ tmpl.name }}" class="form-control" required></div>
+                <div class="col-md-4 d-flex align-items-end"><label class="form-check form-switch mb-2"><input type="checkbox" name="is_active" value="1" class="form-check-input" {% if tmpl.is_active %}checked{% endif %}><span class="form-check-label">Active</span></label></div>
+                <div class="col-12"><label class="form-label">Subject</label><input type="text" name="subject_template" value="{{ tmpl.subject_template }}" class="form-control font-monospace"></div>
+                <div class="col-12"><label class="form-label">Body</label><textarea name="body_template" rows="6" class="form-control font-monospace">{{ tmpl.body_template }}</textarea></div>
+                <div class="col-12"><label class="form-label">Signature</label><select name="signature" class="form-select" style="max-width: 20rem;"><option value="">Use the default signature</option>{% for sig in email_signatures %}<option value="{{ sig.pk }}" {% if tmpl.signature_id == sig.pk %}selected{% endif %}>{{ sig.name }}</option>{% endfor %}</select></div>
+            </div>
+        </div>
+        <div class="card-footer d-flex align-items-center gap-2"><button type="submit" class="btn btn-primary">Save</button><button type="submit" formaction="{% url 'core:email_template_delete' tmpl.pk %}" class="btn btn-outline-danger" data-mb-confirm="Delete the template {{ tmpl.name }}?">Delete</button><span class="ms-auto text-secondary small">Updated {{ tmpl.updated_at|date:"M j, Y g:i A" }}</span></div>
+    </form>
+    {% empty %}
+    <div class="card-body border-top text-secondary">None yet. The four event templates below are sent by Murphy's Bench itself; add your own here for the emails you send by hand.</div>
+    {% endfor %}
+</div>
+<div class="subheader mb-2">Event templates, sent automatically</div>
 {% for tmpl in email_templates %}
 <form method="post" action="{% url 'core:email_template_update' tmpl.pk %}" class="card mb-3">{% csrf_token %}
     <div class="card-header"><h3 class="card-title">{{ tmpl.get_trigger_display }}</h3><div class="card-actions"><label class="form-check form-switch mb-0"><input type="checkbox" name="is_active" value="1" class="form-check-input" {% if tmpl.is_active %}checked{% endif %}><span class="form-check-label">Active</span></label></div></div>

@@ -99,6 +99,7 @@ REGISTRY = (
                      delete_order=55),
     OperationalModel('core.EstimateOption', 'Estimate options', delete_order=54),
     OperationalModel('core.Prospect', 'Prospects', evidence=True, delete_order=65),
+    OperationalModel('core.FollowUp', 'Follow-ups', delete_order=15),
     OperationalModel('core.Contract', 'Managed contracts', evidence=True,
                      delete_order=70),
     OperationalModel('core.PaymentChargeAttempt', 'Card-charge attempts',

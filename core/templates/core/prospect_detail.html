@@ -44,5 +44,6 @@
             {% if prospect.notes %}<div class="mt-3"><div class="subheader">Notes</div><div style="white-space: pre-line;">{{ prospect.notes }}</div></div>{% endif %}
         </div>
     </div>
+    <div class="mt-3">{% include "core/partials/relationship_card.html" with who_kind="prospect" who=prospect %}</div>
 </div></div>
 {% endblock %}

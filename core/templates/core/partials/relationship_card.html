@@ -1,0 +1,47 @@
+{% comment %}
+The Relationship panel of a Client Hub or Prospect page (Desk archetype, rules
+9.4/9.8): open follow-ups with Done / Email, a Plan-a-follow-up form, and
+Email customer. Expects who_kind ('client'|'prospect'), who, follow_ups,
+done_follow_ups, custom_templates, follow_up_kinds.
+{% endcomment %}
+{% load mb_tabler %}
+<div class="card" id="relationship">
+    <div class="card-header">
+        <h3 class="card-title">{% ticon 'heart-handshake' 'icon-sm' %} Relationship</h3><span class="badge bg-purple-lt ms-2">{{ follow_ups|length }}</span>
+        <div class="card-actions btn-list">
+            <a href="{% url 'core:customer_email' %}?{{ who_kind }}={{ who.pk }}" class="btn btn-sm {% if not custom_templates %}disabled{% endif %}" {% if not custom_templates %}title="Add a template under Settings, Email Templates first"{% endif %}>{% ticon 'mail' 'icon-sm' %} Email {% if who_kind == 'client' %}customer{% else %}prospect{% endif %}</a>
+            <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#fu-new">{% ticon 'plus' 'icon-sm' %} Follow-up</button>
+        </div>
+    </div>
+    <form method="post" action="{% url 'core:follow_up_create' %}" class="collapse border-bottom" id="fu-new">
+        {% csrf_token %}<input type="hidden" name="{{ who_kind }}" value="{{ who.pk }}"><input type="hidden" name="next" value="{{ request.path }}#relationship">
+        <div class="card-body"><div class="row g-2">
+            <div class="col-md-4"><label class="form-label">Kind</label><select name="kind" class="form-select">{% for v, l in follow_up_kinds %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
+            <div class="col-md-4"><label class="form-label required">When</label><input type="date" name="due_on" class="form-control" required></div>
+            <div class="col-md-4"><label class="form-label">Email to send</label><select name="template" class="form-select"><option value="">None, just a reminder</option>{% for t in custom_templates %}<option value="{{ t.pk }}">{{ t.name }}</option>{% endfor %}</select></div>
+            <div class="col-12"><label class="form-label">Note</label><input type="text" name="note" class="form-control" placeholder="What to say or check"></div>
+            <div class="col-12"><button type="submit" class="btn btn-primary">Plan it</button></div>
+        </div></div>
+    </form>
+    {% if follow_ups %}
+    <div class="list-group list-group-flush">
+        {% for fu in follow_ups %}
+        <div class="list-group-item d-flex align-items-center gap-2">
+            <div class="flex-fill">
+                <div><span class="fw-medium">{{ fu.get_kind_display }}</span> <span class="{% if fu.is_overdue %}text-red{% else %}text-secondary{% endif %}">{{ fu.due_on|date:"M j" }}{% if fu.is_overdue %}, overdue{% endif %}</span>{% if fu.template %} <span class="badge bg-secondary-lt">{{ fu.template.name }}</span>{% endif %}</div>
+                {% if fu.note %}<div class="text-secondary small">{{ fu.note }}</div>{% endif %}
+                {% if fu.record %}<div class="text-secondary small">{% if fu.work_order %}<a href="{% url 'core:work_order_detail' fu.work_order.pk %}">{{ fu.work_order.work_order_number }}</a>{% else %}<a href="{% url 'core:ticket_detail' fu.ticket.pk %}">{{ fu.ticket.ticket_number }}</a>{% endif %}</div>{% endif %}
+            </div>
+            {% if fu.template %}<a href="{% url 'core:customer_email' %}?follow_up={{ fu.pk }}" class="btn btn-sm">{% ticon 'mail' 'icon-sm' %} Send</a>{% endif %}
+            <form method="post" action="{% url 'core:follow_up_done' fu.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}#relationship"><button type="submit" class="btn btn-sm btn-success">Done</button></form>
+            <form method="post" action="{% url 'core:follow_up_delete' fu.pk %}" data-mb-confirm="Remove this follow-up?">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}#relationship"><button type="submit" class="btn btn-sm btn-ghost-danger btn-icon" title="Remove">{% ticon 'trash' 'icon-sm' %}</button></form>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card-body"><div class="empty py-2"><p class="empty-title">Nothing planned</p><p class="empty-subtitle text-secondary">A thank-you, a satisfaction check, a promised call: plan it here and it shows on the Board when it is due.</p></div></div>
+    {% endif %}
+    {% if done_follow_ups %}
+    <div class="card-footer text-secondary small">Recent: {% for fu in done_follow_ups %}{{ fu.get_kind_display }} {{ fu.done_at|date:"M j" }}{% if not forloop.last %}, {% endif %}{% endfor %}</div>
+    {% endif %}
+</div>

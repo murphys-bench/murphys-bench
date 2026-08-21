@@ -2730,7 +2730,11 @@ class EmailTemplate(models.Model):
         ('ticket_resolved', 'Ticket Resolved'),
     ]
 
-    trigger = models.CharField(max_length=30, choices=TRIGGER_CHOICES, unique=True)
+    # Event templates carry a trigger and are sent by code. Custom templates
+    # (Mike, Aug 21 2026: "what if I want 5, or 8?") carry a name instead and
+    # are sent by a person from a Work Record or Client Hub, or by a follow-up.
+    trigger = models.CharField(max_length=30, choices=TRIGGER_CHOICES, unique=True, null=True, blank=True)
+    name = models.CharField(max_length=100, blank=True, help_text='Custom templates only; event templates are named by their event.')
     subject_template = models.CharField(
         max_length=255,
         help_text='Django template syntax. Variables: {{ ticket.ticket_number }}, {{ ticket.subject }}, {{ customer_name }}, {{ client.name }}, {{ contact.first_name }}, {{ status }}, {{ tech_name }}',
@@ -2751,10 +2755,85 @@ class EmailTemplate(models.Model):
 
     class Meta:
         db_table = 'email_templates'
-        ordering = ['trigger']
+        ordering = ['trigger', 'name']
+
+    @property
+    def is_custom(self):
+        return not self.trigger
+
+    @property
+    def label(self):
+        return self.name if self.is_custom else self.get_trigger_display()
 
     def __str__(self):
-        return f'{self.get_trigger_display()}'
+        return self.label
+
+
+class FollowUpQuerySet(models.QuerySet):
+    def open(self):
+        return self.filter(done_at__isnull=True)
+
+    def due(self):
+        from django.utils import timezone
+        return self.open().filter(due_on__lte=timezone.localdate())
+
+
+class FollowUp(models.Model):
+    """A planned touch with a customer or prospect: a thank-you, a satisfaction
+    check, a promised call-back. The Relationship Desk's unit of work. Lives on
+    the Board while due, on the Follow-ups list always, and is done when the
+    person says so (or when its email goes out)."""
+
+    KIND_CHOICES = [
+        ('thank_you', 'Thank-you'),
+        ('satisfaction', 'Satisfaction check'),
+        ('planned', 'Planned touch'),
+        ('other', 'Other'),
+    ]
+
+    client = models.ForeignKey('Client', on_delete=models.CASCADE, null=True, blank=True, related_name='follow_ups')
+    prospect = models.ForeignKey('Prospect', on_delete=models.CASCADE, null=True, blank=True, related_name='follow_ups')
+    ticket = models.ForeignKey('Ticket', on_delete=models.SET_NULL, null=True, blank=True, related_name='follow_ups')
+    work_order = models.ForeignKey('WorkOrder', on_delete=models.SET_NULL, null=True, blank=True, related_name='follow_ups')
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default='planned')
+    note = models.TextField(blank=True)
+    due_on = models.DateField(db_index=True)
+    template = models.ForeignKey('EmailTemplate', on_delete=models.SET_NULL, null=True, blank=True, related_name='follow_ups',
+                                 help_text='Email to send when this follow-up is carried out.')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='follow_ups_created')
+    created_at = models.DateTimeField(auto_now_add=True)
+    done_at = models.DateTimeField(null=True, blank=True)
+    done_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='follow_ups_done')
+
+    objects = FollowUpQuerySet.as_manager()
+
+    class Meta:
+        db_table = 'follow_ups'
+        ordering = ['due_on', 'created_at']
+
+    @property
+    def who(self):
+        return self.client or self.prospect
+
+    @property
+    def who_name(self):
+        if self.client_id:
+            return self.client.name
+        if self.prospect_id:
+            return self.prospect.display_name
+        return ''
+
+    @property
+    def is_overdue(self):
+        from django.utils import timezone
+        return self.done_at is None and self.due_on < timezone.localdate()
+
+    @property
+    def record(self):
+        return self.work_order or self.ticket
+
+    def __str__(self):
+        return f'{self.get_kind_display()} for {self.who_name} on {self.due_on}'
 
 
 class BlockedSender(models.Model):

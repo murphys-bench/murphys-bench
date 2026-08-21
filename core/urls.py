@@ -63,6 +63,12 @@ urlpatterns = [
     path('prospects/<int:pk>/mark-lost/', views.ProspectMarkLostView.as_view(), name='prospect_mark_lost'),
     path('prospects/<int:pk>/delete/', views.ProspectDeleteView.as_view(), name='prospect_delete'),
 
+    path('follow-ups/', views.FollowUpListView.as_view(), name='follow_up_list'),
+    path('follow-ups/new/', views.FollowUpCreateView.as_view(), name='follow_up_create'),
+    path('follow-ups/<int:pk>/done/', views.FollowUpDoneView.as_view(), name='follow_up_done'),
+    path('follow-ups/<int:pk>/delete/', views.FollowUpDeleteView.as_view(), name='follow_up_delete'),
+    path('email/customer/', views.CustomerEmailView.as_view(), name='customer_email'),
+
     path('estimates/', views.EstimateListView.as_view(), name='estimate_list'),
     path('estimates/new/', views.EstimateCreateView.as_view(), name='estimate_create'),
     path('estimates/<int:pk>/', views.EstimateDetailView.as_view(), name='estimate_detail'),
@@ -260,6 +266,8 @@ urlpatterns = [
 
     # Settings — Email Templates
     path('settings/email-templates/<int:pk>/edit/', views.EmailTemplateUpdateView.as_view(), name='email_template_update'),
+    path('settings/email-templates/new/', views.EmailTemplateCreateView.as_view(), name='email_template_create'),
+    path('settings/email-templates/<int:pk>/delete/', views.EmailTemplateDeleteView.as_view(), name='email_template_delete'),
     path('settings/email-branding/save/', views.EmailBrandingUpdateView.as_view(), name='email_branding_save'),
 
     # Settings — Email Signatures
