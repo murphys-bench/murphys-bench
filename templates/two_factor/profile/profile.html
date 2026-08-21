@@ -1,9 +1,12 @@
-{% extends "two_factor/_base.html" %}
+{% extends "core/base_tabler.html" %}
+{% block room %}office{% endblock %}
 {% load i18n two_factor_tags mb_tabler %}
 {% block title %}Account Security - Murphy's Bench{% endblock %}
-{% block page_title %}Account Security{% endblock %}
+{% block page_header %}
+<div class="page-header d-print-none"><div class="container-fluid"><div class="row g-2 align-items-center"><div class="col"><div class="page-pretitle">Back Office</div><h2 class="page-title">Account Security</h2></div></div></div></div>
+{% endblock %}
 {% block content %}
-<div class="row justify-content-center"><div class="col-12 col-lg-7">
+<div class="row g-3"><div class="col-12 col-lg-3 col-xl-2">{% include "core/partials/settings_nav.html" %}</div><div class="col-12 col-lg-9 col-xl-10">
     <div class="card mb-3">
         <div class="card-header"><h3 class="card-title">Two-factor authentication</h3></div>
         <div class="card-body">

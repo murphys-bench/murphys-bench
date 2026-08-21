@@ -182,6 +182,19 @@
             if (ev.target.closest('[data-mb-print-page]')) window.print();
         });
 
+        // Text size (Settings > Display): a per-browser root font size; every
+        // Tabler measure is in rem, so the whole UI scales together.
+        document.querySelectorAll('[data-mb-text-size]').forEach(function (sel) {
+            var cur = '';
+            try { cur = localStorage.getItem('mb_text_size') || ''; } catch (e) {}
+            sel.value = cur || '16';
+            sel.addEventListener('change', function () {
+                var v = sel.value;
+                try { if (v === '16') localStorage.removeItem('mb_text_size'); else localStorage.setItem('mb_text_size', v); } catch (e) {}
+                el.style.fontSize = v === '16' ? '' : v + 'px';
+            });
+        });
+
         // Repeating rows: <button data-mb-add-row="#tpl-id" data-mb-add-row-into="#list-id">
         // clones the <template> into the list; [data-mb-remove-row] removes its row.
         document.addEventListener('click', function (ev) {

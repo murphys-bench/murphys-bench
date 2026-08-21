@@ -10,6 +10,8 @@
         } else {
             el.setAttribute('data-bs-theme', 'light');
         }
+        var size = localStorage.getItem('mb_text_size');
+        if (size && /^1[4-9]$|^20$/.test(size)) el.style.fontSize = size + 'px';
         if (localStorage.getItem('mb_nav_collapsed') === 'true') {
             el.setAttribute('data-sidebar-collapsed', 'true');
         }

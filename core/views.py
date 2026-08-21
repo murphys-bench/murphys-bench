@@ -9137,6 +9137,13 @@ class _AdminOnlyTwoFactorMixin:
 class AdminOnlyProfileView(_AdminOnlyTwoFactorMixin, TwoFactorProfileView):
     """Account Security (admin). Employees are sent to MySecurityView."""
 
+    def get_context_data(self, **kwargs):
+        # It lives in the Settings sidebar, so it carries the Settings sidebar.
+        ctx = super().get_context_data(**kwargs)
+        ctx['active_tab'] = 'account_security'
+        ctx['tab_groups'] = _grouped_settings_nav('account_security')
+        return ctx
+
 
 class AdminOnlyDisableView(_AdminOnlyTwoFactorMixin, TwoFactorDisableView):
     """Turning 2FA off is an administrative act, never self-service."""

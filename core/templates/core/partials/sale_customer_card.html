@@ -6,7 +6,7 @@ view re-renders this partial with hx-swap outerHTML, so the id stays.
 {% endcomment %}
 {% load mb_tabler %}
 <div class="card" id="sale-customer-card">
-    <div class="card-header"><h3 class="card-title">{% ticon 'user' 'icon-sm' %} Customer</h3></div>
+    <div class="card-header"><h3 class="card-title">{% ticon 'user' 'icon-sm' %} Customer{% if not sale.is_locked %} <span class="text-secondary fw-normal">(optional)</span>{% endif %}</h3></div>
     <div class="card-body">
     {% if sale.is_locked %}
         <div class="row g-3">
@@ -16,7 +16,7 @@ view re-renders this partial with hx-swap outerHTML, so the id stays.
         </div>
     {% else %}
         <div class="row g-3">
-            <div class="col-md-8"><label class="form-label">Customer</label>{{ sale_form.client|tabler_input }}<div class="form-hint">Leave blank for an anonymous walk-in cash sale. Saves automatically.</div></div>
+            <div class="col-md-8"><label class="form-label">Customer</label>{{ sale_form.client|tabler_input }}<div class="form-hint">Leave blank for a walk-in cash sale; no customer record is made. Saves automatically.</div></div>
             <div class="col-md-4"><div class="form-label">Added</div>{{ sale.created_at|date:"M j, Y" }}</div>
             <div class="col-12"><label class="form-label">Notes</label>{{ sale_form.notes|tabler_input }}</div>
         </div>

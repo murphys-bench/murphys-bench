@@ -17,19 +17,7 @@
 {% block content %}
 <div class="row g-3">
     <div class="col-12 col-lg-3 col-xl-2">
-        <div class="card">
-            {% for group_label, group_tabs, group_active in tab_groups %}
-            <button type="button" class="list-group-item list-group-item-action subheader d-flex align-items-center border-bottom-0" data-bs-toggle="collapse" data-bs-target="#stg-{{ forloop.counter }}" aria-expanded="{{ group_active|yesno:'true,false' }}" data-mb-group="stg-{{ forloop.counter }}">{{ group_label }}<span class="ms-auto">{% ticon 'chevron-down' 'icon-sm' %}</span></button>
-            <div class="collapse {% if group_active %}show{% endif %} list-group list-group-flush border-bottom" id="stg-{{ forloop.counter }}">
-                {% for key, label in group_tabs %}
-                {% if key == 'account_security' %}<a href="{% url 'two_factor:profile' %}" class="list-group-item list-group-item-action">{{ label }}</a>
-                {% elif key == 'users' %}<a href="{% url 'core:user_list' %}" class="list-group-item list-group-item-action">{{ label }}</a>
-                {% elif key == 'roles' %}<a href="{% url 'core:role_list' %}" class="list-group-item list-group-item-action">{{ label }}</a>
-                {% else %}<a href="?tab={{ key }}" class="list-group-item list-group-item-action {% if active_tab == key %}active{% endif %}">{{ label }}</a>{% endif %}
-                {% endfor %}
-            </div>
-            {% endfor %}
-        </div>
+        {% include "core/partials/settings_nav.html" %}
     </div>
     <div class="col-12 col-lg-9 col-xl-10">
         {% with "core/settings/"|add:active_tab|add:".html" as tab_template %}{% include tab_template %}{% endwith %}

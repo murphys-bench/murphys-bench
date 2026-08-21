@@ -1,8 +1,14 @@
 {% load mb_tabler %}
 <div class="card">
-    <div class="card-header"><div><h3 class="card-title">Display</h3><div class="card-subtitle">Per-browser appearance.</div></div></div>
+    <div class="card-header"><div><h3 class="card-title">Display</h3><div class="card-subtitle">Stored in this browser only; other users and devices are not affected.</div></div></div>
     <div class="card-body">
-        <p>Dark mode is the toggle at the bottom of the sidebar; it is remembered in this browser only. The sidebar itself collapses with the control at its top.</p>
-        <p class="text-secondary mb-0">The old text-size and table-density knobs belonged to the previous frame and do nothing here, so they are not offered.</p>
+        <div class="mb-3" style="max-width: 20rem;">
+            <label class="form-label">Text size</label>
+            <select class="form-select" data-mb-text-size>
+                <option value="14">Smaller (14 px)</option><option value="15">Small (15 px)</option><option value="16">Default (16 px)</option><option value="17">Large (17 px)</option><option value="18">Larger (18 px)</option><option value="20">Largest (20 px)</option>
+            </select>
+            <div class="form-hint">Scales the whole screen, sidebar included. Takes effect as soon as you pick it.</div>
+        </div>
+        <p class="text-secondary mb-0">Dark mode is the toggle at the bottom of the sidebar.</p>
     </div>
 </div>
