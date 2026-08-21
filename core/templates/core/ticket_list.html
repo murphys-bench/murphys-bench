@@ -70,13 +70,12 @@
             <td class="text-truncate" style="max-width: 16rem;">
                 <a href="{% url 'core:ticket_detail' ticket.pk %}" class="text-reset fw-medium">{{ ticket.client.name }}</a>
                 {% if ticket.client.is_unsorted %}<span class="badge bg-indigo-lt ms-1">Needs triage</span>
-                {% elif ticket.managed_now or ticket.client.is_managed %}<span class="badge bg-blue-lt ms-1">Managed</span>
                 {% elif ticket.client.client_type == 'business' %}<span class="badge bg-azure-lt ms-1">Business</span>
                 {% else %}<span class="badge bg-secondary-lt ms-1">Residential</span>{% endif %}
             </td>
             <td class="text-truncate" style="max-width: 28rem;">
                 <a href="{% url 'core:ticket_detail' ticket.pk %}" class="text-reset d-block text-truncate {% if ticket.needs_response %}fw-bold{% endif %}">
-                    {% if ticket.priority == 'urgent' or ticket.priority == 'high' %}<span class="text-orange" title="{{ ticket.get_priority_display }}">{% ticon 'alert-triangle' 'icon-sm' %}</span>{% endif %}
+                    {% if ticket.priority == 'urgent' or ticket.priority == 'high' %}<span class="text-orange small fw-medium">{% ticon 'alert-triangle' 'icon-sm' %} {{ ticket.get_priority_display }}</span>{% endif %}
                     {{ ticket.subject }}
                 </a>
                 <div class="text-secondary small">

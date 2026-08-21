@@ -38,8 +38,7 @@
         <tr>
             <td>
                 <a href="{% url 'core:client_detail' client.pk %}" class="text-reset fw-medium">{{ client.name }}</a>
-                {% if client.is_managed %}<span class="badge bg-blue-lt ms-1">Managed</span>
-                {% elif client.client_type == 'business' %}<span class="badge bg-azure-lt ms-1">Business</span>
+                {% if client.client_type == 'business' %}<span class="badge bg-azure-lt ms-1">Business</span>
                 {% else %}<span class="badge bg-secondary-lt ms-1">Residential</span>{% endif %}
                 {% if not client.is_active %}<span class="badge bg-secondary-lt ms-1">Inactive</span>{% endif %}
             </td>

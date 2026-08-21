@@ -587,16 +587,6 @@ def _board_order(qs):
     ).order_by('_prio', '_biz', 'created_at')
 
 
-def _annotate_standing(qs):
-    """Managed / Business / Residential, read off the client (standing belongs to
-    the actor, ruled Aug 6). Managed = an active Service Agreement, or the
-    legacy is_managed flag until that migration lands."""
-    from django.db.models import Exists, OuterRef
-    return qs.annotate(
-        managed_now=Exists(Contract.objects.filter(client_id=OuterRef('client_id'), status='active')),
-    )
-
-
 class BoardView(LoginRequiredMixin, View):
     template_name = 'core/board.html'
     REGION_CAP = 40
@@ -663,8 +653,8 @@ class BoardView(LoginRequiredMixin, View):
                  'empty': 'Nothing invoiced is unpaid'},
             ]
 
-        tickets = list(_board_order(_annotate_standing(open_tickets))[:self.REGION_CAP])
-        wos = list(_board_order(_annotate_standing(open_wos))[:self.REGION_CAP])
+        tickets = list(_board_order(open_tickets)[:self.REGION_CAP])
+        wos = list(_board_order(open_wos)[:self.REGION_CAP])
         context = {
             'is_admin': is_admin,
             'tiles': tiles,
@@ -741,7 +731,7 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
                 Q(client__name__icontains=search)
             )
 
-        return _annotate_standing(queryset.select_related('invoice')).order_by('-created_at')
+        return queryset.select_related('invoice').order_by('-created_at')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -3688,7 +3678,7 @@ class TicketListView(LoginRequiredMixin, ListView):
                 Q(client__name__icontains=search)
             )
 
-        return _annotate_standing(queryset).order_by('-created_at')
+        return queryset.order_by('-created_at')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)

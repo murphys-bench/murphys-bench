@@ -14062,7 +14062,7 @@ def test_ticket_priority_renders_on_list_and_detail(client, client_obj, admin_us
     assert listing.status_code == 200
     # On the Tabler worklist priority is an ICON with the level as its title (color
     # means status, never priority: design rules section 5), not a column.
-    assert b'title="Urgent"' in listing.content and b'tabler-alert-triangle' in listing.content
+    assert b'tabler-alert-triangle' in listing.content and b'Urgent' in listing.content
 
 
 def test_t2_selections_unknown_line_warns_but_neutral_lines_do_not(caplog):

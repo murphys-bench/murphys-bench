@@ -64,13 +64,12 @@
         <tr class="mb-stripe" style="--mb-stripe: var(--mb-status-workorder-{{ wo.status }}, var(--tblr-secondary));">
             <td class="text-truncate" style="max-width: 16rem;">
                 <a href="{% url 'core:work_order_detail' wo.pk %}" class="text-reset fw-medium">{% if wo.client %}{{ wo.client.name }}{% else %}Walk-in{% endif %}</a>
-                {% if wo.client %}{% if wo.managed_now or wo.client.is_managed %}<span class="badge bg-blue-lt ms-1">Managed</span>
-                {% elif wo.client.client_type == 'business' %}<span class="badge bg-azure-lt ms-1">Business</span>
+                {% if wo.client %}{% if wo.client.client_type == 'business' %}<span class="badge bg-azure-lt ms-1">Business</span>
                 {% else %}<span class="badge bg-secondary-lt ms-1">Residential</span>{% endif %}{% endif %}
             </td>
             <td class="text-truncate" style="max-width: 28rem;">
                 <a href="{% url 'core:work_order_detail' wo.pk %}" class="text-reset d-block text-truncate">
-                    {% if wo.priority == 'urgent' or wo.priority == 'high' %}<span class="text-orange" title="{{ wo.get_priority_display }}">{% ticon 'alert-triangle' 'icon-sm' %}</span>{% endif %}
+                    {% if wo.priority == 'urgent' or wo.priority == 'high' %}<span class="text-orange small fw-medium">{% ticon 'alert-triangle' 'icon-sm' %} {{ wo.get_priority_display }}</span>{% endif %}
                     {% if wo.reported_problem %}{{ wo.reported_problem|truncatechars:80 }}{% elif wo.repair_type %}{{ wo.repair_type }}{% else %}{{ wo.work_order_number }}{% endif %}
                 </a>
                 <div class="text-secondary small">
