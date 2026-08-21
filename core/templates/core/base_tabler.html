@@ -84,72 +84,23 @@
                         </a>
                     </li>
 
-                                        <li class="nav-item mt-2 mb-room-group">
-                        <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-work" aria-expanded="true" aria-controls="mb-grp-work" data-mb-group="mb-grp-work">
-                            <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-work, var(--tblr-primary));"></span>
-                            <span class="mb-when-expanded">Work</span>
-                            <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
-                        </button>
-                        <ul class="navbar-nav collapse show" id="mb-grp-work">
-                    <li class="nav-item {% if u and 'ticket' in u %}active{% endif %}">
-                        <a class="nav-link" href="{% url 'core:ticket_list' %}" title="Tickets">
-                            <span class="nav-link-icon">{% ticon 'ticket' %}</span>
-                            <span class="nav-link-title">Tickets</span>
-                        </a>
-                    </li>
-                    <li class="nav-item {% if u and 'work_order' in u %}active{% endif %}">
-                        <a class="nav-link" href="{% url 'core:work_order_list' %}" title="Work Orders">
-                            <span class="nav-link-icon">{% ticon 'tool' %}</span>
-                            <span class="nav-link-title">Work Orders</span>
-                        </a>
-                    </li>
-                    {% if can_view_estimates %}
-                    <li class="nav-item {% if u and 'estimate' in u %}active{% endif %}">
-                        <a class="nav-link" href="{% url 'core:estimate_list' %}" title="Estimates">
-                            <span class="nav-link-icon">{% ticon 'file-text' %}</span>
-                            <span class="nav-link-title">Estimates</span>
-                        </a>
-                    </li>
-                    {% endif %}
-                    <li class="nav-item {% if u and 'mileage' in u %}active{% endif %}">
-                        <a class="nav-link" href="{% url 'core:mileage_list' %}" title="Mileage">
-                            <span class="nav-link-icon">{% ticon 'map-pin' %}</span>
-                            <span class="nav-link-title">Mileage</span>
-                        </a>
-                    </li>
-                    <li class="nav-item {% if u and 'device' in u %}active{% endif %}">
-                        <a class="nav-link" href="{% url 'core:device_list' %}" title="Devices">
-                            <span class="nav-link-icon">{% ticon 'device-laptop' %}</span>
-                            <span class="nav-link-title">Devices</span>
-                        </a>
-                    </li>
-
+                    
+                    {% if can_view_prospects or is_admin %}
                                             </ul>
                     </li>
                     <li class="nav-item mt-2 mb-room-group">
-                        <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-clients" aria-expanded="true" aria-controls="mb-grp-clients" data-mb-group="mb-grp-clients">
-                            <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-work, var(--tblr-primary));"></span>
-                            <span class="mb-when-expanded">Clients</span>
+                        <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-desk" aria-expanded="true" aria-controls="mb-grp-desk" data-mb-group="mb-grp-desk">
+                            <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-desk, var(--tblr-primary));"></span>
+                            <span class="mb-when-expanded">Desk</span>
                             <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
                         </button>
-                        <ul class="navbar-nav collapse show" id="mb-grp-clients">
+                        <ul class="navbar-nav collapse show" id="mb-grp-desk">
                     <li class="nav-item {% if u and 'client' in u %}active{% endif %}">
                         <a class="nav-link" href="{% url 'core:client_list' %}" title="Clients">
                             <span class="nav-link-icon">{% ticon 'users' %}</span>
                             <span class="nav-link-title">Clients</span>
                         </a>
                     </li>
-
-                    {% if can_view_prospects or is_admin %}
-                                            </ul>
-                    </li>
-                    <li class="nav-item mt-2 mb-room-group">
-                        <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-relationship-desk" aria-expanded="true" aria-controls="mb-grp-relationship-desk" data-mb-group="mb-grp-relationship-desk">
-                            <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-desk, var(--tblr-primary));"></span>
-                            <span class="mb-when-expanded">Relationship Desk</span>
-                            <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
-                        </button>
-                        <ul class="navbar-nav collapse show" id="mb-grp-relationship-desk">
                     {% if can_view_prospects %}
                     <li class="nav-item {% if u and 'prospect' in u %}active{% endif %}">
                         <a class="nav-link" href="{% url 'core:prospect_list' %}" title="Prospects">
@@ -165,7 +116,6 @@
                             <span class="nav-link-title">Contracts</span>
                         </a>
                     </li>
-                    {% endif %}
                     {% endif %}
 
                     {% if can_view_sales %}

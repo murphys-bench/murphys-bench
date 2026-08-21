@@ -14296,7 +14296,7 @@ def test_tabler_frame_renders_chrome_for_signed_in_user():
     assert 'alpine' not in body.lower()
     assert 'css/app.' not in body                          # Tailwind never loads on a Tabler page (hashed name on prod)
     assert '<body data-room="work"' in body
-    for heading in ('Work', 'Clients', 'Relationship Desk', 'Register', 'Back Office'):
+    for heading in ('Work', 'Desk', 'Register', 'Back Office'):
         assert heading in body
     assert 'data-mb-toggle="theme"' in body and 'data-mb-toggle="sidebar"' in body
     assert 'dropdown-toggle' in body and '>New<' in body.replace('</span>', '<')  # the front door
