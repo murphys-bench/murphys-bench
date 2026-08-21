@@ -645,9 +645,9 @@ def test_reply_form_defaults(client, client_obj, admin_user):
     t = Ticket.objects.create(client=client_obj, subject='form', description='d', assigned_to=admin_user)
     client.force_login(admin_user)
     body = client.get(f'/tickets/{t.pk}/').content
-    assert b"replyType: 'customer_visible'" in body   # Customer Visible is the default
+    assert b'value="customer_visible" class="form-check-input" checked' in body   # to-client is the default
     assert b'name="cc_mode"' in body                  # BCC/CC selector present
-    assert b'rows="8"' in body                         # larger reply box
+    assert b'rows="6"' in body                         # a real reply box, not a one-liner
     assert b'mb_draft_' in body                        # draft autosave wired
 
 
@@ -2280,12 +2280,11 @@ def test_wo_notes_have_order_toggle_defaulting_newest_first(client, client_obj, 
     client.force_login(admin_user)
     body = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
     # localStorage-backed preference with a newest-first default
-    assert "mb_wo_notes_order" in body
-    assert "'newest'" in body
-    # the reverse-on-newest binding drives the visual order without touching DOM/HTMX swap
-    assert "flex-col-reverse" in body
+    assert 'data-mb-order-toggle="#notes-list"' in body     # the toggle, wired by mb-record.js
+    # newest-first is the rendered default: reverse column order, DOM/HTMX swap untouched
+    assert 'id="notes-list" class="d-flex flex-column-reverse' in body
     # a user-facing toggle exists
-    assert 'Newest first' in body and 'Oldest first' in body
+    assert 'Newest first' in body
 
 
 @pytest.mark.django_db
@@ -9010,10 +9009,12 @@ def test_ticket_time_spent_shown_in_details_card_not_timer(client, client_obj, a
 
     resp = client.get(reverse('core:ticket_detail', args=[ticket.pk]))
     content = resp.content.decode()
+    # On the Work Record the time total lives in the Request section, above the
+    # Timer section; the timer logs to the ticket when there is no work order.
     details_idx = content.index('id="ticket-time-spent-wrapper"')
-    timer_idx = content.index('>Timer<')
-    assert details_idx < timer_idx, 'Time Spent must appear before the Timer card (i.e. inside Details)'
-    assert 'Time Spent' in content
+    timer_idx = content.index('data-mb-timer="ticket_timer_')
+    assert details_idx < timer_idx
+    assert 'Time on ticket' in content and '15m' in content
 
 
 # ── Ticket/WO detail layout standardization + shared Device card ────────────
@@ -9034,10 +9035,9 @@ def test_ticket_detail_shows_device_card_with_notes_collapsed(client, client_obj
     content = resp.content.decode()
     assert resp.status_code == 200
     assert 'Cindis-Mac-mini' in content
-    assert 'Device Notes' in content
     assert '8GB RAM, slow boot' in content
-    # Retired standalone Device Notes card / old sidebar Details accordion
-    assert content.count('Device Notes') == 1
+    # One device block on the record, not a card per phase.
+    assert content.count('8GB RAM, slow boot') == 1
 
 
 @pytest.mark.django_db
@@ -9050,7 +9050,6 @@ def test_wo_detail_shows_device_card_with_notes(client, client_obj, admin_user):
     content = resp.content.decode()
     assert resp.status_code == 200
     assert 'Dell Laptop' in content
-    assert 'Device Notes' in content
     assert 'Battery swollen' in content
 
 
@@ -12358,10 +12357,12 @@ def test_converted_ticket_offers_a_route_to_its_work_order(client, admin_user, c
     wo = ticket.work_order_created
 
     body = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
-    assert f'Go to {wo.work_order_number}' in body
+    # The work order is ON the ticket's page now (one Work Record), and the
+    # bar links to the WO route as well.
+    assert wo.work_order_number in body
     assert reverse('core:work_order_detail', args=[wo.pk]) in body
     # And it must not offer a second conversion.
-    assert 'Convert to Work Order</a>' not in body
+    assert 'Convert to Work Order' not in body
 
     # A second attempt at the convert view is refused, on the work order's
     # existence rather than on the status string.
@@ -13345,10 +13346,10 @@ def test_the_ui_still_offers_everything_to_a_role_that_may_use_it(client, client
     wb = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
 
     assert 'Convert to Work Order' in tb
-    assert 'dismissOpen = !dismissOpen' in tb
-    assert 'tk-timer-log-form' in tb
-    assert 'Apply Checklist' in wb
-    assert '+ Custom' in wb
+    assert 'id="dismiss-response"' in tb
+    assert 'data-mb-timer="ticket_timer_' in tb
+    assert 'Apply checklist' in wb
+    assert 'Custom line' in wb
     assert '/check/' in wb, 'the checklist dropdowns must be offered to a role that may use them'
 
 
@@ -14344,3 +14345,42 @@ def test_every_worklist_renders_on_the_tabler_frame():
         assert 'tabler.min' in body and 'css/app.' not in body, name
         assert 'page-title' in body, name
         assert 'data-mb-confirm' in body or 'btn-outline-danger' not in body, f'{name}: a destructive button without the confirm modal'
+
+
+@pytest.mark.django_db
+def test_work_record_is_one_page_for_ticket_and_work_order(client, client_obj, admin_user):
+    """Batch 3: /tickets/<pk>/ and /work-orders/<pk>/ render the same Work Record.
+    A ticket with no WO shows the work-order section present but empty with
+    convert-in-place; once converted, both routes show both phases."""
+    client.force_login(admin_user)
+    t = Ticket.objects.create(client=client_obj, subject='Record subject', description='D', created_by=admin_user)
+    tb = client.get(reverse('core:ticket_detail', args=[t.pk])).content.decode()
+    assert 'tabler.min' in tb and 'css/app.' not in tb
+    for section in ('>Who<', '>Request<', 'Conversation', 'Work order', 'Timer', 'Attachments &amp; related'):
+        assert section in tb, section
+    assert 'No work order yet' in tb and 'Convert to Work Order' in tb
+    assert 'Owner / Device' in tb and 'Work Item' in tb and '>Print<' in tb and '>Email<' in tb   # the bar
+    assert 'id="status-control"' in tb and 'ticket_status_update' not in tb or 'name="status"' in tb
+
+    client.post(reverse('core:ticket_convert', args=[t.pk]), {})
+    t.refresh_from_db()
+    wo = t.work_order_created
+    assert wo is not None
+    tb = client.get(reverse('core:ticket_detail', args=[t.pk])).content.decode()
+    wb = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
+    for body in (tb, wb):
+        assert 'Record subject' in body and wo.work_order_number in body
+        assert 'Work performed' in body and 'Bench notes' in body and 'Settlement' in body
+        assert 'Message Bench Tech' in body and 'Message Ticket Tech' in body
+        assert 'No work order yet' not in body
+    assert 'alpine' not in tb.lower() and 'onclick=' not in tb and 'onsubmit=' not in tb
+
+
+@pytest.mark.django_db
+def test_work_record_thread_carries_status_events(client, client_obj, admin_user):
+    """Status changes appear IN the conversation as dated events (ruled Aug 18)."""
+    client.force_login(admin_user)
+    t = Ticket.objects.create(client=client_obj, subject='S', description='D', status='open')
+    client.post(reverse('core:ticket_status_update', args=[t.pk]), {'status': 'in_progress'})
+    body = client.get(reverse('core:ticket_detail', args=[t.pk])).content.decode()
+    assert 'Status open &rarr; in_progress' in body or 'Status open → in_progress' in body

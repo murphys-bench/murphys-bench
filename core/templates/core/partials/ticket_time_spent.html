@@ -1,6 +1,1 @@
-<span id="ticket-time-spent-display" class="font-semibold text-gray-900">
-  {{ ticket.time_spent_display }}
-  {% if ticket.time_spent_minutes %}
-    <span class="text-xs font-normal text-gray-400">({{ ticket.time_spent_minutes }} min)</span>
-  {% endif %}
-</span>
+<span id="ticket-time-spent-display" class="fw-medium">{{ ticket.time_spent_display }}{% if ticket.time_spent_minutes %} <span class="text-secondary fw-normal">({{ ticket.time_spent_minutes }} min)</span>{% endif %}</span>

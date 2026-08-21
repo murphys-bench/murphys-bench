@@ -1,57 +1,26 @@
-{% load mb_icons %}
-{% if link_error %}
-<p class="text-sm text-red-600 mb-2">{{ link_error }}</p>
-{% endif %}
-
+{% load mb_tabler %}
+{% if link_error %}<div class="text-danger small mb-1">{{ link_error }}</div>{% endif %}
 {% if linked_tickets %}
-<ul class="space-y-2 mb-3">
+<ul class="list-unstyled mb-2">
     {% for item in linked_tickets %}
-    <li class="flex items-center justify-between text-sm">
-        <div>
-            <a href="{% url 'core:ticket_detail' item.ticket.pk %}" class="text-blue-600 hover:underline font-medium">
-                {{ item.ticket.ticket_number }}
-            </a>
-            <span class="text-gray-500 ml-1">{{ item.ticket.subject|truncatechars:30 }}</span>
-            {% status_badge item.ticket.status 'ticket' %}
-            <span class="ml-1 text-xs text-gray-400">({{ item.link_type }})</span>
-        </div>
-        <form x-show="manageLinks" x-cloak
-              hx-post="{% url 'core:ticket_link_remove' ticket.pk %}"
-              hx-target="#linked-tickets-section"
-              hx-swap="innerHTML">
-            {% csrf_token %}
-            <input type="hidden" name="link_id" value="{{ item.link_id }}">
-            <button type="submit" class="text-gray-300 hover:text-red-500 ml-2" title="Remove link">{% icon "x-mark" 4 %}</button>
+    <li class="d-flex align-items-center gap-2">
+        <a href="{% url 'core:ticket_detail' item.ticket.pk %}" class="font-monospace">{{ item.ticket.ticket_number }}</a>
+        <span class="text-truncate">{{ item.ticket.subject|truncatechars:40 }}</span>
+        <span class="status-dot ms-1" style="--tblr-status-color: var(--mb-status-ticket-{{ item.ticket.status }}, var(--tblr-secondary));"></span><span class="small">{{ item.ticket.status|status_word:'ticket' }}</span>
+        <span class="text-secondary small">({{ item.link_type }})</span>
+        <form hx-post="{% url 'core:ticket_link_remove' ticket.pk %}" hx-target="#linked-tickets-section" hx-swap="innerHTML" class="ms-auto">
+            {% csrf_token %}<input type="hidden" name="link_id" value="{{ item.link_id }}">
+            <button type="submit" class="btn btn-sm btn-ghost-secondary" title="Remove link">{% ticon 'x' 'icon-sm' %}</button>
         </form>
     </li>
     {% endfor %}
 </ul>
 {% else %}
-<p class="text-sm text-gray-400 mb-3">No linked tickets.</p>
+<div class="text-secondary mb-2">No linked tickets.</div>
 {% endif %}
-
-<!-- Link Ticket Form -->
-<form x-show="manageLinks" x-cloak
-      hx-post="{% url 'core:ticket_link_add' ticket.pk %}"
-      hx-target="#linked-tickets-section"
-      hx-swap="innerHTML"
-      hx-on:htmx:after-request="this.reset()"
-      class="space-y-2">
+<form hx-post="{% url 'core:ticket_link_add' ticket.pk %}" hx-target="#linked-tickets-section" hx-swap="innerHTML" class="input-group input-group-sm" data-mb-reset-after="">
     {% csrf_token %}
-    <input type="text"
-           name="ticket_number"
-           placeholder="Ticket number (e.g. TKT-...)"
-           class="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-           required>
-    <div class="flex gap-2">
-        <select name="link_type"
-                class="flex-1 text-xs border border-gray-300 rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <option value="related">Related</option>
-            <option value="duplicate">Duplicate</option>
-        </select>
-        <button type="submit"
-                class="px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded hover:bg-blue-700">
-            Link
-        </button>
-    </div>
+    <input type="text" name="ticket_number" class="form-control form-control-sm" placeholder="TKT-00000" required>
+    <select name="link_type" class="form-select form-select-sm" style="max-width: 8rem;"><option value="related">Related</option><option value="duplicate">Duplicate</option></select>
+    <button type="submit" class="btn btn-sm">Link</button>
 </form>

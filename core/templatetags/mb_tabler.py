@@ -26,37 +26,57 @@ SPRITE_PATH = f'vendor/tabler-icons/{SPRITE_VERSION}/mb-sprite.svg'
 # Every Tabler icon MB uses. Keep sorted; the sprite build reads this.
 ICONS = (
     'alert-triangle',
+    'arrow-up',
     'bell',
     'book',
     'building',
+    'calculator',
     'cash-register',
     'chart-bar',
     'check',
     'chevron-down',
+    'clipboard-check',
     'clock',
     'contract',
     'device-laptop',
+    'external-link',
+    'eye',
     'file-text',
     'filter',
     'heart-handshake',
+    'history',
     'home',
+    'key',
     'layout-sidebar-left-collapse',
     'layout-sidebar-left-expand',
+    'link',
     'lock',
     'logout',
     'mail',
     'map-pin',
     'menu-2',
+    'message-circle',
     'moon',
+    'notes',
+    'paperclip',
+    'pencil',
+    'player-pause',
+    'player-play',
     'plus',
+    'printer',
+    'refresh',
+    'send',
     'settings',
     'sun',
     'tag',
     'ticket',
     'tool',
+    'trash',
+    'upload',
     'user',
     'user-plus',
     'users',
+    'wallet',
     'x',
 )
 
@@ -126,3 +146,9 @@ def url_replace(context, **kwargs):
         else:
             q[k] = v
     return '?' + q.urlencode() if q else '?'
+
+
+@register.filter
+def checklist_pair(pre, post):
+    """Zip the two check columns for one loop body: [('pre_check', pre), ('post_check', post)]."""
+    return [('pre_check', pre), ('post_check', post)]

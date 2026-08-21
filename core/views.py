@@ -748,10 +748,85 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
         return context
 
 
+def _record_identity(ticket, wo):
+    """Who/what the record is about, resolved once so templates never do a
+    `|default:` across two objects that may each be None."""
+    return {
+        'record_client': ticket.client if ticket else (wo.client if wo else None),
+        'record_contact': (ticket.contact if ticket else None) or (wo.contact if wo else None),
+        'record_device': (wo.device if wo else None) or (ticket.device if ticket else None),
+    }
+
+
+def _wo_record_context(request, wo):
+    """Everything the Work Record needs to render the WORK ORDER phase."""
+    from django.utils import timezone
+    context = {}
+    # Days open
+    end = wo.completed_date.date() if wo.completed_date else timezone.now().date()
+    context['days_open'] = (end - wo.created_at.date()).days
+    context['wo_audit'] = _audit_entries(wo)
+    ct = ContentType.objects.get_for_model(WorkOrder)
+    context['wo_attachments'] = Attachment.objects.filter(content_type=ct, object_id=wo.pk)
+    # Linked ticket for overdue badge
+    context['linked_ticket'] = getattr(wo, 'ticket', None)
+    # Custom fields
+    fields = _get_custom_fields_for_workorder(wo)
+    context['wo_custom_fields'] = _custom_fields_with_values(fields, wo)
+    # Catalog picker (Products & Services) grouped by category, services first
+    context['catalog_by_category'] = _catalog_by_category()
+    context['wp_entries'] = _line_items_for(wo)
+    # Inline update form data
+    context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
+    context['all_repair_types'] = RepairType.objects.filter(is_active=True).order_by('name')
+    context['client_contacts'] = Contact.objects.filter(client=wo.client).order_by('last_name', 'first_name')
+    context['client_devices'] = Device.objects.filter(client=wo.client).order_by('name')
+    # Device credentials (single store on Device) — job context = this WO
+    if wo.device_id:
+        context.update(_device_cred_context(request.user, wo.device, work_order=wo))
+    # Open tickets for this client (cross-visibility panel)
+    linked_ticket_pk = getattr(wo.ticket, 'pk', None) if hasattr(wo, 'ticket') else None
+    open_tickets = (
+        Ticket.objects
+        .filter(client=wo.client)
+        .exclude(status__in=TICKET_CLOSED_STATUSES)
+        .select_related('created_by')
+        .prefetch_related('replies')
+        .order_by('-created_at')
+    )
+    if linked_ticket_pk:
+        open_tickets = open_tickets.exclude(pk=linked_ticket_pk)
+    context['client_open_tickets'] = open_tickets
+    checklist_items = list(wo.items.filter(item_type='checklist').order_by('created_at'))
+    context['checklist_items'] = checklist_items
+    context['checklist_checked_count'] = sum(1 for i in checklist_items if i.pre_check or i.post_check)
+    # Billing
+    invoice, _ = Invoice.objects.get_or_create(work_order=wo)
+    context['invoice'] = invoice
+    # Dynamic status choices for inline status dropdown. Statuses that finish a
+    # WO are dropped for a user without the close grant, so the dropdown cannot
+    # offer a move the server will refuse.
+    choices = list(
+        StatusDefinition.objects.filter(entity_type='workorder', is_active=True)
+        .order_by('sort_order').values_list('slug', 'label')
+    )
+    if not _can_close_workorder(request.user):
+        # The WO's CURRENT status always survives the filter even when it is a
+        # closing one. Dropping it would leave an already-completed WO showing
+        # some other status preselected, and the next save of an unrelated
+        # field would silently reopen it.
+        choices = [
+            c for c in choices
+            if c[0] not in WO_CLOSED_STATUSES or c[0] == wo.status
+        ]
+    context['wo_status_choices'] = choices
+    return context
+
+
 class WorkOrderDetailView(LoginRequiredMixin, DetailView):
     """Display full details of a single work order"""
     model = WorkOrder
-    template_name = 'core/work_order_detail.html'
+    template_name = 'core/work_record.html'
     context_object_name = 'work_order'
 
     def get_queryset(self):
@@ -762,67 +837,18 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         return _scope_assignable_for(qs, self.request.user)
 
     def get_context_data(self, **kwargs):
-        from django.utils import timezone
         context = super().get_context_data(**kwargs)
         wo = self.object
-        # Days open
-        end = wo.completed_date.date() if wo.completed_date else timezone.now().date()
-        context['days_open'] = (end - wo.created_at.date()).days
-        context['audit_log'] = _audit_entries(self.object)
-        ct = ContentType.objects.get_for_model(WorkOrder)
-        context['wo_attachments'] = Attachment.objects.filter(content_type=ct, object_id=self.object.pk)
-        # Linked ticket for overdue badge
-        context['linked_ticket'] = getattr(self.object, 'ticket', None)
-        # Custom fields
-        fields = _get_custom_fields_for_workorder(self.object)
-        context['custom_field_values'] = _custom_fields_with_values(fields, self.object)
-        # Catalog picker (Products & Services) grouped by category, services first
-        context['catalog_by_category'] = _catalog_by_category()
-        context['wp_entries'] = _line_items_for(self.object)
-        # Inline update form data
-        context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
-        context['all_repair_types'] = RepairType.objects.filter(is_active=True).order_by('name')
-        context['client_contacts'] = Contact.objects.filter(client=wo.client).order_by('last_name', 'first_name')
-        context['client_devices'] = Device.objects.filter(client=wo.client).order_by('name')
-        # Device credentials (single store on Device) — job context = this WO
-        if wo.device_id:
-            context.update(_device_cred_context(self.request.user, wo.device, work_order=wo))
-        # Open tickets for this client (cross-visibility panel)
-        linked_ticket_pk = getattr(self.object.ticket, 'pk', None) if hasattr(self.object, 'ticket') else None
-        open_tickets = (
-            Ticket.objects
-            .filter(client=wo.client)
-            .exclude(status__in=TICKET_CLOSED_STATUSES)
-            .select_related('created_by')
-            .prefetch_related('replies')
-            .order_by('-created_at')
-        )
-        if linked_ticket_pk:
-            open_tickets = open_tickets.exclude(pk=linked_ticket_pk)
-        context['client_open_tickets'] = open_tickets
-        checklist_items = list(self.object.items.filter(item_type='checklist').order_by('created_at'))
-        context['checklist_items'] = checklist_items
-        context['checklist_checked_count'] = sum(1 for i in checklist_items if i.pre_check or i.post_check)
-        # Billing
-        invoice, _ = Invoice.objects.get_or_create(work_order=self.object)
-        context['invoice'] = invoice
-        # Dynamic status choices for inline status dropdown. Statuses that finish a
-        # WO are dropped for a user without the close grant, so the dropdown cannot
-        # offer a move the server will refuse.
-        choices = list(
-            StatusDefinition.objects.filter(entity_type='workorder', is_active=True)
-            .order_by('sort_order').values_list('slug', 'label')
-        )
-        if not _can_close_workorder(self.request.user):
-            # The WO's CURRENT status always survives the filter even when it is a
-            # closing one. Dropping it would leave an already-completed WO showing
-            # some other status preselected, and the next save of an unrelated
-            # field would silently reopen it.
-            choices = [
-                c for c in choices
-                if c[0] not in WO_CLOSED_STATUSES or c[0] == self.object.status
-            ]
-        context['wo_status_choices'] = choices
+        context.update(_wo_record_context(self.request, wo))
+        ticket = getattr(wo, 'ticket', None)
+        context['ticket'] = ticket
+        if ticket:
+            context.update(_ticket_record_context(self.request, ticket))
+            # Job context for credentials is the work order when one exists.
+            if wo.device_id:
+                context.update(_device_cred_context(self.request.user, wo.device, work_order=wo))
+        context['record_kind'] = 'work_order'
+        context.update(_record_identity(ticket, wo))
         return context
 
 
@@ -3695,9 +3721,81 @@ class TicketListView(LoginRequiredMixin, ListView):
         return context
 
 
+def _ticket_record_context(request, ticket):
+    """Everything the Work Record needs to render the TICKET phase. Shared by the
+    ticket route and the work-order route (a converted ticket and its WO are one
+    page, ruled Aug 20 2026)."""
+    context = {}
+    # Determine lock warning state
+    try:
+        lock = ticket.lock
+        if not lock.is_expired() and lock.locked_by != request.user:
+            context['lock_user'] = lock.locked_by
+    except TicketLock.DoesNotExist:
+        pass
+    # WO dependency context
+    wo = getattr(ticket, 'work_order_created', None)
+    if wo:
+        context['linked_wo'] = wo
+        context['wo_is_open'] = wo.status not in WO_CLOSED_STATUSES
+    # Linked tickets
+    context['linked_tickets'] = ticket.get_linked_tickets()
+    # Device credentials (single store on Device) — job context = this ticket
+    if ticket.device_id:
+        context.update(_device_cred_context(request.user, ticket.device, ticket=ticket))
+    context['ticket_audit'] = _audit_entries(ticket)
+    # Ticket-level attachments
+    ct = ContentType.objects.get_for_model(Ticket)
+    context['ticket_attachments'] = Attachment.objects.filter(content_type=ct, object_id=ticket.pk)
+    # Custom fields
+    fields = _get_custom_fields_for_ticket(ticket)
+    context['ticket_custom_fields'] = _custom_fields_with_values(fields, ticket)
+    # Open WOs for this client (cross-visibility panel)
+    linked_wo_pk = wo.pk if wo else None
+    open_wos = (
+        WorkOrder.objects
+        .filter(client=ticket.client)
+        .exclude(status__in=WO_CLOSED_STATUSES)
+        .select_related('assigned_to', 'repair_type')
+        .prefetch_related('notes')
+        .order_by('-created_at')
+    )
+    if linked_wo_pk:
+        open_wos = open_wos.exclude(pk=linked_wo_pk)
+    context['client_open_wos'] = open_wos
+    context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
+    context['is_admin'] = _is_admin(request.user)
+    # The quick dropdown offers only statuses a person may set. 'Converted to
+    # Work Order' is set by TicketConvertView, never by hand: offered here it
+    # renamed the ticket, created nothing, and hid the button that converts.
+    #
+    # The ticket's OWN status is always included even when action-owned:
+    # without it a converted ticket has no matching <option>, the browser
+    # silently displays the first choice instead, and clicking Set moves the
+    # ticket out of 'converted' by accident. Present only when current, it
+    # renders selected and re-posting it is a no-op.
+    context['ticket_statuses'] = StatusDefinition.objects.filter(
+        entity_type='ticket', is_active=True,
+    ).filter(
+        Q(operator_selectable=True) | Q(slug=ticket.status)
+    ).order_by('sort_order')
+    # The thread: replies plus the status / priority / owner changes as dated
+    # events (ruled Aug 18: "the OSTicket way is fine"). Audit rows used to live
+    # in a log no page rendered.
+    events = []
+    for item in context['ticket_audit']:
+        changes = [c for c in item['changes'] if c['field'] in ('status', 'priority', 'assigned_to', 'escalation_level')]
+        if changes:
+            events.append({'is_event': True, 'created_at': item['entry'].timestamp,
+                           'actor': item['entry'].actor, 'changes': changes})
+    thread = [{'is_event': False, 'created_at': r.created_at, 'reply': r} for r in ticket.replies.all()]
+    context['thread'] = sorted(thread + events, key=lambda x: x['created_at'])
+    return context
+
+
 class TicketDetailView(LoginRequiredMixin, DetailView):
     model = Ticket
-    template_name = 'core/ticket_detail.html'
+    template_name = 'core/work_record.html'
     context_object_name = 'ticket'
 
     def get_queryset(self):
@@ -3726,59 +3824,13 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         ticket = self.object
-        # Determine lock warning state
-        try:
-            lock = ticket.lock
-            if not lock.is_expired() and lock.locked_by != self.request.user:
-                context['lock_user'] = lock.locked_by
-        except TicketLock.DoesNotExist:
-            pass
-        # WO dependency context
+        context.update(_ticket_record_context(self.request, ticket))
         wo = getattr(ticket, 'work_order_created', None)
+        context['work_order'] = wo
         if wo:
-            context['linked_wo'] = wo
-            context['wo_is_open'] = wo.status not in WO_CLOSED_STATUSES
-        # Linked tickets
-        context['linked_tickets'] = ticket.get_linked_tickets()
-        # Device credentials (single store on Device) — job context = this ticket
-        if ticket.device_id:
-            context.update(_device_cred_context(self.request.user, ticket.device, ticket=ticket))
-        context['audit_log'] = _audit_entries(ticket)
-        # Ticket-level attachments
-        ct = ContentType.objects.get_for_model(Ticket)
-        context['ticket_attachments'] = Attachment.objects.filter(content_type=ct, object_id=ticket.pk)
-        # Custom fields
-        fields = _get_custom_fields_for_ticket(ticket)
-        context['custom_field_values'] = _custom_fields_with_values(fields, ticket)
-        # Open WOs for this client (cross-visibility panel)
-        linked_wo_pk = wo.pk if wo else None
-        open_wos = (
-            WorkOrder.objects
-            .filter(client=ticket.client)
-            .exclude(status__in=WO_CLOSED_STATUSES)
-            .select_related('assigned_to', 'repair_type')
-            .prefetch_related('notes')
-            .order_by('-created_at')
-        )
-        if linked_wo_pk:
-            open_wos = open_wos.exclude(pk=linked_wo_pk)
-        context['client_open_wos'] = open_wos
-        context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
-        context['is_admin'] = _is_admin(self.request.user)
-        # The quick dropdown offers only statuses a person may set. 'Converted to
-        # Work Order' is set by TicketConvertView, never by hand: offered here it
-        # renamed the ticket, created nothing, and hid the button that converts.
-        #
-        # The ticket's OWN status is always included even when action-owned:
-        # without it a converted ticket has no matching <option>, the browser
-        # silently displays the first choice instead, and clicking Set moves the
-        # ticket out of 'converted' by accident. Present only when current, it
-        # renders selected and re-posting it is a no-op.
-        context['ticket_statuses'] = StatusDefinition.objects.filter(
-            entity_type='ticket', is_active=True,
-        ).filter(
-            Q(operator_selectable=True) | Q(slug=self.object.status)
-        ).order_by('sort_order')
+            context.update(_wo_record_context(self.request, wo))
+        context['record_kind'] = 'ticket'
+        context.update(_record_identity(ticket, wo))
         return context
 
 
