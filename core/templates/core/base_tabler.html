@@ -23,10 +23,10 @@
         :root {
             --tblr-primary: {{ s.color_accent|default:"#206bc4" }};
             --tblr-primary-rgb: {{ s.color_accent|hex_rgb }};
-            /* Room accents. Defaults now; per-shop fields arrive with the Register batch. */
-            --mb-room-register: #2fb344;
-            --mb-room-desk: #ae3ec9;
-            --mb-room-office: #6c7a91;
+            /* Room accents, per shop (Settings > Colors). */
+            --mb-room-register: {{ s.color_room_register|default:"#2fb344" }};
+            --mb-room-desk: {{ s.color_room_desk|default:"#ae3ec9" }};
+            --mb-room-office: {{ s.color_room_office|default:"#6c7a91" }};
             /* Status colors by slug: one variable per StatusDefinition, both entity types.
                Templates reference var(--mb-status-<entity>-<slug>); never a hex. */
             {% for sd in mb_status_defs %}--mb-status-{{ sd.entity_type }}-{{ sd.slug }}: {{ sd.color }};

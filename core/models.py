@@ -2536,6 +2536,11 @@ class SiteSettings(models.Model):
     color_status_cancelled   = models.CharField(max_length=7, default='#fee2e2', blank=True)  # red-100
 
     # Site logo (displayed in nav bar; separate from company_logo on reports)
+    # Room accents on the Tabler frame (ruled Aug 21 2026: per-shop adjustable).
+    # A room shows which room it is by looking different; these are the looks.
+    color_room_register = models.CharField(max_length=7, default='#2fb344', blank=True)
+    color_room_desk     = models.CharField(max_length=7, default='#ae3ec9', blank=True)
+    color_room_office   = models.CharField(max_length=7, default='#6c7a91', blank=True)
     site_logo = models.ImageField(
         upload_to='site/', blank=True, null=True,
         help_text='Logo shown in the nav bar. PNG or SVG recommended. Leave blank to show text.',

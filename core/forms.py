@@ -895,6 +895,7 @@ class ColorSettingsForm(forms.ModelForm):
         fields = [
             'site_logo', 'login_logo',
             'color_primary', 'color_nav_text', 'color_accent',
+            'color_room_register', 'color_room_desk', 'color_room_office',
             'color_sidebar_bg', 'color_sidebar_text',
             'color_page_bg', 'color_page_title', 'color_title_bar', 'color_section_header', 'color_section_header_text',
             'color_status_new', 'color_status_assigned', 'color_status_in_progress',
@@ -910,6 +911,7 @@ class ColorSettingsForm(forms.ModelForm):
         ]
         _hex_fields = [
             'color_primary', 'color_nav_text', 'color_accent',
+            'color_room_register', 'color_room_desk', 'color_room_office',
             'color_sidebar_bg', 'color_sidebar_text',
             'color_page_bg', 'color_page_title', 'color_title_bar', 'color_section_header', 'color_section_header_text',
             'color_status_new', 'color_status_assigned', 'color_status_in_progress',

@@ -7962,8 +7962,8 @@ def test_settings_colors_tab_offers_only_fields_the_frame_reads(client, admin_us
     resp = client.get('/settings/?tab=colors')
     assert resp.status_code == 200
     body = resp.content
-    assert b'Work order status colors' in body
-    assert b'colors-color_status_new' in body
+    assert b'colors-color_accent' in body and b'colors-color_room_register' in body
+    assert b'colors-color_status_new' not in body      # statuses are colored on the Statuses tab
     assert b'colors-color_dash_tickets_bg' not in body
     assert b'colors-color_primary' not in body
 
@@ -14584,3 +14584,14 @@ def test_work_record_offers_email_customer_and_plan_follow_up(client, admin_user
     EmailTemplate.objects.create(name='T', subject_template='{{ work_order.work_order_number }}', body_template='b')
     r = client.get(reverse('core:customer_email') + f'?work_order={wo.pk}&template={EmailTemplate.objects.get(name="T").pk}')
     assert wo.work_order_number.encode() in r.content
+
+
+@pytest.mark.django_db
+def test_room_colors_are_per_shop_and_reach_the_frame(client, admin_user):
+    from core.models import SiteSettings
+    client.force_login(admin_user)
+    r = client.post('/settings/', {'tab': 'colors', 'colors-color_room_register': '#112233', 'colors-color_room_desk': '', 'colors-color_room_office': '#445566', 'colors-color_accent': ''})
+    assert r.status_code == 302
+    s = SiteSettings.get(); assert s.color_room_register == '#112233' and s.color_room_office == '#445566'
+    body = client.get('/').content.decode()
+    assert '--mb-room-register: #112233;' in body and '--mb-room-desk: #ae3ec9;' in body and '--mb-room-office: #445566;' in body
