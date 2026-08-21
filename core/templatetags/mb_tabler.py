@@ -13,6 +13,7 @@ import logging
 import re
 
 from django import template
+from django.forms import widgets as fw
 from django.utils import timezone
 from django.templatetags.static import static
 from django.utils.safestring import mark_safe
@@ -38,12 +39,16 @@ ICONS = (
     'clipboard-check',
     'clock',
     'contract',
+    'device-desktop',
     'device-laptop',
+    'device-mobile',
+    'device-tablet',
     'external-link',
     'eye',
     'file-text',
     'filter',
     'heart-handshake',
+    'help',
     'history',
     'home',
     'key',
@@ -60,12 +65,14 @@ ICONS = (
     'notes',
     'paperclip',
     'pencil',
+    'phone',
     'player-pause',
     'player-play',
     'plus',
     'printer',
     'refresh',
     'send',
+    'server',
     'settings',
     'sun',
     'tag',
@@ -77,6 +84,7 @@ ICONS = (
     'user-plus',
     'users',
     'wallet',
+    'wifi',
     'x',
 )
 
@@ -152,3 +160,33 @@ def url_replace(context, **kwargs):
 def checklist_pair(pre, post):
     """Zip the two check columns for one loop body: [('pre_check', pre), ('post_check', post)]."""
     return [('pre_check', pre), ('post_check', post)]
+
+
+@register.filter
+def tabler_input(bound_field, extra=''):
+    """Render a form field with Tabler's input classes, whatever the form's own
+    widget attrs say. One filter instead of re-declaring every widget."""
+    w = bound_field.field.widget
+    if isinstance(w, fw.CheckboxInput):
+        base = 'form-check-input'
+    elif isinstance(w, (fw.RadioSelect, fw.CheckboxSelectMultiple)):
+        base = ''
+    elif isinstance(w, (fw.Select, fw.SelectMultiple)):
+        base = 'form-select'
+    else:
+        base = 'form-control'
+    attrs = {'class': f'{base} {extra}'.strip()} if base or extra else {}
+    return bound_field.as_widget(attrs=attrs)
+
+
+_DEVICE_ICONS = {
+    'laptop': 'device-laptop', 'desktop': 'device-desktop', 'server': 'server',
+    'mobile': 'device-mobile', 'tablet': 'device-tablet', 'printer': 'printer',
+    'wifi': 'wifi', 'question': 'help',
+}
+
+
+@register.filter
+def device_icon(heroicon_name):
+    """DeviceType.icon holds the old Heroicon name; map it to the Tabler sprite."""
+    return _DEVICE_ICONS.get(heroicon_name, 'device-laptop')

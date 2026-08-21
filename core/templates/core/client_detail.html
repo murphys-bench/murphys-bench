@@ -1,543 +1,260 @@
-{% extends "core/base.html" %}
-{% load mb_icons %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
+{% comment %}
+ARCHETYPE 4, THE CLIENT HUB. Who this is, their standing, what they own, what
+covers them, what is open, what they owe. Standing is the WORD: Client (active
+Service Agreement) or Customer. Standing crossings are offered in place (add an
+agreement). Every card present; empty states say something real.
+{% endcomment %}
 
 {% block title %}{{ client.name }} - Murphy's Bench{% endblock %}
+{% block room %}desk{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex items-center justify-between">
-        <div>
-            <a href="{% url 'core:client_list' %}" class="text-gray-400 hover:text-gray-600 text-sm">← Clients</a>
-            <h1 class="text-2xl font-bold text-gray-900 mt-1">{{ client.name }}</h1>
-            <div class="flex gap-2 mt-1">
-                {% if not client.is_active %}
-                    <span class="px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">Inactive</span>
-                {% endif %}
-                {% if client.client_type == 'business' %}
-                    <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-700">Business</span>
-                {% else %}
-                    <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700">Residential</span>
-                {% endif %}
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <div class="page-pretitle">{% if has_sa %}Client{% else %}Customer{% endif %}</div>
+                <h2 class="page-title">
+                    {{ client.name }}
+                    {% if client.client_type == 'business' %}<span class="badge bg-azure-lt ms-2">Business</span>{% else %}<span class="badge bg-secondary-lt ms-2">Residential</span>{% endif %}
+                    {% if not client.is_active %}<span class="badge bg-secondary-lt ms-1">Inactive</span>{% endif %}
+                </h2>
+                <div class="text-secondary">
+                    {% if client.phone %}{{ client.phone }}{% endif %}{% if client.email %}{% if client.phone %} &middot; {% endif %}{{ client.email }}{% endif %}
+                    {% if client.address_line1 %} &middot; {{ client.address_line1 }}{% if client.address_line2 %}, {{ client.address_line2 }}{% endif %}, {{ client.address_city }}{% if client.address_state %}, {{ client.address_state }}{% endif %} {{ client.address_zip }}{% endif %}
+                </div>
             </div>
-        </div>
-        <div class="flex gap-2">
-            {% include "core/partials/header_bell.html" %}
-            {% if can_create_workorder %}
-            <a href="{% url 'core:work_order_create' %}?client={{ client.pk }}"
-               class="px-4 py-2 bg-green-700 text-white rounded-md hover:bg-green-800 text-sm font-medium">+ Work Order</a>
-            {% endif %}
-            <a href="{% url 'core:client_edit' client.pk %}"
-               class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">Edit Client</a>
+            <div class="col-auto">
+                <div class="btn-group" role="group">
+                    {% if can_create_ticket %}<a href="{% url 'core:ticket_create' %}?client={{ client.pk }}" class="btn btn-primary">{% ticon 'plus' 'icon-sm' %} Ticket</a>{% endif %}
+                    {% if can_create_workorder %}<a href="{% url 'core:work_order_create' %}?client={{ client.pk }}" class="btn">{% ticon 'plus' 'icon-sm' %} Work order</a>{% endif %}
+                    <a href="{% url 'core:client_edit' client.pk %}" class="btn">Edit</a>
+                </div>
+                {% if outstanding_balance %}<div class="text-orange small mt-1 text-end">${{ outstanding_balance }} outstanding</div>{% endif %}
+            </div>
         </div>
     </div>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="space-y-6">
+<div class="row row-cards">
 
-    <!-- Account Info -->
-    <div class="bg-white rounded-lg shadow p-6">
-        <h2 class="text-base font-semibold text-gray-900 mb-4">Account Info</h2>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-            <div>
-                <dt class="text-xs font-medium text-gray-500 uppercase mb-1">Phone</dt>
-                <dd class="text-gray-900">{{ client.phone|default:"—" }}</dd>
+    {# ── Open work ──────────────────────────────────────────────────── #}
+    <div class="col-12 col-xl-6">
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">Open work</h3><span class="badge bg-blue-lt ms-2">{{ open_tickets|length|add:open_wos|length }}</span></div>
+            {% if open_tickets or open_wos %}
+            <div class="list-group list-group-flush">
+                {% for t in open_tickets %}
+                <a href="{% url 'core:ticket_detail' t.pk %}" class="list-group-item list-group-item-action mb-stripe" style="--mb-stripe: var(--mb-status-ticket-{{ t.status }}, var(--tblr-secondary));">
+                    <div class="row align-items-center g-2">
+                        <div class="col text-truncate"><span class="font-monospace">{{ t.ticket_number }}</span> &middot; {{ t.subject }}</div>
+                        <div class="col-auto small text-end"><span class="status-dot me-1" style="--tblr-status-color: var(--mb-status-ticket-{{ t.status }}, var(--tblr-secondary));"></span>{{ t.status|status_word:'ticket' }}<div class="text-secondary">{{ t.created_at|age_short }}</div></div>
+                    </div>
+                </a>
+                {% endfor %}
+                {% for w in open_wos %}
+                <a href="{% url 'core:work_order_detail' w.pk %}" class="list-group-item list-group-item-action mb-stripe" style="--mb-stripe: var(--mb-status-workorder-{{ w.status }}, var(--tblr-secondary));">
+                    <div class="row align-items-center g-2">
+                        <div class="col text-truncate"><span class="font-monospace">{{ w.work_order_number }}</span> &middot; {{ w.reported_problem|default:w.repair_type|default:""|truncatechars:70 }}</div>
+                        <div class="col-auto small text-end"><span class="status-dot me-1" style="--tblr-status-color: var(--mb-status-workorder-{{ w.status }}, var(--tblr-secondary));"></span>{{ w.status|status_word:'workorder' }}<div class="text-secondary">{{ w.created_at|age_short }}{% if w.line_items_total %} &middot; ${{ w.line_items_total|floatformat:2 }}{% endif %}</div></div>
+                    </div>
+                </a>
+                {% endfor %}
             </div>
-            <div>
-                <dt class="text-xs font-medium text-gray-500 uppercase mb-1">Email</dt>
-                <dd class="text-gray-900">{{ client.email|default:"—" }}</dd>
-            </div>
-            <div>
-                <dt class="text-xs font-medium text-gray-500 uppercase mb-1">Address</dt>
-                <dd class="text-gray-900">
-                    {% if client.address_line1 %}
-                        {{ client.address_line1 }}<br>
-                        {% if client.address_line2 %}{{ client.address_line2 }}<br>{% endif %}
-                        {{ client.address_city }}{% if client.address_state %}, {{ client.address_state }}{% endif %} {{ client.address_zip }}
-                    {% else %}—{% endif %}
-                </dd>
-            </div>
-            {% if client.notes %}
-            <div class="md:col-span-3">
-                <dt class="text-xs font-medium text-gray-500 uppercase mb-1">Notes</dt>
-                <dd class="text-gray-700 whitespace-pre-wrap">{{ client.notes }}</dd>
-            </div>
+            {% else %}
+            <div class="card-body"><div class="empty py-3"><p class="empty-title">Nothing open</p><p class="empty-subtitle text-secondary">No tickets or work orders in progress for {{ client.name }}.</p></div></div>
             {% endif %}
         </div>
     </div>
 
-    <!-- ── CONTACTS ────────────────────────────────────────────────── -->
-    <div class="bg-white rounded-lg shadow overflow-hidden" x-data="{ addingContact: false }">
-        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-            <h2 class="text-lg font-semibold text-gray-900">Contacts</h2>
-            <button @click="addingContact = !addingContact"
-                    class="text-sm text-blue-600 hover:underline">+ Add Contact</button>
-        </div>
-
-        <!-- Add Contact Form -->
-        <div x-show="addingContact" x-cloak class="px-6 py-4 bg-blue-50 border-b border-blue-200">
-            <h3 class="text-sm font-semibold text-gray-800 mb-3">New Contact</h3>
-            <form method="post" action="{% url 'core:contact_create' client.pk %}">
-                {% csrf_token %}
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-                    <div>
-                        <label class="block text-xs font-medium text-gray-600 mb-1">First Name <span class="text-red-500">*</span></label>
-                        <input type="text" name="first_name" required
-                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-600 mb-1">Last Name</label>
-                        <input type="text" name="last_name"
-                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-600 mb-1">Title</label>
-                        <input type="text" name="title"
-                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-600 mb-1">Email</label>
-                        <input type="email" name="email"
-                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500">
-                    </div>
-                </div>
-
-                <!-- Phone Numbers -->
-                <div class="mb-3" x-data="{ phones: [{number: '', type: 'cell', label: ''}] }">
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Phone Numbers</label>
-                    <template x-for="(phone, idx) in phones" :key="idx">
-                        <div class="flex gap-2 mb-1.5 items-center">
-                            <select name="phone_type" x-model="phone.type"
-                                    class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 w-24">
-                                <option value="cell">Cell</option>
-                                <option value="home">Home</option>
-                                <option value="work">Work</option>
-                                <option value="other">Other</option>
-                            </select>
-                            <input type="text" name="phone_number" x-model="phone.number"
-                                   placeholder="Number"
-                                   class="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500">
-                            <input type="text" name="phone_label" x-model="phone.label"
-                                   placeholder="Label (optional)"
-                                   class="w-36 px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500">
-                            <button type="button" @click="phones.splice(idx,1)"
-                                    x-show="phones.length > 1"
-                                    class="text-red-400 hover:text-red-600">{% icon "x-mark" 4 %}</button>
+    {# ── Service Agreements ────────────────────────────────────────── #}
+    <div class="col-12 col-xl-6">
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">Service Agreements</h3><span class="badge bg-blue-lt ms-2">{{ client.contracts.count }}</span>
+                <div class="card-actions"><a href="{% url 'core:contract_create' client.pk %}" class="btn btn-sm">{% ticon 'plus' 'icon-sm' %} Agreement</a></div></div>
+            {% if client.contracts.all %}
+            <div class="list-group list-group-flush">
+                {% for c in client.contracts.all %}
+                <div class="list-group-item">
+                    <div class="row align-items-center g-2">
+                        <div class="col">
+                            <a href="{% url 'core:contract_detail' c.pk %}" class="text-reset fw-medium">{{ c.title }}</a>
+                            <div class="text-secondary small">{{ c.contract_number }} &middot; {{ c.get_billing_cadence_display }}, invoice day {{ c.billing_day }} &middot; ${{ c.line_items_total|floatformat:2 }}{% if c.renewal_date %} &middot; renews {{ c.renewal_date|date:"M j, Y" }}{% endif %}</div>
                         </div>
-                    </template>
-                    <button type="button" @click="phones.push({number:'',type:'cell',label:''})"
-                            class="text-xs text-blue-600 hover:underline mt-1">+ Add Phone</button>
-                </div>
-
-                <div class="mb-3">
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Notes</label>
-                    <textarea name="notes" rows="2"
-                              class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></textarea>
-                </div>
-                <div class="flex items-center gap-4 mb-3">
-                    <label class="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
-                        <input type="checkbox" name="is_primary" value="1" class="rounded"> Primary Contact
-                    </label>
-                    <label class="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
-                        <input type="checkbox" name="receives_email" value="1" checked class="rounded"> Receives Email
-                    </label>
-                </div>
-                <div class="flex gap-2">
-                    <button type="submit"
-                            class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 font-medium">Save Contact</button>
-                    <button type="button" @click="addingContact = false"
-                            class="px-3 py-1.5 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300">Cancel</button>
-                </div>
-            </form>
-        </div>
-
-        <!-- Existing Contacts -->
-        {% if client.contacts.all %}
-            <div class="divide-y divide-gray-100">
-                {% for contact in client.contacts.all %}
-                    <div class="px-6 py-4" x-data="{ editing: false }">
-
-                        <!-- Display Mode -->
-                        <div x-show="!editing">
-                            <div class="flex items-start justify-between gap-4">
-                                <div class="flex-1 min-w-0">
-                                    <p class="text-sm font-semibold text-gray-900">
-                                        {{ contact.first_name }} {{ contact.last_name }}
-                                        {% if contact.is_primary %}
-                                            <span class="ml-1 px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded">Primary</span>
-                                        {% endif %}
-                                        {% if not contact.receives_email %}
-                                            <span class="ml-1 px-1.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-500 rounded">No Email</span>
-                                        {% endif %}
-                                    </p>
-                                    {% if contact.title %}<p class="text-xs text-gray-500 mt-0.5">{{ contact.title }}</p>{% endif %}
-                                    {% if contact.email %}<p class="text-sm text-gray-600 mt-1">{{ contact.email }}</p>{% endif %}
-                                    {% for phone in contact.phone_numbers.all %}
-                                        <p class="text-sm text-gray-600">
-                                            {{ phone.number }}
-                                            <span class="text-xs text-gray-400">
-                                                {% if phone.label %}{{ phone.label }}{% else %}{{ phone.get_phone_type_display }}{% endif %}
-                                            </span>
-                                        </p>
-                                    {% endfor %}
-                                    {% if contact.notes %}
-                                        <p class="text-xs text-gray-500 mt-1 italic">{{ contact.notes }}</p>
-                                    {% endif %}
-                                </div>
-                                <div class="flex flex-wrap gap-2 shrink-0">
-                                    {% if can_create_workorder %}
-                                    <a href="{% url 'core:work_order_create' %}?client={{ client.pk }}&contact={{ contact.pk }}"
-                                       class="px-2 py-1 text-xs bg-green-700 text-white rounded hover:bg-green-800 font-medium">+ WO</a>
-                                    {% endif %}
-                                    <button @click="editing = true"
-                                            class="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 font-medium">Edit</button>
-                                    {% if not contact.is_primary %}
-                                    <form method="post" action="{% url 'core:contact_set_primary' contact.pk %}" class="inline">
-                                        {% csrf_token %}
-                                        <button type="submit"
-                                                class="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 font-medium">Set Primary</button>
-                                    </form>
-                                    {% endif %}
-                                    <form method="post" action="{% url 'core:contact_delete' contact.pk %}" class="inline"
-                                          onsubmit="return confirm('Delete {{ contact.first_name }} {{ contact.last_name }}?')">
-                                        {% csrf_token %}
-                                        <button type="submit"
-                                                class="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium">Delete</button>
-                                    </form>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Edit Mode -->
-                        <div x-show="editing" x-cloak>
-                            <form method="post" action="{% url 'core:contact_edit' contact.pk %}">
+                        <div class="col-auto">
+                            {# Status settable in place (ruled Aug 20). #}
+                            <form method="post" action="{% url 'core:contract_status_update' c.pk %}" class="input-group input-group-sm">
                                 {% csrf_token %}
-                                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-                                    <div>
-                                        <label class="block text-xs font-medium text-gray-600 mb-1">First Name <span class="text-red-500">*</span></label>
-                                        <input type="text" name="first_name" value="{{ contact.first_name }}" required
-                                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500">
-                                    </div>
-                                    <div>
-                                        <label class="block text-xs font-medium text-gray-600 mb-1">Last Name</label>
-                                        <input type="text" name="last_name" value="{{ contact.last_name }}"
-                                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500">
-                                    </div>
-                                    <div>
-                                        <label class="block text-xs font-medium text-gray-600 mb-1">Title</label>
-                                        <input type="text" name="title" value="{{ contact.title }}"
-                                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500">
-                                    </div>
-                                    <div>
-                                        <label class="block text-xs font-medium text-gray-600 mb-1">Email</label>
-                                        <input type="email" name="email" value="{{ contact.email }}"
-                                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500">
-                                    </div>
-                                </div>
-
-                                <!-- Phone Numbers (edit) -->
-                                <div class="mb-3"
-                                     x-data="{ phones: [{% for p in contact.phone_numbers.all %}{number:'{{ p.number|escapejs }}', type:'{{ p.phone_type }}', label:'{{ p.label|escapejs }}'}{% if not forloop.last %},{% endif %}{% endfor %}{% if not contact.phone_numbers.all %}{number:'',type:'cell',label:''}{% endif %}] }">
-                                    <label class="block text-xs font-medium text-gray-600 mb-1">Phone Numbers</label>
-                                    <template x-for="(phone, idx) in phones" :key="idx">
-                                        <div class="flex gap-2 mb-1.5 items-center">
-                                            <select name="phone_type" x-model="phone.type"
-                                                    class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 w-24">
-                                                <option value="cell">Cell</option>
-                                                <option value="home">Home</option>
-                                                <option value="work">Work</option>
-                                                <option value="other">Other</option>
-                                            </select>
-                                            <input type="text" name="phone_number" x-model="phone.number"
-                                                   placeholder="Number"
-                                                   class="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500">
-                                            <input type="text" name="phone_label" x-model="phone.label"
-                                                   placeholder="Label (optional)"
-                                                   class="w-36 px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500">
-                                            <button type="button" @click="phones.splice(idx,1)"
-                                                    x-show="phones.length > 1"
-                                                    class="text-red-400 hover:text-red-600">{% icon "x-mark" 4 %}</button>
-                                        </div>
-                                    </template>
-                                    <button type="button" @click="phones.push({number:'',type:'cell',label:''})"
-                                            class="text-xs text-blue-600 hover:underline mt-1">+ Add Phone</button>
-                                </div>
-
-                                <div class="mb-3">
-                                    <label class="block text-xs font-medium text-gray-600 mb-1">Notes</label>
-                                    <textarea name="notes" rows="2"
-                                              class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500">{{ contact.notes }}</textarea>
-                                </div>
-                                <div class="flex items-center gap-4 mb-3">
-                                    <label class="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
-                                        <input type="checkbox" name="is_primary" value="1" {% if contact.is_primary %}checked{% endif %} class="rounded"> Primary Contact
-                                    </label>
-                                    <label class="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
-                                        <input type="checkbox" name="receives_email" value="1" {% if contact.receives_email %}checked{% endif %} class="rounded"> Receives Email
-                                    </label>
-                                </div>
-                                <div class="flex gap-2">
-                                    <button type="submit"
-                                            class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 font-medium">Save</button>
-                                    <button type="button" @click="editing = false"
-                                            class="px-3 py-1.5 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300">Cancel</button>
-                                </div>
+                                <span class="input-group-text"><span class="status-dot" style="--tblr-status-color: {% if c.status == 'active' %}var(--tblr-green){% elif c.status == 'draft' %}var(--tblr-secondary){% elif c.status == 'expired' %}var(--tblr-yellow){% else %}var(--tblr-red){% endif %};"></span></span>
+                                <select name="status" class="form-select form-select-sm">{% for val, label in c.STATUS_CHOICES %}<option value="{{ val }}" {% if c.status == val %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+                                <button type="submit" class="btn btn-sm">Set</button>
                             </form>
                         </div>
-
                     </div>
+                </div>
                 {% endfor %}
             </div>
-        {% else %}
-            <div class="px-6 py-6 text-center text-gray-400 text-sm">No contacts on file.</div>
-        {% endif %}
+            {% else %}
+            <div class="card-body"><div class="empty py-3"><p class="empty-title">No Service Agreement</p><p class="empty-subtitle text-secondary">{{ client.name }} is a retail customer. Adding an active agreement makes them a client.</p><div class="empty-action"><a href="{% url 'core:contract_create' client.pk %}" class="btn btn-primary btn-sm">Add an agreement</a></div></div></div>
+            {% endif %}
+        </div>
     </div>
 
-    <!-- ── DEVICES ─────────────────────────────────────────────────── -->
-    <div class="bg-white rounded-lg shadow overflow-hidden">
-        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-            <h2 class="text-lg font-semibold text-gray-900">Devices</h2>
-            <a href="{% url 'core:device_create' %}?client={{ client.pk }}&next={{ request.path }}"
-               class="text-sm text-blue-600 hover:underline">+ Add Device</a>
-        </div>
-        {% with devices=client.devices.all %}
-        {% if devices %}
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Device</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Serial #</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">OS</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned To</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">
-                    {% for device in devices %}
-                        <tr class="hover:bg-gray-50">
-                            <td class="px-6 py-3">
-                                <p class="text-sm font-medium text-gray-900">{{ device.name }}</p>
-                                {% if device.manufacturer or device.model %}
-                                    <p class="text-xs text-gray-500">{{ device.manufacturer }} {{ device.model }}</p>
-                                {% endif %}
-                            </td>
-                            <td class="px-6 py-3 text-sm text-gray-600">{{ device.type_label }}{% if device.contract %} <span class="ml-1 px-1.5 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded" title="Covered by {{ device.contract.contract_number }}">covered</span>{% endif %}</td>
-                            <td class="px-6 py-3 text-sm text-gray-600">{{ device.serial_number|default:"—" }}</td>
-                            <td class="px-6 py-3 text-sm text-gray-600">
-                                {% if device.os %}{{ device.get_os_display }}{% if device.os_version %} {{ device.os_version }}{% endif %}{% else %}—{% endif %}
-                            </td>
-                            <td class="px-6 py-3 text-sm text-gray-600">
-                                {% if device.assigned_contact %}{{ device.assigned_contact.first_name }} {{ device.assigned_contact.last_name }}{% else %}—{% endif %}
-                            </td>
-                            <td class="px-6 py-3">
-                                <div class="flex gap-2">
-                                    <a href="{% url 'core:device_detail' device.pk %}"
-                                       class="text-xs text-blue-600 hover:underline">View</a>
-                                    {% if can_create_workorder %}
-                                    <a href="{% url 'core:work_order_create' %}?device={{ device.pk }}&client={{ client.pk }}"
-                                       class="px-2 py-0.5 text-xs bg-green-700 text-white rounded hover:bg-green-800 font-medium">+ WO</a>
-                                    {% endif %}
-                                    {% if is_admin %}
-                                    {% with wo_count=device.work_orders.count %}
-                                    <form method="post" action="{% url 'core:device_delete' device.pk %}" class="inline"
-                                          onsubmit="return confirm('Delete device &quot;{{ device.name|escapejs }}&quot;?{% if wo_count %} It is linked to {{ wo_count }} work order(s); those records are kept but will no longer reference a device.{% endif %} This cannot be undone.');">
-                                        {% csrf_token %}
-                                        <button type="submit" class="text-xs text-red-600 hover:underline">Remove</button>
-                                    </form>
-                                    {% endwith %}
-                                    {% endif %}
-                                </div>
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        {% else %}
-            <div class="px-6 py-6 text-center text-gray-400 text-sm">No devices on file.</div>
-        {% endif %}
-        {% endwith %}
-    </div>
-
-    <!-- ── CONTRACTS (managed-client layer) ────────────────────────── -->
-    <div class="bg-white rounded-lg shadow overflow-hidden">
-        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-            <h2 class="text-lg font-semibold text-gray-900">Contracts</h2>
-            <a href="{% url 'core:contract_create' client.pk %}"
-               class="text-sm text-blue-600 hover:underline">+ New Contract</a>
-        </div>
-        {% with contracts=client.contracts.all %}
-        {% if contracts %}
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contract</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cadence</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Recurring</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">
-                    {% for contract in contracts %}
-                        <tr class="hover:bg-gray-50">
-                            <td class="px-6 py-3">
-                                <a href="{% url 'core:contract_detail' contract.pk %}" class="text-sm font-medium text-blue-600 hover:underline">{{ contract.contract_number }}</a>
-                                <p class="text-xs text-gray-500">{{ contract.title }}</p>
-                            </td>
-                            <td class="px-6 py-3 text-sm text-gray-600">{{ contract.get_billing_cadence_display }}</td>
-                            <td class="px-6 py-3 text-sm text-gray-700">${{ contract.line_items_total|floatformat:2 }}</td>
-                            <td class="px-6 py-3 text-sm">
-                                <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium
-                                    {% if contract.status == 'active' %}bg-green-100 text-green-800
-                                    {% elif contract.status == 'draft' %}bg-gray-100 text-gray-600
-                                    {% elif contract.status == 'expired' %}bg-yellow-100 text-yellow-800
-                                    {% else %}bg-red-100 text-red-700{% endif %}">{{ contract.get_status_display }}</span>
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        {% else %}
-            <div class="px-6 py-6 text-center text-gray-400 text-sm">No contracts — this is a retail customer. Add a contract to make it a managed client.</div>
-        {% endif %}
-        {% endwith %}
-    </div>
-
-
-    <!-- ── RECURRING MONTHLY CHARGES (managed clients) ─────────────── -->
-    {% if client.is_managed %}
-    <div class="bg-white rounded-lg shadow p-6" x-data="{ logOpen: false, customOpen: false }">
-        <div class="flex items-center justify-between mb-1">
-            <h2 class="text-lg font-semibold text-gray-900">Recurring monthly charges</h2>
-            <div class="flex gap-2">
-                <button type="button" @click="customOpen = !customOpen; if(customOpen) logOpen = false"
-                        class="text-xs px-2 py-1 rounded border" :class="customOpen ? 'bg-blue-600 text-white border-blue-600' : 'text-blue-600 border-blue-300 hover:bg-blue-50'">+ Custom</button>
-                {% if catalog_by_category %}
-                <button type="button" @click="logOpen = !logOpen; if(logOpen) customOpen = false"
-                        class="text-xs px-2 py-1 rounded border" :class="logOpen ? 'bg-gray-700 text-white border-gray-700' : 'text-gray-600 border-gray-300 hover:bg-gray-50'">+ Catalog</button>
-                {% endif %}
-            </div>
-        </div>
-        <p class="text-xs text-gray-500 mb-3">Set once — these lines are copied into each month's draft invoice on the Monthly Clients page. Handles one service, several services, or per-machine quantities with negotiated pricing.</p>
-
-        <!-- Custom entry -->
-        <div x-show="customOpen" x-cloak class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-100">
-            <form method="post" action="{% url 'core:client_recurring_custom' client.pk %}"
-                  hx-post="{% url 'core:client_recurring_custom' client.pk %}" hx-target="#client-recurring-section" hx-swap="innerHTML"
-                  hx-on:htmx:after-request="if(event.detail.successful){this.reset(); customOpen = false;}" class="space-y-2">
-                {% csrf_token %}
-                <div class="flex gap-2">
-                    <select name="kind" class="text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                        <option value="labor">Service</option>
-                        <option value="part">Product</option>
-                    </select>
-                    <input type="text" name="custom_label" placeholder="Service name…" required
-                           class="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                </div>
-                <textarea name="notes" rows="2" placeholder="Details (optional)"
-                          class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"></textarea>
-                <div class="flex gap-2">
-                    <label class="flex-1"><span class="block text-xs text-gray-400 mb-0.5">Qty</span>
-                        <input type="number" name="quantity" value="1" min="0" step="0.01"
-                               class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"></label>
-                    <label class="flex-1"><span class="block text-xs text-gray-400 mb-0.5">Unit price ($)</span>
-                        <input type="number" name="unit_price" min="0" step="0.01" placeholder="optional"
-                               class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"></label>
-                </div>
-                <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Add</button>
-            </form>
-        </div>
-
-        <!-- Catalog buttons -->
-        <div x-show="logOpen" x-cloak class="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
-            {% for category, items in catalog_by_category.items %}
-            <div class="mb-3 last:mb-0">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">{{ category }}</p>
-                <div class="flex flex-wrap gap-1.5">
-                    {% for item in items %}
-                    <form method="post" action="{% url 'core:client_recurring_log' client.pk item.pk %}"
-                          hx-post="{% url 'core:client_recurring_log' client.pk item.pk %}" hx-target="#client-recurring-section" hx-swap="innerHTML" class="inline">
+    {# ── Contacts ─────────────────────────────────────────────────── #}
+    <div class="col-12 col-xl-6">
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">Contacts</h3><span class="badge bg-blue-lt ms-2">{{ client.contacts.count }}</span>
+                <div class="card-actions"><button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#contact-new">{% ticon 'plus' 'icon-sm' %} Contact</button></div></div>
+            <div class="collapse border-bottom" id="contact-new">
+                <div class="card-body">
+                    <form method="post" action="{% url 'core:contact_create' client.pk %}">
                         {% csrf_token %}
-                        <button type="submit" class="px-2.5 py-1 text-xs bg-white text-gray-700 rounded border border-gray-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 transition-colors">{{ item.name }}</button>
+                        {% include "core/partials/contact_fields.html" with contact=None %}
+                        <button type="submit" class="btn btn-primary btn-sm mt-2">Save contact</button>
                     </form>
-                    {% endfor %}
                 </div>
             </div>
-            {% endfor %}
+            {% if client.contacts.all %}
+            <div class="list-group list-group-flush">
+                {% for contact in client.contacts.all %}
+                <div class="list-group-item">
+                    <div class="row align-items-center g-2">
+                        <div class="col">
+                            <span class="fw-medium">{{ contact.first_name }} {{ contact.last_name }}</span>
+                            {% if contact.is_primary %}<span class="badge bg-blue-lt ms-1">Primary</span>{% endif %}
+                            {% if not contact.receives_email %}<span class="badge bg-secondary-lt ms-1">No email</span>{% endif %}
+                            {% if contact.title %}<span class="text-secondary ms-1">{{ contact.title }}</span>{% endif %}
+                            <div class="text-secondary small">{% if contact.email %}{{ contact.email }}{% endif %}{% for phone in contact.phone_numbers.all %} &middot; {{ phone.number }} <span class="text-secondary">({% if phone.label %}{{ phone.label }}{% else %}{{ phone.get_phone_type_display }}{% endif %})</span>{% endfor %}</div>
+                            {% if contact.notes %}<div class="small">{{ contact.notes }}</div>{% endif %}
+                        </div>
+                        <div class="col-auto text-nowrap">
+                            {% if can_create_workorder %}<a href="{% url 'core:work_order_create' %}?client={{ client.pk }}&contact={{ contact.pk }}" class="btn btn-sm">Work order</a>{% endif %}
+                            <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#contact-edit-{{ contact.pk }}">Edit</button>
+                            {% if not contact.is_primary %}<form method="post" action="{% url 'core:contact_set_primary' contact.pk %}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-sm">Make primary</button></form>{% endif %}
+                            <form method="post" action="{% url 'core:contact_delete' contact.pk %}" class="d-inline" data-mb-confirm="Delete {{ contact.first_name }} {{ contact.last_name }}?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Delete</button></form>
+                        </div>
+                    </div>
+                    <div class="collapse mt-2" id="contact-edit-{{ contact.pk }}">
+                        <form method="post" action="{% url 'core:contact_edit' contact.pk %}">
+                            {% csrf_token %}
+                            {% include "core/partials/contact_fields.html" with contact=contact %}
+                            <button type="submit" class="btn btn-primary btn-sm mt-2">Save</button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="card-body"><div class="empty py-3"><p class="empty-title">No contacts on file</p><p class="empty-subtitle text-secondary">Replies go to the contact on the ticket; add the person you talk to.</p></div></div>
+            {% endif %}
         </div>
+    </div>
 
-        <div id="client-recurring-section">
-            {% include "core/partials/client_recurring_lines.html" with entries=recurring_entries client=client %}
+    {# ── Devices ──────────────────────────────────────────────────── #}
+    <div class="col-12 col-xl-6">
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">Devices</h3><span class="badge bg-blue-lt ms-2">{{ client.devices.count }}</span>
+                <div class="card-actions"><a href="{% url 'core:device_create' %}?client={{ client.pk }}&next={{ request.path }}" class="btn btn-sm">{% ticon 'plus' 'icon-sm' %} Device</a></div></div>
+            {% with devices=client.devices.all %}
+            {% if devices %}
+            <div class="table-responsive">
+            <table class="table table-vcenter card-table table-sm">
+                <thead><tr><th>Device</th><th>Serial</th><th>Whose</th><th>Covered</th><th></th></tr></thead>
+                <tbody>
+                    {% for d in devices %}
+                    <tr class="{% if not d.is_active %}opacity-50{% endif %}">
+                        <td><a href="{% url 'core:device_detail' d.pk %}" class="text-reset fw-medium">{{ d.name }}</a><div class="text-secondary small">{{ d.type_label }}{% if d.manufacturer or d.model %} &middot; {{ d.manufacturer }} {{ d.model }}{% endif %}{% if d.os %} &middot; {{ d.get_os_display }}{% endif %}</div></td>
+                        <td class="font-monospace small">{{ d.serial_number|default:"" }}</td>
+                        <td>{% if d.assigned_contact %}{{ d.assigned_contact.first_name }} {{ d.assigned_contact.last_name }}{% endif %}</td>
+                        <td>{% if d.contract %}<a href="{% url 'core:contract_detail' d.contract.pk %}" class="badge bg-green-lt" title="covered by {{ d.contract.title }}">{{ d.contract.contract_number }}</a>{% else %}<span class="text-secondary small">not covered</span>{% endif %}</td>
+                        <td class="text-end text-nowrap">
+                            {% if can_create_workorder %}<a href="{% url 'core:work_order_create' %}?device={{ d.pk }}&client={{ client.pk }}" class="btn btn-sm">Work order</a>{% endif %}
+                            {% if is_admin %}<form method="post" action="{% url 'core:device_delete' d.pk %}" class="d-inline" data-mb-confirm="Delete {{ d.name }}?{% with n=d.work_orders.count %}{% if n %} It is on {{ n }} work order{{ n|pluralize }}; those records are kept without a device.{% endif %}{% endwith %} This cannot be undone.">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Remove</button></form>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </div>
+            {% else %}
+            <div class="card-body"><div class="empty py-3"><p class="empty-title">No devices on file</p><p class="empty-subtitle text-secondary">Every machine that comes through the door gets a record here.</p></div></div>
+            {% endif %}
+            {% endwith %}
+        </div>
+    </div>
+
+    {# ── Legacy recurring lines (client-level; retire with the merge migration) ── #}
+    {% if client.is_managed %}
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">Recurring monthly charges (legacy, client-level)</h3>
+                <div class="card-actions">
+                    <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#rec-custom">{% ticon 'plus' 'icon-sm' %} Custom line</button>
+                    {% if catalog_by_category %}<button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#rec-catalog">{% ticon 'tag' 'icon-sm' %} From catalog</button>{% endif %}
+                </div></div>
+            <div class="card-body">
+                <div class="text-secondary small mb-2">Copied into each month's draft on the Monthly Clients page. These move under the Service Agreement when Recurring Invoices lands.</div>
+                <form class="collapse mb-3" id="rec-custom" method="post" action="{% url 'core:client_recurring_custom' client.pk %}" hx-post="{% url 'core:client_recurring_custom' client.pk %}" hx-target="#client-recurring-section" hx-swap="innerHTML" data-mb-reset-after="#rec-custom">
+                    {% csrf_token %}
+                    <div class="row g-2">
+                        <div class="col-md-2"><select name="kind" class="form-select form-select-sm"><option value="labor">Service</option><option value="part">Product</option></select></div>
+                        <div class="col-md-5"><input type="text" name="custom_label" class="form-control form-control-sm" placeholder="Service name" required></div>
+                        <div class="col-md-2"><input type="number" name="quantity" value="1" min="0" step="0.01" class="form-control form-control-sm"></div>
+                        <div class="col-md-2"><input type="number" name="unit_price" min="0" step="0.01" class="form-control form-control-sm" placeholder="Unit $"></div>
+                        <div class="col-md-1"><button type="submit" class="btn btn-sm btn-primary w-100">Add</button></div>
+                        <div class="col-12"><input type="text" name="notes" class="form-control form-control-sm" placeholder="Details (optional)"></div>
+                    </div>
+                </form>
+                <div class="collapse mb-3" id="rec-catalog">
+                    {% for category, items in catalog_by_category.items %}
+                    <div class="mb-2"><div class="subheader">{{ category }}</div><div class="d-flex flex-wrap gap-1">
+                        {% for item in items %}<form method="post" action="{% url 'core:client_recurring_log' client.pk item.pk %}" hx-post="{% url 'core:client_recurring_log' client.pk item.pk %}" hx-target="#client-recurring-section" hx-swap="innerHTML">{% csrf_token %}<button type="submit" class="btn btn-sm">{{ item.name }}</button></form>{% endfor %}
+                    </div></div>
+                    {% endfor %}
+                </div>
+                <div id="client-recurring-section">{% include "core/partials/client_recurring_lines.html" with entries=recurring_entries client=client %}</div>
+            </div>
         </div>
     </div>
     {% endif %}
 
-    <!-- ── WORK ORDER HISTORY ──────────────────────────────────────── -->
-    <div class="bg-white rounded-lg shadow overflow-hidden">
-        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-            <div class="flex items-center gap-3">
-                <h2 class="text-lg font-semibold text-gray-900">Work Order History</h2>
-                {% if outstanding_balance %}
-                <span class="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-700 font-medium">
-                    ${{ outstanding_balance }} outstanding
-                </span>
-                {% endif %}
-            </div>
-            <div class="flex items-center gap-3">
-                <a href="{% url 'core:client_invoice_export' client.pk %}"
-                   class="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1"
-                   title="Export invoices as CSV">
-                    {% icon "arrow-down-tray" 4 %}
-                    CSV
-                </a>
-                {% if can_create_workorder %}
-                <a href="{% url 'core:work_order_create' %}?client={{ client.pk }}"
-                   class="text-sm text-blue-600 hover:underline">+ New WO</a>
-                {% endif %}
-            </div>
-        </div>
-        {% with work_orders=client.work_orders.all %}
-        {% if work_orders %}
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">WO #</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Device</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Opened</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned To</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">
+    {# ── History ──────────────────────────────────────────────────── #}
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">Work history</h3><span class="badge bg-blue-lt ms-2">{{ client.work_orders.count }}</span>
+                <div class="card-actions"><a href="{% url 'core:client_invoice_export' client.pk %}" class="btn btn-sm" title="Export invoices as CSV">CSV</a></div></div>
+            {% with work_orders=client.work_orders.all %}
+            {% if work_orders %}
+            <div class="table-responsive">
+            <table class="table table-vcenter card-table table-sm">
+                <thead><tr><th>Work order</th><th>Status</th><th>Device</th><th>Tech</th><th class="text-end">Money</th><th class="text-end">Opened</th></tr></thead>
+                <tbody>
                     {% for wo in work_orders %}
-                        <tr class="hover:bg-gray-50 cursor-pointer" onclick="window.location='{% url 'core:work_order_detail' wo.pk %}'">
-                            <td class="px-6 py-3 text-sm font-medium text-blue-600">
-                                <a href="{% url 'core:work_order_detail' wo.pk %}">{{ wo.work_order_number }}</a>
-                            </td>
-                            <td class="px-6 py-3">
-                                {% status_badge wo.status 'workorder' %}
-                            </td>
-                            <td class="px-6 py-3 text-sm text-gray-600">
-                                {% if wo.contact %}{{ wo.contact.first_name }} {{ wo.contact.last_name }}{% else %}—{% endif %}
-                            </td>
-                            <td class="px-6 py-3 text-sm text-gray-600">
-                                {{ wo.device.name|default:"—" }}
-                            </td>
-                            <td class="px-6 py-3 text-sm text-gray-600">{{ wo.created_at|date:"M d, Y" }}</td>
-                            <td class="px-6 py-3 text-sm text-gray-600">
-                                {{ wo.assigned_to.get_full_name|default:"Unassigned" }}
-                            </td>
-                        </tr>
+                    <tr class="mb-stripe" style="--mb-stripe: var(--mb-status-workorder-{{ wo.status }}, var(--tblr-secondary));">
+                        <td><a href="{% url 'core:work_order_detail' wo.pk %}" class="text-reset fw-medium">{{ wo.work_order_number }}</a><div class="text-secondary small text-truncate" style="max-width: 24rem;">{{ wo.reported_problem|default:wo.repair_type|default:"" }}</div></td>
+                        <td class="text-nowrap"><span class="status-dot me-1" style="--tblr-status-color: var(--mb-status-workorder-{{ wo.status }}, var(--tblr-secondary));"></span>{{ wo.status|status_word:'workorder' }}</td>
+                        <td>{{ wo.device.name|default:"" }}</td>
+                        <td>{{ wo.assigned_to.get_full_name|default:"" }}</td>
+                        <td class="text-end text-nowrap">{% if wo.line_items_total %}${{ wo.line_items_total|floatformat:2 }}{% endif %}{% if wo.invoice and wo.invoice.billing_status != 'uninvoiced' %}<div class="text-secondary small">{{ wo.invoice.get_billing_status_display }}</div>{% endif %}</td>
+                        <td class="text-end text-nowrap text-secondary">{{ wo.created_at|date:"M j, Y" }}</td>
+                    </tr>
                     {% endfor %}
                 </tbody>
             </table>
-        {% else %}
-            <div class="px-6 py-8 text-center text-gray-400 text-sm">No work orders yet.</div>
-        {% endif %}
-        {% endwith %}
+            </div>
+            {% else %}
+            <div class="card-body"><div class="empty py-3"><p class="empty-title">No work orders yet</p><p class="empty-subtitle text-secondary">The first job for {{ client.name }} will show here.</p></div></div>
+            {% endif %}
+            {% endwith %}
+        </div>
     </div>
 
+    {% if client.notes %}
+    <div class="col-12"><div class="card"><div class="card-header"><h3 class="card-title">Notes</h3></div><div class="card-body" style="white-space: pre-wrap;">{{ client.notes }}</div></div></div>
+    {% endif %}
 </div>
 {% endblock %}

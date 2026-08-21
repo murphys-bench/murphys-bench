@@ -1151,6 +1151,13 @@ class ClientDetailView(LoginRequiredMixin, DetailView):
             amount__isnull=False,
         ).aggregate(total=Sum('amount'))['total']
         context['outstanding_balance'] = outstanding
+        # Standing is the word: Client (active Service Agreement) or Customer.
+        context['has_sa'] = self.object.is_managed or self.object.contracts.filter(status='active').exists()
+        context['open_tickets'] = (_scope_tickets_for(Ticket.objects.filter(client=self.object), self.request.user)
+                                   .exclude(status__in=TICKET_CLOSED_STATUSES).order_by('-created_at'))
+        context['open_wos'] = (_scope_assignable_for(WorkOrder.objects.filter(client=self.object), self.request.user)
+                               .exclude(status__in=WO_CLOSED_STATUSES).select_related('assigned_to', 'repair_type')
+                               .order_by('-created_at'))
         if self.object.is_managed:
             context['catalog_by_category'] = _catalog_by_category()
             context['recurring_entries'] = _line_items_for(self.object)
@@ -4366,6 +4373,40 @@ class TicketAcknowledgeOverdueView(LoginRequiredMixin, View):
         return render(request, 'core/partials/overdue_badge.html', {'ticket': ticket})
 
 
+class IntakeClientPanelView(LoginRequiredMixin, View):
+    """HTMX: who this is, at the moment of intake. Standing (Client / Customer),
+    type, and the open work already on the books, so a duplicate is visible
+    before a second ticket is created (the duplicate-prevention affordance)."""
+
+    def get(self, request):
+        client_id = request.GET.get('client')
+        client = Client.objects.filter(pk=client_id).first() if client_id else None
+        ctx = {'client': client}
+        if client:
+            ctx['has_sa'] = client.is_managed or client.contracts.filter(status='active').exists()
+            ctx['open_tickets'] = (_scope_tickets_for(Ticket.objects.filter(client=client), request.user)
+                                   .exclude(status__in=TICKET_CLOSED_STATUSES).order_by('-created_at')[:8])
+            ctx['open_wos'] = (_scope_assignable_for(WorkOrder.objects.filter(client=client), request.user)
+                               .exclude(status__in=WO_CLOSED_STATUSES).order_by('-created_at')[:8])
+        return render(request, 'core/partials/intake_client_panel.html', ctx)
+
+
+class ContractStatusUpdateView(SaleAccessMixin, View):
+    """Set a Service Agreement's status in place on the client hub (ruled Aug 20:
+    "SA status is settable in place on that card")."""
+
+    def post(self, request, pk):
+        contract = get_object_or_404(Contract, pk=pk)
+        new = request.POST.get('status')
+        if new in dict(Contract.STATUS_CHOICES):
+            contract.status = new
+            contract.save(update_fields=['status'])
+            messages.success(request, f'{contract.contract_number} is now {contract.get_status_display()}.')
+        else:
+            messages.error(request, 'Unknown agreement status.')
+        return redirect('core:client_detail', pk=contract.client_id)
+
+
 class TicketContactsByClientView(LoginRequiredMixin, View):
     """HTMX: return <option> elements for contacts belonging to a given client."""
 
@@ -4383,7 +4424,7 @@ class TicketContactsByClientView(LoginRequiredMixin, View):
         dev_opts = '<option value="">---------</option>'
         for d in devices:
             dev_opts += f'<option value="{d.pk}">{escape(str(d))}</option>'
-        select_cls = 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'
+        select_cls = 'form-select'
         opts += f'<select name="device" id="id_device" hx-swap-oob="true" class="{select_cls}">{dev_opts}</select>'
         return HttpResponse(opts)
 

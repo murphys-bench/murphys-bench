@@ -1,82 +1,48 @@
-{% extends "core/base.html" %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
 
 {% block title %}{{ prospect.display_name }} - Murphy's Bench{% endblock %}
+{% block room %}desk{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-4">
-        <div>
-            <a href="{% url 'core:prospect_list' %}" class="text-gray-400 hover:text-gray-600 text-sm">← Prospects</a>
-            <h1 class="text-2xl font-bold text-gray-900">{{ prospect.display_name }}</h1>
-        </div>
-        <div class="flex items-center gap-3">
-            {% include "core/partials/header_bell.html" %}
-            <span class="inline-flex px-3 py-1 rounded-full text-sm font-medium
-                {% if prospect.status == 'won' %}bg-green-100 text-green-800
-                {% elif prospect.status == 'lost' %}bg-gray-200 text-gray-600
-                {% elif prospect.status == 'quoted' %}bg-blue-100 text-blue-800
-                {% else %}bg-yellow-100 text-yellow-800{% endif %}">
-                {{ prospect.get_status_display }}
-            </span>
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <div class="page-pretitle">Prospect</div>
+                <h2 class="page-title">{{ prospect.display_name }} <span class="badge {% if prospect.client_type == 'business' %}bg-azure-lt{% else %}bg-secondary-lt{% endif %} ms-2">{{ prospect.get_client_type_display }}</span></h2>
+                <div class="text-secondary"><span class="status-dot me-1" style="--tblr-status-color: {% if prospect.status == 'won' %}var(--tblr-green){% elif prospect.status == 'lost' %}var(--tblr-secondary){% elif prospect.status == 'quoted' %}var(--tblr-blue){% else %}var(--tblr-yellow){% endif %};"></span>{{ prospect.get_status_display }} &middot; added {{ prospect.created_at|date:"M j, Y" }}</div>
+            </div>
+            <div class="col-auto">
+                <div class="btn-group" role="group">
+                    {% if not prospect.is_promoted %}<form method="post" action="{% url 'core:prospect_promote' prospect.pk %}" data-mb-confirm="Make {{ prospect.display_name }} a customer? This creates the customer record and a primary contact.">{% csrf_token %}<button type="submit" class="btn btn-primary">Make a customer</button></form>{% endif %}
+                    <a href="{% url 'core:prospect_edit' prospect.pk %}" class="btn">Edit</a>
+                    {% if not prospect.is_promoted and prospect.status != 'lost' %}<form method="post" action="{% url 'core:prospect_mark_lost' prospect.pk %}">{% csrf_token %}<button type="submit" class="btn">Mark lost</button></form>{% endif %}
+                    {% if not prospect.is_promoted %}<form method="post" action="{% url 'core:prospect_delete' prospect.pk %}" data-mb-confirm="Delete this prospect permanently?">{% csrf_token %}<button type="submit" class="btn btn-outline-danger">Delete</button></form>{% endif %}
+                </div>
+            </div>
         </div>
     </div>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="max-w-3xl space-y-6">
-
+<div class="row justify-content-center"><div class="col-12 col-xl-8">
     {% if prospect.is_promoted %}
-    <div class="bg-green-50 border border-green-200 rounded-md p-4 text-sm text-green-800">
-        Promoted to client
-        <a href="{% url 'core:client_detail' prospect.promoted_to_id %}" class="font-medium underline">{{ prospect.promoted_to.name }}</a>
-        on {{ prospect.promoted_at|date:"M j, Y" }}.
-    </div>
+    <div class="alert alert-success">Now a customer: <a href="{% url 'core:client_detail' prospect.promoted_to_id %}">{{ prospect.promoted_to.name }}</a>, since {{ prospect.promoted_at|date:"M j, Y" }}.</div>
     {% endif %}
-
-    <div class="bg-white rounded-lg shadow p-6">
-        <h2 class="text-base font-semibold text-gray-900 mb-4">Details</h2>
-        <dl class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div><dt class="text-gray-500">Contact</dt><dd class="text-gray-900">{{ prospect.contact_name|default:"—" }}</dd></div>
-            <div><dt class="text-gray-500">Type</dt><dd class="text-gray-900">{{ prospect.get_client_type_display }}</dd></div>
-            <div><dt class="text-gray-500">Company</dt><dd class="text-gray-900">{{ prospect.company|default:"—" }}</dd></div>
-            <div><dt class="text-gray-500">Email</dt><dd class="text-gray-900">{{ prospect.email|default:"—" }}</dd></div>
-            <div><dt class="text-gray-500">Phone</dt><dd class="text-gray-900">{{ prospect.phone|default:"—" }}</dd></div>
-            <div><dt class="text-gray-500">Added</dt><dd class="text-gray-900">{{ prospect.created_at|date:"M j, Y" }}</dd></div>
-        </dl>
-        {% if prospect.notes %}
-        <div class="mt-4 pt-4 border-t border-gray-100">
-            <dt class="text-gray-500 text-sm mb-1">Notes</dt>
-            <dd class="text-sm text-gray-900 whitespace-pre-line">{{ prospect.notes }}</dd>
+    <div class="card">
+        <div class="card-header"><h3 class="card-title">Who</h3></div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4"><div class="subheader">Contact</div>{{ prospect.contact_name|default:"" }}</div>
+                <div class="col-md-4"><div class="subheader">Company</div>{{ prospect.company|default:"" }}</div>
+                <div class="col-md-4"><div class="subheader">Stage</div>{{ prospect.get_status_display }}</div>
+                <div class="col-md-4"><div class="subheader">Email</div>{{ prospect.email|default:"" }}</div>
+                <div class="col-md-4"><div class="subheader">Phone</div>{{ prospect.phone|default:"" }}</div>
+            </div>
+            {% if prospect.notes %}<div class="mt-3"><div class="subheader">Notes</div><div style="white-space: pre-line;">{{ prospect.notes }}</div></div>{% endif %}
         </div>
-        {% endif %}
     </div>
-
-    <!-- Actions -->
-    <div class="flex flex-wrap gap-3">
-        {% if not prospect.is_promoted %}
-            <form method="post" action="{% url 'core:prospect_promote' prospect.pk %}"
-                  onsubmit="return confirm('Promote this prospect to a client? This creates a client and a primary contact.');">
-                {% csrf_token %}
-                <button type="submit" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">Promote to Client</button>
-            </form>
-        {% endif %}
-        <a href="{% url 'core:prospect_edit' prospect.pk %}"
-           class="px-5 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">Edit</a>
-        {% if not prospect.is_promoted and prospect.status != 'lost' %}
-            <form method="post" action="{% url 'core:prospect_mark_lost' prospect.pk %}">
-                {% csrf_token %}
-                <button type="submit" class="px-5 py-2 bg-amber-100 text-amber-800 rounded-md hover:bg-amber-200 font-medium">Mark Lost</button>
-            </form>
-        {% endif %}
-        {% if not prospect.is_promoted %}
-            <form method="post" action="{% url 'core:prospect_delete' prospect.pk %}"
-                  onsubmit="return confirm('Delete this prospect permanently?');">
-                {% csrf_token %}
-                <button type="submit" class="px-5 py-2 text-red-600 hover:text-red-800 font-medium">Delete</button>
-            </form>
-        {% endif %}
-    </div>
-
-</div>
+</div></div>
 {% endblock %}

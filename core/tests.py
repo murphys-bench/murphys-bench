@@ -14367,3 +14367,56 @@ def test_work_record_names_standing_as_client_or_customer(client, client_obj, ad
     assert '>Customer<' in client.get(reverse('core:ticket_detail', args=[t.pk])).content.decode()
     Contract.objects.create(client=client_obj, title='Managed', status='active')
     assert '>Client<' in client.get(reverse('core:ticket_detail', args=[t.pk])).content.decode()
+
+
+@pytest.mark.django_db
+def test_client_hub_names_standing_and_sets_agreement_status_in_place(client, client_obj, admin_user):
+    """Batch 4: the hub is headed Customer until an active Service Agreement exists,
+    and an agreement's status is settable on the hub card (ruled Aug 20)."""
+    from core.models import Contract
+    client.force_login(admin_user)
+    body = client.get(reverse('core:client_detail', args=[client_obj.pk])).content.decode()
+    assert 'tabler.min' in body and '>Customer<' in body and 'No Service Agreement' in body
+    c = Contract.objects.create(client=client_obj, title='Managed', status='draft')
+    body = client.get(reverse('core:client_detail', args=[client_obj.pk])).content.decode()
+    assert '>Customer<' in body and reverse('core:contract_status_update', args=[c.pk]) in body
+    r = client.post(reverse('core:contract_status_update', args=[c.pk]), {'status': 'active'})
+    assert r.status_code == 302
+    c.refresh_from_db()
+    assert c.status == 'active'
+    assert '>Client<' in client.get(reverse('core:client_detail', args=[client_obj.pk])).content.decode()
+
+
+@pytest.mark.django_db
+def test_intake_panel_shows_standing_and_open_work(client, client_obj, admin_user):
+    """The front door resolves WHO and shows what is already open, so a duplicate
+    is visible before a second ticket is created."""
+    client.force_login(admin_user)
+    Ticket.objects.create(client=client_obj, subject='Already open', description='D', status='open')
+    r = client.get(reverse('core:intake_client_panel') + f'?client={client_obj.pk}')
+    body = r.content.decode()
+    assert r.status_code == 200 and 'Customer' in body and 'Already open' in body
+    assert 'Already open for this' in body
+    r = client.get(reverse('core:intake_client_panel'))
+    assert 'Choose who this is for' in r.content.decode()
+
+
+@pytest.mark.django_db
+def test_intake_and_hub_pages_render_on_the_tabler_frame(client, client_obj, admin_user):
+    from core.models import Device, Contract, Prospect
+    client.force_login(admin_user)
+    d = Device.objects.create(client=client_obj, name='Hub PC')
+    c = Contract.objects.create(client=client_obj, title='SA', status='active')
+    p = Prospect.objects.create(contact_first_name='Pat', client_type='residential')
+    wo = WorkOrder.objects.create(client=client_obj)
+    pages = [reverse('core:ticket_create'), reverse('core:work_order_create'), reverse('core:client_create'),
+             reverse('core:device_create'), reverse('core:prospect_create'), reverse('core:contract_create', args=[client_obj.pk]),
+             reverse('core:mileage_create'), reverse('core:wo_mileage_create', args=[wo.pk]),
+             reverse('core:client_edit', args=[client_obj.pk]), reverse('core:device_edit', args=[d.pk]),
+             reverse('core:device_detail', args=[d.pk]), reverse('core:contract_detail', args=[c.pk]),
+             reverse('core:prospect_detail', args=[p.pk]), reverse('core:work_order_edit', args=[wo.pk])]
+    for url in pages:
+        r = client.get(url)
+        body = r.content.decode()
+        assert r.status_code == 200, url
+        assert 'tabler.min' in body and 'css/app.' not in body and 'x-data' not in body, url

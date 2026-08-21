@@ -1,172 +1,81 @@
-{% extends "core/base.html" %}
-{% load mb_icons %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
 
 {% block title %}{{ contract.contract_number }} - Murphy's Bench{% endblock %}
+{% block room %}desk{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
-        <a href="{% url 'core:client_detail' contract.client.pk %}" class="text-gray-400 hover:text-gray-600 text-sm">← {{ contract.client.name }}</a>
-        <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-                <h1 class="text-2xl font-bold text-gray-900">{{ contract.contract_number }}</h1>
-                {% if contract.status == 'active' %}
-                    <span class="px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full">Active</span>
-                {% elif contract.status == 'draft' %}
-                    <span class="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded-full">Draft</span>
-                {% elif contract.status == 'expired' %}
-                    <span class="px-2 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded-full">Expired</span>
-                {% else %}
-                    <span class="px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded-full">Cancelled</span>
-                {% endif %}
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <div class="page-pretitle">Service Agreement &middot; <a href="{% url 'core:client_detail' contract.client.pk %}">{{ contract.client.name }}</a></div>
+                <h2 class="page-title">{{ contract.title }} <span class="text-secondary ms-2">{{ contract.contract_number }}</span></h2>
+                <div class="text-secondary"><span class="status-dot me-1" style="--tblr-status-color: {% if contract.status == 'active' %}var(--tblr-green){% elif contract.status == 'draft' %}var(--tblr-secondary){% elif contract.status == 'expired' %}var(--tblr-yellow){% else %}var(--tblr-red){% endif %};"></span>{{ contract.get_status_display }} &middot; {{ contract.get_billing_cadence_display }}, invoice day {{ contract.billing_day }} &middot; ${{ contract.line_items_total|floatformat:2 }} per cycle</div>
             </div>
-            <div class="flex items-center gap-2">
-                <a href="{% url 'core:contract_edit' contract.pk %}"
-                   class="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200">Edit</a>
-                {% if is_admin %}
-                <form method="post" action="{% url 'core:contract_delete' contract.pk %}" class="inline"
-                      onsubmit="return confirm('Delete contract {{ contract.contract_number }}? This cannot be undone.');">
-                    {% csrf_token %}
-                    <button type="submit" class="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100">Delete</button>
-                </form>
-                {% endif %}
+            <div class="col-auto">
+                <div class="btn-group" role="group">
+                    <a href="{% url 'core:contract_edit' contract.pk %}" class="btn">Edit</a>
+                    {% if is_admin %}<form method="post" action="{% url 'core:contract_delete' contract.pk %}" data-mb-confirm="Delete {{ contract.contract_number }}? This cannot be undone.">{% csrf_token %}<button type="submit" class="btn btn-outline-danger">Delete</button></form>{% endif %}
+                </div>
             </div>
         </div>
-        <p class="text-gray-600 mt-1">{{ contract.title }}</p>
     </div>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="max-w-4xl space-y-6">
-
-    <!-- ── DETAILS ─────────────────────────────────────────────────── -->
-    <div class="bg-white rounded-lg shadow p-6">
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">Details</h2>
-        <dl class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
-            <div class="flex justify-between border-b border-gray-100 pb-2">
-                <dt class="text-gray-500">Cadence</dt><dd class="text-gray-900">{{ contract.get_billing_cadence_display }}</dd>
-            </div>
-            <div class="flex justify-between border-b border-gray-100 pb-2">
-                <dt class="text-gray-500">Billing day</dt><dd class="text-gray-900">{{ contract.billing_day }}</dd>
-            </div>
-            <div class="flex justify-between border-b border-gray-100 pb-2">
-                <dt class="text-gray-500">Start</dt><dd class="text-gray-900">{{ contract.start_date|default:"—" }}</dd>
-            </div>
-            <div class="flex justify-between border-b border-gray-100 pb-2">
-                <dt class="text-gray-500">End</dt><dd class="text-gray-900">{{ contract.end_date|default:"open-ended" }}</dd>
-            </div>
-            <div class="flex justify-between border-b border-gray-100 pb-2">
-                <dt class="text-gray-500">Auto-renew</dt><dd class="text-gray-900">{{ contract.auto_renew|yesno:"Yes,No" }}</dd>
-            </div>
-            <div class="flex justify-between border-b border-gray-100 pb-2">
-                <dt class="text-gray-500">Renewal date</dt><dd class="text-gray-900">{{ contract.renewal_date|default:"—" }}</dd>
-            </div>
-        </dl>
-        {% if contract.notes %}
-        <div class="mt-4 text-sm text-gray-600">
-            <p class="text-gray-500 mb-1">Notes</p>
-            <p class="whitespace-pre-line">{{ contract.notes }}</p>
-        </div>
-        {% endif %}
-    </div>
-
-    <!-- ── RECURRING LINES ─────────────────────────────────────────── -->
-    <div class="bg-white rounded-lg shadow p-6" x-data="{ logOpen: false, customOpen: false }">
-        <div class="flex items-center justify-between mb-1">
-            <h2 class="text-lg font-semibold text-gray-900">Recurring charges</h2>
-            <div class="flex gap-2">
-                <button type="button" @click="customOpen = !customOpen; if(customOpen) logOpen = false"
-                        class="text-xs px-2 py-1 rounded border" :class="customOpen ? 'bg-blue-600 text-white border-blue-600' : 'text-blue-600 border-blue-300 hover:bg-blue-50'">+ Custom</button>
-                {% if catalog_by_category %}
-                <button type="button" @click="logOpen = !logOpen; if(logOpen) customOpen = false"
-                        class="text-xs px-2 py-1 rounded border" :class="logOpen ? 'bg-gray-700 text-white border-gray-700' : 'text-gray-600 border-gray-300 hover:bg-gray-50'">+ Catalog</button>
-                {% endif %}
-            </div>
-        </div>
-        <p class="text-xs text-gray-500 mb-3">These lines are copied into each billing period's draft invoice. MB never auto-charges — the billing run produces a draft you settle.</p>
-
-        <!-- Custom entry -->
-        <div x-show="customOpen" x-cloak class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-100">
-            <form method="post" action="{% url 'core:contract_line_custom' contract.pk %}"
-                  hx-post="{% url 'core:contract_line_custom' contract.pk %}" hx-target="#contract-line-items-section" hx-swap="innerHTML"
-                  hx-on:htmx:after-request="if(event.detail.successful){this.reset(); customOpen = false;}" class="space-y-2">
-                {% csrf_token %}
-                <div class="flex gap-2">
-                    <select name="kind" class="text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                        <option value="labor">Service</option>
-                        <option value="part">Product</option>
-                    </select>
-                    <input type="text" name="custom_label" placeholder="Service name…" required
-                           class="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+<div class="row row-cards">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">Terms and recurring charges</h3>
+                <div class="card-actions">
+                    <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#cl-custom">{% ticon 'plus' 'icon-sm' %} Custom line</button>
+                    {% if catalog_by_category %}<button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#cl-catalog">{% ticon 'tag' 'icon-sm' %} From catalog</button>{% endif %}
+                </div></div>
+            <div class="card-body">
+                <div class="row g-3 mb-3">
+                    <div class="col-6 col-md-2"><div class="subheader">Start</div>{{ contract.start_date|default:"" }}</div>
+                    <div class="col-6 col-md-2"><div class="subheader">End</div>{{ contract.end_date|default:"open-ended" }}</div>
+                    <div class="col-6 col-md-2"><div class="subheader">Renewal</div>{{ contract.renewal_date|default:"" }}</div>
+                    <div class="col-6 col-md-2"><div class="subheader">Auto-renew</div>{{ contract.auto_renew|yesno:"Yes,No" }}</div>
+                    {% if contract.notes %}<div class="col-12"><div class="subheader">Notes</div><div style="white-space: pre-line;">{{ contract.notes }}</div></div>{% endif %}
                 </div>
-                <textarea name="notes" rows="2" placeholder="Details (optional)"
-                          class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"></textarea>
-                <div class="flex gap-2">
-                    <label class="flex-1"><span class="block text-xs text-gray-400 mb-0.5">Qty</span>
-                        <input type="number" name="quantity" value="1" min="0" step="0.01"
-                               class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"></label>
-                    <label class="flex-1"><span class="block text-xs text-gray-400 mb-0.5">Unit price ($)</span>
-                        <input type="number" name="unit_price" min="0" step="0.01" placeholder="optional"
-                               class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"></label>
-                </div>
-                <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Add</button>
-            </form>
-        </div>
-
-        <!-- Catalog buttons -->
-        <div x-show="logOpen" x-cloak class="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
-            {% for category, items in catalog_by_category.items %}
-            <div class="mb-3 last:mb-0">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">{{ category }}</p>
-                <div class="flex flex-wrap gap-1.5">
-                    {% for item in items %}
-                    <form method="post" action="{% url 'core:contract_line_log' contract.pk item.pk %}"
-                          hx-post="{% url 'core:contract_line_log' contract.pk item.pk %}" hx-target="#contract-line-items-section" hx-swap="innerHTML" class="inline">
-                        {% csrf_token %}
-                        <button type="submit" class="px-2.5 py-1 text-xs bg-white text-gray-700 rounded border border-gray-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 transition-colors">{{ item.name }}</button>
-                    </form>
+                <div class="text-secondary small mb-2">These lines are copied into each billing period's draft invoice. MB never auto-charges; the billing run produces a draft you settle.</div>
+                <form class="collapse mb-3" id="cl-custom" method="post" action="{% url 'core:contract_line_custom' contract.pk %}" hx-post="{% url 'core:contract_line_custom' contract.pk %}" hx-target="#contract-line-items-section" hx-swap="innerHTML" data-mb-reset-after="#cl-custom">
+                    {% csrf_token %}
+                    <div class="row g-2">
+                        <div class="col-md-2"><select name="kind" class="form-select form-select-sm"><option value="labor">Service</option><option value="part">Product</option></select></div>
+                        <div class="col-md-5"><input type="text" name="custom_label" class="form-control form-control-sm" placeholder="Service name" required></div>
+                        <div class="col-md-2"><input type="number" name="quantity" value="1" min="0" step="0.01" class="form-control form-control-sm"></div>
+                        <div class="col-md-2"><input type="number" name="unit_price" min="0" step="0.01" class="form-control form-control-sm" placeholder="Unit $"></div>
+                        <div class="col-md-1"><button type="submit" class="btn btn-sm btn-primary w-100">Add</button></div>
+                        <div class="col-12"><input type="text" name="notes" class="form-control form-control-sm" placeholder="Details (optional)"></div>
+                    </div>
+                </form>
+                <div class="collapse mb-3" id="cl-catalog">
+                    {% for category, items in catalog_by_category.items %}
+                    <div class="mb-2"><div class="subheader">{{ category }}</div><div class="d-flex flex-wrap gap-1">
+                        {% for item in items %}<form method="post" action="{% url 'core:contract_line_log' contract.pk item.pk %}" hx-post="{% url 'core:contract_line_log' contract.pk item.pk %}" hx-target="#contract-line-items-section" hx-swap="innerHTML">{% csrf_token %}<button type="submit" class="btn btn-sm">{{ item.name }}</button></form>{% endfor %}
+                    </div></div>
                     {% endfor %}
                 </div>
+                <div id="contract-line-items-section">{% include "core/partials/contract_line_items.html" with entries=entries contract=contract %}</div>
             </div>
-            {% endfor %}
-        </div>
-
-        <div id="contract-line-items-section">
-            {% include "core/partials/contract_line_items.html" with entries=entries contract=contract %}
         </div>
     </div>
-
-    <!-- ── COVERED DEVICES ─────────────────────────────────────────── -->
-    <div class="bg-white rounded-lg shadow overflow-hidden">
-        <div class="px-6 py-4 border-b border-gray-200">
-            <h2 class="text-lg font-semibold text-gray-900">Covered devices</h2>
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">Covered devices</h3><span class="badge bg-blue-lt ms-2">{{ covered_devices|length }}</span></div>
+            {% if covered_devices %}
+            <div class="table-responsive"><table class="table table-vcenter card-table table-sm">
+                <thead><tr><th>Device</th><th>Type</th><th>Serial</th></tr></thead>
+                <tbody>{% for d in covered_devices %}<tr><td><a href="{% url 'core:device_detail' d.pk %}" class="text-reset fw-medium">{{ d.name }}</a></td><td>{{ d.type_label }}</td><td class="font-monospace small">{{ d.serial_number|default:"" }}</td></tr>{% endfor %}</tbody>
+            </table></div>
+            {% else %}
+            <div class="card-body"><div class="empty py-3"><p class="empty-title">No devices under this agreement</p><p class="empty-subtitle text-secondary">Set "Covered by Service Agreement" on a device to attach it. An add-on agreement may cover no devices at all.</p></div></div>
+            {% endif %}
         </div>
-        {% if covered_devices %}
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Device</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Serial</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">
-                    {% for device in covered_devices %}
-                        <tr class="hover:bg-gray-50">
-                            <td class="px-6 py-3 text-sm font-medium">
-                                <a href="{% url 'core:device_detail' device.pk %}" class="text-blue-600 hover:underline">{{ device.name }}</a>
-                            </td>
-                            <td class="px-6 py-3 text-sm text-gray-600">{{ device.type_label }}</td>
-                            <td class="px-6 py-3 text-sm text-gray-600">{{ device.serial_number|default:"—" }}</td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        {% else %}
-            <div class="px-6 py-6 text-center text-gray-400 text-sm">No devices covered by this contract yet. Set "Covered by Contract" on a device to attach it.</div>
-        {% endif %}
     </div>
-
 </div>
 {% endblock %}
