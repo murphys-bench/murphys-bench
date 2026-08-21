@@ -426,37 +426,34 @@ def test_email_branding_save_post(client, admin_user):
 
 @pytest.mark.django_db
 def test_sidebar_order_and_admin_gating(client, admin_user):
-    # Tech (non-staff) does NOT see admin-only links.
+    # Tech (non-staff) does NOT see admin-only links. Mileage is for everyone now
+    # (the Board replaced the tech dashboard's My Mileage card, Aug 21 2026).
     tech = User.objects.create_user(username='tech1', password='x', is_staff=False)
     client.force_login(tech)
     tech_body = client.get('/').content
-    for hidden in (b'title="Queues"', b'title="Mileage"', b'title="Reports"'):
+    for hidden in (b'title="Queues"', b'title="Reports"', b'title="Settings"'):
         assert hidden not in tech_body
-    assert b'title="Tickets"' in tech_body          # core links still present
-    assert b'title="Knowledge Base"' in tech_body
+    for shown in (b'title="Tickets"', b'title="Knowledge Base"', b'title="Mileage"'):
+        assert shown in tech_body
 
-    # Admin sees them, and the top order is Dashboard, Tickets, Work Orders, Clients.
+    # Admin sees them, and the top order is Board, Tickets, Work Orders, Clients.
     client.force_login(admin_user)
     body = client.get('/').content
     for shown in (b'title="Queues"', b'title="Mileage"', b'title="Reports"'):
         assert shown in body
-    order = [body.index(b'title="%s"' % t) for t in (b'Dashboard', b'Tickets', b'Work Orders', b'Clients')]
+    order = [body.index(b'title="%s"' % t) for t in (b'Board', b'Tickets', b'Work Orders', b'Clients')]
     assert order == sorted(order)
 
 
 @pytest.mark.django_db
-def test_tech_dashboard_shows_my_mileage(client, client_obj, admin_user):
+def test_tech_reaches_own_mileage_from_the_nav(client, client_obj, admin_user):
     from core.models import Mileage
     tech = User.objects.create_user(username='tech2', password='x', is_staff=False)
     Mileage.objects.create(technician=tech, trip_date='2026-06-11', miles=12, purpose='Onsite call')
 
     client.force_login(tech)
-    body = client.get('/').content
-    assert b'>My Mileage</h2>' in body      # tech sees the card heading
-    assert b'Onsite call' in body           # ...with their own entry
-
-    client.force_login(admin_user)
-    assert b'>My Mileage</h2>' not in client.get('/').content   # admin sees Team Workload instead
+    assert b'title="Mileage"' in client.get('/').content          # nav entry, not a dashboard card
+    assert b'Onsite call' in client.get(reverse('core:mileage_list')).content
 
 
 @pytest.mark.django_db
@@ -604,18 +601,22 @@ def test_transfer_flags_new_to_you_and_clears_on_open(client, client_obj):
 
 
 @pytest.mark.django_db
-def test_dashboard_surfaces_escalations_to_higher_level(client, client_obj):
+def test_board_surfaces_escalations_to_higher_level(client, client_obj):
     l2 = User.objects.create_user(username='dl2', password='x', is_staff=False, level=2)
     l3 = User.objects.create_user(username='dl3', password='x', is_staff=False, level=3)
     Ticket.objects.create(client=client_obj, subject='escd', description='d',
                           assigned_to=l2, escalation_level=3)
 
+    def tile(resp, label):
+        return next(t for t in resp.context['tiles'] if t['label'] == label)
+
     client.force_login(l3)                       # L3 it was escalated to
-    body = client.get('/').content
-    assert b'Escalated to You' in body and b'escd' in body
+    resp = client.get('/')
+    assert tile(resp, 'Escalated to you')['count'] == 1
+    assert b'escd' in resp.content               # and it sits in their Tickets region
 
     client.force_login(l2)                       # the holder doesn't see it as escalated-to-them
-    assert b'Escalated to You' not in client.get('/').content
+    assert tile(client.get('/'), 'Escalated to you')['count'] == 0
 
 
 @pytest.mark.django_db
@@ -1371,9 +1372,9 @@ def test_unsorted_bucket_cannot_be_deleted(client, admin_user):
 
 
 @pytest.mark.django_db
-def test_owner_dashboard_renders_business_tiles(client, admin_user):
-    # The owner dashboard leads with business metrics, not the old triage/attention
-    # rail. Triage stays reachable via the ticket list (?triage=1), tested elsewhere.
+def test_board_renders_admin_money_tiles_and_unsorted_region(client, admin_user):
+    # Money tiles are admin-only (role-gated, ruled Aug 20); the unsorted queue is
+    # a permanent Board region, present with an empty state even when empty.
     bucket = Client.get_unsorted()
     Ticket.objects.create(client=bucket, subject='unsorted', description='d',
                           ticket_number='TKT-D-1', status='new')
@@ -1381,7 +1382,10 @@ def test_owner_dashboard_renders_business_tiles(client, admin_user):
     resp = client.get(reverse('core:dashboard'))
     assert resp.status_code == 200
     body = resp.content.decode()
-    assert 'Ready to bill' in body and 'Outstanding invoices' in body
+    assert 'Ready to bill' in body and 'Outstanding' in body
+    assert 'Unsorted inbound' in body and 'unsorted' in body
+    for region in ('Tickets', 'Bench', 'Follow-ups', 'Unsorted inbound'):
+        assert region in body
 
 
 @pytest.mark.django_db
@@ -7878,10 +7882,7 @@ def test_mfa_setup_survives_intervening_get(client):
 # ── Owner dashboard: business metrics, billing filters, backlog age bands ────
 
 @pytest.mark.django_db
-def test_owner_dashboard_business_metrics(client, client_obj, admin_user):
-    from datetime import timedelta
-    from django.utils import timezone
-
+def test_board_money_tiles_count_decisions_not_totals(client, client_obj, admin_user):
     # Ready to bill: completed WO whose auto-invoice is still uninvoiced.
     WorkOrder.objects.create(client=client_obj, status='completed')
     # Outstanding: a WO billed (invoiced) and waiting on payment.
@@ -7895,20 +7896,21 @@ def test_owner_dashboard_business_metrics(client, client_obj, admin_user):
     paid.invoice.billing_status = 'paid'
     paid.invoice.amount = 999
     paid.invoice.save()
-    # An open WO for the open-count.
+    # An open WO for the bench.
     WorkOrder.objects.create(client=client_obj, status='in_progress')
-    # An open ticket 5 days old for the backlog band.
-    old = Ticket.objects.create(client=client_obj, subject='old', description='d')
-    Ticket.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=5))
 
     client.force_login(admin_user)
-    resp = client.get(reverse('core:dashboard'))
-    ctx = resp.context
+    ctx = client.get(reverse('core:dashboard')).context
+    tiles = {t['label']: t for t in ctx['tiles']}
+    assert tiles['Ready to bill']['count'] == 1
+    assert float(tiles['Outstanding']['count']) == 150.0   # billed only, not the paid 999
+    assert ctx['wo_total'] == 1                             # only the in_progress one is on the bench
 
-    assert ctx['ready_to_bill_count'] == 1
-    assert float(ctx['outstanding_total']) == 150.0   # billed only, not the paid 999
-    assert ctx['open_wo_count'] == 1                   # only the in_progress one
-    assert ctx['backlog_buckets']['b3to7'] == 1
+    # A technician gets no money tiles at all.
+    tech = User.objects.create_user(username='boardtech', password='x', is_staff=False)
+    client.force_login(tech)
+    labels = {t['label'] for t in client.get(reverse('core:dashboard')).context['tiles']}
+    assert 'Ready to bill' not in labels and 'Outstanding' not in labels
 
 
 @pytest.mark.django_db
@@ -7964,20 +7966,20 @@ def test_settings_colors_tab_has_dashboard_block(client, admin_user):
 
 
 @pytest.mark.django_db
-def test_admin_dashboard_counts_and_marks_triage(client, admin_user):
-    # Triage tickets are open + unassigned, so they count in the admin's Open
-    # tickets and get a "Needs triage" marker in the worklist card.
+def test_board_keeps_unsorted_out_of_tickets_region(client, admin_user):
+    # Unsorted inbound has its own permanent region; it never pads the Tickets count.
     bucket = Client.get_unsorted()
     Ticket.objects.create(client=bucket, subject='unsorted inbound', description='d',
                           ticket_number='TKT-TR-1', status='new')
     client.force_login(admin_user)
     resp = client.get(reverse('core:dashboard'))
-    assert resp.context['open_ticket_count'] == 1
-    assert b'Needs triage' in resp.content
+    assert resp.context['ticket_total'] == 0
+    assert resp.context['unsorted_total'] == 1
+    assert b'unsorted inbound' in resp.content
 
 
 @pytest.mark.django_db
-def test_tech_dashboard_shows_triage_pool_tile(client, client_obj):
+def test_board_shows_unsorted_to_techs_too(client, client_obj):
     tech = User.objects.create_user(username='dtech', password='x', is_staff=False, level=1)
     bucket = Client.get_unsorted()
     Ticket.objects.create(client=bucket, subject='inbound', description='d',
@@ -7985,7 +7987,8 @@ def test_tech_dashboard_shows_triage_pool_tile(client, client_obj):
     client.force_login(tech)
     resp = client.get(reverse('core:dashboard'))
     assert resp.status_code == 200
-    assert b'Triage pool' in resp.content
+    assert resp.context['unsorted_total'] == 1
+    assert b'Unsorted inbound' in resp.content
 
 
 # ── Backup destinations + schedule (Settings → Maintenance → Backups) ─────────
@@ -13789,31 +13792,27 @@ def test_a_legacy_admin_is_offered_the_settings_it_can_open(client):
 
 
 @pytest.mark.django_db
-def test_recently_closed_shows_completed_work(client, client_obj):
-    """The dashboard panel must show finished jobs, which means 'completed'.
-
-    It filtered a hand-written ['closed', 'cancelled'] — a second definition of
-    "finished" written three lines below the constant that exists to be the only
-    one. Retiring the `closed` status left it naming a state nothing can hold, so
-    "Recently Closed" could never show a completed job again.
-
-    ⚠ This panel is on the TECHNICIAN dashboard, not the owner's — admins get a
-    separate _admin_dashboard() that never builds this key. I first reported it
-    as "the dashboard", which would have had Mike looking for a panel his own
-    account never renders.
-    """
+def test_board_bench_holds_only_open_work_in_triage_order(client, client_obj):
+    """Finished and cancelled work leaves the bench (WO_CLOSED_STATUSES is the one
+    definition of finished). Open work sorts in the triage order Mike stated:
+    urgent first, then business before residential, then oldest first."""
+    from datetime import timedelta
+    from django.utils import timezone
     tech = _role_tech('rc_tech')
-    done = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
-                                    client=client_obj, status='completed')
-    scrapped = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
-                                        client=client_obj, status='cancelled')
-    live = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
-                                    client=client_obj, status='in_progress')
+    biz = Client.objects.create(name='Biz Co', client_type='business')
+    for status in ('completed', 'cancelled'):
+        WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                 client=client_obj, status=status)
+    res_old = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                       client=client_obj, status='in_progress')
+    WorkOrder.objects.filter(pk=res_old.pk).update(created_at=timezone.now() - timedelta(days=3))
+    biz_new = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                       client=biz, status='new')
+    urgent = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                      client=client_obj, status='new', priority='urgent')
     client.force_login(tech)
-    shown = {w.work_order_number for w in client.get(reverse('core:dashboard')).context['recently_closed']}
-    assert done.work_order_number in shown, 'a completed job never reaches Recently Closed'
-    assert scrapped.work_order_number in shown
-    assert live.work_order_number not in shown
+    shown = [w.work_order_number for w in client.get(reverse('core:dashboard')).context['work_orders']]
+    assert shown == [urgent.work_order_number, biz_new.work_order_number, res_old.work_order_number]
 
 
 @pytest.mark.django_db

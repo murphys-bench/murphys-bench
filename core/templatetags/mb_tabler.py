@@ -13,6 +13,7 @@ import logging
 import re
 
 from django import template
+from django.utils import timezone
 from django.templatetags.static import static
 from django.utils.safestring import mark_safe
 
@@ -87,3 +88,27 @@ def hex_rgb(value, default='#206bc4'):
     m = _HEX.match(str(value or '')) or _HEX.match(default)
     h = m.group(1)
     return f'{int(h[0:2], 16)}, {int(h[2:4], 16)}, {int(h[4:6], 16)}'
+
+
+@register.filter
+def age_short(dt):
+    """Elapsed time as the queue reads it: '15m', '3h', '2d', '5w'. Age is the
+    Board's native metric (not a timestamp)."""
+    if not dt:
+        return ''
+    secs = (timezone.now() - dt).total_seconds()
+    if secs < 3600:
+        return f'{max(int(secs // 60), 0)}m'
+    if secs < 86400:
+        return f'{int(secs // 3600)}h'
+    days = int(secs // 86400)
+    if days < 14:
+        return f'{days}d'
+    return f'{days // 7}w'
+
+
+@register.filter
+def status_word(slug, entity_type):
+    """The shop's label for a status slug (from StatusDefinition), for dot + word."""
+    from core.templatetags.mb_icons import status_label
+    return status_label(slug, entity_type)

@@ -565,235 +565,123 @@ def _custom_fields_with_values(fields, obj):
     return result
 
 
-_TILE_COLOR_CLASSES = {
-    'blue':   {'card': 'bg-blue-50 border-l-4 border-blue-400',   'num': 'text-blue-700',   'icon': 'text-blue-400'},
-    'yellow': {'card': 'bg-yellow-50 border-l-4 border-yellow-400', 'num': 'text-yellow-700', 'icon': 'text-yellow-400'},
-    'red':    {'card': 'bg-red-50 border-l-4 border-red-500',     'num': 'text-red-700',    'icon': 'text-red-400'},
-    'green':  {'card': 'bg-green-50 border-l-4 border-green-400', 'num': 'text-green-700',  'icon': 'text-green-500'},
-    'gray':   {'card': 'bg-gray-50 border-l-4 border-gray-400',   'num': 'text-gray-600',   'icon': 'text-gray-400'},
-}
+# ── The Board ────────────────────────────────────────────────────────────────
+# The shop's home screen (archetype 1, ruled Aug 20 2026): where work waits, in
+# triage order, for everyone, with the tiles row gated by role. Regions are
+# STATIC: always present, same place, designed empty states. Replaced the
+# owner/tech dashboards and their configurable DashboardTile row on Aug 21 2026
+# (tabler-rebuild batch 2); tiles now surface DECISIONS, never totals.
+
+# Triage order, as Mike stated it Aug 13: emergencies always visible, then
+# Business before Residential, then severity of effect, then age (oldest first).
+_PRIORITY_RANK = {'urgent': 0, 'high': 1, 'normal': 2, 'low': 3}
 
 
-def _tile_color(tile):
-    if 'overdue=1' in tile.link_url or '/overdue' in tile.link_url:
-        return 'red'
-    statuses = set(tile.status_filter or [])
-    active = {'open', 'in_progress', 'assigned'}
-    waiting = {'waiting_on_customer', 'waiting_on_parts', 'waiting'}
-    completed = {'completed', 'closed', 'resolved'}
-    if statuses & completed and not (statuses & (active | waiting)):
-        return 'green'
-    if statuses & waiting and not (statuses & active):
-        return 'yellow'
-    if statuses == {'new'}:
-        return 'gray'
-    return 'blue'
+def _board_order(qs):
+    from django.db.models import Case, When, Value, IntegerField
+    return qs.annotate(
+        _prio=Case(*[When(priority=k, then=Value(v)) for k, v in _PRIORITY_RANK.items()],
+                   default=Value(9), output_field=IntegerField()),
+        _biz=Case(When(client__client_type='business', then=Value(0)),
+                  default=Value(1), output_field=IntegerField()),
+    ).order_by('_prio', '_biz', 'created_at')
 
 
-def _tile_count(tile, user, is_admin):
-    """Return the count for a DashboardTile."""
-    statuses = tile.status_filter or []
-    if tile.row == 'ticket':
-        qs = Ticket.objects.all()
-        if not is_admin:
-            qs = qs.filter(assigned_to=user)
-        if statuses:
-            qs = qs.filter(status__in=statuses)
-        else:
-            qs = qs.exclude(status__in=TICKET_CLOSED_STATUSES)
-        if '/overdue' in tile.link_url or 'overdue=1' in tile.link_url:
-            qs = Ticket.overdue_queryset(qs)
-    else:
-        qs = WorkOrder.objects.all()
-        if not is_admin:
-            qs = qs.filter(assigned_to=user)
-        if statuses:
-            qs = qs.filter(status__in=statuses)
-        else:
-            qs = qs.exclude(status__in=WO_CLOSED_STATUSES)
-    return qs.count()
+def _annotate_standing(qs):
+    """Managed / Business / Residential, read off the client (standing belongs to
+    the actor, ruled Aug 6). Managed = an active Service Agreement, or the
+    legacy is_managed flag until that migration lands."""
+    from django.db.models import Exists, OuterRef
+    return qs.annotate(
+        managed_now=Exists(Contract.objects.filter(client_id=OuterRef('client_id'), status='active')),
+    )
 
 
-class DashboardView(LoginRequiredMixin, View):
-    template_name = 'core/dashboard.html'
-
-    def _admin_dashboard(self, request):
-        """Owner/manager view: business metrics first (open work, money to bill
-        and money owed), the two live worklists, and a backlog-aging strip."""
-        from django.db.models import Sum
-        now = timezone.now()
-
-        open_tickets_qs = (
-            Ticket.objects.select_related('client', 'assigned_to')
-            .exclude(status__in=TICKET_CLOSED_STATUSES)
-        )
-        open_wo_qs = (
-            WorkOrder.objects.select_related('client', 'assigned_to', 'device')
-            .exclude(status__in=WO_CLOSED_STATUSES)
-        )
-
-        # Ready to bill = the work is done (completed) but nothing has been sent yet.
-        ready_to_bill_count = WorkOrder.objects.filter(
-            status='completed', invoice__billing_status='uninvoiced'
-        ).count()
-        # Outstanding = billed and waiting to be paid (money owed) — deliberately
-        # NOT the uninvoiced set above, so the two figures never double-count.
-        outstanding_total = (
-            Invoice.objects.filter(billing_status='invoiced')
-            .aggregate(t=Sum('amount'))['t'] or 0
-        )
-
-        # Backlog aging on unresolved tickets. Excludes 'converted' (those have a
-        # live work order), matching the Reports backlog metric.
-        backlog_qs = (
-            Ticket.objects.exclude(status__in=Ticket.CLOSED_STATUSES)
-            .exclude(source='system').only('created_at')
-        )
-        buckets = {'lt1': 0, 'b1to3': 0, 'b3to7': 0, 'gt7': 0}
-        for t in backlog_qs:
-            age_days = (now - t.created_at).total_seconds() / 86400
-            if age_days < 1:
-                buckets['lt1'] += 1
-            elif age_days < 3:
-                buckets['b1to3'] += 1
-            elif age_days < 7:
-                buckets['b3to7'] += 1
-            else:
-                buckets['gt7'] += 1
-
-        context = {
-            'is_admin': True,
-            'open_ticket_count': open_tickets_qs.count(),
-            'open_tickets': open_tickets_qs.order_by('-created_at')[:12],
-            'open_wo_count': open_wo_qs.count(),
-            'open_work_orders': open_wo_qs.order_by('-created_at')[:12],
-            'ready_to_bill_count': ready_to_bill_count,
-            'outstanding_total': outstanding_total,
-            'backlog_buckets': buckets,
-            'backlog_total': sum(buckets.values()),
-        }
-        return render(request, self.template_name, context)
+class BoardView(LoginRequiredMixin, View):
+    template_name = 'core/board.html'
+    REGION_CAP = 40
 
     def get(self, request):
-        is_admin = _is_admin(request.user)
-        if is_admin:
-            return self._admin_dashboard(request)
+        from django.db.models import Sum
+        user = request.user
+        is_admin = _is_admin(user)
 
-        # --- technician dashboard (unchanged) ---
-        tiles_qs = DashboardTile.objects.filter(is_active=True)
-        ticket_tiles = []
-        wo_tiles = []
-        for tile in tiles_qs:
-            if tile.visible_to == 'admin' and not is_admin:
-                continue
-            if tile.visible_to == 'tech' and is_admin:
-                continue
-            entry = {
-                'tile': tile,
-                'count': _tile_count(tile, request.user, is_admin),
-                'colors': _TILE_COLOR_CLASSES[_tile_color(tile)],
-            }
-            if tile.row == 'ticket':
-                ticket_tiles.append(entry)
-            else:
-                wo_tiles.append(entry)
-
-        # Recent open work orders (tech sees own, admin sees all)
-        wo_qs = WorkOrder.objects.select_related('client', 'assigned_to', 'device').exclude(status__in=WO_CLOSED_STATUSES)
-        if not is_admin:
-            wo_qs = wo_qs.filter(assigned_to=request.user)
-        open_work_orders = wo_qs.order_by('-created_at')[:10]
-
-        # ⚠ Was ['closed', 'cancelled'] — a second hand-written list of what
-        # "finished" means, sitting three lines below the constant that exists to
-        # be the only one. Retiring the `closed` status left it naming a state
-        # nothing can hold, so a dashboard panel called "Recently Closed" could
-        # never show a completed job again.
-        recently_closed = WorkOrder.objects.select_related('client', 'assigned_to').filter(
-            status__in=WO_CLOSED_STATUSES
-        ).order_by('-updated_at')[:5]
-
-        # Team workload (admin only)
-        team_workload = []
-        if is_admin:
-            techs = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
-            open_wo_statuses = ['new', 'in_progress', 'waiting_on_customer', 'on_hold']
-            open_ticket_statuses = ['new', 'open', 'in_progress', 'waiting_on_customer', 'converted']
-            for tech in techs:
-                open_wos = WorkOrder.objects.filter(assigned_to=tech, status__in=open_wo_statuses).count()
-                open_tickets = Ticket.objects.filter(assigned_to=tech, status__in=open_ticket_statuses).count()
-                if open_wos or open_tickets:
-                    team_workload.append({
-                        'tech': tech,
-                        'open_wos': open_wos,
-                        'open_tickets': open_tickets,
-                        'total': open_wos + open_tickets,
-                    })
-            team_workload.sort(key=lambda x: -x['total'])
-
-        ticket_qs = Ticket.objects.select_related('client', 'assigned_to').exclude(status__in=TICKET_CLOSED_STATUSES)
-        if not is_admin:
-            ticket_qs = ticket_qs.filter(assigned_to=request.user)
-        open_tickets = ticket_qs.order_by('-created_at')[:10]
-
-        needs_response_qs = Ticket.objects.filter(needs_response=True)
-        if not is_admin:
-            needs_response_qs = needs_response_qs.filter(assigned_to=request.user)
-        needs_response_count = needs_response_qs.count()
-
-        # Unsorted/Unverified triage bucket — inbound from senders not yet matched
-        # to a real client. These are unassigned, so they sit in every tech's
-        # claim pool; the tech dashboard surfaces them as their own tile.
-        triage_count = (
-            Ticket.objects.filter(client__is_unsorted=True)
-            .exclude(status__in=TICKET_CLOSED_STATUSES).count()
-        )
-
-        # Tickets escalated above their owner's level, awaiting pickup by someone higher.
-        # Admins see all of them; a tech sees those escalated up to their own level.
-        escalated_qs = (
-            Ticket.objects.select_related('client', 'assigned_to')
-            .filter(assigned_to__isnull=False, escalation_level__gt=models_F('assigned_to__level'))
+        open_tickets = (
+            Ticket.objects.select_related('client', 'assigned_to', 'sla_plan')
             .exclude(status__in=TICKET_CLOSED_STATUSES)
+            .exclude(client__is_unsorted=True)
+        )
+        open_tickets = _scope_tickets_for(open_tickets, user)
+        open_wos = (
+            WorkOrder.objects.select_related('client', 'assigned_to', 'device', 'invoice')
+            .exclude(status__in=WO_CLOSED_STATUSES)
+        )
+        open_wos = _scope_assignable_for(open_wos, user)
+        # Unsorted inbound is unclaimed by definition, so it is in every tech's pool.
+        unsorted = (
+            Ticket.objects.select_related('client')
+            .filter(client__is_unsorted=True)
+            .exclude(status__in=TICKET_CLOSED_STATUSES)
+            .order_by('created_at')
+        )
+
+        overdue_count = Ticket.overdue_queryset(open_tickets).count()
+        awaiting_count = _tickets_awaiting_reply(user).count()
+        escalated_qs = (
+            open_tickets.filter(assigned_to__isnull=False,
+                                escalation_level__gt=models_F('assigned_to__level'))
         )
         if not is_admin:
-            escalated_qs = escalated_qs.filter(
-                escalation_level__lte=request.user.level
-            ).exclude(assigned_to=request.user)
-        escalated_to_me = list(escalated_qs.order_by('-updated_at')[:10])
+            escalated_qs = escalated_qs.filter(escalation_level__lte=user.level).exclude(assigned_to=user)
+        escalated_count = escalated_qs.count()
 
-        # Tech-only "My Mileage" card — techs have no Mileage nav link, so this is
-        # their entry point to log/view their own miles. (Admins see Team Workload.)
-        my_mileage_total = None
-        my_mileage_recent = []
-        if not is_admin:
-            from django.db.models import Sum
-            today = timezone.now().date()
-            my_mileage_total = Mileage.objects.filter(
-                technician=request.user,
-                trip_date__year=today.year, trip_date__month=today.month,
-            ).aggregate(t=Sum('miles'))['t'] or 0
-            my_mileage_recent = list(
-                Mileage.objects.filter(technician=request.user).order_by('-trip_date')[:5]
-            )
+        tiles = [
+            {'label': 'Past SLA', 'count': overdue_count, 'tone': 'red',
+             'url': reverse('core:ticket_list') + '?overdue=1',
+             'empty': 'No ticket is past its response deadline'},
+            {'label': 'Awaiting your reply', 'count': awaiting_count, 'tone': 'green',
+             'url': reverse('core:ticket_list') + '?needs_response=1',
+             'empty': 'Every client reply has been answered'},
+            {'label': 'Unsorted inbound', 'count': unsorted.count(), 'tone': 'indigo',
+             'url': reverse('core:ticket_list') + '?triage=1',
+             'empty': 'Every message matched a client'},
+            {'label': 'Escalated to you', 'count': escalated_count, 'tone': 'orange',
+             'url': reverse('core:ticket_list') + '?assigned_to=me',
+             'empty': 'Nothing is waiting on a higher level'},
+        ]
+        if is_admin:
+            ready_to_bill = WorkOrder.objects.filter(
+                status='completed', invoice__billing_status='uninvoiced').count()
+            outstanding = (Invoice.objects.filter(billing_status='invoiced')
+                           .aggregate(t=Sum('amount'))['t'] or 0)
+            tiles += [
+                {'label': 'Ready to bill', 'count': ready_to_bill, 'tone': 'teal',
+                 'url': reverse('core:work_order_list') + '?billing=ready',
+                 'empty': 'No finished work is waiting to be billed'},
+                {'label': 'Outstanding', 'count': outstanding, 'money': True, 'tone': 'yellow',
+                 'url': reverse('core:work_order_list') + '?billing=outstanding',
+                 'empty': 'Nothing invoiced is unpaid'},
+            ]
 
+        tickets = list(_board_order(_annotate_standing(open_tickets))[:self.REGION_CAP])
+        wos = list(_board_order(_annotate_standing(open_wos))[:self.REGION_CAP])
         context = {
-            'ticket_tiles': ticket_tiles,
-            'wo_tiles': wo_tiles,
-            'open_work_orders': open_work_orders,
-            'recently_closed': recently_closed,
-            'active_clients': Client.objects.filter(is_active=True, is_unsorted=False).count(),
-            'total_devices': Device.objects.filter(is_active=True).count(),
             'is_admin': is_admin,
-            'team_workload': team_workload,
-            'needs_response_count': needs_response_count,
-            'triage_count': triage_count,
-            'open_tickets': open_tickets,
-            'escalated_to_me': escalated_to_me,
-            'my_mileage_total': my_mileage_total,
-            'my_mileage_recent': my_mileage_recent,
+            'tiles': tiles,
+            'tickets': tickets,
+            'ticket_total': open_tickets.count(),
+            'work_orders': wos,
+            'wo_total': open_wos.count(),
+            'unsorted': list(unsorted[:self.REGION_CAP]),
+            'unsorted_total': unsorted.count(),
+            'region_cap': self.REGION_CAP,
         }
         return render(request, self.template_name, context)
+
+
+# Kept under its old name so the URLconf and every `core:dashboard` reverse keep
+# working; the route IS the Board now.
+DashboardView = BoardView
 
 
 # Statuses that mean a work order is finished: off the active list, settleable at the
