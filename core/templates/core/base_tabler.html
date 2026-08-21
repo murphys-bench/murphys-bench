@@ -84,7 +84,7 @@
                         </a>
                     </li>
 
-                    <li class="nav-item mt-2"><span class="nav-link text-uppercase fw-bold mb-when-expanded mb-room-heading" data-room="work" style="font-size:.7rem;opacity:.7;">Work</span></li>
+                    <li class="nav-item mt-2"><span class="nav-link mb-when-expanded mb-room-heading"><span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-work, var(--tblr-primary));"></span>Work</span></li>
                     <li class="nav-item {% if u and 'ticket' in u %}active{% endif %}">
                         <a class="nav-link" href="{% url 'core:ticket_list' %}" title="Tickets">
                             <span class="nav-link-icon">{% ticon 'ticket' %}</span>
@@ -112,7 +112,7 @@
                         </a>
                     </li>
 
-                    <li class="nav-item mt-2"><span class="nav-link text-uppercase fw-bold mb-when-expanded mb-room-heading" data-room="work" style="font-size:.7rem;opacity:.7;">Clients</span></li>
+                    <li class="nav-item mt-2"><span class="nav-link mb-when-expanded mb-room-heading"><span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-work, var(--tblr-primary));"></span>Clients</span></li>
                     <li class="nav-item {% if u and 'client' in u %}active{% endif %}">
                         <a class="nav-link" href="{% url 'core:client_list' %}" title="Clients">
                             <span class="nav-link-icon">{% ticon 'users' %}</span>
@@ -121,7 +121,7 @@
                     </li>
 
                     {% if can_view_prospects or is_admin %}
-                    <li class="nav-item mt-2"><span class="nav-link text-uppercase fw-bold mb-when-expanded mb-room-heading" data-room="desk" style="font-size:.7rem;opacity:.7;">Relationship Desk</span></li>
+                    <li class="nav-item mt-2"><span class="nav-link mb-when-expanded mb-room-heading"><span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-desk, var(--tblr-primary));"></span>Relationship Desk</span></li>
                     {% if can_view_prospects %}
                     <li class="nav-item {% if u and 'prospect' in u %}active{% endif %}">
                         <a class="nav-link" href="{% url 'core:prospect_list' %}" title="Prospects">
@@ -141,7 +141,7 @@
                     {% endif %}
 
                     {% if can_view_sales %}
-                    <li class="nav-item mt-2"><span class="nav-link text-uppercase fw-bold mb-when-expanded mb-room-heading" data-room="register" style="font-size:.7rem;opacity:.7;">Register</span></li>
+                    <li class="nav-item mt-2"><span class="nav-link mb-when-expanded mb-room-heading"><span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-register, var(--tblr-primary));"></span>Register</span></li>
                     <li class="nav-item {% if u and 'pos' in u %}active{% endif %}">
                         <a class="nav-link" href="{% url 'core:pos_home' %}" title="Register">
                             <span class="nav-link-icon">{% ticon 'cash-register' %}</span>
@@ -150,7 +150,7 @@
                     </li>
                     {% endif %}
 
-                    <li class="nav-item mt-2"><span class="nav-link text-uppercase fw-bold mb-when-expanded mb-room-heading" data-room="office" style="font-size:.7rem;opacity:.7;">Back Office</span></li>
+                    <li class="nav-item mt-2"><span class="nav-link mb-when-expanded mb-room-heading"><span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-office, var(--tblr-primary));"></span>Back Office</span></li>
                     <li class="nav-item {% if u and 'catalog' in u %}active{% endif %}">
                         <a class="nav-link" href="{% url 'core:catalog_list' %}" title="Products &amp; Services">
                             <span class="nav-link-icon">{% ticon 'tag' %}</span>
