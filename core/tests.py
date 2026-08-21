@@ -14293,7 +14293,7 @@ def test_tabler_frame_renders_chrome_for_signed_in_user():
     assert 'vendor/tabler/1.4.0/tabler.min' in body
     assert 'js/mb-boot.js' in body and 'js/mb-chrome.js' in body
     assert 'alpine' not in body.lower()
-    assert 'css/app.css' not in body                       # Tailwind never loads on a Tabler page
+    assert 'css/app.' not in body                          # Tailwind never loads on a Tabler page (hashed name on prod)
     assert '<body data-room="work"' in body
     for heading in ('Work', 'Clients', 'Relationship Desk', 'Register', 'Back Office'):
         assert heading in body
@@ -14323,5 +14323,5 @@ def test_legacy_pages_still_load_the_tailwind_frame():
     r = c.get(reverse('core:ticket_list'))
     assert r.status_code == 200
     body = r.content.decode()
-    assert 'css/app.css' in body
+    assert 'css/app.' in body                              # 'app.css' locally, 'app.<hash>.css' under manifest storage
     assert 'tabler.min' not in body
