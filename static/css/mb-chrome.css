@@ -44,3 +44,16 @@ body[data-room="work"]     { --mb-room: var(--tblr-primary); }
     html[data-sidebar-collapsed="true"] .navbar-vertical .mb-room-group > .navbar-nav { display: block !important; height: auto !important; }
     html[data-sidebar-collapsed="true"] .navbar-vertical .mb-room-heading { padding-top: .25rem; }
 }
+
+/* ── Dark mode legibility ────────────────────────────────────────────────── */
+/* Tabler's secondary text is tuned for light; on the dark surfaces it fades
+ * into the card. Mike, Aug 21: "should stand out from background easily." */
+[data-bs-theme="dark"] .text-secondary,
+[data-bs-theme="dark"] .subheader,
+[data-bs-theme="dark"] .page-pretitle,
+[data-bs-theme="dark"] .empty-subtitle,
+[data-bs-theme="dark"] .card-footer,
+[data-bs-theme="dark"] .form-label-description { color: #b6c0cf !important; }
+[data-bs-theme="dark"] .page-title, [data-bs-theme="dark"] .card-title, [data-bs-theme="dark"] .empty-title { color: #f1f5f9; }
+[data-bs-theme="dark"] .badge.bg-secondary-lt { color: #d5dbe5; }
+[data-bs-theme="dark"] .list-group-item-action { color: #e2e8f0; }
