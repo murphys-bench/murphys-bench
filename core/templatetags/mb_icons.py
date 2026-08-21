@@ -21,6 +21,20 @@ def _get_status_def(slug, entity_type):
     return _sd_cache[entity_type].get(slug)
 
 
+def all_status_defs():
+    """Every StatusDefinition for both entity types, through the same 2-minute cache.
+
+    The Tabler frame emits one CSS variable per status (--mb-status-<entity>-<slug>)
+    on every page, so templates carry no hex. Inactive statuses are included on
+    purpose: a record can still hold a retired status and must still show its color.
+    """
+    out = []
+    for entity_type in ('ticket', 'workorder'):
+        _get_status_def('', entity_type)          # warms/refreshes the cache
+        out.extend(_sd_cache[entity_type].values())
+    return out
+
+
 def _contrasting_color(hex_color):
     try:
         h = hex_color.lstrip('#')

@@ -1,0 +1,36 @@
+/* MB on Tabler: the few rules the framework does not provide.
+ * Kept deliberately short. If a page needs something that is not here and not
+ * in Tabler, the answer is a rule in mb-docs/MB-ON-TABLER-DESIGN-RULES.md
+ * first, then a line here; never a one-off on the page. */
+
+/* ── Sidebar collapse to icons ───────────────────────────────────────────── */
+@media (min-width: 992px) {
+    html[data-sidebar-collapsed="true"] .navbar-vertical.navbar-expand-lg { width: 4rem; }
+    html[data-sidebar-collapsed="true"] .navbar-vertical.navbar-expand-lg ~ .page { padding-left: 4rem; }
+    html[data-sidebar-collapsed="true"] .navbar-vertical .nav-link-title,
+    html[data-sidebar-collapsed="true"] .navbar-vertical .mb-when-expanded,
+    html[data-sidebar-collapsed="true"] .navbar-vertical .navbar-brand { display: none; }
+    html[data-sidebar-collapsed="true"] .navbar-vertical .nav-link { justify-content: center; padding-left: 0; padding-right: 0; }
+    html[data-sidebar-collapsed="true"] .navbar-vertical .nav-link-icon { margin-right: 0; }
+    html[data-sidebar-collapsed="true"] .mb-when-collapsed { display: inline-flex; }
+}
+.mb-when-collapsed { display: none; }
+.navbar-vertical .navbar-brand img { max-height: 5rem; width: auto; }
+
+/* ── Status carried by color ─────────────────────────────────────────────── */
+/* Left stripe on a card, row, or record header. Set --mb-stripe on the element. */
+.mb-stripe { box-shadow: inset 4px 0 0 var(--mb-stripe, var(--tblr-secondary)); }
+/* Dot + word: use Tabler's .status-dot with --tblr-status-color set to the status var. */
+
+/* ── Rooms ───────────────────────────────────────────────────────────────── */
+/* One attribute on <body> says which room a screen is in. The room colors are
+ * CSS variables emitted by base_tabler.html (shop-adjustable in a later batch). */
+body[data-room="register"] { --mb-room: var(--mb-room-register); }
+body[data-room="desk"]     { --mb-room: var(--mb-room-desk); }
+body[data-room="office"]   { --mb-room: var(--mb-room-office); }
+body[data-room="work"]     { --mb-room: var(--tblr-primary); }
+.page-header { box-shadow: inset 0 3px 0 var(--mb-room, transparent); padding-top: calc(var(--tblr-page-padding-y, 1rem) + 3px); }
+.navbar-vertical .mb-room-heading { color: var(--mb-room-heading, inherit); }
+.navbar-vertical .mb-room-heading[data-room="register"] { --mb-room-heading: var(--mb-room-register); }
+.navbar-vertical .mb-room-heading[data-room="desk"]     { --mb-room-heading: var(--mb-room-desk); }
+.navbar-vertical .mb-room-heading[data-room="office"]   { --mb-room-heading: var(--mb-room-office); }

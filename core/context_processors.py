@@ -1,4 +1,5 @@
 from .models import SiteSettings
+from .templatetags.mb_icons import all_status_defs
 
 # Role flags exposed to every template so a button the user cannot use is not
 # drawn. These mirror the _can_* helpers in views.py one-for-one; the helpers are
@@ -47,6 +48,8 @@ def site_settings(request):
     user = getattr(request, 'user', None)
     context = {
         'site_settings': SiteSettings.get(),
+        # Tabler frame: status colors as CSS variables, from the shop's status table.
+        'mb_status_defs': all_status_defs(),
         'is_admin': False,
         'can_view_prospects': False,
         'can_view_estimates': False,

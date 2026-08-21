@@ -1,105 +1,114 @@
-{% extends "core/base.html" %}
-{% load mb_icons %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
 
 {% block title %}Notifications — Murphy's Bench{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
-        <div class="flex items-center gap-4">
-            <h1 class="text-2xl font-bold text-gray-900 shrink-0">Notifications</h1>
-            <div class="flex-1"></div>
-            {% if notifications %}
-            <form method="post" action="{% url 'core:notification_dismiss_all' %}">
-                {% csrf_token %}
-                <button type="submit"
-                        class="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-md text-sm hover:bg-gray-200 shrink-0">
-                    Dismiss all
-                </button>
-            </form>
-            {% endif %}
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <div class="page-pretitle">Attention</div>
+                <h2 class="page-title">Notifications</h2>
+            </div>
+            <div class="col-auto">
+                {% if notifications %}
+                <form method="post" action="{% url 'core:notification_dismiss_all' %}">
+                    {% csrf_token %}
+                    <button type="submit" class="btn">Dismiss all</button>
+                </form>
+                {% endif %}
+            </div>
         </div>
     </div>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="max-w-3xl mx-auto space-y-6">
+<div class="row row-cards">
+    <div class="col-12 col-lg-8">
 
-    {% if awaiting_reply %}
-    {% comment %}
-    Not notification rows — Ticket.needs_response, queried live. Nothing to
-    dismiss here: replying to the client clears the flag on its own.
-    {% endcomment %}
-    <div>
-        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
-            Awaiting your reply
-        </h2>
-        <div class="space-y-2">
-            {% for ticket in awaiting_reply %}
-            <a href="{% url 'core:ticket_detail' ticket.pk %}"
-               class="block bg-white rounded-lg shadow hover:shadow-md transition-shadow px-5 py-3
-                      border-l-4 border-green-500">
-                <div class="flex items-start gap-3">
-                    <span class="mt-0.5 text-green-600">{% icon 'envelope' 5 %}</span>
-                    <div class="flex-1 min-w-0">
-                        <p class="text-sm text-gray-900 font-medium truncate">
-                            {{ ticket.ticket_number }} — {{ ticket.subject }}
-                        </p>
-                        <p class="text-xs text-gray-400 mt-0.5">
-                            {% if ticket.client %}{{ ticket.client.name }} · {% endif %}
-                            Client replied {{ ticket.updated_at|date:"M j, Y g:i A" }}
-                        </p>
-                    </div>
-                </div>
-            </a>
-            {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-
-    <div>
-        {% if awaiting_reply %}
-        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Notices</h2>
-        {% endif %}
-        <div class="space-y-2">
-            {% for note in notifications %}
-            <div class="flex items-stretch gap-2">
-                <a href="{% url 'core:notification_open' note.pk %}"
-                   class="flex-1 min-w-0 block bg-white rounded-lg shadow hover:shadow-md transition-shadow px-5 py-3
-                          {% if not note.is_read %}border-l-4 border-blue-500{% endif %}">
-                    <div class="flex items-start gap-3">
-                        <span class="mt-0.5 {% if note.is_read %}text-gray-400{% else %}text-blue-600{% endif %}">
-                            {% icon 'bell' 5 %}
-                        </span>
-                        <div class="flex-1 min-w-0">
-                            <p class="text-sm {% if note.is_read %}text-gray-600{% else %}text-gray-900 font-medium{% endif %}">
-                                {{ note.text }}
-                            </p>
-                            <p class="text-xs text-gray-400 mt-0.5">{{ note.created_at|date:"M j, Y g:i A" }}</p>
+        {% comment %}
+        Two sections, both always present (presence is static): tickets a client has
+        replied to and nobody has answered, then notices addressed to this person.
+        {% endcomment %}
+        <div class="card mb-3">
+            <div class="card-header">
+                <h3 class="card-title">Awaiting your reply</h3>
+                <span class="badge bg-green-lt ms-2">{{ awaiting_reply|length }}</span>
+            </div>
+            {% if awaiting_reply %}
+            <div class="list-group list-group-flush">
+                {% for ticket in awaiting_reply %}
+                <a href="{% url 'core:ticket_detail' ticket.pk %}" class="list-group-item list-group-item-action mb-stripe"
+                   style="--mb-stripe: var(--mb-status-ticket-{{ ticket.status }}, var(--tblr-green));">
+                    <div class="row align-items-center">
+                        <div class="col-auto text-green">{% ticon 'mail' %}</div>
+                        <div class="col text-truncate">
+                            <div class="fw-medium">{{ ticket.ticket_number }} &middot; {{ ticket.subject }}</div>
+                            <div class="text-secondary small">
+                                {% if ticket.client %}{{ ticket.client.name }} &middot; {% endif %}
+                                Client replied {{ ticket.updated_at|date:"M j, Y g:i A" }}
+                            </div>
                         </div>
-                        {% if not note.is_read %}
-                        <span class="shrink-0 mt-1 inline-block w-2 h-2 rounded-full bg-blue-500"></span>
-                        {% endif %}
                     </div>
                 </a>
-                <form method="post" action="{% url 'core:notification_dismiss' note.pk %}" class="shrink-0 flex">
-                    {% csrf_token %}
-                    <button type="submit" title="Dismiss"
-                            class="px-3 bg-white rounded-lg shadow text-gray-300 hover:text-gray-600 hover:shadow-md transition">
-                        {% icon 'x-mark' 5 %}
-                    </button>
-                </form>
+                {% endfor %}
             </div>
-            {% empty %}
-            {% if not awaiting_reply %}
-            <div class="bg-white rounded-lg shadow px-5 py-10 text-center text-gray-400 text-sm">
-                Nothing needs your attention.
+            {% else %}
+            <div class="card-body">
+                <div class="empty py-3">
+                    <p class="empty-title">No client is waiting on you</p>
+                    <p class="empty-subtitle text-secondary">Every client reply has been answered.</p>
+                </div>
             </div>
             {% endif %}
-            {% endfor %}
         </div>
-    </div>
 
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Notices</h3>
+            </div>
+            {% if notifications %}
+            <div class="list-group list-group-flush">
+                {% for note in notifications %}
+                <div class="list-group-item">
+                    <div class="row align-items-center">
+                        <div class="col-auto">
+                            {% if note.is_read %}
+                            <span class="status-dot" style="--tblr-status-color: var(--tblr-secondary);"></span>
+                            {% else %}
+                            <span class="status-dot status-dot-animated" style="--tblr-status-color: var(--tblr-primary);"></span>
+                            {% endif %}
+                        </div>
+                        <div class="col text-truncate">
+                            <a href="{% url 'core:notification_open' note.pk %}" class="text-reset d-block {% if not note.is_read %}fw-bold{% endif %}">
+                                {{ note.text }}
+                            </a>
+                            <div class="text-secondary small">{{ note.created_at|date:"M j, Y g:i A" }}</div>
+                        </div>
+                        <div class="col-auto">
+                            <form method="post" action="{% url 'core:notification_dismiss' note.pk %}">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-icon btn-ghost-secondary" title="Dismiss">
+                                    {% ticon 'x' %}
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="card-body">
+                <div class="empty py-3">
+                    <p class="empty-title">Nothing needs your attention</p>
+                    <p class="empty-subtitle text-secondary">Messages from other techs and system alerts land here.</p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+    </div>
 </div>
 {% endblock %}

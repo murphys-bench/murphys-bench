@@ -14205,3 +14205,123 @@ def test_check_sla_overdue_command_runs_auto_close(client_obj):
     t.refresh_from_db()
     assert t.status == 'closed'
     assert '[CLOSE]' in out.getvalue()
+
+
+# ── Tabler frame (tabler-rebuild batch 1) ────────────────────────────────────
+# The new chrome (core/base_tabler.html) and the vendored framework it loads.
+# These guard the vendoring contract, not the look: the files are the pinned
+# bytes, the icon sprite holds every icon a template asks for, and the frame
+# renders for a signed-in user with the rooms and toggles the design rules name.
+
+def _tabler_admin_client():
+    from django.test import Client as HttpClient
+    u = get_user_model().objects.create_superuser('tabler_admin', 'ta@example.com', 'x' * 16)
+    c = HttpClient()
+    c.force_login(u)
+    return c, u
+
+
+def _repo():
+    from pathlib import Path
+    from django.conf import settings
+    return Path(settings.BASE_DIR)
+
+
+def test_vendored_tabler_files_match_recorded_versions():
+    """static/vendor/VERSIONS is the contract: each listed file exists at the
+    versioned path it names. The recorded SHA-256 is of the upstream file BEFORE
+    the sourcemap comment was stripped, so the guard here is presence + version
+    directory, and that neither vendored file still references a .map
+    (ManifestStaticFilesStorage fails collectstatic on a missing referenced file)."""
+    repo = _repo()
+    versions = (repo / 'static' / 'vendor' / 'VERSIONS').read_text()
+    listed = re.findall(r'^(@tabler/\S+) (\S+) (\S+) sha256=([0-9a-f]{64})', versions, re.M)
+    assert len(listed) == 3, listed
+    css = repo / 'static' / 'vendor' / 'tabler' / '1.4.0' / 'tabler.min.css'
+    js = repo / 'static' / 'vendor' / 'tabler' / '1.4.0' / 'tabler.min.js'
+    assert css.stat().st_size > 400_000 and js.stat().st_size > 50_000
+    assert 'Tabler v1.4.0' in css.read_text()[:200]
+    assert 'Tabler v1.4.0' in js.read_text()[:200]
+    assert 'sourceMappingURL' not in css.read_text()
+    assert 'sourceMappingURL' not in js.read_text()
+    assert 'Bootstrap v5.3.7' in js.read_text()
+
+
+def test_icon_sprite_holds_every_icon_the_templates_use():
+    """Every {% ticon 'name' %} in any template names an icon that is (a) in
+    mb_tabler.ICONS and (b) present in the vendored sprite subset. A name that
+    fails either renders nothing on a box with no error, which is why this is
+    checked here instead of at render time."""
+    from core.templatetags.mb_tabler import ICONS, SPRITE_PATH
+    repo = _repo()
+    sprite = (repo / 'static' / SPRITE_PATH).read_text()
+    in_sprite = set(re.findall(r'<symbol id="tabler-([a-z0-9-]+)"', sprite))
+    used = set()
+    for tpl in repo.glob('core/templates/**/*.html'):
+        used |= set(re.findall(r"{%\s*ticon\s+'([a-z0-9-]+)'", tpl.read_text()))
+    assert used, 'no template uses ticon; the frame should'
+    assert used <= set(ICONS), used - set(ICONS)
+    assert set(ICONS) <= in_sprite, set(ICONS) - in_sprite
+
+
+def test_ticon_unknown_name_renders_nothing_and_warns(caplog):
+    from core.templatetags.mb_tabler import ticon
+    with caplog.at_level('WARNING', logger='core'):
+        assert ticon('no-such-icon') == ''
+    assert 'no-such-icon' in caplog.text
+    assert 'tabler-home' in ticon('home')
+
+
+def test_hex_rgb_filter():
+    from core.templatetags.mb_tabler import hex_rgb
+    assert hex_rgb('#2fb344') == '47, 179, 68'
+    assert hex_rgb('2FB344') == '47, 179, 68'
+    assert hex_rgb('') == '32, 107, 196'          # default Tabler primary
+    assert hex_rgb('not a color') == '32, 107, 196'
+
+
+@pytest.mark.django_db
+def test_tabler_frame_renders_chrome_for_signed_in_user():
+    """The Notifications page is the first page on the new frame. It must carry
+    the Tabler stylesheet + bundled JS, the pre-paint boot script, no Alpine, the
+    room attribute, the New button, every room heading, both toggles, and one
+    CSS variable per status from the shop's status table."""
+    c, _ = _tabler_admin_client()
+    r = c.get(reverse('core:notifications'))
+    assert r.status_code == 200
+    body = r.content.decode()
+    assert 'vendor/tabler/1.4.0/tabler.min' in body
+    assert 'js/mb-boot.js' in body and 'js/mb-chrome.js' in body
+    assert 'alpine' not in body.lower()
+    assert 'css/app.css' not in body                       # Tailwind never loads on a Tabler page
+    assert '<body data-room="work"' in body
+    for heading in ('Work', 'Clients', 'Relationship Desk', 'Register', 'Back Office'):
+        assert heading in body
+    assert 'data-mb-toggle="theme"' in body and 'data-mb-toggle="sidebar"' in body
+    assert 'dropdown-toggle' in body and '>New<' in body.replace('</span>', '<')  # the front door
+    assert '--mb-status-ticket-new:' in body and '--mb-status-workorder-new:' in body
+    assert 'No client is waiting on you' in body           # static presence: empty state shown
+    assert 'Nothing needs your attention' in body
+
+
+@pytest.mark.django_db
+def test_notification_count_tabler_style():
+    c, u = _tabler_admin_client()
+    r = c.get(reverse('core:notification_count') + '?style=tabler')
+    assert r.status_code == 200 and r.content.strip() == b''
+    from core.models import Notification
+    Notification.objects.create(recipient=u, text='hello')
+    r = c.get(reverse('core:notification_count') + '?style=tabler')
+    assert b'badge bg-red' in r.content and b'>1<' in r.content
+
+
+@pytest.mark.django_db
+def test_legacy_pages_still_load_the_tailwind_frame():
+    """Until a page is rebuilt it stays on core/base.html. The two frames must
+    never meet on one page, so a legacy page must not carry the Tabler assets."""
+    c, _ = _tabler_admin_client()
+    r = c.get(reverse('core:ticket_list'))
+    assert r.status_code == 200
+    body = r.content.decode()
+    assert 'css/app.css' in body
+    assert 'tabler.min' not in body

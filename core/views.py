@@ -1632,11 +1632,11 @@ class NotificationCountView(LoginRequiredMixin, View):
     def get(self, request):
         count = (request.user.notifications.unread().count()
                  + _tickets_awaiting_reply(request.user).count())
-        template = (
-            'core/partials/notification_badge_header.html'
-            if request.GET.get('style') == 'header'
-            else 'core/partials/notification_badge.html'
-        )
+        style = request.GET.get('style')
+        template = {
+            'header': 'core/partials/notification_badge_header.html',
+            'tabler': 'core/partials/notification_badge_tabler.html',
+        }.get(style, 'core/partials/notification_badge.html')
         return render(request, template, {'count': count})
 
 
