@@ -1,117 +1,52 @@
-{% extends "core/base.html" %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
 
 {% block title %}Monthly Clients - Murphy's Bench{% endblock %}
+{% block room %}register{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-4">
-        <div>
-            <a href="{% url 'core:sale_list' %}" class="text-sm text-gray-400 hover:text-gray-600">← Sales</a>
-            <h1 class="text-2xl font-bold text-gray-900">Monthly Clients</h1>
-            <p class="text-xs text-gray-500 mt-0.5">Phase 1: Murphy's Bench sends <strong>draft</strong> invoices to Invoice Ninja. Nothing is charged here — charge each card by hand in Invoice Ninja, then Check IN to record payment.</p>
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col"><div class="page-pretitle"><a href="{% url 'core:sale_list' %}">Sales</a></div><h2 class="page-title">Monthly Clients</h2><div class="text-secondary">Murphy's Bench sends <strong>draft</strong> invoices to Invoice Ninja. Nothing is charged here; charge each card by hand in Invoice Ninja, then Check IN to record payment.</div></div>
+            {% if rows %}
+            <div class="col-auto">
+                <div class="btn-list">
+                    <form method="post" action="{% url 'core:monthly_batch_prepare' %}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-primary" {% if not due_unprepared_count %}disabled{% endif %}>Prepare all due{% if due_unprepared_count %} ({{ due_unprepared_count }}){% endif %}</button></form>
+                    {% if invoice_ninja_enabled %}
+                    <a href="{% url 'core:monthly_batch_send' %}" class="btn btn-success {% if not prepared_unsent_count %}disabled{% endif %}">Send prepared drafts to Invoice Ninja{% if prepared_unsent_count %} ({{ prepared_unsent_count }}){% endif %}</a>
+                    {% else %}
+                    <span class="text-secondary small">Enable Invoice Ninja in Settings to send drafts.</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
         </div>
-        {% include "core/partials/header_bell.html" %}
     </div>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="max-w-5xl mx-auto">
-
-    {% if rows %}
-    <!-- Batch actions -->
-    <div class="flex flex-wrap items-center gap-3 mb-4">
-        <form method="post" action="{% url 'core:monthly_batch_prepare' %}">
-            {% csrf_token %}
-            <button type="submit" {% if not due_unprepared_count %}disabled{% endif %}
-                    class="px-4 py-2 rounded text-sm font-medium {% if due_unprepared_count %}bg-blue-600 text-white hover:bg-blue-700{% else %}bg-gray-100 text-gray-400 cursor-not-allowed{% endif %}">
-                Prepare all due{% if due_unprepared_count %} ({{ due_unprepared_count }}){% endif %}
-            </button>
-        </form>
-        {% if invoice_ninja_enabled %}
-        <a href="{% if prepared_unsent_count %}{% url 'core:monthly_batch_send' %}{% else %}#{% endif %}"
-           class="px-4 py-2 rounded text-sm font-medium {% if prepared_unsent_count %}bg-green-600 text-white hover:bg-green-700{% else %}bg-gray-100 text-gray-400 cursor-not-allowed pointer-events-none{% endif %}">
-            Send prepared drafts to Invoice Ninja{% if prepared_unsent_count %} ({{ prepared_unsent_count }}){% endif %}
-        </a>
-        {% else %}
-        <span class="text-xs text-gray-400">Enable Invoice Ninja in Settings to send drafts.</span>
-        {% endif %}
+<div class="card">
+{% if rows %}
+    <div class="table-responsive">
+    <table class="table card-table table-vcenter">
+        <thead><tr><th>Client</th><th>Billing day</th><th>Amount</th><th>This month</th><th></th></tr></thead>
+        <tbody>
+        {% for row in rows %}
+        <tr>
+            <td><a href="{% url 'core:client_detail' row.client.pk %}">{{ row.client.name }}</a></td>
+            <td>{{ row.billing_date|date:"M j" }}{% if not row.is_due %} <span class="text-secondary small">(not due yet)</span>{% endif %}</td>
+            <td>{% if row.client.monthly_amount %}${{ row.client.monthly_amount }}{% else %}<span class="text-secondary">Not set</span>{% endif %}</td>
+            <td>{% include "core/partials/billing_state_badge.html" with state=row.state sale=row.sale %}</td>
+            <td class="text-end text-nowrap">{% url 'core:client_prepare_monthly' row.client.pk as prep %}{% include "core/partials/billing_row_actions.html" with state=row.state sale=row.sale is_due=True prepare_url=prep next_url=request.path %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
     </div>
-
-    <div class="bg-white rounded-lg shadow overflow-hidden">
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
-                <tr>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Billing Day</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">This Month</th>
-                    <th class="px-4 py-3"></th>
-                </tr>
-            </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-                {% for row in rows %}
-                <tr class="hover:bg-gray-50">
-                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium">
-                        <a href="{% url 'core:client_detail' row.client.pk %}" class="text-green-700 hover:underline">{{ row.client.name }}</a>
-                    </td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
-                        {{ row.billing_date|date:"M j" }}
-                        {% if not row.is_due %}<span class="ml-1 text-xs text-gray-400">(not due yet)</span>{% endif %}
-                    </td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
-                        {% if row.client.monthly_amount %}${{ row.client.monthly_amount }}{% else %}<span class="text-gray-400">Not set</span>{% endif %}
-                    </td>
-                    <td class="px-4 py-3 whitespace-nowrap">
-                        {% if row.state == 'not_prepared' %}
-                            <span class="px-2 py-1 text-xs font-semibold rounded bg-gray-100 text-gray-600">Not prepared</span>
-                        {% elif row.state == 'prepared' %}
-                            <span class="px-2 py-1 text-xs font-semibold rounded bg-yellow-100 text-yellow-700">Prepared</span>
-                        {% elif row.state == 'draft_in_in' %}
-                            <span class="px-2 py-1 text-xs font-semibold rounded bg-blue-100 text-blue-700">Draft in IN{% if row.sale.invoice_ninja_ref %} · #{{ row.sale.invoice_ninja_ref }}{% endif %}</span>
-                        {% elif row.state == 'paid' %}
-                            <span class="px-2 py-1 text-xs font-semibold rounded bg-green-100 text-green-700">Paid</span>
-                        {% endif %}
-                    </td>
-                    <td class="px-4 py-3 whitespace-nowrap text-right">
-                        <div class="flex items-center gap-2 justify-end">
-                        {% if row.state == 'not_prepared' %}
-                            <form method="post" action="{% url 'core:client_prepare_monthly' row.client.pk %}">
-                                {% csrf_token %}
-                                <button type="submit" class="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Prepare draft</button>
-                            </form>
-                        {% elif row.state == 'prepared' %}
-                            <a href="{% url 'core:sale_detail' row.sale.pk %}" class="px-3 py-1 border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50">Review</a>
-                            {% if invoice_ninja_enabled %}
-                            <form method="post" action="{% url 'core:sale_send_draft' row.sale.pk %}">
-                                {% csrf_token %}
-                                <button type="submit" class="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">Send draft</button>
-                            </form>
-                            {% endif %}
-                        {% elif row.state == 'draft_in_in' %}
-                            {% if invoice_ninja_enabled %}
-                            <form method="post" action="{% url 'core:sale_check_in' row.sale.pk %}">
-                                {% csrf_token %}
-                                <input type="hidden" name="next" value="{% url 'core:monthly_clients_list' %}">
-                                <button type="submit" class="px-3 py-1 border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50">Check IN</button>
-                            </form>
-                            {% endif %}
-                            <a href="{% url 'core:sale_detail' row.sale.pk %}" class="px-3 py-1 border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50">View</a>
-                        {% else %}
-                            <a href="{% url 'core:sale_detail' row.sale.pk %}" class="px-3 py-1 border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50">View</a>
-                        {% endif %}
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="bg-white rounded-lg shadow px-6 py-16 text-center">
-        <p class="text-gray-400 text-lg mb-2">No monthly clients yet.</p>
-        <p class="text-gray-400 text-sm">Toggle "Monthly client" on a client's Edit page to add them to this list.</p>
-    </div>
-    {% endif %}
+{% else %}
+    <div class="empty"><div class="empty-icon">{% ticon 'users' %}</div><p class="empty-title">No monthly clients yet</p><p class="empty-subtitle text-secondary">Turn on "Monthly client" on a client's edit page to add them here.</p></div>
+{% endif %}
 </div>
 {% endblock %}

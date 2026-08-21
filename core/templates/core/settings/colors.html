@@ -1,0 +1,40 @@
+{% load mb_tabler %}
+{% with form=forms.colors %}
+<form method="post" enctype="multipart/form-data">
+    {% csrf_token %}<input type="hidden" name="tab" value="colors">
+    <div class="card mb-3">
+        <div class="card-header"><div><h3 class="card-title">Logos</h3><div class="card-subtitle">PNG or SVG. Blank shows the company name as text.</div></div></div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Sidebar logo</label>
+                    {% if settings.site_logo %}<div class="d-flex align-items-center gap-3 mb-2"><img src="{{ settings.site_logo.url }}" alt="Current logo" style="max-height:2.5rem;" class="border rounded p-1"><label class="form-check mb-0"><input type="checkbox" name="colors-site_logo-clear" class="form-check-input"><span class="form-check-label">Remove</span></label></div>{% endif %}
+                    <input type="file" name="colors-site_logo" accept="image/*" class="form-control">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Sign-in page logo</label>
+                    {% if settings.login_logo %}<div class="d-flex align-items-center gap-3 mb-2"><img src="{{ settings.login_logo.url }}" alt="Current login logo" style="max-height:4rem;" class="border rounded p-1"><label class="form-check mb-0"><input type="checkbox" name="colors-login_logo-clear" class="form-check-input"><span class="form-check-label">Remove</span></label></div>{% endif %}
+                    <input type="file" name="colors-login_logo" accept="image/*" class="form-control">
+                    <div class="form-hint">Room for a larger logo than the sidebar. Max 2000 by 2000 px.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="card mb-3">
+        <div class="card-header"><div><h3 class="card-title">Work order status colors</h3><div class="card-subtitle">The color behind each status on lists and records.</div></div></div>
+        <div class="card-body">
+            <div class="row g-3">
+                {% for status_key, status_label, field_name, current_val in color_status_rows %}
+                <div class="col-md-4" data-mb-color>
+                    <label class="form-label">{{ status_label }}</label>
+                    <div class="input-group"><input type="color" class="form-control form-control-color" value="{{ current_val }}"><input type="text" name="colors-{{ field_name }}" value="{{ current_val }}" maxlength="7" class="form-control font-monospace"></div>
+                    <div class="mt-2"><span class="badge" data-mb-color-preview style="background:{{ current_val }}; color: var(--tblr-body-color);">{{ status_label }}</span></div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="card-footer"><button type="submit" class="btn btn-primary">Save colors</button></div>
+    </div>
+</form>
+{% endwith %}
+<div class="text-secondary small">The nav, page, title, section and dashboard color fields from the old frame are not offered here; the new frame does not read them. Room colors (Work, Register, Desk, Back Office) are coming as their own settings.</div>

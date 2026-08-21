@@ -1,67 +1,46 @@
-{% extends "core/base.html" %}
-{% load mb_icons %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler mb_icons %}
+
+{% block title %}Role: {{ role.name }} - Murphy's Bench{% endblock %}
+{% block room %}office{% endblock %}
 
 {% block page_header %}
-<div class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-    <h1 class="text-xl font-semibold text-gray-900">Edit Role — {{ role.name }}</h1>
-    <a href="{% url 'core:role_list' %}" class="text-sm text-gray-500 hover:text-gray-700">← Back to Roles</a>
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col"><div class="page-pretitle"><a href="{% url 'core:role_list' %}">Roles</a></div><h2 class="page-title">{{ role.name }}</h2></div>
+            <div class="col-auto"><a href="{% url 'core:role_list' %}" class="btn">Cancel</a></div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="p-6 max-w-2xl">
-    <form method="post">
-        {% csrf_token %}
-        <div class="bg-white rounded-lg shadow p-6 mb-4 space-y-4">
-            <div class="grid grid-cols-2 gap-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Name <span class="text-red-500">*</span></label>
-                    {{ form.name }}
-                    {% if form.name.errors %}<p class="text-xs text-red-600 mt-1">{{ form.name.errors|join:", " }}</p>{% endif %}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                    {{ form.description }}
-                </div>
-            </div>
-        </div>
-
-        <div class="bg-white rounded-lg shadow p-6 mb-6">
-            <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">Permissions</h2>
-            <div class="space-y-5">
-                {% for group in role_flag_groups %}
-                <div>
-                    <div class="flex items-baseline gap-2 mb-2 pb-1 border-b border-gray-100">
-                        <span class="text-xs font-semibold uppercase tracking-wider text-gray-500">{{ group.label }}</span>
-                        <span class="text-xs text-gray-400">{{ group.note }}</span>
-                    </div>
-                    <div class="grid grid-cols-2 gap-x-8 gap-y-3">
-                        {% for flag, label, sensitive in group.flags %}
-                        <label class="flex items-center gap-2 cursor-pointer text-sm {% if sensitive %}text-gray-900 font-medium{% else %}text-gray-700{% endif %}">
-                            {{ form|getfield:flag }} {{ label }}
-                            {% if sensitive %}<span class="text-amber-500 text-[10px]" title="Has an effect outside Murphy's Bench">●</span>{% endif %}
-                        </label>
-                        {% endfor %}
-                    </div>
-                </div>
+<div class="row justify-content-center"><div class="col-12 col-lg-9">
+<form method="post">
+    {% csrf_token %}
+    {% include "core/partials/form_errors.html" %}
+    <div class="card mb-3">
+        <div class="card-body"><div class="row g-3">
+            <div class="col-md-5"><label class="form-label required">Name</label>{{ form.name|tabler_input }}</div>
+            <div class="col-md-7"><label class="form-label">Description</label>{{ form.description|tabler_input }}</div>
+        </div></div>
+    </div>
+    <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Permissions</h3></div>
+        {% for group in role_flag_groups %}
+        <div class="card-body border-bottom">
+            <div class="subheader mb-1">{{ group.label }} <span class="text-secondary text-lowercase fw-normal">{{ group.note }}</span></div>
+            <div class="row g-2">
+                {% for flag, label, sensitive in group.flags %}
+                <div class="col-md-6"><label class="form-check mb-0">{% with f=form|getfield:flag %}{{ f|tabler_input }}{% endwith %}<span class="form-check-label {% if sensitive %}fw-medium{% endif %}">{{ label }}{% if sensitive %} <span class="text-warning" title="Has an effect outside Murphy's Bench">{% ticon 'alert-triangle' 'icon-sm' %}</span>{% endif %}</span></label></div>
                 {% endfor %}
-                <p class="text-xs text-gray-400 flex items-center gap-1.5">
-                    <span class="text-amber-500 text-[10px]">●</span>
-                    Marked permissions have an effect outside Murphy's Bench — money moves, a stored
-                    password is revealed, someone's two-factor is cleared, a login is created, or a
-                    record is destroyed.
-                </p>
             </div>
         </div>
-
-        <div class="flex gap-3">
-            <button type="submit" class="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
-                Save Role
-            </button>
-            <a href="{% url 'core:role_list' %}" class="px-5 py-2 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
-                Cancel
-            </a>
-        </div>
-    </form>
-</div>
+        {% endfor %}
+        <div class="card-body text-secondary small"><span class="text-warning">{% ticon 'alert-triangle' 'icon-sm' %}</span> Marked permissions have an effect outside Murphy's Bench: money moves, a stored password is revealed, someone's two-factor is cleared, a login is created, or a record is destroyed.</div>
+        <div class="card-footer"><button type="submit" class="btn btn-primary">Save role</button></div>
+    </div>
+</form>
+</div></div>
 {% endblock %}

@@ -1,0 +1,9 @@
+{# The fields of a custom estimate line (kind, label, details, qty, unit price, submit). Shared by the General section and every option card. #}
+<div class="row g-2">
+    <div class="col-md-3"><label class="form-label">Kind</label><select name="kind" class="form-select"><option value="labor">Labor</option><option value="part">Part</option></select></div>
+    <div class="col-md-9"><label class="form-label required">What is being quoted</label><input type="text" name="custom_label" class="form-control" required></div>
+    <div class="col-12"><label class="form-label">Details</label><textarea name="notes" rows="2" class="form-control" placeholder="Optional"></textarea></div>
+    <div class="col-md-4"><label class="form-label">Qty</label><input type="number" name="quantity" value="1" min="0" step="0.01" class="form-control"></div>
+    <div class="col-md-4"><label class="form-label">Unit price ($)</label><input type="number" name="unit_price" min="0" step="0.01" class="form-control" placeholder="optional"></div>
+    <div class="col-md-4 d-flex align-items-end"><button type="submit" class="btn btn-primary">Add line</button></div>
+</div>

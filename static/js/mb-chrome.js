@@ -46,9 +46,13 @@
             if (!panel) return;
             var key = 'mb_nav_group_' + id;
             try {
-                if (localStorage.getItem(key) === 'closed') {
+                var stored = localStorage.getItem(key);
+                if (stored === 'closed') {
                     panel.classList.remove('show');
                     btn.setAttribute('aria-expanded', 'false');
+                } else if (stored === 'open') {
+                    panel.classList.add('show');
+                    btn.setAttribute('aria-expanded', 'true');
                 }
             } catch (e) {}
             panel.addEventListener('shown.bs.collapse', function () {
@@ -65,23 +69,118 @@
         if (modalEl && window.bootstrap) {
             var modal = new bootstrap.Modal(modalEl);
             var pending = null;
+            function ask(text, onOk) {
+                pending = onOk;
+                modalEl.querySelector('[data-mb-confirm-text]').textContent = text;
+                modal.show();
+            }
             document.addEventListener('submit', function (ev) {
                 var form = ev.target;
                 if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-mb-confirm')) return;
+                if (form.hasAttribute('hx-post') || form.hasAttribute('hx-get')) return; // htmx:confirm handles these
                 if (form.dataset.mbConfirmed === '1') { form.dataset.mbConfirmed = ''; return; }
                 ev.preventDefault();
-                pending = form;
-                modalEl.querySelector('[data-mb-confirm-text]').textContent = form.getAttribute('data-mb-confirm');
-                modal.show();
+                ask(form.getAttribute('data-mb-confirm'), function () {
+                    form.dataset.mbConfirmed = '1';
+                    form.requestSubmit ? form.requestSubmit() : form.submit();
+                });
             }, true);
+            // HTMX requests: the form (or button) carries data-mb-confirm; the request is
+            // held until the modal's OK, then issued with the confirm skipped.
+            document.addEventListener('htmx:confirm', function (ev) {
+                var el = ev.target.closest ? ev.target.closest('[data-mb-confirm]') : null;
+                if (!el) return;
+                ev.preventDefault();
+                ask(el.getAttribute('data-mb-confirm'), function () { ev.detail.issueRequest(true); });
+            });
             modalEl.querySelector('[data-mb-confirm-ok]').addEventListener('click', function () {
                 if (!pending) return;
-                var f = pending; pending = null;
+                var fn = pending; pending = null;
                 modal.hide();
-                f.dataset.mbConfirmed = '1';
-                f.requestSubmit ? f.requestSubmit() : f.submit();
+                fn();
             });
         }
+
+        // Forms that reset themselves after a successful HTMX post:
+        // <form data-mb-reset-after="#collapse-id"> (the id is optional; when
+        // given, that collapse closes too). Delegated, so rows HTMX swaps in later
+        // still get it.
+        document.addEventListener('htmx:afterRequest', function (ev) {
+            var form = ev.target;
+            if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-mb-reset-after')) return;
+            if (!ev.detail.successful) return;
+            form.reset();
+            var target = form.getAttribute('data-mb-reset-after');
+            if (target && window.bootstrap) {
+                var el = document.querySelector(target);
+                if (el) bootstrap.Collapse.getOrCreateInstance(el).hide();
+            }
+        });
+
+        // Show a block only while a given radio/checkbox value is selected:
+        // <div data-mb-show-for="reply_type=customer_visible">
+        function bindShowFor(root) {
+            root.querySelectorAll('[data-mb-show-for]').forEach(function (el) {
+                if (el.dataset.mbShowForBound) return;
+                el.dataset.mbShowForBound = '1';
+                var pair = el.getAttribute('data-mb-show-for').split('=');
+                var name = pair[0], value = pair[1];
+                function sync() {
+                    var checked = document.querySelector('input[name="' + name + '"]:checked');
+                    el.classList.toggle('d-none', !(checked && checked.value === value));
+                }
+                document.querySelectorAll('input[name="' + name + '"]').forEach(function (r) { r.addEventListener('change', sync); });
+                sync();
+            });
+        }
+        bindShowFor(document);
+        document.addEventListener('htmx:afterSwap', function (ev) { bindShowFor(ev.target); });
+
+        // Color pickers: <div data-mb-color> holds an <input type=color>, a hex
+        // <input type=text>, and optionally [data-mb-color-preview] whose
+        // background (or color, with data-mb-color-preview="fg") tracks the value.
+        function bindColors(root) {
+            root.querySelectorAll('[data-mb-color]').forEach(function (box) {
+                if (box.dataset.mbColorBound) return;
+                box.dataset.mbColorBound = '1';
+                var pick = box.querySelector('input[type="color"]'), hex = box.querySelector('input[type="text"]');
+                var prev = box.querySelector('[data-mb-color-preview]');
+                function paint(v) {
+                    if (!prev) return;
+                    if (prev.getAttribute('data-mb-color-preview') === 'fg') prev.style.color = v; else prev.style.background = v;
+                }
+                if (pick && hex) {
+                    pick.addEventListener('input', function () { hex.value = pick.value; paint(pick.value); });
+                    hex.addEventListener('input', function () { if (/^#[0-9a-fA-F]{6}$/.test(hex.value)) { pick.value = hex.value; paint(hex.value); } });
+                    if (hex.value && /^#[0-9a-fA-F]{6}$/.test(hex.value)) pick.value = hex.value;
+                    paint(hex.value || pick.value);
+                }
+            });
+        }
+        bindColors(document);
+        document.addEventListener('htmx:afterSwap', function (ev) { bindColors(ev.target); });
+
+        // Restore picker: choosing a backup fills the form and enables the button;
+        // the confirm text names the choice. <div data-mb-restore-picker>
+        document.addEventListener('change', function (ev) {
+            var radio = ev.target;
+            if (!(radio instanceof HTMLInputElement) || radio.name !== 'archive_choice') return;
+            var box = radio.closest('[data-mb-restore-picker]');
+            if (!box) return;
+            var form = box.querySelector('form[data-mb-restore-form]');
+            if (!form) return;
+            form.querySelector('[name="archive"]').value = radio.value;
+            form.querySelector('[name="source"]').value = radio.getAttribute('data-source') || '';
+            var label = radio.getAttribute('data-label') || radio.value;
+            form.setAttribute('data-mb-confirm', 'Restore the backup taken ' + label + '? Everything created since then will be permanently gone, and Murphy\'s Bench will restart.');
+            var btn = form.querySelector('button[type="submit"]');
+            if (btn && !btn.hasAttribute('data-mb-locked')) { btn.disabled = false; btn.textContent = 'Restore the backup from ' + label; }
+        });
+
+        // <button data-mb-print-page> prints the page (backup tokens).
+        document.addEventListener('click', function (ev) {
+            if (ev.target.closest('[data-mb-print-page]')) window.print();
+        });
 
         // Repeating rows: <button data-mb-add-row="#tpl-id" data-mb-add-row-into="#list-id">
         // clones the <template> into the list; [data-mb-remove-row] removes its row.

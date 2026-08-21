@@ -1,0 +1,47 @@
+{% load mb_tabler %}
+<form method="post" class="card">
+    {% csrf_token %}<input type="hidden" name="tab" value="outbound">
+    <div class="card-header"><div><h3 class="card-title">Outbound email (SMTP)</h3><div class="card-subtitle">Used for notifications, replies, and auto-responses.</div></div></div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-12"><label class="form-check form-switch">{{ forms.outbound.email_enabled|tabler_input }}<span class="form-check-label">Enable outbound email</span></label><div class="form-hint">Master switch: off stops all automated email.</div></div>
+            <div class="col-md-8"><label class="form-label">SMTP host</label>{{ forms.outbound.email_host|tabler_input }}</div>
+            <div class="col-md-4"><label class="form-label">Port</label>{{ forms.outbound.email_port|tabler_input }}</div>
+            <div class="col-12"><label class="form-check">{{ forms.outbound.email_use_tls|tabler_input }}<span class="form-check-label">Use TLS</span></label></div>
+            <div class="col-md-6"><label class="form-label">Username</label>{{ forms.outbound.email_username|tabler_input }}</div>
+            <div class="col-md-6"><label class="form-label">Password</label>{{ forms.outbound.email_password|tabler_input }}</div>
+            <div class="col-md-6"><label class="form-label">From address</label>{{ forms.outbound.email_from|tabler_input }}<div class="form-hint">Shown to clients in the From field.</div></div>
+            <div class="col-md-6"><label class="form-label">Sales from address</label>{{ forms.outbound.email_sales_from|tabler_input }}<div class="form-hint">Used when emailing quotes. Blank uses the From address.</div></div>
+            <div class="col-12"><label class="form-label">Suppression patterns</label>{{ forms.outbound.email_suppression_patterns|tabler_input }}<div class="form-hint">One fnmatch pattern per line. Matching senders never receive automated replies (for example <code>noreply@*</code>).</div></div>
+        </div>
+    </div>
+    <div class="card-footer"><button type="submit" class="btn btn-primary">Save outbound email</button></div>
+</form>
+<div class="card mt-3">
+    <div class="card-header"><div><h3 class="card-title">Suppressed addresses</h3><div class="card-subtitle">Never receive automated email, regardless of the patterns above.</div></div></div>
+    <form method="post" action="{% url 'core:suppressed_address_add' %}" class="card-body border-bottom">
+        {% csrf_token %}
+        <div class="row g-2">
+            <div class="col-md-5"><input type="email" name="email" class="form-control" placeholder="address@example.com" required></div>
+            <div class="col-md-5"><input type="text" name="reason" class="form-control" placeholder="Reason (optional)"></div>
+            <div class="col-md-2 d-grid"><button type="submit" class="btn">Add</button></div>
+        </div>
+    </form>
+    {% if suppressed_addresses %}
+    <table class="table card-table table-vcenter">
+        <thead><tr><th>Email</th><th>Reason</th><th>Added</th><th></th></tr></thead>
+        <tbody>{% for addr in suppressed_addresses %}<tr><td>{{ addr.email }}</td><td class="text-secondary">{{ addr.reason|default:"" }}</td><td class="text-secondary text-nowrap">{{ addr.created_at|date:"M j Y" }}</td><td class="text-end"><form method="post" action="{% url 'core:suppressed_address_delete' addr.pk %}" data-mb-confirm="Remove {{ addr.email }} from the suppression list?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Remove</button></form></td></tr>{% endfor %}</tbody>
+    </table>
+    {% else %}
+    <div class="card-body text-secondary">No addresses suppressed yet.</div>
+    {% endif %}
+</div>
+<div class="card mt-3">
+    <div class="card-header"><h3 class="card-title">Send a test email</h3></div>
+    {% comment %}The recipient is fixed server-side (your own address, else the From address). Not a field: an arbitrary-recipient test sends through the shop's SMTP credentials, which is a relay. See EmailTestOutboundView.{% endcomment %}
+    <div class="card-body">
+        <p class="text-secondary">Sends to <strong>{{ request.user.email|default:settings.email_from|default:settings.email_username|default:"no address on file" }}</strong>.</p>
+        <button type="button" class="btn" hx-post="{% url 'core:settings_test_outbound' %}" hx-target="#outbound-test-result" hx-swap="innerHTML">Send test email</button>
+        <div id="outbound-test-result"></div>
+    </div>
+</div>

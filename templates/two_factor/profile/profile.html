@@ -1,79 +1,33 @@
 {% extends "two_factor/_base.html" %}
-{% load i18n %}
-{% load two_factor_tags %}
-
+{% load i18n two_factor_tags mb_tabler %}
+{% block title %}Account Security - Murphy's Bench{% endblock %}
 {% block page_title %}Account Security{% endblock %}
-
 {% block content %}
-<div class="p-6 max-w-2xl">
-
-    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
-        <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
-            <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide">Two-Factor Authentication</h2>
+<div class="row justify-content-center"><div class="col-12 col-lg-7">
+    <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Two-factor authentication</h3></div>
+        <div class="card-body">
+        {% if default_device %}
+            <div class="d-flex gap-3"><span class="text-green">{% ticon 'lock' %}</span><div><div class="fw-medium">Two-factor authentication is on</div><div class="text-secondary">Primary method: {{ default_device|as_action }}</div></div></div>
+        {% else %}
+            <div class="d-flex gap-3"><span class="text-secondary">{% ticon 'lock' %}</span><div><div class="fw-medium">Two-factor authentication is not on</div><div class="text-secondary">Add an extra layer of security by requiring a code from your authenticator app on sign-in.</div></div></div>
+        {% endif %}
         </div>
-        <div class="px-6 py-5">
-            {% if default_device %}
-                <div class="flex items-start gap-3 mb-4">
-                    <span class="text-green-500 text-xl mt-0.5">✓</span>
-                    <div>
-                        <p class="text-sm font-medium text-gray-900">Two-factor authentication is enabled</p>
-                        <p class="text-sm text-gray-500 mt-0.5">Primary method: {{ default_device|as_action }}</p>
-                    </div>
-                </div>
-
-                <div class="flex flex-wrap gap-3 mt-4">
-                    {% comment %}
-                    Backup codes are admin-only, enforced in AdminOnlyBackupTokensView.
-                    This whole page is admin-only too (AdminOnlyProfileView), so this
-                    guard is defence in depth rather than the gate — it keeps the
-                    button correct if the page is ever opened up again.
-                    {% endcomment %}
-                    {% if is_admin %}
-                    <a href="{% url 'two_factor:backup_tokens' %}"
-                       class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
-                        Backup Tokens
-                        {% if backup_tokens %}
-                            <span class="ml-1 text-xs text-gray-400">({{ backup_tokens }} left)</span>
-                        {% endif %}
-                    </a>
-                    {% endif %}
-                    <a href="{% url 'two_factor:disable' %}"
-                       class="px-4 py-2 text-sm font-medium text-red-600 bg-white border border-red-300 rounded-md hover:bg-red-50">
-                        Disable 2FA
-                    </a>
-                </div>
-            {% else %}
-                <div class="flex items-start gap-3 mb-4">
-                    <span class="text-gray-400 text-xl mt-0.5">○</span>
-                    <div>
-                        <p class="text-sm font-medium text-gray-900">Two-factor authentication is not enabled</p>
-                        <p class="text-sm text-gray-500 mt-0.5">
-                            Add an extra layer of security to your account by requiring a code from your authenticator app on sign-in.
-                        </p>
-                    </div>
-                </div>
-                <a href="{% url 'two_factor:setup' %}"
-                   class="inline-block px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">
-                    Enable Two-Factor Authentication
-                </a>
-            {% endif %}
+        <div class="card-footer btn-list">
+        {% if default_device %}
+            {% comment %}Backup codes are admin-only, enforced in AdminOnlyBackupTokensView. This whole page is admin-only too (AdminOnlyProfileView); this guard is defence in depth.{% endcomment %}
+            {% if is_admin %}<a href="{% url 'two_factor:backup_tokens' %}" class="btn">Backup tokens{% if backup_tokens %} <span class="badge bg-secondary-lt ms-1">{{ backup_tokens }} left</span>{% endif %}</a>{% endif %}
+            <a href="{% url 'two_factor:disable' %}" class="btn btn-outline-danger">Disable two-factor</a>
+        {% else %}
+            <a href="{% url 'two_factor:setup' %}" class="btn btn-primary">Enable two-factor authentication</a>
+        {% endif %}
         </div>
     </div>
-
     {% if request.user.role == 'admin' or request.user.is_staff %}
-    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-        <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
-            <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide">Admin Actions</h2>
-        </div>
-        <div class="px-6 py-5">
-            <p class="text-sm text-gray-600 mb-3">Manage MFA settings for all users from the user management panel.</p>
-            <a href="{% url 'core:user_list' %}"
-               class="inline-block px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
-                User Management →
-            </a>
-        </div>
+    <div class="card">
+        <div class="card-header"><h3 class="card-title">Admin actions</h3></div>
+        <div class="card-body"><p class="text-secondary">Manage MFA for all users from user management.</p><a href="{% url 'core:user_list' %}" class="btn">User management</a></div>
     </div>
     {% endif %}
-
-</div>
+</div></div>
 {% endblock %}

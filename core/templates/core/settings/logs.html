@@ -1,0 +1,36 @@
+{% load mb_tabler %}
+<form method="get" class="card mb-3">
+    <input type="hidden" name="tab" value="logs">
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-5"><label class="form-label">Search</label><input type="search" name="log_q" value="{{ log_q }}" class="form-control" placeholder="Search all logs"></div>
+            <div class="col-md-3"><label class="form-label">Source</label><select name="log_source" class="form-select"><option value="">All sources</option>{% for key, label in log_sources %}<option value="{{ key }}" {% if log_source == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+            <div class="col-md-2"><label class="form-label">From</label><input type="date" name="log_from" value="{{ log_from }}" class="form-control"></div>
+            <div class="col-md-2"><label class="form-label">To</label><input type="date" name="log_to" value="{{ log_to }}" class="form-control"></div>
+            <div class="col-12 d-flex gap-2"><button type="submit" class="btn btn-primary">Search</button>{% if log_q or log_source or log_from or log_to %}<a href="?tab=logs" class="btn">Clear</a>{% endif %}</div>
+        </div>
+    </div>
+</form>
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">{% if log_source %}{{ log_source_label }}{% else %}All activity{% endif %}</h3>
+        <div class="card-actions text-secondary small">{% if log_page %}{{ log_page.paginator.count }} entr{{ log_page.paginator.count|pluralize:"y,ies" }} &middot; page {{ log_page.number }} of {{ log_page.paginator.num_pages }}{% elif log_capped %}Most recent {{ log_rows|length }}; narrow by source for the full history{% else %}{{ log_rows|length }} entr{{ log_rows|length|pluralize:"y,ies" }}{% endif %}</div>
+    </div>
+    <div class="table-responsive">
+    <table class="table card-table table-vcenter">
+        <thead><tr><th>Time</th>{% if not log_source %}<th>Source</th>{% endif %}<th>Who</th><th>Event</th><th>Detail</th></tr></thead>
+        <tbody>
+        {% for row in log_rows %}
+        <tr><td class="text-secondary text-nowrap">{{ row.when|date:"M j Y H:i" }}</td>{% if not log_source %}<td><span class="badge bg-secondary-lt">{{ row.source_label }}</span></td>{% endif %}<td class="text-nowrap">{{ row.actor }}</td><td>{% if row.url %}<a href="{{ row.url }}">{{ row.summary }}</a>{% else %}{{ row.summary }}{% endif %}</td><td class="text-secondary small">{{ row.detail|default:"" }}</td></tr>
+        {% empty %}<tr><td colspan="5" class="text-secondary">{% if log_filtered or log_source %}Nothing matched.{% else %}No entries yet.{% endif %}</td></tr>{% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% if log_page and log_page.paginator.num_pages > 1 %}
+    <div class="card-footer d-flex justify-content-between">
+        {% if log_page.has_previous %}<a href="?tab=logs&log_source={{ log_source }}&log_q={{ log_q|urlencode }}&log_from={{ log_from }}&log_to={{ log_to }}&page={{ log_page.previous_page_number }}" class="btn btn-sm">Newer</a>{% else %}<span></span>{% endif %}
+        {% if log_page.has_next %}<a href="?tab=logs&log_source={{ log_source }}&log_q={{ log_q|urlencode }}&log_from={{ log_from }}&log_to={{ log_to }}&page={{ log_page.next_page_number }}" class="btn btn-sm">Older</a>{% endif %}
+    </div>
+    {% endif %}
+</div>
+{% if not log_source %}<div class="text-secondary small mt-2">Every log interleaved. Pick a source for its own columns and complete history.</div>{% endif %}

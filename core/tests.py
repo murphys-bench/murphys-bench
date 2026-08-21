@@ -410,7 +410,7 @@ def test_settings_email_templates_tab_renders(client, admin_user):
     client.force_login(admin_user)
     resp = client.get('/settings/?tab=email_templates')
     assert resp.status_code == 200
-    assert b'Email Branding' in resp.content
+    assert b'Email branding' in resp.content
 
 
 @pytest.mark.django_db
@@ -2296,7 +2296,7 @@ def test_role_edit_page_renders(client, admin_user):
     client.force_login(admin_user)
     resp = client.get(reverse('core:role_edit', args=[role.pk]))
     assert resp.status_code == 200
-    assert 'Edit Role' in resp.content.decode()
+    assert 'Save role' in resp.content.decode()
 
 
 # ── SLA response deadline: first staff reply meets it permanently ───────────
@@ -3668,7 +3668,7 @@ def test_email_report_form_page_renders(client, client_obj, admin_user):
     client.force_login(admin_user)
     resp = client.get(reverse('core:work_order_email_report', args=[wo.pk]))
     assert resp.status_code == 200
-    assert b'Email Repair Report' in resp.content
+    assert b'Email repair report' in resp.content
     assert b'wayne@davis.example' in resp.content
 
 
@@ -4784,7 +4784,7 @@ def test_sale_custom_log_refreshes_checkout_card_out_of_band(client, admin_user,
     assert 'id="sale-checkout-card"' in body
     assert 'hx-swap-oob="true"' in body
     assert 'Add at least one priced line item' not in body
-    assert 'Complete Sale' in body
+    assert 'Complete sale' in body
 
 
 @pytest.mark.django_db
@@ -7106,7 +7106,7 @@ def test_pos_sale_settle_screen_renders(client, admin_user, client_obj):
     client.force_login(admin_user)
     resp = client.get(reverse('core:pos_sale_settle', args=[sale.pk]))
     assert resp.status_code == 200
-    assert b'Complete Sale' in resp.content
+    assert b'Complete sale' in resp.content
 
 
 @pytest.mark.django_db
@@ -7954,14 +7954,18 @@ def test_ticket_list_age_band_filter(client, client_obj, admin_user):
 
 
 @pytest.mark.django_db
-def test_settings_colors_tab_has_dashboard_block(client, admin_user):
+def test_settings_colors_tab_offers_only_fields_the_frame_reads(client, admin_user):
+    """Batch 5 (ruling 2, Aug 21): the nav/page/title/section/dashboard color
+    fields are retired. The tab offers logos and status colors only; the
+    model fields go with batch 7's migration."""
     client.force_login(admin_user)
     resp = client.get('/settings/?tab=colors')
     assert resp.status_code == 200
     body = resp.content
-    assert b'Dashboard Colors' in body
-    assert b'colors-color_dash_tickets_bg' in body
-    assert b'colors-color_dash_backlog4_text' in body
+    assert b'Work order status colors' in body
+    assert b'colors-color_status_new' in body
+    assert b'colors-color_dash_tickets_bg' not in body
+    assert b'colors-color_primary' not in body
 
 
 @pytest.mark.django_db
@@ -8267,7 +8271,7 @@ def test_maintenance_tab_shows_backup_status_and_updates(admin_user, client, set
     body = resp.content.decode()
     assert 'Last backup succeeded' in body
     assert '4.2M' in body
-    assert 'Software Updates' in body  # Backups + Updates cards share the Maintenance tab
+    assert 'Software updates' in body  # Backups + Updates cards share the Maintenance tab
 
 
 def test_request_backup_now_writes_trigger_and_refuses_double(settings, tmp_path):
@@ -9335,7 +9339,7 @@ def test_logs_tab_merges_every_source_by_default(client, admin_user, log_fixture
     assert b'Re: Printer jam' in body            # inbound email
     assert b'Router admin' in body               # org credential
     assert b'Front desk PC' in body              # device credential
-    assert b'All Activity' in body
+    assert b'All activity' in body
 
 
 @pytest.mark.django_db
@@ -10506,9 +10510,9 @@ def test_restore_ui_separates_choosing_from_restoring():
 
     # Selection is its own control, and the action button is gated on it.
     assert 'type="radio"' in tpl
-    assert ':disabled="!chosen' in tpl
+    assert 'data-mb-restore-form' in tpl and 'disabled' in tpl
     # The confirmation names the chosen backup rather than asking a generic question.
-    assert 'chosenLabel' in tpl
+    assert 'data-label=' in tpl
     # And the consequence is stated, including that it is not a one-click undo.
     assert 'will be gone' in tpl
     assert 'pre-restore' in tpl
@@ -14289,15 +14293,19 @@ def test_notification_count_tabler_style():
 
 
 @pytest.mark.django_db
-def test_legacy_pages_still_load_the_tailwind_frame():
-    """Until a page is rebuilt it stays on core/base.html. The two frames must
-    never meet on one page, so a legacy page must not carry the Tabler assets."""
+def test_no_page_loads_the_tailwind_frame_any_more():
+    """Batch 5 put the last pages (Register, Back Office, Settings, Reports,
+    sign-in, two-factor) on the Tabler frame. The two frames never meet, and
+    after batch 5 the Tailwind one is not loaded anywhere."""
     c, _ = _tabler_admin_client()
-    r = c.get(reverse('core:settings'))               # Back Office: not rebuilt until batch 5
-    assert r.status_code == 200
-    body = r.content.decode()
-    assert 'css/app.' in body                              # 'app.css' locally, 'app.<hash>.css' under manifest storage
-    assert 'tabler.min' not in body
+    for name in ('settings', 'reports', 'pos_home', 'user_list'):
+        r = c.get(reverse('core:%s' % name))
+        assert r.status_code == 200, name
+        body = r.content.decode()
+        assert 'tabler.min' in body, name
+        assert 'css/app.' not in body, name
+    r = c.get(reverse('two_factor:profile'))
+    assert r.status_code == 200 and 'css/app.' not in r.content.decode()
 
 
 @pytest.mark.django_db

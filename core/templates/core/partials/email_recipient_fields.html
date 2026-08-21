@@ -1,0 +1,28 @@
+{% comment %}
+Recipient picker shared by the email-a-PDF screens (receipt, quote, repair
+report). Expects `contacts`, `default_contact`, `default_email`, and
+`no_contacts_note`. A custom address, when filled, wins over the contact
+server-side, so the checkbox only reveals the field.
+{% endcomment %}
+{% if contacts %}
+<div class="mb-3">
+    <label class="form-label">Send to contact</label>
+    <select name="contact" class="form-select">
+        {% for c in contacts %}
+        <option value="{{ c.pk }}" {% if default_contact and c.pk == default_contact.pk %}selected{% endif %}>{{ c.first_name }} {{ c.last_name }}{% if c.email %}, {{ c.email }}{% else %} (no email){% endif %}</option>
+        {% empty %}
+        <option value="">No contacts on file</option>
+        {% endfor %}
+    </select>
+</div>
+<div class="mb-3">
+    <label class="form-check"><input type="checkbox" class="form-check-input" data-bs-toggle="collapse" data-bs-target="#custom-email"><span class="form-check-label">Send to a different address instead</span></label>
+    <div class="collapse" id="custom-email"><input type="email" name="custom_email" class="form-control mt-2" placeholder="someone@example.com"></div>
+</div>
+{% else %}
+<div class="mb-3">
+    <label class="form-label required">Email address</label>
+    <input type="email" name="custom_email" value="{{ default_email }}" class="form-control" placeholder="someone@example.com" required>
+    <div class="form-hint">{{ no_contacts_note }} It sends to whatever address you enter here.</div>
+</div>
+{% endif %}

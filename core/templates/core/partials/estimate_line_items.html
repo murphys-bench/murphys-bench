@@ -1,176 +1,56 @@
 {% comment %}
-HTMX partial — rendered by the Estimate line-item views. Shows the estimate's
-"General" (unscoped) line items, plus a card per EstimateOption with its own
-line items and subtotal, for comparing several priced choices on one quote
-(e.g. budget/standard/premium device replacement) instead of three separate
-estimates. When no options exist this renders exactly as a flat quote always
-has — options are opt-in via "+ Add Option" in estimate_detail.html.
+HTMX partial rendered by the Estimate line-item views. The estimate's
+"General" (unscoped) line items, plus a section per EstimateOption with its
+own line items and subtotal. With no options this renders as a flat quote.
 {% endcomment %}
+{% load mb_tabler %}
 {% if options %}
-<div x-data="{ customOpen: false }">
-    <div class="flex items-center justify-between mb-1.5">
-        {% if estimate.is_locked %}
-        <p class="text-sm font-semibold text-gray-800">{{ estimate.general_label }}</p>
-        {% else %}
-        <input type="text" name="general_label" value="{{ estimate.general_label }}"
-               placeholder="General"
-               hx-post="{% url 'core:estimate_general_label_update' estimate.pk %}"
-               hx-trigger="blur"
-               hx-target="#estimate-line-items-section" hx-swap="innerHTML"
-               class="text-sm font-semibold text-gray-800 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 w-48">
-        {% endif %}
-        {% if not estimate.is_locked %}
-        <button type="button" @click="customOpen = !customOpen"
-                class="text-xs px-2 py-1 rounded border text-blue-600 border-blue-300 hover:bg-blue-50">
-            + Item
-        </button>
-        {% endif %}
-    </div>
-
-    {% if not estimate.is_locked %}
-    <div x-show="customOpen" x-cloak class="mb-3 p-3 bg-blue-50 rounded-lg border border-blue-100">
-        <form method="post" action="{% url 'core:estimate_custom_log' estimate.pk %}"
-              hx-post="{% url 'core:estimate_custom_log' estimate.pk %}"
-              hx-target="#estimate-line-items-section" hx-swap="innerHTML"
-              hx-on:htmx:after-request="if(event.detail.successful){this.reset(); customOpen = false;}"
-              class="space-y-2">
-            {% csrf_token %}
-            <div class="flex gap-2">
-                <select name="kind" class="text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                    <option value="labor">Labor</option>
-                    <option value="part">Part</option>
-                </select>
-                <input type="text" name="custom_label" placeholder="What's being quoted…"
-                       class="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                       required>
-            </div>
-            <textarea name="notes" rows="2" placeholder="Details (optional)"
-                      class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"></textarea>
-            <div class="flex gap-2">
-                <label class="flex-1">
-                    <span class="block text-xs text-gray-400 mb-0.5">Qty</span>
-                    <input type="number" name="quantity" value="1" min="0" step="0.01"
-                           class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                </label>
-                <label class="flex-1">
-                    <span class="block text-xs text-gray-400 mb-0.5">Unit price ($)</span>
-                    <input type="number" name="unit_price" min="0" step="0.01" placeholder="optional"
-                           class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                </label>
-            </div>
-            <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Log</button>
-        </form>
-    </div>
+<div class="card-body border-bottom d-flex align-items-center gap-2">
+    {% if estimate.is_locked %}
+    <span class="fw-medium">{{ estimate.general_label }}</span>
+    {% else %}
+    <input type="text" name="general_label" value="{{ estimate.general_label }}" placeholder="General" class="form-control w-auto" hx-post="{% url 'core:estimate_general_label_update' estimate.pk %}" hx-trigger="blur" hx-target="#estimate-line-items-section" hx-swap="innerHTML">
+    <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#est-general-add">{% ticon 'plus' 'icon-sm' %} Item</button>
     {% endif %}
 </div>
+{% if not estimate.is_locked %}
+<form class="collapse border-bottom" id="est-general-add" method="post" action="{% url 'core:estimate_custom_log' estimate.pk %}" hx-post="{% url 'core:estimate_custom_log' estimate.pk %}" hx-target="#estimate-line-items-section" hx-swap="innerHTML">
+    {% csrf_token %}<div class="card-body">{% include "core/partials/_estimate_line_item_fields.html" %}</div>
+</form>
 {% endif %}
-{% if entries %}
-<div class="space-y-1">
-    {% for entry in entries %}
-        {% include "core/partials/_estimate_line_item_row.html" with entry=entry locked=estimate.is_locked %}
+{% endif %}
+<table class="table card-table table-vcenter">
+    <tbody>
+    {% for entry in entries %}{% include "core/partials/_estimate_line_item_row.html" with entry=entry locked=estimate.is_locked %}{% empty %}
+    <tr><td colspan="3" class="text-secondary">{% if options %}No general items.{% elif estimate.is_locked %}No line items.{% else %}No line items yet. Add a custom line or pick from the catalog above.{% endif %}</td></tr>
     {% endfor %}
-</div>
-{% elif options %}
-<p class="text-sm text-gray-400 italic mb-2">No general items.</p>
-{% else %}
-<p class="text-sm text-gray-400 italic">No line items yet.</p>
-{% endif %}
-<div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-200 text-sm">
-    <span class="text-gray-500">{% if options %}Subtotal{% else %}Total{% endif %}</span>
-    <span class="font-semibold text-gray-800">${{ estimate.line_items_total|floatformat:2 }}</span>
-</div>
+    </tbody>
+    <tfoot><tr><th>{% if options %}Subtotal{% else %}Total{% endif %}</th><th class="text-end">${{ estimate.line_items_total|floatformat:2 }}</th>{% if not estimate.is_locked %}<th></th>{% endif %}</tr></tfoot>
+</table>
 
 {% for option in options %}
-<div class="mt-4 pt-4 border-t border-gray-200" x-data="{ customOpen: false }">
-    <div class="flex items-center justify-between mb-2">
-        <div>
-            <p class="text-sm font-semibold text-gray-800">
-                {{ option.label }}
-                {% if option.is_selected %}
-                <span class="ml-1 inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Selected</span>
-                {% endif %}
-            </p>
-        </div>
-        {% if not estimate.is_locked %}
-        <div class="flex gap-2 items-center">
-            <button type="button" @click="customOpen = !customOpen"
-                    class="text-xs px-2 py-1 rounded border text-blue-600 border-blue-300 hover:bg-blue-50">
-                + Item
-            </button>
-            {% if not option.is_selected %}
-            <form method="post" action="{% url 'core:estimate_option_select' option.pk %}"
-                  hx-post="{% url 'core:estimate_option_select' option.pk %}"
-                  hx-target="#estimate-line-items-section" hx-swap="innerHTML" class="inline">
-                {% csrf_token %}
-                <button type="submit" class="text-xs px-2 py-1 rounded border text-green-700 border-green-300 hover:bg-green-50">Select</button>
-            </form>
-            {% endif %}
-            <form method="post" action="{% url 'core:estimate_option_delete' option.pk %}"
-                  hx-post="{% url 'core:estimate_option_delete' option.pk %}"
-                  hx-target="#estimate-line-items-section" hx-swap="innerHTML"
-                  onsubmit="return confirm('Remove this option and its line items?');" class="inline">
-                {% csrf_token %}
-                <button type="submit" class="text-gray-400 hover:text-red-500 transition-colors" title="Remove option">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="3 6 5 6 21 6"/>
-                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                    </svg>
-                </button>
-            </form>
-        </div>
-        {% endif %}
-    </div>
-
+<div class="card-body border-top d-flex align-items-center gap-2">
+    <span class="fw-medium">{{ option.label }}</span>
+    {% if option.is_selected %}<span class="badge bg-green-lt">Selected</span>{% endif %}
     {% if not estimate.is_locked %}
-    <div x-show="customOpen" x-cloak class="mb-3 p-3 bg-blue-50 rounded-lg border border-blue-100">
-        <form method="post" action="{% url 'core:estimate_option_custom_log' option.pk %}"
-              hx-post="{% url 'core:estimate_option_custom_log' option.pk %}"
-              hx-target="#estimate-line-items-section" hx-swap="innerHTML"
-              hx-on:htmx:after-request="if(event.detail.successful){this.reset(); customOpen = false;}"
-              class="space-y-2">
-            {% csrf_token %}
-            <div class="flex gap-2">
-                <select name="kind" class="text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                    <option value="labor">Labor</option>
-                    <option value="part">Part</option>
-                </select>
-                <input type="text" name="custom_label" placeholder="What's being quoted…"
-                       class="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                       required>
-            </div>
-            <textarea name="notes" rows="2" placeholder="Details (optional)"
-                      class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"></textarea>
-            <div class="flex gap-2">
-                <label class="flex-1">
-                    <span class="block text-xs text-gray-400 mb-0.5">Qty</span>
-                    <input type="number" name="quantity" value="1" min="0" step="0.01"
-                           class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                </label>
-                <label class="flex-1">
-                    <span class="block text-xs text-gray-400 mb-0.5">Unit price ($)</span>
-                    <input type="number" name="unit_price" min="0" step="0.01" placeholder="optional"
-                           class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                </label>
-            </div>
-            <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Log</button>
-        </form>
+    <div class="ms-auto btn-list">
+        <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#est-opt-add-{{ option.pk }}">{% ticon 'plus' 'icon-sm' %} Item</button>
+        {% if not option.is_selected %}<form method="post" action="{% url 'core:estimate_option_select' option.pk %}" hx-post="{% url 'core:estimate_option_select' option.pk %}" hx-target="#estimate-line-items-section" hx-swap="innerHTML" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-sm btn-outline-success">Select</button></form>{% endif %}
+        <form method="post" action="{% url 'core:estimate_option_delete' option.pk %}" hx-post="{% url 'core:estimate_option_delete' option.pk %}" hx-target="#estimate-line-items-section" hx-swap="innerHTML" class="d-inline" data-mb-confirm="Remove the option {{ option.label }} and its line items?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger btn-icon" title="Remove option">{% ticon 'trash' 'icon-sm' %}</button></form>
     </div>
     {% endif %}
-
-    {% with option_entries=option.line_items.all %}
-    {% if option_entries %}
-    <div class="space-y-1">
-        {% for entry in option_entries %}
-            {% include "core/partials/_estimate_line_item_row.html" with entry=entry locked=estimate.is_locked %}
-        {% endfor %}
-    </div>
-    {% else %}
-    <p class="text-sm text-gray-400 italic">No line items yet.</p>
-    {% endif %}
-    {% endwith %}
-    <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-200 text-sm">
-        <span class="text-gray-500">Subtotal</span>
-        <span class="font-semibold text-gray-800">${{ option.total|floatformat:2 }}</span>
-    </div>
 </div>
+{% if not estimate.is_locked %}
+<form class="collapse border-top" id="est-opt-add-{{ option.pk }}" method="post" action="{% url 'core:estimate_option_custom_log' option.pk %}" hx-post="{% url 'core:estimate_option_custom_log' option.pk %}" hx-target="#estimate-line-items-section" hx-swap="innerHTML">
+    {% csrf_token %}<div class="card-body">{% include "core/partials/_estimate_line_item_fields.html" %}</div>
+</form>
+{% endif %}
+<table class="table card-table table-vcenter">
+    <tbody>
+    {% for entry in option.line_items.all %}{% include "core/partials/_estimate_line_item_row.html" with entry=entry locked=estimate.is_locked %}{% empty %}
+    <tr><td colspan="3" class="text-secondary">No line items yet.</td></tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr><th>Subtotal</th><th class="text-end">${{ option.total|floatformat:2 }}</th>{% if not estimate.is_locked %}<th></th>{% endif %}</tr></tfoot>
+</table>
 {% endfor %}

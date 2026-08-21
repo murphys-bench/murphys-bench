@@ -1,0 +1,51 @@
+{% load mb_tabler %}
+<div class="card">
+    <div class="card-header"><div><h3 class="card-title">Custom fields</h3><div class="card-subtitle">Extra fields on tickets or work orders, optionally scoped to a help topic or repair type.</div></div><div class="card-actions"><button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#cf-new">{% ticon 'plus' 'icon-sm' %} Custom field</button></div></div>
+    <form method="post" action="{% url 'core:cf_create' %}" class="collapse" id="cf-new">{% csrf_token %}
+        <div class="card-body border-top"><div class="row g-2 align-items-end">
+            <div class="col-md-3"><label class="form-label required">Label</label><input type="text" name="label" class="form-control" placeholder="e.g. Serial number" required></div>
+            <div class="col-md-2"><label class="form-label">Type</label><select name="field_type" class="form-select"><option value="text">Text</option><option value="textarea">Text area</option><option value="select">Dropdown</option><option value="checkbox">Checkbox</option><option value="date">Date</option></select></div>
+            <div class="col-md-2"><label class="form-label">Applies to</label><select name="applies_to" class="form-select"><option value="ticket">Tickets</option><option value="workorder">Work orders</option><option value="both">Both</option></select></div>
+            <div class="col-md-2"><label class="form-label">Help topic scope</label><select name="scoped_to_help_topic" class="form-select"><option value="">all</option>{% for ht in help_topics_all %}<option value="{{ ht.pk }}">{{ ht.name }}</option>{% endfor %}</select></div>
+            <div class="col-md-2"><label class="form-label">Repair type scope</label><select name="scoped_to_repair_type" class="form-select"><option value="">all</option>{% for rt in repair_types_all %}<option value="{{ rt.pk }}">{{ rt.name }}</option>{% endfor %}</select></div>
+            <div class="col-md-1"><label class="form-check mb-2"><input type="checkbox" name="is_required" class="form-check-input"><span class="form-check-label">Required</span></label></div>
+            <div class="col-12"><label class="form-label">Dropdown choices (one per line, dropdown type only)</label><textarea name="choices" rows="3" class="form-control" style="max-width: 20rem;" placeholder="Option A&#10;Option B"></textarea></div>
+        </div></div>
+        <div class="card-footer"><button type="submit" class="btn btn-primary">Add custom field</button></div>
+    </form>
+    <table class="table card-table table-vcenter">
+        <thead><tr><th>Label</th><th>Type</th><th>Applies to</th><th>Scope</th><th>Req</th><th>Active</th><th></th></tr></thead>
+        <tbody>
+        {% for cf in custom_fields %}
+        <tr>
+            <td class="fw-medium">{{ cf.label }}
+                <div class="collapse mt-2 fw-normal" id="cf-edit-{{ cf.pk }}">
+                    <form method="post" action="{% url 'core:cf_update' cf.pk %}">{% csrf_token %}<div class="row g-2 align-items-end">
+                        <div class="col-md-3"><label class="form-label">Label</label><input type="text" name="label" value="{{ cf.label }}" class="form-control" required></div>
+                        <div class="col-md-2"><label class="form-label">Type</label><select name="field_type" class="form-select"><option value="text" {% if cf.field_type == 'text' %}selected{% endif %}>Text</option><option value="textarea" {% if cf.field_type == 'textarea' %}selected{% endif %}>Text area</option><option value="select" {% if cf.field_type == 'select' %}selected{% endif %}>Dropdown</option><option value="checkbox" {% if cf.field_type == 'checkbox' %}selected{% endif %}>Checkbox</option><option value="date" {% if cf.field_type == 'date' %}selected{% endif %}>Date</option></select></div>
+                        <div class="col-md-2"><label class="form-label">Applies to</label><select name="applies_to" class="form-select"><option value="ticket" {% if cf.applies_to == 'ticket' %}selected{% endif %}>Tickets</option><option value="workorder" {% if cf.applies_to == 'workorder' %}selected{% endif %}>Work orders</option><option value="both" {% if cf.applies_to == 'both' %}selected{% endif %}>Both</option></select></div>
+                        <div class="col-md-2"><label class="form-label">Help topic</label><select name="scoped_to_help_topic" class="form-select"><option value="">all</option>{% for ht in help_topics_all %}<option value="{{ ht.pk }}" {% if cf.scoped_to_help_topic_id == ht.pk %}selected{% endif %}>{{ ht.name }}</option>{% endfor %}</select></div>
+                        <div class="col-md-2"><label class="form-label">Repair type</label><select name="scoped_to_repair_type" class="form-select"><option value="">all</option>{% for rt in repair_types_all %}<option value="{{ rt.pk }}" {% if cf.scoped_to_repair_type_id == rt.pk %}selected{% endif %}>{{ rt.name }}</option>{% endfor %}</select></div>
+                        <div class="col-md-1"><label class="form-label">Sort</label><input type="number" name="sort_order" value="{{ cf.sort_order }}" class="form-control"></div>
+                        <div class="col-12 d-flex align-items-center gap-3"><label class="form-check mb-0"><input type="checkbox" name="is_required" class="form-check-input" {% if cf.is_required %}checked{% endif %}><span class="form-check-label">Required</span></label><label class="form-check mb-0"><input type="checkbox" name="is_active" class="form-check-input" {% if cf.is_active %}checked{% endif %}><span class="form-check-label">Active</span></label><button type="submit" class="btn btn-sm btn-primary">Save</button></div>
+                    </div></form>
+                    {% if cf.field_type == 'select' %}
+                    <div class="mt-3 pt-3 border-top">
+                        <div class="subheader mb-2">Dropdown choices</div>
+                        <div class="d-flex flex-wrap gap-2 mb-2">{% for choice in cf.choices.all %}<span class="badge bg-secondary-lt">{{ choice.label }} <form method="post" action="{% url 'core:cf_choice_delete' choice.pk %}" class="d-inline" data-mb-confirm="Remove the choice {{ choice.label }}?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger btn-icon p-0 ms-1" style="height:1rem;width:1rem;">{% ticon 'x' 'icon-sm' %}</button></form></span>{% empty %}<span class="text-secondary">No choices yet.</span>{% endfor %}</div>
+                        <form method="post" action="{% url 'core:cf_choice_add' cf.pk %}" class="input-group" style="max-width: 20rem;">{% csrf_token %}<input type="text" name="label" class="form-control" placeholder="New choice" required><button type="submit" class="btn">Add</button></form>
+                    </div>
+                    {% endif %}
+                </div>
+            </td>
+            <td class="text-secondary">{{ cf.get_field_type_display }}</td>
+            <td class="text-secondary">{{ cf.get_applies_to_display }}</td>
+            <td class="text-secondary small">{% if cf.scoped_to_help_topic %}Topic: {{ cf.scoped_to_help_topic.name }}{% elif cf.scoped_to_repair_type %}Type: {{ cf.scoped_to_repair_type.name }}{% else %}All{% endif %}</td>
+            <td>{% if cf.is_required %}{% ticon 'check' 'icon-sm text-red' %}{% endif %}</td>
+            <td>{% if cf.is_active %}{% ticon 'check' 'icon-sm text-green' %}{% endif %}</td>
+            <td class="text-end text-nowrap"><button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#cf-edit-{{ cf.pk }}">Edit</button> <form method="post" action="{% url 'core:cf_delete' cf.pk %}" class="d-inline" data-mb-confirm="Delete the custom field {{ cf.label }} and all its values?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Delete</button></form></td>
+        </tr>
+        {% empty %}<tr><td colspan="7" class="text-secondary">No custom fields yet.</td></tr>{% endfor %}
+        </tbody>
+    </table>
+</div>

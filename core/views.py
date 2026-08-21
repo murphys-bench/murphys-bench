@@ -5278,6 +5278,8 @@ class ReportsView(LoginRequiredMixin, View):
             'status_data': status_data,
             # 3
             'by_client': by_client,
+            'by_client_labels': [r['client__name'] for r in by_client],
+            'by_client_data': [r['count'] for r in by_client],
             # 4
             'by_tech': by_tech,
             # 5

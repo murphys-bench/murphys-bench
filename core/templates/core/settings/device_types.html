@@ -1,0 +1,26 @@
+{% load mb_tabler %}
+<div class="card">
+    <div class="card-header"><div><h3 class="card-title">Device types</h3><div class="card-subtitle">The machine categories offered when logging a device. A type still used by devices or checklist items cannot be deleted until they are reassigned.</div></div></div>
+    <form method="post" action="{% url 'core:device_type_create' %}" class="card-body border-bottom">{% csrf_token %}
+        <div class="row g-2 align-items-end">
+            <div class="col-md-6"><label class="form-label">Type name</label><input type="text" name="label" class="form-control" placeholder="e.g. Network device" required></div>
+            <div class="col-md-4"><label class="form-label">Icon</label><select name="icon" class="form-select">{% for name in dt_icons %}<option value="{{ name }}">{{ name }}</option>{% endfor %}</select></div>
+            <div class="col-md-2 d-grid"><button type="submit" class="btn btn-primary">Add type</button></div>
+        </div>
+    </form>
+    <table class="table card-table table-vcenter">
+        <thead><tr><th>Type</th><th>Icon</th><th>In use</th><th></th></tr></thead>
+        <tbody>
+        {% for row in dt_rows %}
+        <tr>
+            <td class="fw-medium">{{ row.obj.label }}
+                <form method="post" action="{% url 'core:device_type_update' row.obj.pk %}" class="collapse mt-2" id="dt-edit-{{ row.obj.pk }}">{% csrf_token %}<div class="row g-2"><div class="col-md-5"><input type="text" name="label" value="{{ row.obj.label }}" class="form-control" required></div><div class="col-md-4"><select name="icon" class="form-select">{% for name in dt_icons %}<option value="{{ name }}" {% if name == row.obj.icon %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></div><div class="col-md-3 d-grid"><button type="submit" class="btn btn-primary">Save</button></div></div></form>
+            </td>
+            <td class="text-secondary">{% ticon row.obj.icon|device_icon 'icon-sm' %} {{ row.obj.icon }}</td>
+            <td class="text-secondary">{% if row.device_count or row.checklist_count %}{{ row.device_count }} device{{ row.device_count|pluralize }}{% if row.checklist_count %}, {{ row.checklist_count }} checklist item{{ row.checklist_count|pluralize }}{% endif %}{% else %}unused{% endif %}</td>
+            <td class="text-end text-nowrap"><button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#dt-edit-{{ row.obj.pk }}">Edit</button> {% if not row.device_count and not row.checklist_count %}<form method="post" action="{% url 'core:device_type_delete' row.obj.pk %}" class="d-inline" data-mb-confirm="Delete the device type {{ row.obj.label }}?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Delete</button></form>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>

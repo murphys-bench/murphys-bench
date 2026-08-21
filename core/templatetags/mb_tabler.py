@@ -27,6 +27,7 @@ SPRITE_PATH = f'vendor/tabler-icons/{SPRITE_VERSION}/mb-sprite.svg'
 # Every Tabler icon MB uses. Keep sorted; the sprite build reads this.
 ICONS = (
     'alert-triangle',
+    'arrow-down',
     'arrow-up',
     'bell',
     'book',
@@ -36,6 +37,9 @@ ICONS = (
     'chart-bar',
     'check',
     'chevron-down',
+    'chevron-right',
+    'chevron-up',
+    'circle-check',
     'clipboard-check',
     'clock',
     'contract',
@@ -43,6 +47,7 @@ ICONS = (
     'device-laptop',
     'device-mobile',
     'device-tablet',
+    'download',
     'external-link',
     'eye',
     'file-text',
@@ -70,10 +75,12 @@ ICONS = (
     'player-play',
     'plus',
     'printer',
+    'qrcode',
     'refresh',
     'send',
     'server',
     'settings',
+    'shield-lock',
     'sun',
     'tag',
     'ticket',
@@ -166,6 +173,9 @@ def checklist_pair(pre, post):
 def tabler_input(bound_field, extra=''):
     """Render a form field with Tabler's input classes, whatever the form's own
     widget attrs say. One filter instead of re-declaring every widget."""
+    if not hasattr(bound_field, 'field'):
+        # A form variant that dropped this field (restrict_for) resolves to ''.
+        return bound_field
     w = bound_field.field.widget
     if isinstance(w, fw.CheckboxInput):
         base = 'form-check-input'

@@ -33,32 +33,6 @@
             } catch (e) {}
         });
 
-        // ── Forms that reset themselves after a successful HTMX post ──────
-        document.querySelectorAll('form[data-mb-reset-after]').forEach(function (form) {
-            form.addEventListener('htmx:afterRequest', function (ev) {
-                if (!ev.detail.successful) return;
-                form.reset();
-                var target = form.getAttribute('data-mb-reset-after');
-                if (target && window.bootstrap) {
-                    var el = document.querySelector(target);
-                    if (el) bootstrap.Collapse.getOrCreateInstance(el).hide();
-                }
-            });
-        });
-
-        // ── Show a block only while a given radio value is selected ───────
-        // <div data-mb-show-for="reply_type=customer_visible">
-        document.querySelectorAll('[data-mb-show-for]').forEach(function (el) {
-            var pair = el.getAttribute('data-mb-show-for').split('=');
-            var name = pair[0], value = pair[1];
-            function sync() {
-                var checked = document.querySelector('input[name="' + name + '"]:checked');
-                el.classList.toggle('d-none', !(checked && checked.value === value));
-            }
-            document.querySelectorAll('input[name="' + name + '"]').forEach(function (r) { r.addEventListener('change', sync); });
-            sync();
-        });
-
         // ── Notes order (newest first by default, remembered per browser) ──
         document.querySelectorAll('[data-mb-order-toggle]').forEach(function (btn) {
             var list = document.querySelector(btn.getAttribute('data-mb-order-toggle'));

@@ -1,85 +1,51 @@
-{% extends "core/base.html" %}
-{% load mb_icons %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
 
 {% block title %}{{ queue.name }} - Murphy's Bench{% endblock %}
+{% block room %}office{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="px-6 py-4 flex items-center justify-between">
-        <div>
-            <div class="flex items-center gap-2 text-sm text-gray-500 mb-1">
-                <a href="{% url 'core:queue_list' %}" class="hover:text-gray-700">Queues</a>
-                <span>›</span>
-                <span>{{ queue.name }}</span>
-                {% if queue.is_system_queue %}
-                <span class="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-full">System</span>
-                {% endif %}
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <div class="page-pretitle"><a href="{% url 'core:queue_list' %}">Queues</a></div>
+                <h2 class="page-title">{{ queue.name }} <span class="badge bg-secondary-lt ms-2">{{ tickets.count }} ticket{{ tickets.count|pluralize }}</span>{% if queue.is_system_queue %} <span class="badge bg-secondary-lt">System</span>{% endif %}</h2>
             </div>
-            <h1 class="text-xl font-bold text-gray-900">{{ queue.name }}
-                <span class="text-sm font-normal text-gray-400 ml-2">{{ tickets.count }} ticket{{ tickets.count|pluralize }}</span>
-            </h1>
-        </div>
-        <div class="flex items-center gap-2">
-            {% if queue.owner == request.user or request.user.is_staff %}
-            <a href="{% url 'core:queue_edit' queue.pk %}"
-               class="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Edit Queue</a>
-            {% endif %}
-            {% if can_create_ticket %}
-            <a href="{% url 'core:ticket_create' %}"
-               class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
-                + New Ticket
-            </a>
-            {% endif %}
+            <div class="col-auto">
+                <div class="btn-group" role="group">
+                    {% if queue.owner == request.user or request.user.is_staff %}<a href="{% url 'core:queue_edit' queue.pk %}" class="btn">{% ticon 'pencil' 'icon-sm' %} Edit queue</a>{% endif %}
+                    {% if can_create_ticket %}<a href="{% url 'core:ticket_create' %}" class="btn btn-primary">{% ticon 'plus' 'icon-sm' %} Ticket</a>{% endif %}
+                </div>
+            </div>
         </div>
     </div>
 </div>
 {% endblock %}
 
 {% block content %}
+<div class="card">
 {% if tickets %}
-<div class="bg-white rounded-lg shadow overflow-hidden">
-    <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
+    <div class="table-responsive">
+    <table class="table card-table table-vcenter">
+        <thead><tr><th>Ticket</th><th>Client</th><th>Subject</th><th>Status</th><th>Assigned to</th><th>Created</th><th>Due</th></tr></thead>
+        <tbody>
+        {% for ticket in tickets %}
             <tr>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ticket</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned To</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Due</th>
+                <td><a href="{% url 'core:ticket_detail' ticket.pk %}">{{ ticket.ticket_number }}</a></td>
+                <td>{{ ticket.client.name }}</td>
+                <td class="text-truncate" style="max-width: 24rem;">{{ ticket.subject }}</td>
+                <td class="text-nowrap"><span class="status-dot me-1" style="--tblr-status-color: var(--mb-status-ticket-{{ ticket.status }}, var(--tblr-secondary));"></span>{{ ticket.status|status_word:'ticket' }}</td>
+                <td>{{ ticket.assigned_to.get_full_name|default:"" }}</td>
+                <td class="text-secondary text-nowrap">{{ ticket.created_at|date:"M d, Y" }}</td>
+                <td class="text-nowrap {% if ticket.is_overdue %}text-danger fw-medium{% else %}text-secondary{% endif %}">{% if ticket.due_at %}{{ ticket.due_at|date:"M d, Y" }}{% endif %}</td>
             </tr>
-        </thead>
-        <tbody class="bg-white divide-y divide-gray-200">
-            {% for ticket in tickets %}
-            <tr class="hover:bg-gray-50 cursor-pointer {% if ticket.is_overdue %}bg-red-50{% endif %}"
-                onclick="window.location='{% url 'core:ticket_detail' ticket.pk %}'">
-                <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-blue-600">
-                    <a href="{% url 'core:ticket_detail' ticket.pk %}">{{ ticket.ticket_number }}</a>
-                </td>
-                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{{ ticket.client.name }}</td>
-                <td class="px-4 py-3 text-sm text-gray-700 max-w-xs truncate">{{ ticket.subject }}</td>
-                <td class="px-4 py-3 whitespace-nowrap">
-                    {% status_badge ticket.status 'ticket' %}
-                </td>
-                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
-                    {{ ticket.assigned_to.get_full_name|default:"—" }}
-                </td>
-                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{{ ticket.created_at|date:"M d, Y" }}</td>
-                <td class="px-4 py-3 whitespace-nowrap text-sm {% if ticket.is_overdue %}text-red-600 font-medium{% else %}text-gray-500{% endif %}">
-                    {% if ticket.due_at %}{{ ticket.due_at|date:"M d, Y" }}{% else %}—{% endif %}
-                </td>
-            </tr>
-            {% endfor %}
+        {% endfor %}
         </tbody>
     </table>
-</div>
+    </div>
 {% else %}
-<div class="bg-white rounded-lg shadow px-6 py-12 text-center">
-    <p class="text-gray-400 text-lg mb-1">No tickets match this queue.</p>
-    <p class="text-gray-400 text-sm">Try adjusting the filter criteria in
-        <a href="{% url 'core:queue_edit' queue.pk %}" class="text-blue-600 hover:underline">queue settings</a>.
-    </p>
-</div>
+    <div class="empty"><div class="empty-icon">{% ticon 'filter' %}</div><p class="empty-title">No tickets match this queue</p><p class="empty-subtitle text-secondary">Adjust the filter criteria in the queue settings.</p>{% if queue.owner == request.user or request.user.is_staff %}<div class="empty-action"><a href="{% url 'core:queue_edit' queue.pk %}" class="btn">Edit queue</a></div>{% endif %}</div>
 {% endif %}
+</div>
 {% endblock %}

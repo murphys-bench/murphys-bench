@@ -1,0 +1,9 @@
+{% load mb_tabler %}
+<div class="card">
+    <div class="card-header"><div><h3 class="card-title">Tech skills</h3><div class="card-subtitle">Skill tags for technicians, for future skill-based routing.</div></div></div>
+    <table class="table card-table table-vcenter">
+        <thead><tr><th>Skill</th><th>Description</th><th></th></tr></thead>
+        <tbody>{% for skill in tech_skills %}<tr><td class="fw-medium">{{ skill.name }}</td><td class="text-secondary">{{ skill.description|default:"" }}</td><td class="text-end"><form method="post" action="{% url 'core:tech_skill_delete' skill.pk %}" data-mb-confirm="Delete the skill {{ skill.name }}?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Delete</button></form></td></tr>{% empty %}<tr><td colspan="3" class="text-secondary">No skills defined yet.</td></tr>{% endfor %}</tbody>
+    </table>
+    <form method="post" action="{% url 'core:tech_skill_create' %}" class="card-footer">{% csrf_token %}<div class="row g-2"><div class="col-md-4"><input type="text" name="name" class="form-control" placeholder="Skill, e.g. Apple repair" required></div><div class="col-md-6"><input type="text" name="description" class="form-control" placeholder="Description (optional)"></div><div class="col-md-2 d-grid"><button type="submit" class="btn btn-primary">Add skill</button></div></div></form>
+</div>
