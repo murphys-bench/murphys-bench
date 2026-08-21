@@ -32,11 +32,14 @@ asked), then the quiet details. Edit is the same shape with everything reachable
             <div class="row g-3">
                 <div class="col-md-6">
                     <label class="form-label">Customer or client</label>
-                    <select name="client" id="id_client" class="form-select"
+                    <div class="input-group">
+                        <select name="client" id="id_client" class="form-select"
                             hx-get="{% url 'core:ticket_contacts_by_client' %}" hx-trigger="change" hx-target="#id_contact" hx-include="this">
                         {% for val, label in form.fields.client.choices %}<option value="{{ val }}"{% if form.client.value|stringformat:"s" == val|stringformat:"s" %} selected{% endif %}>{{ label }}</option>{% endfor %}
                     </select>
-                    <div class="form-hint">Leave blank for a walk-in; no placeholder customer is created. Not on the list? <a href="{% url 'core:client_create' %}">Add a new customer</a>.</div>
+                        <a href="{% url 'core:client_create' %}?next={{ request.get_full_path|urlencode }}" class="btn">{% ticon 'plus' 'icon-sm' %} New</a>
+                    </div>
+                    <div class="form-hint">Leave blank for a walk-in; no placeholder customer is created. New adds a customer and brings you back here.</div>
                 </div>
                 <div class="col-md-6">
                     <div id="intake-panel" hx-get="{% url 'core:intake_client_panel' %}" hx-trigger="load, change from:#id_client" hx-include="#id_client" hx-swap="innerHTML"></div>

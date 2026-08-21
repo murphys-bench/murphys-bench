@@ -24,7 +24,23 @@
         <div class="card-header"><h3 class="card-title">Owner and machine</h3></div>
         <div class="card-body">
             <div class="row g-3">
-                <div class="col-md-6"><label class="form-label">Owner</label>{{ form.client|tabler_input }}<div class="form-hint">Blank for a walk-in device. Every device has a real owner or none; never a placeholder.</div></div>
+                <div class="col-md-6">
+                    <label class="form-label">Owner</label>
+                    <div class="input-group">{{ form.client|tabler_input }}<button type="button" class="btn" data-bs-toggle="collapse" data-bs-target="#new-owner">{% ticon 'plus' 'icon-sm' %} New</button></div>
+                    <div class="form-hint">Blank for a walk-in device. Every device has a real owner or none; never a placeholder.</div>
+                </div>
+                <div class="col-12 collapse" id="new-owner">
+                    <div class="card card-sm bg-secondary-lt"><div class="card-body">
+                        <div class="fw-medium mb-2">New customer</div>
+                        <div class="row g-2">
+                            <div class="col-md-5"><label class="form-label">Name (person, or company)</label><input type="text" name="new_client_name" class="form-control" autocomplete="off"></div>
+                            <div class="col-md-3"><label class="form-label">Type</label><select name="new_client_type" class="form-select"><option value="residential">Residential</option><option value="business">Business</option></select></div>
+                            <div class="col-md-2"><label class="form-label">Phone</label><input type="text" name="new_client_phone" class="form-control"></div>
+                            <div class="col-md-2"><label class="form-label">Email</label><input type="email" name="new_client_email" class="form-control"></div>
+                        </div>
+                        <div class="form-hint">Used only when no owner is chosen above. The customer is created with the device and can be filled in later from their hub.</div>
+                    </div></div>
+                </div>
                 <div class="col-md-6"><label class="form-label">Whose device (contact)</label>{{ form.assigned_contact|tabler_input }}</div>
                 <div class="col-md-6"><label class="form-label required">Device name</label>{{ form.name|tabler_input }}</div>
                 <div class="col-md-6"><label class="form-label">Default repair type</label>{{ form.repair_type|tabler_input }}</div>

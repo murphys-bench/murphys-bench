@@ -19,6 +19,7 @@
 <div class="row justify-content-center"><div class="col-12 col-xl-9">
 <form method="post">
     {% csrf_token %}
+    {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
     {% include "core/partials/form_errors.html" %}
     {% if device_form.errors %}{% with form=device_form %}{% include "core/partials/form_errors.html" %}{% endwith %}{% endif %}
 

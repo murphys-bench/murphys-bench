@@ -1816,15 +1816,26 @@ class ClientCreateView(LoginRequiredMixin, CreateView):
     form_class = ClientForm
     template_name = 'core/client_form.html'
 
+    def _next(self):
+        from django.utils.http import url_has_allowed_host_and_scheme
+        nxt = self.request.POST.get('next') or self.request.GET.get('next') or ''
+        return nxt if url_has_allowed_host_and_scheme(nxt, allowed_hosts={self.request.get_host()}) else ''
+
     def get_success_url(self):
+        # Came from an intake form? Go back to it with the new customer selected.
+        nxt = self._next()
+        if nxt:
+            sep = '&' if '?' in nxt else '?'
+            return f'{nxt}{sep}client={self.object.pk}'
         return reverse_lazy('core:client_detail', kwargs={'pk': self.object.pk})
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context.setdefault('device_form', DeviceQuickAddForm(prefix='device'))
         context['device_types'] = DeviceType.objects.all()
-        context['title'] = 'New Client'
-        context['cancel_url'] = reverse_lazy('core:client_list')
+        context['title'] = 'New Customer'
+        context['next_url'] = self._next()
+        context['cancel_url'] = self._next() or reverse_lazy('core:client_list')
         return context
 
     def post(self, request, *args, **kwargs):
@@ -3227,6 +3238,21 @@ class DeviceCreateView(LoginRequiredMixin, CreateView):
         return initial
 
     def form_valid(self, form):
+        # Intake at the device: a customer who is not on the books yet can be
+        # created here in the same motion (Mike, Aug 21). Only when no owner was
+        # picked and a new-customer name was typed.
+        new_name = (self.request.POST.get('new_client_name') or '').strip()
+        if new_name and not form.cleaned_data.get('client'):
+            if Client.objects.filter(name=new_name).exists():
+                form.add_error('client', f'"{new_name}" already exists; pick them from the list.')
+                return self.form_invalid(form)
+            owner = Client.objects.create(
+                name=new_name,
+                client_type=self.request.POST.get('new_client_type') or 'residential',
+                phone=(self.request.POST.get('new_client_phone') or '').strip(),
+                email=(self.request.POST.get('new_client_email') or '').strip(),
+            )
+            form.instance.client = owner
         self.object = form.save()
         if self.request.POST.get('save_and_create_wo'):
             return redirect(

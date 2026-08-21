@@ -14420,3 +14420,39 @@ def test_intake_and_hub_pages_render_on_the_tabler_frame(client, client_obj, adm
         body = r.content.decode()
         assert r.status_code == 200, url
         assert 'tabler.min' in body and 'css/app.' not in body and 'x-data' not in body, url
+
+
+@pytest.mark.django_db
+def test_new_customer_from_intake_returns_to_the_intake_with_them_selected(client, admin_user):
+    """The New button beside the owner select: create the customer, land back on
+    the form you came from with them chosen."""
+    client.force_login(admin_user)
+    nxt = reverse('core:ticket_create')
+    body = client.get(nxt).content.decode()
+    assert reverse('core:client_create') + '?next=' in body and '>New</a>' in body.replace('</svg> New', '>New')
+    r = client.post(reverse('core:client_create') + f'?next={nxt}', {
+        'name': 'Walk-up Wanda', 'client_type': 'residential', 'is_active': 'on', 'billing_day': '1', 'next': nxt})
+    assert r.status_code == 302
+    c = Client.objects.get(name='Walk-up Wanda')
+    assert r['Location'] == f'{nxt}?client={c.pk}'
+    # Off-site next is refused.
+    r = client.post(reverse('core:client_create'), {'name': 'Evil Ed', 'client_type': 'residential', 'is_active': 'on',
+                                                    'billing_day': '1', 'next': 'https://example.org/x'})
+    assert r['Location'].startswith('/clients/')
+
+
+@pytest.mark.django_db
+def test_new_device_can_take_in_a_new_customer(client, admin_user):
+    from core.models import Device
+    client.force_login(admin_user)
+    r = client.post(reverse('core:device_create'), {
+        'name': 'Drop-off Laptop', 'device_type': 'laptop', 'is_active': 'on',
+        'new_client_name': 'Fresh Face Co', 'new_client_type': 'business', 'new_client_phone': '555-0100', 'new_client_email': '',
+    })
+    assert r.status_code == 302
+    d = Device.objects.get(name='Drop-off Laptop')
+    assert d.client is not None and d.client.name == 'Fresh Face Co' and d.client.client_type == 'business'
+    # A typed name that already exists is refused rather than duplicated.
+    r = client.post(reverse('core:device_create'), {'name': 'Second', 'device_type': 'laptop', 'is_active': 'on', 'new_client_name': 'Fresh Face Co'})
+    assert r.status_code == 200 and b'already exists' in r.content
+    assert Client.objects.filter(name='Fresh Face Co').count() == 1
