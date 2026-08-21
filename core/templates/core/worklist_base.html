@@ -1,0 +1,76 @@
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
+{% comment %}
+ARCHETYPE 2, THE WORKLIST. One shape for every list page: a page header with the
+count and the one primary action; a single GET form holding search, the
+tab/segment control and the secondary filters on one row; a card table with fat
+rows; pagination that keeps the filters. Lists fill the blocks below and nothing
+else. Two temperaments share the shape (work lists vs reference lists); they
+differ only in default sort and what a row carries, never in structure.
+
+Blocks:
+  list_pretitle   room or group name (default: Work)
+  list_title      the list's name
+  list_count      optional badge text next to the title
+  list_actions    the primary action button(s)
+  list_segments   optional segmented control (Active / Closed tabs)
+  list_filters    optional secondary filter controls (selects, chips)
+  search_placeholder
+  list_table      the <table> (thead + tbody)
+  list_empty      the empty state's title/subtitle
+  list_has_rows   truthy when there are rows (used to pick table vs empty)
+{% endcomment %}
+
+{% block page_header %}
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <div class="page-pretitle">{% block list_pretitle %}Work{% endblock %}</div>
+                <h2 class="page-title">
+                    {% block list_title %}{% endblock %}
+                    {% block list_count %}{% endblock %}
+                </h2>
+            </div>
+            <div class="col-auto ms-auto d-print-none">
+                {% block list_actions %}{% endblock %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-body border-bottom py-3">
+        <form method="get" class="d-flex flex-wrap align-items-center gap-2">
+            {% if request.GET.tab %}<input type="hidden" name="tab" value="{{ request.GET.tab }}">{% endif %}
+            <div class="input-group" style="max-width: 28rem;">
+                <input type="text" name="{% block search_name %}search{% endblock %}"
+                       value="{% block search_value %}{{ request.GET.search }}{% endblock %}"
+                       class="form-control" placeholder="{% block search_placeholder %}Search{% endblock %}"
+                       aria-label="Search">
+                <button class="btn" type="submit">Search</button>
+            </div>
+            {% block list_segments %}{% endblock %}
+            {% block list_filters %}{% endblock %}
+        </form>
+    </div>
+    {% block list_notice %}{% endblock %}
+    {% if list_has_rows|default:page_obj.object_list %}
+    <div class="table-responsive">
+        {% block list_table %}{% endblock %}
+    </div>
+    {% include "core/partials/worklist_pagination.html" %}
+    {% else %}
+    <div class="card-body">
+        <div class="empty py-4">
+            {% block list_empty %}
+            <p class="empty-title">Nothing here</p>
+            <p class="empty-subtitle text-secondary">Clear the search or filters to see more.</p>
+            {% endblock %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

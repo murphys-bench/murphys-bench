@@ -112,3 +112,17 @@ def status_word(slug, entity_type):
     """The shop's label for a status slug (from StatusDefinition), for dot + word."""
     from core.templatetags.mb_icons import status_label
     return status_label(slug, entity_type)
+
+
+@register.simple_tag(takes_context=True)
+def url_replace(context, **kwargs):
+    """Current query string with some keys replaced: {% url_replace page=2 %}.
+    Keeps every other filter (tab, search, status...) so paging and tab links
+    never drop the user's filters, the defect the old ticket list shipped with."""
+    q = context['request'].GET.copy()
+    for k, v in kwargs.items():
+        if v in (None, ''):
+            q.pop(k, None)
+        else:
+            q[k] = v
+    return '?' + q.urlencode() if q else '?'

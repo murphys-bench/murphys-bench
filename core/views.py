@@ -741,7 +741,7 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
                 Q(client__name__icontains=search)
             )
 
-        return queryset.order_by('-created_at')
+        return _annotate_standing(queryset.select_related('invoice')).order_by('-created_at')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -3686,7 +3686,7 @@ class TicketListView(LoginRequiredMixin, ListView):
                 Q(client__name__icontains=search)
             )
 
-        return queryset.order_by('-created_at')
+        return _annotate_standing(queryset).order_by('-created_at')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
