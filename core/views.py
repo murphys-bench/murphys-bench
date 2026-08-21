@@ -857,26 +857,6 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         return context
 
 
-class WorkOrderMetaView(LoginRequiredMixin, DetailView):
-    """Low-frequency WO metadata (audit dates, invoice ref) — split off the
-    main detail page to keep it from crowding the right rail."""
-    model = WorkOrder
-    template_name = 'core/work_order_meta.html'
-    context_object_name = 'work_order'
-
-    def get_queryset(self):
-        qs = WorkOrder.objects.select_related('client')
-        return _scope_assignable_for(qs, self.request.user)
-
-    def get_context_data(self, **kwargs):
-        from django.utils import timezone
-        context = super().get_context_data(**kwargs)
-        wo = self.object
-        end = wo.completed_date.date() if wo.completed_date else timezone.now().date()
-        context['days_open'] = (end - wo.created_at.date()).days
-        return context
-
-
 class WorkOrderAddTimeView(LoginRequiredMixin, View):
     """Add minutes to a work order's time_spent_minutes. Returns updated display fragment."""
 
@@ -3839,23 +3819,6 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
         return context
 
 
-class TicketMetaView(LoginRequiredMixin, DetailView):
-    """Low-frequency ticket metadata (source, audit dates, linked tickets) —
-    split off the main detail page to keep it from crowding the right rail."""
-    model = Ticket
-    template_name = 'core/ticket_meta.html'
-    context_object_name = 'ticket'
-
-    def get_queryset(self):
-        qs = Ticket.objects.select_related('client', 'created_by')
-        return _scope_tickets_for(qs, self.request.user)
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['linked_tickets'] = self.object.get_linked_tickets()
-        return context
-
-
 class TicketCreateView(LoginRequiredMixin, CreateView):
     model = Ticket
     form_class = TicketForm
@@ -4144,11 +4107,10 @@ class TicketConvertView(LoginRequiredMixin, View):
         return getattr(ticket, 'work_order_created', None)
 
     def get(self, request, pk):
-        ticket = _get_scoped_ticket_or_404(request, pk)
-        if self._existing_work_order(ticket):
-            return redirect('core:ticket_detail', pk=pk)
-        form = TicketConvertForm()
-        return render(request, 'core/ticket_convert.html', {'ticket': ticket, 'form': form})
+        # Conversion happens IN PLACE on the Work Record (ruled Aug 20/21): there
+        # is no separate page any more. A GET just lands on the record.
+        _get_scoped_ticket_or_404(request, pk)
+        return redirect('core:ticket_detail', pk=pk)
 
     def post(self, request, pk):
         ticket = _get_scoped_ticket_or_404(request, pk)
@@ -4157,7 +4119,9 @@ class TicketConvertView(LoginRequiredMixin, View):
 
         form = TicketConvertForm(request.POST)
         if not form.is_valid():
-            return render(request, 'core/ticket_convert.html', {'ticket': ticket, 'form': form})
+            messages.error(request, 'Could not convert: ' + '; '.join(
+                f'{k}: {", ".join(v)}' for k, v in form.errors.items()))
+            return redirect('core:ticket_detail', pk=pk)
 
         work_order = WorkOrder.objects.create(
             work_order_number=WorkOrder.generate_work_order_number(from_ticket_number=ticket.ticket_number),

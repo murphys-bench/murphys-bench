@@ -56,10 +56,9 @@ status control sits with the reply.
                         <div class="dropdown-menu">
                             {% if ticket and can_edit_ticket and ticket.status != 'closed' %}<a class="dropdown-item" href="{% url 'core:ticket_edit' ticket.pk %}">Edit ticket</a>{% endif %}
                             {% if work_order and can_edit_workorder %}<a class="dropdown-item" href="{% url 'core:work_order_edit' work_order.pk %}">Edit work order</a>{% endif %}
-                            {% if ticket and not work_order and can_create_workorder and can_edit_ticket %}<a class="dropdown-item" href="{% url 'core:ticket_convert' ticket.pk %}">Convert to Work Order</a>{% endif %}
+                            {% if ticket and not work_order and can_create_workorder and can_edit_ticket %}<form method="post" action="{% url 'core:ticket_convert' ticket.pk %}">{% csrf_token %}<button type="submit" class="dropdown-item">Convert to Work Order</button></form>{% endif %}
                             {% if work_order and work_order.service_type == 'onsite' %}<a class="dropdown-item" href="{% url 'core:wo_mileage_create' work_order.pk %}">Log mileage</a>{% endif %}
-                            {% if ticket %}<a class="dropdown-item" href="{% url 'core:ticket_meta' ticket.pk %}">Ticket details &amp; history</a>{% endif %}
-                            {% if work_order %}<a class="dropdown-item" href="{% url 'core:work_order_meta' work_order.pk %}">Work order details &amp; history</a>{% endif %}
+                            <a class="dropdown-item" href="#sec-history">History</a>
                             <a class="dropdown-item" href="{% url 'core:kb_list' %}{% if ticket %}?q={{ ticket.subject|urlencode }}{% endif %}">Search KB</a>
                             {% if ticket and can_delete_ticket and not work_order %}
                             <div class="dropdown-divider"></div>
@@ -516,7 +515,7 @@ status control sits with the reply.
                     <p class="empty-title">No work order yet</p>
                     <p class="empty-subtitle text-secondary">Bench work, parts, checklist and settlement appear here once this ticket becomes a work order.</p>
                     {% if ticket and can_create_workorder and can_edit_ticket %}
-                    <div class="empty-action"><a href="{% url 'core:ticket_convert' ticket.pk %}" class="btn btn-primary">Convert to Work Order</a></div>
+                    <div class="empty-action"><form method="post" action="{% url 'core:ticket_convert' ticket.pk %}">{% csrf_token %}<button type="submit" class="btn btn-primary">Convert to Work Order</button></form></div>
                     {% endif %}
                 </div>
             </div>
@@ -593,6 +592,41 @@ status control sits with the reply.
                         {% endif %}
                         {% endwith %}
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ══ HISTORY (the facts the old "Details & history" pages held, plus the full audit trail) ══ #}
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sec-history" aria-expanded="false">History</button></h2>
+        <div id="sec-history" class="accordion-collapse collapse">
+            <div class="accordion-body">
+                <div class="row g-3 mb-3">
+                    {% if ticket %}
+                    <div class="col-6 col-md-3"><div class="subheader">Ticket opened</div>{{ ticket.created_at|date:"M j, Y g:i A" }}{% if ticket.created_by %}<div class="text-secondary small">by {{ ticket.created_by.get_full_name|default:ticket.created_by.username }}</div>{% endif %}</div>
+                    <div class="col-6 col-md-3"><div class="subheader">Ticket updated</div>{{ ticket.updated_at|date:"M j, Y g:i A" }}</div>
+                    {% if ticket.closed_at %}<div class="col-6 col-md-3"><div class="subheader">Ticket closed</div>{{ ticket.closed_at|date:"M j, Y g:i A" }}</div>{% endif %}
+                    {% if ticket.first_responded_at %}<div class="col-6 col-md-3"><div class="subheader">First response</div>{{ ticket.first_responded_at|date:"M j, Y g:i A" }}</div>{% endif %}
+                    {% endif %}
+                    {% if work_order %}
+                    <div class="col-6 col-md-3"><div class="subheader">Work order opened</div>{{ work_order.created_at|date:"M j, Y g:i A" }}<div class="text-secondary small">{{ days_open }} day{{ days_open|pluralize }} open</div></div>
+                    <div class="col-6 col-md-3"><div class="subheader">Work order updated</div>{{ work_order.updated_at|date:"M j, Y g:i A" }}</div>
+                    {% if work_order.completed_date %}<div class="col-6 col-md-3"><div class="subheader">Completed</div>{{ work_order.completed_date|date:"M j, Y g:i A" }}</div>{% endif %}
+                    {% if work_order.invoice_ninja_ref or work_order.invoice_ninja_id %}<div class="col-6 col-md-3"><div class="subheader">Invoice Ninja</div><span class="font-monospace">{{ work_order.invoice_ninja_ref|default:work_order.invoice_ninja_id }}</span></div>{% endif %}
+                    {% endif %}
+                </div>
+                <div class="subheader">Every recorded change</div>
+                <div class="small">
+                    {% for item in ticket_audit %}
+                    <div class="mb-1"><span class="text-secondary">{{ item.entry.timestamp|date:"M j, Y g:i A" }} &middot; {% if item.entry.actor %}{{ item.entry.actor.get_full_name|default:item.entry.actor.username }}{% else %}System{% endif %} &middot; ticket</span>
+                        {% if item.changes %}{% for c in item.changes %} {{ c.field|cut:"_"|capfirst }}: {{ c.old|default:"none"|truncatechars:40 }} &rarr; {{ c.new|default:"none"|truncatechars:40 }}{% if not forloop.last %};{% endif %}{% endfor %}{% else %} {{ item.entry.get_action_display }}{% endif %}</div>
+                    {% endfor %}
+                    {% for item in wo_audit %}
+                    <div class="mb-1"><span class="text-secondary">{{ item.entry.timestamp|date:"M j, Y g:i A" }} &middot; {% if item.entry.actor %}{{ item.entry.actor.get_full_name|default:item.entry.actor.username }}{% else %}System{% endif %} &middot; work order</span>
+                        {% if item.changes %}{% for c in item.changes %} {{ c.field|cut:"_"|capfirst }}: {{ c.old|default:"none"|truncatechars:40 }} &rarr; {{ c.new|default:"none"|truncatechars:40 }}{% if not forloop.last %};{% endif %}{% endfor %}{% else %} {{ item.entry.get_action_display }}{% endif %}</div>
+                    {% endfor %}
+                    {% if not ticket_audit and not wo_audit %}<div class="text-secondary">No changes recorded yet.</div>{% endif %}
                 </div>
             </div>
         </div>

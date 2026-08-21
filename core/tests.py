@@ -9054,47 +9054,17 @@ def test_wo_detail_shows_device_card_with_notes(client, client_obj, admin_user):
 
 
 @pytest.mark.django_db
-def test_ticket_meta_page_renders_and_holds_linked_tickets(client, client_obj, admin_user):
+def test_work_record_history_section_replaces_the_meta_pages(client, client_obj, admin_user):
+    """The old 'Details & history' pages are gone (single page carries all
+    information, Mike Aug 21); their facts live in the record's History section."""
+    from django.urls import NoReverseMatch
     ticket = Ticket.objects.create(client=client_obj, subject='S', description='D', created_by=admin_user)
     client.force_login(admin_user)
-
-    resp = client.get(reverse('core:ticket_meta', args=[ticket.pk]))
-    assert resp.status_code == 200
-    content = resp.content.decode()
-    assert 'Details &amp; History' in content or 'Details & History' in content
-    assert 'Linked Tickets' in content
-
-
-@pytest.mark.django_db
-def test_wo_meta_page_renders(client, client_obj, admin_user):
-    wo = WorkOrder.objects.create(client=client_obj)
-    client.force_login(admin_user)
-
-    resp = client.get(reverse('core:work_order_meta', args=[wo.pk]))
-    assert resp.status_code == 200
-    assert 'Days Open' in resp.content.decode()
-
-
-@pytest.mark.django_db
-def test_ticket_meta_404s_for_non_owning_non_admin_tech(client, client_obj):
-    owner = User.objects.create_user(username='meta_owner', password='x', is_staff=False)
-    other = User.objects.create_user(username='meta_other', password='x', is_staff=False)
-    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D', assigned_to=owner)
-
-    client.force_login(other)
-    resp = client.get(reverse('core:ticket_meta', args=[ticket.pk]))
-    assert resp.status_code == 404
-
-
-@pytest.mark.django_db
-def test_wo_meta_404s_for_non_owning_non_admin_tech(client, client_obj):
-    owner = User.objects.create_user(username='wo_meta_owner', password='x', is_staff=False)
-    other = User.objects.create_user(username='wo_meta_other', password='x', is_staff=False)
-    wo = WorkOrder.objects.create(client=client_obj, assigned_to=owner)
-
-    client.force_login(other)
-    resp = client.get(reverse('core:work_order_meta', args=[wo.pk]))
-    assert resp.status_code == 404
+    body = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    assert 'id="sec-history"' in body and 'Ticket opened' in body and 'Linked tickets' in body
+    for name in ('ticket_meta', 'work_order_meta'):
+        with pytest.raises(NoReverseMatch):
+            reverse(f'core:{name}', args=[ticket.pk])
 
 
 # ---------------------------------------------------------------------------
@@ -12335,8 +12305,9 @@ def test_a_hand_marked_converted_ticket_can_still_be_converted(client, admin_use
     )
     client.force_login(admin_user)
 
-    # The real route must still open, and still work.
-    assert client.get(reverse('core:ticket_convert', args=[ticket.pk])).status_code == 200
+    # The real route must still work (conversion is in place now: GET lands on
+    # the record, POST converts).
+    assert client.get(reverse('core:ticket_convert', args=[ticket.pk])).status_code == 302
     resp = client.post(reverse('core:ticket_convert', args=[ticket.pk]), {})
     assert resp.status_code == 302
     ticket.refresh_from_db()
@@ -13040,10 +13011,10 @@ def test_converting_a_ticket_needs_both_grants(client, client_obj):
     tkt_only = _role_tech('t_conv_tkt', can_edit_ticket=True)      # no WO create
     both = _role_tech('t_conv_both', can_create_workorder=True, can_edit_ticket=True)
 
-    for user, expected in ((wo_only, 403), (tkt_only, 403), (both, 200)):
+    for user, expected in ((wo_only, 403), (tkt_only, 403), (both, 302)):   # 302 = in-place convert done
         ticket = _ticket_for(user, client_obj)
         client.force_login(user)
-        resp = client.get(reverse('core:ticket_convert', args=[ticket.pk]))
+        resp = client.post(reverse('core:ticket_convert', args=[ticket.pk]), {})
         assert resp.status_code == expected, (
             f'{user.username} got {resp.status_code}, expected {expected}'
         )
