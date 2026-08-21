@@ -84,7 +84,13 @@
                         </a>
                     </li>
 
-                    <li class="nav-item mt-2"><span class="nav-link mb-when-expanded mb-room-heading"><span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-work, var(--tblr-primary));"></span>Work</span></li>
+                                        <li class="nav-item mt-2 mb-room-group">
+                        <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-work" aria-expanded="true" aria-controls="mb-grp-work" data-mb-group="mb-grp-work">
+                            <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-work, var(--tblr-primary));"></span>
+                            <span class="mb-when-expanded">Work</span>
+                            <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
+                        </button>
+                        <ul class="navbar-nav collapse show" id="mb-grp-work">
                     <li class="nav-item {% if u and 'ticket' in u %}active{% endif %}">
                         <a class="nav-link" href="{% url 'core:ticket_list' %}" title="Tickets">
                             <span class="nav-link-icon">{% ticon 'ticket' %}</span>
@@ -112,7 +118,15 @@
                         </a>
                     </li>
 
-                    <li class="nav-item mt-2"><span class="nav-link mb-when-expanded mb-room-heading"><span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-work, var(--tblr-primary));"></span>Clients</span></li>
+                                            </ul>
+                    </li>
+                    <li class="nav-item mt-2 mb-room-group">
+                        <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-clients" aria-expanded="true" aria-controls="mb-grp-clients" data-mb-group="mb-grp-clients">
+                            <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-work, var(--tblr-primary));"></span>
+                            <span class="mb-when-expanded">Clients</span>
+                            <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
+                        </button>
+                        <ul class="navbar-nav collapse show" id="mb-grp-clients">
                     <li class="nav-item {% if u and 'client' in u %}active{% endif %}">
                         <a class="nav-link" href="{% url 'core:client_list' %}" title="Clients">
                             <span class="nav-link-icon">{% ticon 'users' %}</span>
@@ -121,7 +135,15 @@
                     </li>
 
                     {% if can_view_prospects or is_admin %}
-                    <li class="nav-item mt-2"><span class="nav-link mb-when-expanded mb-room-heading"><span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-desk, var(--tblr-primary));"></span>Relationship Desk</span></li>
+                                            </ul>
+                    </li>
+                    <li class="nav-item mt-2 mb-room-group">
+                        <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-relationship-desk" aria-expanded="true" aria-controls="mb-grp-relationship-desk" data-mb-group="mb-grp-relationship-desk">
+                            <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-desk, var(--tblr-primary));"></span>
+                            <span class="mb-when-expanded">Relationship Desk</span>
+                            <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
+                        </button>
+                        <ul class="navbar-nav collapse show" id="mb-grp-relationship-desk">
                     {% if can_view_prospects %}
                     <li class="nav-item {% if u and 'prospect' in u %}active{% endif %}">
                         <a class="nav-link" href="{% url 'core:prospect_list' %}" title="Prospects">
@@ -141,7 +163,15 @@
                     {% endif %}
 
                     {% if can_view_sales %}
-                    <li class="nav-item mt-2"><span class="nav-link mb-when-expanded mb-room-heading"><span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-register, var(--tblr-primary));"></span>Register</span></li>
+                                            </ul>
+                    </li>
+                    <li class="nav-item mt-2 mb-room-group">
+                        <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-register" aria-expanded="true" aria-controls="mb-grp-register" data-mb-group="mb-grp-register">
+                            <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-register, var(--tblr-primary));"></span>
+                            <span class="mb-when-expanded">Register</span>
+                            <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
+                        </button>
+                        <ul class="navbar-nav collapse show" id="mb-grp-register">
                     <li class="nav-item {% if u and 'pos' in u %}active{% endif %}">
                         <a class="nav-link" href="{% url 'core:pos_home' %}" title="Register">
                             <span class="nav-link-icon">{% ticon 'cash-register' %}</span>
@@ -150,7 +180,15 @@
                     </li>
                     {% endif %}
 
-                    <li class="nav-item mt-2"><span class="nav-link mb-when-expanded mb-room-heading"><span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-office, var(--tblr-primary));"></span>Back Office</span></li>
+                                            </ul>
+                    </li>
+                    <li class="nav-item mt-2 mb-room-group">
+                        <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-back-office" aria-expanded="true" aria-controls="mb-grp-back-office" data-mb-group="mb-grp-back-office">
+                            <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-office, var(--tblr-primary));"></span>
+                            <span class="mb-when-expanded">Back Office</span>
+                            <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
+                        </button>
+                        <ul class="navbar-nav collapse show" id="mb-grp-back-office">
                     <li class="nav-item {% if u and 'catalog' in u %}active{% endif %}">
                         <a class="nav-link" href="{% url 'core:catalog_list' %}" title="Products &amp; Services">
                             <span class="nav-link-icon">{% ticon 'tag' %}</span>
@@ -196,7 +234,9 @@
                         </a>
                     </li>
                     {% endif %}
-                </ul>
+                                        </ul>
+                    </li>
+</ul>
                 </div>
 
                 {# Bottom: who you are, attention, account, display. #}

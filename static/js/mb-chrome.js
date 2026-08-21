@@ -39,6 +39,26 @@
             n.textContent = el.getAttribute('data-bs-theme') === 'dark' ? 'Light mode' : 'Dark mode';
         });
 
+        // Room groups in the sidebar remember open/closed per browser.
+        document.querySelectorAll('[data-mb-group]').forEach(function (btn) {
+            var id = btn.getAttribute('data-mb-group');
+            var panel = document.getElementById(id);
+            if (!panel) return;
+            var key = 'mb_nav_group_' + id;
+            try {
+                if (localStorage.getItem(key) === 'closed') {
+                    panel.classList.remove('show');
+                    btn.setAttribute('aria-expanded', 'false');
+                }
+            } catch (e) {}
+            panel.addEventListener('shown.bs.collapse', function () {
+                try { localStorage.setItem(key, 'open'); } catch (e) {}
+            });
+            panel.addEventListener('hidden.bs.collapse', function () {
+                try { localStorage.setItem(key, 'closed'); } catch (e) {}
+            });
+        });
+
         // Sidebar scroll position survives full-page navigation (short laptop
         // screens scroll the nav; snapping to top on every click was a reported
         // annoyance on the old frame and the fix carries over).
