@@ -83,10 +83,46 @@
                             <span class="nav-link-title">Board</span>
                         </a>
                     </li>
-
-                    
-                    {% if can_view_prospects or is_admin %}
-                                            </ul>
+                    <li class="nav-item mt-2 mb-room-group">
+                        <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-work" aria-expanded="true" aria-controls="mb-grp-work" data-mb-group="mb-grp-work">
+                            <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-work, var(--tblr-primary));"></span>
+                            <span class="mb-when-expanded">Work</span>
+                            <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
+                        </button>
+                        <ul class="navbar-nav collapse show" id="mb-grp-work">
+                            <li class="nav-item {% if u and 'ticket' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:ticket_list' %}" title="Tickets">
+                                    <span class="nav-link-icon">{% ticon 'ticket' %}</span>
+                                    <span class="nav-link-title">Tickets</span>
+                                </a>
+                            </li>
+                            <li class="nav-item {% if u and 'work_order' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:work_order_list' %}" title="Work Orders">
+                                    <span class="nav-link-icon">{% ticon 'tool' %}</span>
+                                    <span class="nav-link-title">Work Orders</span>
+                                </a>
+                            </li>
+                            {% if can_view_estimates %}
+                            <li class="nav-item {% if u and 'estimate' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:estimate_list' %}" title="Estimates">
+                                    <span class="nav-link-icon">{% ticon 'file-text' %}</span>
+                                    <span class="nav-link-title">Estimates</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                            <li class="nav-item {% if u and 'mileage' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:mileage_list' %}" title="Mileage">
+                                    <span class="nav-link-icon">{% ticon 'map-pin' %}</span>
+                                    <span class="nav-link-title">Mileage</span>
+                                </a>
+                            </li>
+                            <li class="nav-item {% if u and 'device' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:device_list' %}" title="Devices">
+                                    <span class="nav-link-icon">{% ticon 'device-laptop' %}</span>
+                                    <span class="nav-link-title">Devices</span>
+                                </a>
+                            </li>
+                        </ul>
                     </li>
                     <li class="nav-item mt-2 mb-room-group">
                         <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-desk" aria-expanded="true" aria-controls="mb-grp-desk" data-mb-group="mb-grp-desk">
@@ -95,32 +131,31 @@
                             <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
                         </button>
                         <ul class="navbar-nav collapse show" id="mb-grp-desk">
-                    <li class="nav-item {% if u and 'client' in u %}active{% endif %}">
-                        <a class="nav-link" href="{% url 'core:client_list' %}" title="Clients">
-                            <span class="nav-link-icon">{% ticon 'users' %}</span>
-                            <span class="nav-link-title">Clients</span>
-                        </a>
+                            <li class="nav-item {% if u and 'client' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:client_list' %}" title="Clients">
+                                    <span class="nav-link-icon">{% ticon 'users' %}</span>
+                                    <span class="nav-link-title">Clients</span>
+                                </a>
+                            </li>
+                            {% if can_view_prospects %}
+                            <li class="nav-item {% if u and 'prospect' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:prospect_list' %}" title="Prospects">
+                                    <span class="nav-link-icon">{% ticon 'user-plus' %}</span>
+                                    <span class="nav-link-title">Prospects</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                            {% if is_admin %}
+                            <li class="nav-item {% if u and 'contract' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:contract_list' %}" title="Contracts">
+                                    <span class="nav-link-icon">{% ticon 'contract' %}</span>
+                                    <span class="nav-link-title">Contracts</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                        </ul>
                     </li>
-                    {% if can_view_prospects %}
-                    <li class="nav-item {% if u and 'prospect' in u %}active{% endif %}">
-                        <a class="nav-link" href="{% url 'core:prospect_list' %}" title="Prospects">
-                            <span class="nav-link-icon">{% ticon 'user-plus' %}</span>
-                            <span class="nav-link-title">Prospects</span>
-                        </a>
-                    </li>
-                    {% endif %}
-                    {% if is_admin %}
-                    <li class="nav-item {% if u and 'contract' in u %}active{% endif %}">
-                        <a class="nav-link" href="{% url 'core:contract_list' %}" title="Contracts">
-                            <span class="nav-link-icon">{% ticon 'contract' %}</span>
-                            <span class="nav-link-title">Contracts</span>
-                        </a>
-                    </li>
-                    {% endif %}
-
                     {% if can_view_sales %}
-                                            </ul>
-                    </li>
                     <li class="nav-item mt-2 mb-room-group">
                         <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-register" aria-expanded="true" aria-controls="mb-grp-register" data-mb-group="mb-grp-register">
                             <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-register, var(--tblr-primary));"></span>
@@ -128,16 +163,15 @@
                             <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
                         </button>
                         <ul class="navbar-nav collapse show" id="mb-grp-register">
-                    <li class="nav-item {% if u and 'pos' in u %}active{% endif %}">
-                        <a class="nav-link" href="{% url 'core:pos_home' %}" title="Register">
-                            <span class="nav-link-icon">{% ticon 'cash-register' %}</span>
-                            <span class="nav-link-title">Register</span>
-                        </a>
+                            <li class="nav-item {% if u and 'pos' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:pos_home' %}" title="Register">
+                                    <span class="nav-link-icon">{% ticon 'cash-register' %}</span>
+                                    <span class="nav-link-title">Register</span>
+                                </a>
+                            </li>
+                        </ul>
                     </li>
                     {% endif %}
-
-                                            </ul>
-                    </li>
                     <li class="nav-item mt-2 mb-room-group">
                         <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-back-office" aria-expanded="true" aria-controls="mb-grp-back-office" data-mb-group="mb-grp-back-office">
                             <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-office, var(--tblr-primary));"></span>
@@ -145,48 +179,53 @@
                             <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
                         </button>
                         <ul class="navbar-nav collapse show" id="mb-grp-back-office">
-                    <li class="nav-item {% if u and 'catalog' in u %}active{% endif %}">
-                        <a class="nav-link" href="{% url 'core:catalog_list' %}" title="Products &amp; Services">
-                            <span class="nav-link-icon">{% ticon 'tag' %}</span>
-                            <span class="nav-link-title">Products &amp; Services</span>
-                        </a>
+                            <li class="nav-item {% if u and 'catalog' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:catalog_list' %}" title="Products &amp; Services">
+                                    <span class="nav-link-icon">{% ticon 'tag' %}</span>
+                                    <span class="nav-link-title">Products &amp; Services</span>
+                                </a>
+                            </li>
+                            <li class="nav-item {% if u and 'kb' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:kb_list' %}" title="Knowledge Base">
+                                    <span class="nav-link-icon">{% ticon 'book' %}</span>
+                                    <span class="nav-link-title">Knowledge Base</span>
+                                </a>
+                            </li>
+                            {% if is_admin %}
+                            <li class="nav-item {% if u and 'queue' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:queue_list' %}" title="Queues">
+                                    <span class="nav-link-icon">{% ticon 'filter' %}</span>
+                                    <span class="nav-link-title">Queues</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                            {% if is_admin %}
+                            <li class="nav-item {% if u and 'report' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:reports' %}" title="Reports">
+                                    <span class="nav-link-icon">{% ticon 'chart-bar' %}</span>
+                                    <span class="nav-link-title">Reports</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                            {% if is_admin %}
+                            <li class="nav-item {% if u == 'settings' %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:settings' %}" title="Settings">
+                                    <span class="nav-link-icon">{% ticon 'settings' %}</span>
+                                    <span class="nav-link-title">Settings</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                            {% if can_manage_users and not is_admin %}
+                            <li class="nav-item {% if u and 'user' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:user_list' %}" title="Users">
+                                    <span class="nav-link-icon">{% ticon 'user' %}</span>
+                                    <span class="nav-link-title">Users</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                        </ul>
                     </li>
-                    <li class="nav-item {% if u and 'kb' in u %}active{% endif %}">
-                        <a class="nav-link" href="{% url 'core:kb_list' %}" title="Knowledge Base">
-                            <span class="nav-link-icon">{% ticon 'book' %}</span>
-                            <span class="nav-link-title">Knowledge Base</span>
-                        </a>
-                    </li>
-                    {% if is_admin %}
-                    <li class="nav-item {% if u and 'queue' in u %}active{% endif %}">
-                        <a class="nav-link" href="{% url 'core:queue_list' %}" title="Queues">
-                            <span class="nav-link-icon">{% ticon 'filter' %}</span>
-                            <span class="nav-link-title">Queues</span>
-                        </a>
-                    </li>
-                    <li class="nav-item {% if u and 'report' in u %}active{% endif %}">
-                        <a class="nav-link" href="{% url 'core:reports' %}" title="Reports">
-                            <span class="nav-link-icon">{% ticon 'chart-bar' %}</span>
-                            <span class="nav-link-title">Reports</span>
-                        </a>
-                    </li>
-                    <li class="nav-item {% if u == 'settings' %}active{% endif %}">
-                        <a class="nav-link" href="{% url 'core:settings' %}" title="Settings">
-                            <span class="nav-link-icon">{% ticon 'settings' %}</span>
-                            <span class="nav-link-title">Settings</span>
-                        </a>
-                    </li>
-                    {% elif can_manage_users %}
-                    <li class="nav-item {% if u and 'user' in u %}active{% endif %}">
-                        <a class="nav-link" href="{% url 'core:user_list' %}" title="Users">
-                            <span class="nav-link-icon">{% ticon 'user' %}</span>
-                            <span class="nav-link-title">Users</span>
-                        </a>
-                    </li>
-                    {% endif %}
-                                        </ul>
-                    </li>
-</ul>
+                </ul>
                 </div>
 
                 {# Bottom: who you are, attention, account, display. #}
