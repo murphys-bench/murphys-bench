@@ -29,7 +29,7 @@ where money exists, and the card itself is the one action (open it).
 <div class="row row-deck row-cards mb-3">
     {% for t in tiles %}
     <div class="col-6 col-md-4 col-xl-2">
-        <a href="{{ t.url }}" class="card card-sm card-link {% if not t.count %}opacity-75{% endif %}">
+        <a href="{{ t.url }}" class="card card-sm card-link">
             <div class="card-body">
                 <div class="d-flex align-items-center">
                     <span class="status-dot me-2 {% if t.count %}status-dot-animated{% endif %}" style="--tblr-status-color: var(--tblr-{{ t.tone }});"></span>
@@ -64,10 +64,9 @@ where money exists, and the card itself is the one action (open it).
                         <div class="col text-truncate">
                             <div class="text-truncate">
                                 <span class="fw-medium">{{ t.client.name }}</span>
-                                {% if t.managed_now or t.client.is_managed %}<span class="badge bg-blue-lt ms-1">Managed</span>
-                                {% elif t.client.client_type == 'business' %}<span class="badge bg-azure-lt ms-1">Business</span>
+                                {% if t.client.client_type == 'business' %}<span class="badge bg-azure-lt ms-1">Business</span>
                                 {% else %}<span class="badge bg-secondary-lt ms-1">Residential</span>{% endif %}
-                                {% if t.priority == 'urgent' or t.priority == 'high' %}<span class="text-orange ms-1" title="{{ t.get_priority_display }}">{% ticon 'alert-triangle' 'icon-sm' %}</span>{% endif %}
+                                {% if t.priority == 'urgent' or t.priority == 'high' %}<span class="text-orange ms-1 small fw-medium">{% ticon 'alert-triangle' 'icon-sm' %} {{ t.get_priority_display }}</span>{% endif %}
                                 {% if t.is_overdue %}<span class="text-red ms-1" title="Past response deadline">{% ticon 'clock' 'icon-sm' %}</span>{% endif %}
                                 {% if t.needs_response %}<span class="text-green ms-1" title="Client replied, awaiting answer">{% ticon 'mail' 'icon-sm' %}</span>{% endif %}
                             </div>
@@ -114,10 +113,9 @@ where money exists, and the card itself is the one action (open it).
                         <div class="col text-truncate">
                             <div class="text-truncate">
                                 <span class="fw-medium">{% if w.client %}{{ w.client.name }}{% else %}Walk-in{% endif %}</span>
-                                {% if w.client %}{% if w.managed_now or w.client.is_managed %}<span class="badge bg-blue-lt ms-1">Managed</span>
-                                {% elif w.client.client_type == 'business' %}<span class="badge bg-azure-lt ms-1">Business</span>
+                                {% if w.client %}{% if w.client.client_type == 'business' %}<span class="badge bg-azure-lt ms-1">Business</span>
                                 {% else %}<span class="badge bg-secondary-lt ms-1">Residential</span>{% endif %}{% endif %}
-                                {% if w.priority == 'urgent' or w.priority == 'high' %}<span class="text-orange ms-1" title="{{ w.get_priority_display }}">{% ticon 'alert-triangle' 'icon-sm' %}</span>{% endif %}
+                                {% if w.priority == 'urgent' or w.priority == 'high' %}<span class="text-orange ms-1 small fw-medium">{% ticon 'alert-triangle' 'icon-sm' %} {{ w.get_priority_display }}</span>{% endif %}
                             </div>
                             <div class="text-secondary small text-truncate">
                                 {{ w.work_order_number }}
