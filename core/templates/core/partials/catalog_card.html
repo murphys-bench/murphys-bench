@@ -1,76 +1,52 @@
-{% comment %}A collapsible catalog card (Services or Products). Items are grouped by
-category with a divider per category. Inherits can_edit + type_choices from
-the parent context. Expects: title, groups (by_category dict), count, empty_text.{% endcomment %}
-<div class="bg-white rounded-lg shadow"
-     x-data="{ open: JSON.parse(localStorage.getItem('acc_catalog_{{ title|slugify }}') ?? 'false') }"
-     x-init="$watch('open', v => localStorage.setItem('acc_catalog_{{ title|slugify }}', v))">
-    <button type="button" @click="open = !open"
-            style="background-color: var(--color-accent);"
-            class="w-full flex items-center justify-between px-6 py-4 text-left rounded-t-lg text-white">
-        <span class="text-base font-semibold">{{ title }}
-            <span class="text-white/70 font-normal">({{ count }})</span></span>
-        <svg class="w-4 h-4 text-white/80 transition-transform" :class="open && 'rotate-180'"
-             fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-        </svg>
+{% load mb_tabler %}
+{% comment %}One section of the catalog (Services or Products), grouped by category.
+Inherits can_edit + type_choices from the parent context. Expects: title, groups
+(by_category dict), count, empty_text. Bootstrap collapse; per-item edit form
+unfolds in place.{% endcomment %}
+<div class="card-header border-top"><h3 class="card-title">{{ title }}</h3><span class="badge bg-blue-lt ms-2">{{ count }}</span></div>
+{% for category, group_items in groups.items %}
+<div class="card-body py-2 border-bottom">
+    <button class="btn btn-ghost-secondary btn-sm w-100 text-start" type="button" data-bs-toggle="collapse" data-bs-target="#cat-{{ title|slugify }}-{{ forloop.counter }}" aria-expanded="false">
+        {% ticon 'chevron-down' 'icon-sm' %} <span class="fw-medium">{{ category }}</span> <span class="text-secondary">({{ group_items|length }})</span>
     </button>
-    <div x-show="open" x-cloak class="border-t border-gray-100">
-        {% for category, group_items in groups.items %}
-        <div x-data="{ catOpen: false }">
-        <button type="button" @click="catOpen = !catOpen"
-                style="color: var(--color-accent); border-left: 4px solid var(--color-accent);"
-                class="w-full flex items-center justify-between px-6 py-2 bg-gray-100 border-b border-gray-200 text-xs font-bold uppercase tracking-wide hover:bg-gray-200 text-left">
-            <span>{{ category }} <span class="font-normal normal-case opacity-70">({{ group_items|length }})</span></span>
-            <svg class="w-3.5 h-3.5 transition-transform" :class="catOpen && 'rotate-180'"
-                 fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-            </svg>
-        </button>
-        <div x-show="catOpen" x-cloak>
-        {% for item in group_items %}
-        <div class="border-b border-gray-50 last:border-0 {% if not item.is_active %}opacity-50{% endif %}" x-data="{ editing: false }">
-            <div class="px-6 py-2.5 flex items-center gap-3">
-                <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-gray-900">{{ item.name }}{% if not item.is_active %} <span class="text-xs text-gray-400">(inactive)</span>{% endif %}</p>
-                    {% if item.print_description %}<p class="text-xs text-gray-400 truncate">{{ item.print_description }}</p>{% endif %}
+    <div class="collapse" id="cat-{{ title|slugify }}-{{ forloop.counter }}">
+        <div class="list-group list-group-flush mt-2">
+            {% for item in group_items %}
+            <div class="list-group-item {% if not item.is_active %}opacity-50{% endif %}">
+                <div class="row align-items-center g-2">
+                    <div class="col">
+                        <div class="fw-medium">{{ item.name }}{% if not item.is_active %} <span class="badge bg-secondary-lt ms-1">Inactive</span>{% endif %}</div>
+                        {% if item.print_description %}<div class="text-secondary small text-truncate">{{ item.print_description }}</div>{% endif %}
+                    </div>
+                    <div class="col-auto text-nowrap">{% if item.default_price != None %}${{ item.default_price }}{% endif %}</div>
+                    {% if can_edit %}
+                    <div class="col-auto"><button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#edit-item-{{ item.pk }}" aria-expanded="false">Edit</button></div>
+                    {% endif %}
                 </div>
-                <div class="text-sm text-gray-700 whitespace-nowrap">{% if item.default_price != None %}${{ item.default_price }}{% else %}<span class="text-gray-300">—</span>{% endif %}</div>
-                {% if can_edit %}<button type="button" @click="editing = !editing" class="text-xs text-blue-600 hover:underline shrink-0">Edit</button>{% endif %}
+                {% if can_edit %}
+                <div class="collapse mt-2" id="edit-item-{{ item.pk }}">
+                    <form method="post" action="{% url 'core:catalog_update' item.pk %}" class="row g-2 align-items-end">
+                        {% csrf_token %}
+                        <div class="col-md-2"><label class="form-label">Type</label>
+                            <select name="item_type" class="form-select form-select-sm">{% for value, label in type_choices %}<option value="{{ value }}" {% if item.item_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+                        <div class="col-md-3"><label class="form-label">Name</label><input type="text" name="name" value="{{ item.name }}" required class="form-control form-control-sm"></div>
+                        <div class="col-md-2"><label class="form-label">Category</label><input type="text" name="category" value="{{ item.category }}" required class="form-control form-control-sm"></div>
+                        <div class="col-md-2"><label class="form-label">Price ($)</label><input type="number" name="default_price" value="{{ item.default_price|default_if_none:'' }}" step="0.01" min="0" class="form-control form-control-sm"></div>
+                        <div class="col-md-1"><label class="form-check"><input type="checkbox" name="is_active" value="1" {% if item.is_active %}checked{% endif %} class="form-check-input"><span class="form-check-label">Active</span></label></div>
+                        <div class="col-md-2"><button type="submit" class="btn btn-sm btn-primary w-100">Save</button></div>
+                        <div class="col-12"><label class="form-label">Client-facing description</label><input type="text" name="print_description" value="{{ item.print_description }}" class="form-control form-control-sm"></div>
+                    </form>
+                    <form method="post" action="{% url 'core:catalog_delete' item.pk %}" class="mt-2" data-mb-confirm="Delete {{ item.name }} from the catalog?">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete this item</button>
+                    </form>
+                </div>
+                {% endif %}
             </div>
-            {% if can_edit %}
-            <div x-show="editing" x-cloak class="px-6 pb-3 bg-gray-50">
-                <form method="post" action="{% url 'core:catalog_update' item.pk %}" class="grid grid-cols-1 sm:grid-cols-6 gap-2 items-end pt-3">
-                    {% csrf_token %}
-                    <div><label class="block text-xs text-gray-500 mb-1">Type</label>
-                        <select name="item_type" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm">
-                            {% for value, label in type_choices %}<option value="{{ value }}" {% if item.item_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
-                        </select></div>
-                    <div class="sm:col-span-2"><label class="block text-xs text-gray-500 mb-1">Name</label>
-                        <input type="text" name="name" value="{{ item.name }}" required class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"></div>
-                    <div><label class="block text-xs text-gray-500 mb-1">Category</label>
-                        <input type="text" name="category" value="{{ item.category }}" required class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"></div>
-                    <div><label class="block text-xs text-gray-500 mb-1">Price ($)</label>
-                        <input type="number" name="default_price" value="{{ item.default_price|default_if_none:'' }}" step="0.01" min="0" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"></div>
-                    <label class="flex items-center gap-1 text-xs text-gray-600">
-                        <input type="checkbox" name="is_active" value="1" {% if item.is_active %}checked{% endif %} class="h-4 w-4 rounded border-gray-300"> Active
-                    </label>
-                    <div class="sm:col-span-5"><label class="block text-xs text-gray-500 mb-1">Client-facing description</label>
-                        <input type="text" name="print_description" value="{{ item.print_description }}" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"></div>
-                    <div><button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Save</button></div>
-                </form>
-                <form method="post" action="{% url 'core:catalog_delete' item.pk %}" class="mt-2"
-                      onsubmit="return confirm('Delete {{ item.name|escapejs }} from the catalog?')">
-                    {% csrf_token %}
-                    <button type="submit" class="text-xs text-red-600 hover:underline">Delete this item</button>
-                </form>
-            </div>
-            {% endif %}
+            {% endfor %}
         </div>
-        {% endfor %}
-        </div>{# x-show catOpen #}
-        </div>{# x-data catOpen #}
-        {% empty %}
-        <p class="px-6 py-4 text-sm text-gray-400">{{ empty_text }}</p>
-        {% endfor %}
     </div>
 </div>
+{% empty %}
+<div class="card-body"><div class="empty py-3"><p class="empty-title">{{ empty_text }}</p></div></div>
+{% endfor %}

@@ -14321,8 +14321,26 @@ def test_legacy_pages_still_load_the_tailwind_frame():
     """Until a page is rebuilt it stays on core/base.html. The two frames must
     never meet on one page, so a legacy page must not carry the Tabler assets."""
     c, _ = _tabler_admin_client()
-    r = c.get(reverse('core:client_list'))            # not yet rebuilt as of batch 2b
+    r = c.get(reverse('core:settings'))               # Back Office: not rebuilt until batch 5
     assert r.status_code == 200
     body = r.content.decode()
     assert 'css/app.' in body                              # 'app.css' locally, 'app.<hash>.css' under manifest storage
     assert 'tabler.min' not in body
+
+
+@pytest.mark.django_db
+def test_every_worklist_renders_on_the_tabler_frame():
+    """Batch 2: all fifteen list pages of the Worklist archetype share one skeleton
+    (worklist_base.html) and never load the Tailwind frame. Monthly Clients and
+    Contract Billing are excluded on purpose: they merge into one list with a
+    migration in a later batch and stay on the old frame until then."""
+    c, _ = _tabler_admin_client()
+    for name in ('ticket_list', 'work_order_list', 'client_list', 'device_list', 'estimate_list',
+                 'sale_list', 'prospect_list', 'contract_list', 'catalog_list', 'kb_list',
+                 'queue_list', 'mileage_list', 'user_list', 'role_list'):
+        r = c.get(reverse(f'core:{name}'))
+        assert r.status_code == 200, name
+        body = r.content.decode()
+        assert 'tabler.min' in body and 'css/app.' not in body, name
+        assert 'page-title' in body, name
+        assert 'data-mb-confirm' in body or 'btn-outline-danger' not in body, f'{name}: a destructive button without the confirm modal'

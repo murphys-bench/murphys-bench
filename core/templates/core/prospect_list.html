@@ -1,74 +1,63 @@
-{% extends "core/base.html" %}
-{% load mb_icons %}
+{% extends "core/worklist_base.html" %}
+{% load mb_tabler %}
 
 {% block title %}Prospects - Murphy's Bench{% endblock %}
+{% block room %}desk{% endblock %}
+{% block list_pretitle %}Relationship Desk{% endblock %}
+{% block list_title %}Prospects{% endblock %}
+{% block list_count %}<span class="badge bg-blue-lt ms-2">{{ page_obj.paginator.count }}</span>{% endblock %}
+{% block search_placeholder %}Name, company, email or phone{% endblock %}
 
-{% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex flex-wrap items-center gap-4">
-        <h1 class="text-2xl font-bold text-gray-900 shrink-0">Prospects</h1>
-        <div class="flex-1"></div>
-        {% include "core/partials/header_bell.html" %}
-        <a href="{% url 'core:prospect_create' %}"
-           class="px-4 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">+ New Prospect</a>
-    </div>
-</div>
-{% include "core/partials/list_search_bar.html" with search_value=request.GET.search search_placeholder="Search prospects…" filters_template="core/partials/_status_open_filter.html" status_all_label="Open stages" filters_active=active_status %}
+{% block list_actions %}
+<a href="{% url 'core:prospect_create' %}" class="btn btn-primary">{% ticon 'plus' %} New Prospect</a>
 {% endblock %}
 
-{% block content %}
-<div class="max-w-7xl mx-auto">
-    <div class="bg-white rounded-lg shadow overflow-hidden">
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
-                <tr>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Prospect</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stage</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Added</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-200">
-                {% for prospect in prospects %}
-                <tr class="hover:bg-gray-50">
-                    <td class="px-4 py-3">
-                        <a href="{% url 'core:prospect_detail' prospect.pk %}" class="text-blue-600 hover:underline font-medium">{{ prospect.display_name }}</a>
-                    </td>
-                    <td class="px-4 py-3 text-sm text-gray-600">{{ prospect.get_client_type_display }}</td>
-                    <td class="px-4 py-3 text-sm text-gray-600">{{ prospect.email|default:prospect.phone|default:"—" }}</td>
-                    <td class="px-4 py-3 text-sm">
-                        <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium
-                            {% if prospect.status == 'won' %}bg-green-100 text-green-800
-                            {% elif prospect.status == 'lost' %}bg-gray-200 text-gray-600
-                            {% elif prospect.status == 'quoted' %}bg-blue-100 text-blue-800
-                            {% else %}bg-yellow-100 text-yellow-800{% endif %}">
-                            {{ prospect.get_status_display }}
-                        </span>
-                    </td>
-                    <td class="px-4 py-3 text-sm text-gray-500">{{ prospect.created_at|date:"M j, Y" }}</td>
-                </tr>
-                {% empty %}
-                <tr><td colspan="5" class="px-4 py-10 text-center text-gray-500">No prospects found.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    <div class="mt-4 text-sm">
-        {% if show_closed %}
-            <a href="{% url 'core:prospect_list' %}" class="text-blue-600 hover:underline">Hide won/lost</a>
-        {% else %}
-            <a href="?show_closed=1" class="text-blue-600 hover:underline">Show won/lost</a>
-        {% endif %}
-    </div>
-
-    {% if is_paginated %}
-    <div class="mt-4 flex justify-center gap-2 text-sm">
-        {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}" class="px-3 py-1 border rounded">Prev</a>{% endif %}
-        <span class="px-3 py-1">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
-        {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}" class="px-3 py-1 border rounded">Next</a>{% endif %}
-    </div>
-    {% endif %}
+{% block list_segments %}
+<div class="btn-group" role="group" aria-label="Open or all">
+    <a href="{% url_replace show_closed='' status='' page='' %}" class="btn btn-sm {% if not show_closed and not active_status %}active{% endif %}">Open</a>
+    <a href="{% url_replace show_closed='1' status='' page='' %}" class="btn btn-sm {% if show_closed %}active{% endif %}">All</a>
 </div>
+{% endblock %}
+
+{% block list_filters %}
+<select name="status" class="form-select form-select-sm" style="width: auto;" aria-label="Stage">
+    <option value="">Any stage</option>
+    {% for value, label in status_choices %}
+    <option value="{{ value }}" {% if active_status == value %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+</select>
+{% endblock %}
+
+{% block list_table %}
+<table class="table table-vcenter card-table">
+    <thead>
+        <tr>
+            <th>Prospect</th>
+            <th>Contact</th>
+            <th>Stage</th>
+            <th class="text-end">Age</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for prospect in prospects %}
+        <tr>
+            <td>
+                <a href="{% url 'core:prospect_detail' prospect.pk %}" class="text-reset fw-medium">{{ prospect.display_name }}</a>
+                <span class="badge bg-purple-lt ms-1">Prospect</span>
+                <span class="badge {% if prospect.client_type == 'business' %}bg-azure-lt{% else %}bg-secondary-lt{% endif %} ms-1">{{ prospect.get_client_type_display }}</span>
+            </td>
+            <td>{{ prospect.email|default:prospect.phone|default:"" }}</td>
+            <td class="text-nowrap">
+                <span class="status-dot me-1" style="--tblr-status-color: {% if prospect.status == 'won' %}var(--tblr-green){% elif prospect.status == 'lost' %}var(--tblr-secondary){% elif prospect.status == 'quoted' %}var(--tblr-blue){% else %}var(--tblr-yellow){% endif %};"></span>{{ prospect.get_status_display }}
+            </td>
+            <td class="text-end text-nowrap text-secondary" title="{{ prospect.created_at|date:'M j, Y' }}">{{ prospect.created_at|age_short }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
+
+{% block list_empty %}
+<p class="empty-title">No prospects match</p>
+<p class="empty-subtitle text-secondary">Open stages show by default; choose All to include won and lost.</p>
 {% endblock %}

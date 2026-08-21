@@ -1,132 +1,79 @@
-{% extends "core/base.html" %}
+{% extends "core/worklist_base.html" %}
+{% load mb_tabler %}
 
 {% block title %}Mileage - Murphy's Bench{% endblock %}
+{% block list_title %}Mileage{% endblock %}
+{% block list_count %}<span class="badge bg-blue-lt ms-2">{{ total_miles|floatformat:1 }} mi</span>{% endblock %}
 
-{% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
-        <div class="flex items-center gap-4">
-            <div class="shrink-0">
-                <h1 class="text-2xl font-bold text-gray-900">Mileage Log</h1>
-                <p class="text-gray-500 text-xs mt-0.5">Total: <span class="font-semibold text-gray-900">{{ total_miles|floatformat:1 }} miles</span></p>
-            </div>
-            <div class="flex-1"></div>
-            {% include "core/partials/header_bell.html" %}
-            <a href="{% url 'core:mileage_create' %}"
-               class="px-4 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium shrink-0">
-                + Log Mileage
-            </a>
-        </div>
-    </div>
-</div>
-<div class="max-w-7xl mx-auto px-4 pt-4 sm:px-6 lg:px-8">
-    <form method="get" class="w-full lg:w-2/3 mx-auto bg-white rounded-lg shadow px-4 py-3 flex items-center gap-2">
-        <label class="text-sm text-gray-600 shrink-0">Month</label>
-        <input type="month" name="month" value="{{ request.GET.month }}"
-               class="flex-1 min-w-0 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-        <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Filter</button>
-        <a href="{% url 'core:mileage_list' %}" class="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium shrink-0">Clear</a>
-    </form>
+{% block list_actions %}
+<a href="{% url 'core:mileage_create' %}" class="btn btn-primary">{% ticon 'plus' %} Log Mileage</a>
+{% endblock %}
+
+{% block list_search %}
+<div class="input-group" style="max-width: 16rem;">
+    <span class="input-group-text">Month</span>
+    <input type="month" name="month" value="{{ request.GET.month }}" class="form-control" aria-label="Month">
 </div>
 {% endblock %}
 
-{% block content %}
+{% block list_filters %}
+{% if is_admin %}
+<select name="technician" class="form-select form-select-sm" style="width: auto;" aria-label="Technician">
+    <option value="">All technicians</option>
+    {% for u in all_users %}
+    <option value="{{ u.pk }}" {% if request.GET.technician == u.pk|stringformat:"s" %}selected{% endif %}>{{ u.get_full_name|default:u.username }}</option>
+    {% endfor %}
+</select>
+{% endif %}
+<button class="btn btn-sm" type="submit">Apply</button>
+{% if request.GET.month or request.GET.technician %}<a href="{% url 'core:mileage_list' %}" class="btn btn-sm btn-ghost-secondary">Clear</a>{% endif %}
+{% endblock %}
 
-    <!-- Mileage Table -->
-    <div class="bg-white rounded-lg shadow overflow-hidden">
-        {% if entries %}
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                        {% if is_admin %}<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Technician</th>{% endif %}
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">From</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">To</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Miles</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Purpose</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Work Order</th>
-                        <th class="px-6 py-3"></th>
-                    </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
-                    {% for entry in entries %}
-                        <tr class="hover:bg-gray-50">
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                {{ entry.trip_date|date:"M d, Y" }}
-                            </td>
-                            {% if is_admin %}<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                {{ entry.technician.get_full_name|default:entry.technician.username }}
-                            </td>{% endif %}
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                {{ entry.from_location|default:"—" }}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                {{ entry.to_location|default:"—" }}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                                {{ entry.miles }}
-                            </td>
-                            <td class="px-6 py-4 text-sm text-gray-600">
-                                {{ entry.purpose|default:"—" }}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                {% if entry.work_order %}
-                                    <a href="{% url 'core:work_order_detail' entry.work_order.pk %}" class="text-blue-600 hover:underline">
-                                        {{ entry.work_order.work_order_number }}
-                                    </a>
-                                {% else %}
-                                    <span class="text-gray-400">—</span>
-                                {% endif %}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
-                                {% if entry.technician == request.user or request.user.is_staff %}
-                                    <div class="flex items-center justify-end gap-3">
-                                        <a href="{% url 'core:mileage_edit' entry.pk %}" class="text-gray-400 hover:text-blue-600">Edit</a>
-                                        <form method="post" action="{% url 'core:mileage_delete' entry.pk %}"
-                                              onsubmit="return confirm('Delete this mileage entry ({{ entry.miles }} mi on {{ entry.trip_date|date:'M d, Y' }})? This cannot be undone.');"
-                                              class="inline">
-                                            {% csrf_token %}
-                                            <button type="submit" class="text-gray-400 hover:text-red-600">Delete</button>
-                                        </form>
-                                    </div>
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-                <!-- Totals Row -->
-                <tfoot class="bg-gray-50 border-t-2 border-gray-300">
-                    <tr>
-                        <td colspan="{% if is_admin %}4{% else %}3{% endif %}" class="px-6 py-3 text-sm font-semibold text-gray-700 text-right">Total Miles:</td>
-                        <td class="px-6 py-3 text-sm font-bold text-gray-900">{{ total_miles|floatformat:1 }}</td>
-                        <td colspan="3"></td>
-                    </tr>
-                </tfoot>
-            </table>
+{% block list_table %}
+<table class="table table-vcenter card-table">
+    <thead>
+        <tr>
+            <th>Date</th>
+            {% if is_admin %}<th>Technician</th>{% endif %}
+            <th>Trip</th>
+            <th>Purpose</th>
+            <th>Work order</th>
+            <th class="text-end">Miles</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for entry in entries %}
+        <tr>
+            <td class="text-nowrap">{{ entry.trip_date|date:"M j, Y" }}</td>
+            {% if is_admin %}<td>{{ entry.technician.get_full_name|default:entry.technician.username }}</td>{% endif %}
+            <td>{{ entry.from_location|default:"" }}{% if entry.from_location and entry.to_location %} &rarr; {% endif %}{{ entry.to_location|default:"" }}</td>
+            <td>{{ entry.purpose|default:"" }}</td>
+            <td>{% if entry.work_order %}<a href="{% url 'core:work_order_detail' entry.work_order.pk %}" class="text-reset">{{ entry.work_order.work_order_number }}</a>{% endif %}</td>
+            <td class="text-end fw-medium">{{ entry.miles }}</td>
+            <td class="text-end text-nowrap">
+                {% if entry.technician == request.user or request.user.is_staff %}
+                <a href="{% url 'core:mileage_edit' entry.pk %}" class="btn btn-sm btn-ghost-secondary">Edit</a>
+                <form method="post" action="{% url 'core:mileage_delete' entry.pk %}" class="d-inline" data-mb-confirm="Delete this mileage entry ({{ entry.miles }} mi on {{ entry.trip_date|date:'M j, Y' }})? This cannot be undone.">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-sm btn-ghost-danger">Delete</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr>
+            <td colspan="{% if is_admin %}5{% else %}4{% endif %}" class="text-end fw-medium">Total</td>
+            <td class="text-end fw-bold">{{ total_miles|floatformat:1 }}</td>
+            <td></td>
+        </tr>
+    </tfoot>
+</table>
+{% endblock %}
 
-            {% if is_paginated %}
-                <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200">
-                    <p class="text-sm text-gray-700">
-                        Page <span class="font-medium">{{ page_obj.number }}</span>
-                        of <span class="font-medium">{{ page_obj.paginator.num_pages }}</span>
-                    </p>
-                    <div class="flex gap-2">
-                        {% if page_obj.has_previous %}
-                            <a href="?page={{ page_obj.previous_page_number }}" class="px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300">Previous</a>
-                        {% endif %}
-                        {% if page_obj.has_next %}
-                            <a href="?page={{ page_obj.next_page_number }}" class="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Next</a>
-                        {% endif %}
-                    </div>
-                </div>
-            {% endif %}
-
-        {% else %}
-            <div class="px-6 py-16 text-center">
-                <p class="text-gray-400 text-lg mb-2">No mileage entries yet.</p>
-                <p class="text-gray-400 text-sm"><a href="{% url 'core:mileage_create' %}" class="text-blue-600 hover:underline">Log your first trip</a>.</p>
-            </div>
-        {% endif %}
-    </div>
-
+{% block list_empty %}
+<p class="empty-title">No mileage logged</p>
+<p class="empty-subtitle text-secondary">Nothing for this month{% if request.GET.technician %} and technician{% endif %}. <a href="{% url 'core:mileage_create' %}">Log a trip</a>.</p>
 {% endblock %}

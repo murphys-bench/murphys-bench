@@ -59,6 +59,30 @@
             });
         });
 
+        // Destructive actions confirm in a modal, never window.confirm (design
+        // rules section 7). Mark the <form> with data-mb-confirm="what will happen".
+        var modalEl = document.getElementById('mb-confirm');
+        if (modalEl && window.bootstrap) {
+            var modal = new bootstrap.Modal(modalEl);
+            var pending = null;
+            document.addEventListener('submit', function (ev) {
+                var form = ev.target;
+                if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-mb-confirm')) return;
+                if (form.dataset.mbConfirmed === '1') { form.dataset.mbConfirmed = ''; return; }
+                ev.preventDefault();
+                pending = form;
+                modalEl.querySelector('[data-mb-confirm-text]').textContent = form.getAttribute('data-mb-confirm');
+                modal.show();
+            }, true);
+            modalEl.querySelector('[data-mb-confirm-ok]').addEventListener('click', function () {
+                if (!pending) return;
+                var f = pending; pending = null;
+                modal.hide();
+                f.dataset.mbConfirmed = '1';
+                f.requestSubmit ? f.requestSubmit() : f.submit();
+            });
+        }
+
         // Sidebar scroll position survives full-page navigation (short laptop
         // screens scroll the nav; snapping to top on every click was a reported
         // annoyance on the old frame and the fix carries over).

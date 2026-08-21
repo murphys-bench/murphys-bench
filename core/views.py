@@ -1379,6 +1379,8 @@ class MileageListView(LoginRequiredMixin, ListView):
         from django.db.models import Sum
         total = self.get_queryset().aggregate(total=Sum('miles'))['total'] or 0
         context['total_miles'] = total
+        if _is_admin(self.request.user):
+            context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
         return context
 
 

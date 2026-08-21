@@ -18,7 +18,8 @@ Blocks:
   search_placeholder
   list_table      the <table> (thead + tbody)
   list_empty      the empty state's title/subtitle
-  list_has_rows   truthy when there are rows (used to pick table vs empty)
+  list_body       override entirely for non-table lists (cards, grouped lists)
+  list_after      content below the card (secondary forms, notes)
 {% endcomment %}
 
 {% block page_header %}
@@ -45,6 +46,7 @@ Blocks:
     <div class="card-body border-bottom py-3">
         <form method="get" class="d-flex flex-wrap align-items-center gap-2">
             {% if request.GET.tab %}<input type="hidden" name="tab" value="{{ request.GET.tab }}">{% endif %}
+            {% block list_search %}
             <div class="input-group" style="max-width: 28rem;">
                 <input type="text" name="{% block search_name %}search{% endblock %}"
                        value="{% block search_value %}{{ request.GET.search }}{% endblock %}"
@@ -52,12 +54,14 @@ Blocks:
                        aria-label="Search">
                 <button class="btn" type="submit">Search</button>
             </div>
+            {% endblock %}
             {% block list_segments %}{% endblock %}
             {% block list_filters %}{% endblock %}
         </form>
     </div>
     {% block list_notice %}{% endblock %}
-    {% if list_has_rows|default:page_obj.object_list %}
+    {% block list_body %}
+    {% if page_obj.object_list %}
     <div class="table-responsive">
         {% block list_table %}{% endblock %}
     </div>
@@ -72,5 +76,7 @@ Blocks:
         </div>
     </div>
     {% endif %}
+    {% endblock %}
 </div>
+{% block list_after %}{% endblock %}
 {% endblock %}
