@@ -10,7 +10,7 @@
         byclient: 'Tickets by Client', bytech: 'Tickets by Technician', resolution: 'Resolution Time',
         sla: 'SLA Compliance', backlog: 'Backlog Health', conversion: 'Conversion Rate',
         mileage: 'Mileage', wostatus: 'Work Orders by Status', wobyclient: 'Work Orders by Client',
-        wolist: 'Work Orders', tickettime: 'Ticket Time Logged', wotime: 'Work Order Time Logged'
+        wolist: 'Work Orders', woweek: 'Work Orders per Week', tickettime: 'Ticket Time Logged', wotime: 'Work Order Time Logged'
     };
     var CHART_COLORS = ['#206bc4', '#2fb344', '#f59f00', '#d63939', '#6f32be', '#d6336c', '#0ca678', '#f76707', '#4263eb', '#74b816'];
 
@@ -90,6 +90,25 @@
         }
     }
 
+    // Generic charts: one JSON blob keyed by canvas id (see ReportsView chart_data).
+    function genericCharts() {
+        var all = blob('rpt-chart-data');
+        if (!all || !window.Chart) return;
+        Object.keys(all).forEach(function (id) {
+            var c = document.getElementById(id), spec = all[id];
+            if (!c || !spec || !spec.labels || !spec.labels.length) { if (c) c.parentNode.innerHTML = '<p class="text-secondary mb-0">No data for this period.</p>'; return; }
+            var opts = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: spec.type === 'doughnut', position: 'right' } } };
+            if (spec.type !== 'doughnut') {
+                var axis = spec.horizontal ? 'x' : 'y';
+                opts.indexAxis = spec.horizontal ? 'y' : 'x';
+                opts.scales = {}; opts.scales[axis] = { beginAtZero: true, ticks: { precision: 0 } };
+                if (spec.max) opts.scales[axis].max = spec.max;
+            }
+            new Chart(c, { type: spec.type, data: { labels: spec.labels, datasets: [{ label: spec.label || '', data: spec.data,
+                backgroundColor: spec.type === 'doughnut' || spec.horizontal ? CHART_COLORS : CHART_COLORS[0], borderRadius: spec.type === 'doughnut' ? 0 : 3, borderWidth: spec.type === 'doughnut' ? 2 : 0 }] }, options: opts });
+        });
+    }
+
     function init() {
         document.addEventListener('click', function (ev) {
             var a = ev.target.closest('[data-mb-csv], [data-mb-print], [data-mb-pdf]');
@@ -102,6 +121,7 @@
         var g = document.querySelector('[data-mb-submit-on-change]');
         if (g) g.addEventListener('change', function () { g.form.submit(); });
         charts();
+        genericCharts();
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();

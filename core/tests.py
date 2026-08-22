@@ -14595,3 +14595,25 @@ def test_room_colors_are_per_shop_and_reach_the_frame(client, admin_user):
     s = SiteSettings.get(); assert s.color_room_register == '#112233' and s.color_room_office == '#445566'
     body = client.get('/').content.decode()
     assert '--mb-room-register: #112233;' in body and '--mb-room-desk: #ae3ec9;' in body and '--mb-room-office: #445566;' in body
+
+
+@pytest.mark.django_db
+def test_reports_charts_cover_work_orders_and_metrics(client, admin_user):
+    """Mike, Aug 21 2026: "Tickets have graphics, Work Orders don't. Same with
+    business metrics." Charts now come from one JSON blob per page, no inline
+    script, and every canvas on those two domains has a spec behind it."""
+    import json
+    from core.models import Client
+    client.force_login(admin_user)
+    c = Client.objects.create(name='Acme', client_type='business')
+    WorkOrder.objects.create(client=c); WorkOrder.objects.create(client=c, status='completed')
+    body = client.get(reverse('core:reports') + '?domain=workorders').content.decode()
+    for cid in ('chartWoStatus', 'chartWoClients', 'chartWoWeek'):
+        assert f'id="{cid}"' in body, cid
+    blob = json.loads(body.split('id="rpt-chart-data"')[1].split('</script>')[0].split('>', 1)[1])
+    assert blob['chartWoStatus']['data'] and sum(blob['chartWoStatus']['data']) == 2
+    assert blob['chartWoClients']['labels'] == ['Acme'] and blob['chartWoWeek']['data'] == [2]
+    body = client.get(reverse('core:reports') + '?domain=metrics').content.decode()
+    for cid in ('chartResolution', 'chartBacklog'):
+        assert f'id="{cid}"' in body, cid
+    assert '<script>' not in body.replace('<script src=', '').replace('<script type="application/json"', '')

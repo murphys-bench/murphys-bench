@@ -5159,6 +5159,7 @@ class ReportsView(LoginRequiredMixin, View):
         wo_status_counts = []
         wo_by_client = []
         wo_list = []
+        wo_by_week = []
         if domain == 'workorders':
             wos_in_range = WorkOrder.objects.filter(
                 created_at__range=(start_dt, end_dt)
@@ -5172,6 +5173,11 @@ class ReportsView(LoginRequiredMixin, View):
                 wos_in_range.values('client__name').annotate(count=Count('id')).order_by('-count')[:15]
             )
             wo_list = list(wos_in_range.order_by('-created_at')[:100])
+            from django.db.models.functions import TruncWeek
+            wo_by_week = [
+                (r['week'].date().isoformat(), r['count'])
+                for r in wos_in_range.annotate(week=TruncWeek('created_at')).values('week').annotate(count=Count('id')).order_by('week')
+            ]
 
         # 10. Technician performance
         tech_perf = []
@@ -5339,6 +5345,14 @@ class ReportsView(LoginRequiredMixin, View):
             'revenue_total': revenue_total,
             # 13
             'wo_status_counts': wo_status_counts,
+            'chart_data': {
+                'chartWoStatus': {'type': 'doughnut', 'labels': [r['label'] for r in wo_status_counts], 'data': [r['count'] for r in wo_status_counts]},
+                'chartWoClients': {'type': 'bar', 'horizontal': True, 'label': 'Work orders', 'labels': [r['client__name'] or 'Walk-in' for r in wo_by_client], 'data': [r['count'] for r in wo_by_client]},
+                'chartWoWeek': {'type': 'bar', 'label': 'Work orders', 'labels': [w for w, _ in wo_by_week], 'data': [c for _, c in wo_by_week]},
+                'chartResolution': {'type': 'bar', 'horizontal': True, 'label': 'Avg hours', 'labels': [r['name'] for r in avg_res_by_tech], 'data': [r['avg_hours'] for r in avg_res_by_tech]},
+                'chartSlaTech': {'type': 'bar', 'label': 'SLA met %', 'max': 100, 'labels': [r['label'] for r in sla_by_tech if r.get('sla_rate') is not None], 'data': [r['sla_rate'] for r in sla_by_tech if r.get('sla_rate') is not None]},
+                'chartBacklog': {'type': 'bar', 'label': 'Open tickets', 'labels': ['Under 1 day', '1 to 3 days', '3 to 7 days', '7+ days'], 'data': [backlog_buckets['lt_1d'], backlog_buckets['1_3d'], backlog_buckets['3_7d'], backlog_buckets['7d_plus']]},
+            },
             'wo_by_client': wo_by_client,
             'wo_list': wo_list,
             # 14
