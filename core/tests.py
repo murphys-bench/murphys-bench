@@ -14597,3 +14597,90 @@ def test_reports_charts_cover_work_orders_and_metrics(client, admin_user):
     for cid in ('chartResolution', 'chartBacklog'):
         assert f'id="{cid}"' in body, cid
     assert '<script>' not in body.replace('<script src=', '').replace('<script type="application/json"', '')
+
+
+# ── Outside review, Aug 21 2026: conflicting Desk context must be refused ─────
+
+@pytest.fixture
+def desk_world(db, admin_user):
+    from core.models import Client, Contact, EmailTemplate, FollowUp, Prospect, SiteSettings
+    site = SiteSettings.get(); site.email_enabled = True; site.save()
+    a = Client.objects.create(name='Acme', client_type='business', email='acme@example.com')
+    b = Client.objects.create(name='Bolt', client_type='business', email='bolt@example.com')
+    ca = Contact.objects.create(client=a, first_name='Pat', last_name='A', email='pat@a.example.com', is_primary=True)
+    cb = Contact.objects.create(client=b, first_name='Sam', last_name='B', email='sam@b.example.com', is_primary=True)
+    t = EmailTemplate.objects.create(name='T', subject_template='{{ ticket.ticket_number }} for {{ client.name }}', body_template='b')
+    ticket_a = Ticket.objects.create(client=a, subject='S', description='D')
+    wo_a = WorkOrder.objects.create(client=a, ticket=ticket_a)
+    fu_b = FollowUp.objects.create(client=b, kind='planned', due_on=timezone.localdate(), template=t)
+    p = Prospect.objects.create(contact_first_name='Lee', contact_last_name='P', email='lee@example.com')
+    return dict(a=a, b=b, ca=ca, cb=cb, t=t, ticket_a=ticket_a, wo_a=wo_a, fu_b=fu_b, p=p)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('params, why', [
+    ({'ticket': 'ticket_a', 'client': 'b'}, 'ticket belongs to A, client says B'),
+    ({'work_order': 'wo_a', 'client': 'b'}, 'work order belongs to A, client says B'),
+    ({'follow_up': 'fu_b', 'ticket': 'ticket_a'}, 'follow-up is B, ticket is A'),
+    ({'follow_up': 'fu_b', 'client': 'a'}, 'follow-up is B, client says A'),
+    ({'ticket': 'ticket_a', 'prospect': 'p'}, 'a ticket has a customer, not a prospect'),
+    ({'client': 'a', 'prospect': 'p'}, 'one customer or one prospect'),
+])
+def test_customer_email_refuses_cross_wired_context(client, admin_user, desk_world, params, why):
+    """P1: ticket=A&client=B&follow_up=C must never produce a mixed send."""
+    from core.models import EmailSendLog, FollowUp
+    client.force_login(admin_user)
+    q = {k: desk_world[v].pk for k, v in params.items()}
+    q['template'] = desk_world['t'].pk
+    r = client.get(reverse('core:customer_email'), q)
+    assert r.status_code == 400, why
+    r = client.post(reverse('core:customer_email'), {**q, 'custom_email': 'x@example.com', 'subject': 's', 'body': 'b'})
+    assert r.status_code == 400, why
+    assert not EmailSendLog.objects.exists()
+    assert FollowUp.objects.get(pk=desk_world['fu_b'].pk).done_at is None
+
+
+@pytest.mark.django_db
+def test_customer_email_derives_customer_from_record_and_ignores_foreign_contact(client, admin_user, desk_world, monkeypatch):
+    from core import email_utils
+    from core.models import EmailSendLog
+    client.force_login(admin_user)
+    w = desk_world
+    # The work order alone decides the customer (A) and pulls its ticket in.
+    r = client.get(reverse('core:customer_email'), {'work_order': w['wo_a'].pk, 'template': w['t'].pk})
+    assert r.status_code == 200 and f'{w["ticket_a"].ticket_number} for Acme'.encode() in r.content
+    sent = {}
+    monkeypatch.setattr(email_utils, '_smtp_send', lambda *a, **k: (sent.update(to=a[6]) or ('sent', '', '')))
+    # A contact id from customer B is not A's contact: it falls back to A's address, never to B.
+    r = client.post(reverse('core:customer_email'), {'work_order': w['wo_a'].pk, 'template': w['t'].pk, 'contact': w['cb'].pk, 'subject': 's', 'body': 'b'})
+    assert r.status_code == 302 and sent['to'] == 'acme@example.com'
+    assert EmailSendLog.objects.get().ticket == w['ticket_a']
+
+
+@pytest.mark.django_db
+def test_custom_send_honors_contact_opt_out(client, admin_user, desk_world):
+    from core.models import EmailSendLog
+    client.force_login(admin_user)
+    w = desk_world
+    w['ca'].receives_email = False; w['ca'].save()
+    r = client.post(reverse('core:customer_email'), {'client': w['a'].pk, 'template': w['t'].pk, 'contact': w['ca'].pk, 'subject': 's', 'body': 'b'})
+    assert r.status_code == 200 and b'Not sent' in r.content
+    assert EmailSendLog.objects.get().reason == 'contact_flag'
+
+
+@pytest.mark.django_db
+def test_follow_up_needs_exactly_one_customer_or_prospect(client, admin_user, desk_world):
+    from django.db import IntegrityError, transaction
+    from core.models import FollowUp
+    client.force_login(admin_user)
+    w = desk_world
+    today = timezone.localdate().isoformat()
+    r = client.post(reverse('core:follow_up_create'), {'client': w['a'].pk, 'prospect': w['p'].pk, 'kind': 'planned', 'due_on': today})
+    assert r.status_code == 400
+    r = client.post(reverse('core:follow_up_create'), {'ticket': w['ticket_a'].pk, 'client': w['b'].pk, 'kind': 'planned', 'due_on': today})
+    assert r.status_code == 400
+    assert FollowUp.objects.count() == 1
+    with pytest.raises(IntegrityError), transaction.atomic():
+        FollowUp.objects.create(client=w['a'], prospect=w['p'], kind='planned', due_on=timezone.localdate())
+    with pytest.raises(IntegrityError), transaction.atomic():
+        FollowUp.objects.create(kind='planned', due_on=timezone.localdate())

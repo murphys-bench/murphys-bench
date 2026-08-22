@@ -130,7 +130,7 @@ jobs:
         run: python manage.py check --deploy
 
       - name: Collect static files
-        # Surfaces missing/broken static refs and confirms app.css collects.
+        # Surfaces missing/broken static refs (vendored Tabler, sprite, own JS).
         run: python manage.py collectstatic --noinput
 
       - name: Run tests with coverage

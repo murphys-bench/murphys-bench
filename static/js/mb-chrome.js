@@ -74,15 +74,20 @@
                 modalEl.querySelector('[data-mb-confirm-text]').textContent = text;
                 modal.show();
             }
+            // Plain forms: the confirm text comes from the form, or from the button
+            // that submitted it (a Delete with its own formaction inside a Save form).
             document.addEventListener('submit', function (ev) {
                 var form = ev.target;
-                if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-mb-confirm')) return;
+                if (!(form instanceof HTMLFormElement)) return;
+                var btn = ev.submitter && ev.submitter.hasAttribute('data-mb-confirm') ? ev.submitter : null;
+                var text = btn ? btn.getAttribute('data-mb-confirm') : form.getAttribute('data-mb-confirm');
+                if (!text) return;
                 if (form.hasAttribute('hx-post') || form.hasAttribute('hx-get')) return; // htmx:confirm handles these
                 if (form.dataset.mbConfirmed === '1') { form.dataset.mbConfirmed = ''; return; }
                 ev.preventDefault();
-                ask(form.getAttribute('data-mb-confirm'), function () {
+                ask(text, function () {
                     form.dataset.mbConfirmed = '1';
-                    form.requestSubmit ? form.requestSubmit() : form.submit();
+                    if (form.requestSubmit) form.requestSubmit(btn || undefined); else form.submit();
                 });
             }, true);
             // HTMX requests: the form (or button) carries data-mb-confirm; the request is

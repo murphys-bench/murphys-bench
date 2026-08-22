@@ -18,7 +18,7 @@ from django.db.models.functions import Coalesce
 from django.db import IntegrityError
 from django.core.exceptions import PermissionDenied
 from django.contrib.contenttypes.models import ContentType
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, HttpResponseBadRequest
 from django.utils import timezone
 from django.utils.html import escape
 from two_factor.views import SetupView as TwoFactorSetupView
@@ -8798,9 +8798,6 @@ class TechSkillDeleteView(SettingsAdminMixin, View):
         return redirect(reverse_lazy(_TS_REDIRECT) + _TS_TAB)
 
 
-# ---------------------------------------------------------------------------
-# Dashboard Tiles
-# ---------------------------------------------------------------------------
 
 
 _CF_REDIRECT = 'core:settings'
@@ -9085,22 +9082,74 @@ class MySecurityView(LoginRequiredMixin, View):
 
 # ── Relationship Desk: follow-ups and hand-sent customer email (batch 6) ────
 
-def _follow_up_target(request):
-    """Resolve who a follow-up (or email) is about from query/POST params.
-    Returns (client, prospect, ticket, work_order)."""
+class _ConflictingContext(Exception):
+    """The ids handed to a Desk action do not describe one customer."""
+
+
+def _resolve_desk_context(request):
+    """Work out WHO a follow-up or email is about from the ids in the request,
+    and refuse any combination that does not describe one customer.
+
+    Precedence: the follow-up, then the work order, then the ticket, decide the
+    customer; an explicit client/prospect id must agree with them. This is what
+    stops a crafted request from sending customer B an email filled with
+    customer A's ticket, or marking an unrelated follow-up done (outside review,
+    Aug 21 2026, P1). Returns a dict with follow_up, work_order, ticket, client,
+    prospect; raises _ConflictingContext on any mismatch.
+    """
+    from .models import FollowUp
     src = request.POST if request.method == 'POST' else request.GET
-    client = prospect = ticket = work_order = None
-    if src.get('ticket'):
-        ticket = get_object_or_404(Ticket, pk=src.get('ticket'))
-        client = ticket.client
-    if src.get('work_order'):
-        work_order = get_object_or_404(WorkOrder, pk=src.get('work_order'))
-        client = work_order.client or client
-    if src.get('client'):
-        client = get_object_or_404(Client, pk=src.get('client'))
-    if src.get('prospect'):
-        prospect = get_object_or_404(Prospect, pk=src.get('prospect'))
-    return client, prospect, ticket, work_order
+
+    def _get(model, key):
+        raw = src.get(key)
+        if not raw:
+            return None
+        try:
+            return get_object_or_404(model, pk=int(raw))
+        except (TypeError, ValueError):
+            raise _ConflictingContext(f'bad {key}')
+
+    follow_up = _get(FollowUp, 'follow_up')
+    work_order = _get(WorkOrder, 'work_order')
+    ticket = _get(Ticket, 'ticket')
+    client = _get(Client, 'client')
+    prospect = _get(Prospect, 'prospect')
+
+    if follow_up is not None:
+        for name, given, own in (('work_order', work_order, follow_up.work_order),
+                                 ('ticket', ticket, follow_up.ticket),
+                                 ('client', client, follow_up.client),
+                                 ('prospect', prospect, follow_up.prospect)):
+            if given is not None and own is not None and given.pk != own.pk:
+                raise _ConflictingContext(f'{name} does not belong to this follow-up')
+            if given is not None and own is None:
+                raise _ConflictingContext(f'{name} is not part of this follow-up')
+        work_order, ticket = follow_up.work_order, follow_up.ticket
+        client, prospect = follow_up.client, follow_up.prospect
+
+    if work_order is not None and ticket is not None and work_order.ticket_id and work_order.ticket_id != ticket.pk:
+        raise _ConflictingContext('ticket and work order do not match')
+    if work_order is not None and ticket is None and work_order.ticket_id:
+        ticket = work_order.ticket
+
+    implied = None
+    for rec in (work_order, ticket):
+        if rec is not None:
+            if rec.client_id is None:
+                raise _ConflictingContext('that record has no customer')
+            if implied is not None and implied.pk != rec.client_id:
+                raise _ConflictingContext('ticket and work order belong to different customers')
+            implied = rec.client
+    if implied is not None:
+        if client is not None and client.pk != implied.pk:
+            raise _ConflictingContext('client does not match the record')
+        if prospect is not None:
+            raise _ConflictingContext('a record belongs to a customer, not a prospect')
+        client = implied
+
+    if client is not None and prospect is not None:
+        raise _ConflictingContext('one customer or one prospect, not both')
+    return {'follow_up': follow_up, 'work_order': work_order, 'ticket': ticket, 'client': client, 'prospect': prospect}
 
 
 class FollowUpListView(LoginRequiredMixin, View):
@@ -9138,7 +9187,11 @@ class FollowUpCreateView(LoginRequiredMixin, View):
     def post(self, request):
         from .models import FollowUp
         from datetime import date
-        client, prospect, ticket, work_order = _follow_up_target(request)
+        try:
+            who = _resolve_desk_context(request)
+        except _ConflictingContext as exc:
+            return HttpResponseBadRequest(f'Cannot plan that follow-up: {exc}.')
+        client, prospect, ticket, work_order = who['client'], who['prospect'], who['ticket'], who['work_order']
         if not client and not prospect:
             messages.error(request, 'A follow-up needs a customer or a prospect.')
             return redirect(request.POST.get('next') or 'core:follow_up_list')
@@ -9188,14 +9241,11 @@ class CustomerEmailView(LoginRequiredMixin, View):
     template_name = 'core/customer_email.html'
 
     def _context(self, request):
-        from .models import FollowUp
         from .email_utils import email_context, render_email_template
-        client, prospect, ticket, work_order = _follow_up_target(request)
         src = request.POST if request.method == 'POST' else request.GET
-        follow_up = get_object_or_404(FollowUp, pk=src.get('follow_up')) if src.get('follow_up') else None
-        if follow_up is not None:
-            client = client or follow_up.client; prospect = prospect or follow_up.prospect
-            ticket = ticket or follow_up.ticket; work_order = work_order or follow_up.work_order
+        who = _resolve_desk_context(request)  # raises _ConflictingContext; get/post turn it into a 400
+        follow_up, client, prospect = who['follow_up'], who['client'], who['prospect']
+        ticket, work_order = who['ticket'], who['work_order']
         if not client and not prospect:
             raise Http404('No customer to email.')
         templates = list(EmailTemplate.objects.filter(trigger__isnull=True, is_active=True).select_related('signature'))
@@ -9228,13 +9278,20 @@ class CustomerEmailView(LoginRequiredMixin, View):
         }
 
     def get(self, request):
-        return render(request, self.template_name, self._context(request))
+        try:
+            ctx = self._context(request)
+        except _ConflictingContext as exc:
+            return HttpResponseBadRequest(f'Cannot email from that: {exc}.')
+        return render(request, self.template_name, ctx)
 
     def post(self, request):
         from .email_utils import send_custom_email
         from .models import TicketReply
         from django.utils import timezone
-        ctx = self._context(request)
+        try:
+            ctx = self._context(request)
+        except _ConflictingContext as exc:
+            return HttpResponseBadRequest(f'Cannot send that: {exc}.')
         chosen = ctx['chosen']
         if chosen is None:
             messages.error(request, 'Pick a template first.')

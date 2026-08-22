@@ -265,6 +265,9 @@ def send_custom_email(template, *, to_email, client, contact=None, ticket=None,
         return _log('suppressed', 'email_disabled')
     if not to_email:
         return _log('suppressed', 'no_address')
+    # Recipient-level opt-out, same as document email (outside review P3).
+    if contact is not None and not contact.receives_email:
+        return _log('suppressed', 'contact_flag')
     reason, detail = _suppression_reason(to_email, client, site)
     if reason:
         return _log('suppressed', reason, detail)

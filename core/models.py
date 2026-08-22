@@ -2784,6 +2784,14 @@ class FollowUp(models.Model):
     class Meta:
         db_table = 'follow_ups'
         ordering = ['due_on', 'created_at']
+        constraints = [
+            # Exactly one of client / prospect (outside review, Aug 21 2026, P2).
+            models.CheckConstraint(
+                name='follow_up_exactly_one_of_client_or_prospect',
+                condition=(models.Q(client__isnull=False, prospect__isnull=True)
+                           | models.Q(client__isnull=True, prospect__isnull=False)),
+            ),
+        ]
 
     @property
     def who(self):
