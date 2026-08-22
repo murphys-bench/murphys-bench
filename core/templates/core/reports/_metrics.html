@@ -1,0 +1,338 @@
+{% load mb_tabler %}
+{# metrics report sections. Shared by the screen (reports.html) and the PDF (reports_pdf.html); `sections` limits what renders, `pdf` swaps canvases for the browser-supplied pictures. #}
+<!-- Technician Performance -->
+{% if tech_perf %}
+{% if 'techperf' in sections %}<div class="card mb-3" id="section-techperf">
+    <div class="card-header"><h3 class="card-title">Technician Performance</h3></div><div class="card-body">
+    <table class="table table-sm table-vcenter">
+        <thead>
+            <tr>
+                <th >Technician</th>
+                <th class="text-end">WOs (period)</th>
+                <th class="text-end">Completed</th>
+                <th class="text-end">Completion %</th>
+                <th class="text-end">Avg Resolution</th>
+                <th class="text-end">Open Now</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in tech_perf %}
+            <tr>
+                <td >{{ row.tech.get_full_name|default:row.tech.username }}</td>
+                <td class="text-end">{{ row.total_wos }}</td>
+                <td class="text-end">{{ row.completed_wos }}</td>
+                <td class="text-end">
+                    {% if row.completion_rate is not None %}
+                    <span class="{% if row.completion_rate >= 80 %}text-green{% elif row.completion_rate >= 50 %}text-yellow{% else %}text-red{% endif %} fw-medium">
+                        {{ row.completion_rate }}%
+                    </span>
+                    {% else %}{% endif %}
+                </td>
+                <td class="text-end">
+                    {% if row.avg_hours is not None %}{{ row.avg_hours }}h{% else %}{% endif %}
+                </td>
+                <td class="text-end">
+                    {% if row.open_wos %}
+                    <a href="{% url 'core:work_order_list' %}?assigned_to={{ row.tech.pk }}"
+                       >{{ row.open_wos }}</a>
+                    {% else %}{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div></div>{% endif %}
+{% endif %}
+<!-- 5. Average Resolution Time -->
+{% if 'resolution' in sections %}<div class="card mb-3" id="section-resolution">
+    <div class="card-header"><h3 class="card-title">5. Average Ticket Resolution Time</h3></div><div class="card-body">
+    {% include "core/reports/_chart.html" with chart="chartResolution" height=220 %}
+    {% if avg_res_by_tech %}
+    <table class="table table-sm table-vcenter w-auto">
+        <thead><tr>
+            <th >Technician</th>
+            <th class="text-end">Closed</th>
+            <th class="text-end">Avg Hours</th>
+        </tr></thead>
+        <tbody>
+        {% for row in avg_res_by_tech %}
+        <tr>
+            <td >{{ row.name }}</td>
+            <td class="text-end">{{ row.count }}</td>
+            <td class="text-end fw-medium">{{ row.avg_hours }}h</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-secondary mb-0">No closed tickets in this period.</p>
+    {% endif %}
+</div></div>{% endif %}
+
+<!-- 6. SLA Compliance -->
+{% if 'sla' in sections %}<div class="card mb-3" id="section-sla">
+    <div class="card-header"><h3 class="card-title">6. SLA Compliance Rate</h3></div><div class="card-body">
+    {% if total_sla %}
+        {% if sla_rate is not None %}
+        <div class="d-flex gap-4 align-items-center">
+            <div>
+                <p class="text-5xl font-bold {% if sla_rate >= 90 %}text-green{% elif sla_rate >= 70 %}text-yellow{% else %}text-red{% endif %}">
+                    {{ sla_rate }}%
+                </p>
+                <p class="text-secondary">First response before SLA due date</p>
+            </div>
+            <div>
+                <p>Total tickets with SLA: <strong>{{ total_sla }}</strong></p>
+                <p>Answered on time: <strong>{{ responded_on_time }}</strong> of <strong>{{ judged_sla }}</strong> judged</p>
+                {% if pending_sla %}<p class="text-secondary mb-1">{{ pending_sla }} still within their SLA window (not yet counted)</p>{% endif %}
+                {% if median_response_hours is not None %}<p>Median first-response time: <strong>{{ median_response_hours }}h</strong></p>{% endif %}
+            </div>
+        </div>
+        {% else %}
+        <p class="text-secondary mb-0">{{ total_sla }} ticket{{ total_sla|pluralize }} with an SLA — all still within their response window; none judged yet.</p>
+        {% endif %}
+    {% else %}
+    <p class="text-secondary mb-0">No tickets with SLA plans in this period.</p>
+    {% endif %}
+
+    {% if sla_by_tech %}{% include "core/reports/_chart.html" with chart="chartSlaTech" height=200 extra="mt-3" %}{% endif %}
+    {% if sla_by_tech or sla_by_client %}
+    <div class="row g-3 mt-2"><div class="col-md-6">
+        <div>
+            <div class="subheader mb-2">By Technician</h3>
+            {% if sla_by_tech %}
+            <table class="table table-sm table-vcenter">
+                <thead><tr>
+                    <th >Tech</th><th >Judged</th><th >Rate</th><th >Median Resp.</th>
+                </tr></thead>
+                <tbody>
+                {% for row in sla_by_tech %}
+                <tr>
+                    <td >{{ row.label }}</td>
+                    <td >{{ row.judged }}</td>
+                    <td >{% if row.sla_rate is not None %}{{ row.sla_rate }}%{% else %}—{% endif %}</td>
+                    <td >{% if row.median_response_hours is not None %}{{ row.median_response_hours }}h{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-secondary mb-0">No assigned tickets with an SLA in this period.</p>
+            {% endif %}
+        </div>
+        <div>
+            <div class="subheader mb-2">By Client</h3>
+            {% if sla_by_client %}
+            <table class="table table-sm table-vcenter">
+                <thead><tr>
+                    <th >Client</th><th >Judged</th><th >Rate</th><th >Median Resp.</th>
+                </tr></thead>
+                <tbody>
+                {% for row in sla_by_client %}
+                <tr>
+                    <td >{{ row.label }}</td>
+                    <td >{{ row.judged }}</td>
+                    <td >{% if row.sla_rate is not None %}{{ row.sla_rate }}%{% else %}—{% endif %}</td>
+                    <td >{% if row.median_response_hours is not None %}{{ row.median_response_hours }}h{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-secondary mb-0">No tickets with an SLA in this period.</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div></div>{% endif %}
+
+<!-- 6b. Backlog Health (live snapshot — not date-range filtered) -->
+{% if 'backlog' in sections %}<div class="card mb-3" id="section-backlog">
+    <div class="card-header"><h3 class="card-title">Backlog Health <span class="text-secondary fw-normal small">(right now, not the date range above)</span></h3></div><div class="card-body">
+    {% include "core/reports/_chart.html" with chart="chartBacklog" height=180 %}
+    <div class="d-flex gap-4 align-items-center flex-wrap">
+        <div>
+            <p class="h1 mb-0">{{ backlog_open_count }}</p>
+            <p class="text-secondary">Open tickets</p>
+        </div>
+        <div>
+            <p>Under 1 day: <strong>{{ backlog_buckets.lt_1d }}</strong></p>
+            <p>1–3 days: <strong>{{ backlog_buckets.1_3d }}</strong></p>
+            <p>3–7 days: <strong>{{ backlog_buckets.3_7d }}</strong></p>
+            <p class="mb-1 {% if backlog_buckets.7d_plus %}text-red fw-medium{% endif %}">7+ days: <strong>{{ backlog_buckets.7d_plus }}</strong></p>
+        </div>
+        <div class="border-start ps-4">
+            <p>Created in period: <strong>{{ created_in_period }}</strong></p>
+            <p>Closed in period: <strong>{{ closed_in_period }}</strong></p>
+        </div>
+    </div>
+</div></div>{% endif %}
+
+<!-- 7. Ticket → WO Conversion Rate -->
+{% if 'conversion' in sections %}<div class="card mb-3" id="section-conversion">
+    <div class="card-header"><h3 class="card-title">7. Ticket → Work Order Conversion Rate</h3></div><div class="card-body">
+    {% if total_tickets %}
+    <div class="d-flex gap-4 align-items-center">
+        <div>
+            <p class="h1 mb-0">{{ conversion_rate }}%</p>
+            <p class="text-secondary">Tickets converted to work orders</p>
+        </div>
+        <div>
+            <p>Total tickets: <strong>{{ total_tickets }}</strong></p>
+            <p>Converted: <strong>{{ converted_count }}</strong></p>
+        </div>
+    </div>
+    {% else %}
+    <p class="text-secondary mb-0">No tickets in this period.</p>
+    {% endif %}
+</div></div>{% endif %}
+
+<!-- Ticket Time Logged (non-billable ticket work) -->
+{% if 'tickettime' in sections %}<div class="card mb-3" id="section-tickettime">
+    <div class="card-header"><h3 class="card-title">Ticket Time Logged <span class="text-secondary fw-normal small">(non-billable work tracked directly on tickets)</span></h3></div><div class="card-body">
+    {% if ticket_time_count %}
+    <div class="d-flex gap-4 align-items-center flex-wrap mb-3">
+        <div>
+            <p class="h1 mb-0">{{ ticket_time_total }}<span class="h3"> min</span></p>
+            <p class="text-secondary">Total time logged</p>
+        </div>
+        <div>
+            <p>Entries logged: <strong>{{ ticket_time_count }}</strong></p>
+        </div>
+    </div>
+    <!-- Per-ticket: time on each ticket + everyone who worked on it -->
+    {% if ticket_time_by_ticket %}
+    <div class="subheader mb-2">By ticket</h3>
+    <div class="table-responsive mb-3">
+    <table class="table table-sm table-vcenter">
+        <thead>
+            <tr>
+                <th >Ticket</th>
+                <th >Client</th>
+                <th >Worked on by</th>
+                <th class="text-end">Time</th>
+                <th class="text-end">Entries</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in ticket_time_by_ticket %}
+            <tr>
+                <td >
+                    <a href="{% url 'core:ticket_detail' row.ticket.pk %}" >{{ row.ticket.ticket_number }}</a>
+                    <div class="text-secondary small">{{ row.ticket.subject|truncatechars:40 }}</div>
+                </td>
+                <td >{{ row.ticket.client.name|default:"—" }}</td>
+                <td >
+                    {% for name, mins in row.techs %}
+                    <span class="text-nowrap">{{ name }} <span class="text-secondary">({{ mins }}m)</span>{% if not forloop.last %}, {% endif %}</span>
+                    {% endfor %}
+                </td>
+                <td class="text-end fw-bold">{{ row.minutes }} min</td>
+                <td class="text-end">{{ row.entries }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
+
+    <!-- Per-tech: total across all tickets -->
+    {% if ticket_time_by_tech %}
+    <div class="subheader mb-2">By technician <span class="text-secondary fw-normal small">(total across all tickets)</span></h3>
+    <div class="table-responsive">
+    <table class="table table-sm table-vcenter">
+        <thead>
+            <tr>
+                <th >Technician</th>
+                <th class="text-end">Minutes</th>
+                <th class="text-end">Entries</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in ticket_time_by_tech %}
+            <tr>
+                <td >{{ row.logged_by__first_name }} {{ row.logged_by__last_name }}{% if not row.logged_by__first_name and not row.logged_by__last_name %}{{ row.logged_by__username }}{% endif %}</td>
+                <td class="text-end">{{ row.minutes }}</td>
+                <td class="text-end">{{ row.entries }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
+    {% else %}
+    <p class="text-secondary mb-0">No ticket time logged in this period.</p>
+    {% endif %}
+</div></div>{% endif %}
+
+<!-- Work Order Time Logged (the WO stopwatch's time, same period) -->
+{% if 'wotime' in sections %}<div class="card mb-3" id="section-wotime">
+    <div class="card-header"><h3 class="card-title">Work Order Time Logged <span class="text-secondary fw-normal small">(stopwatch time on work orders created in this period)</span></h3></div><div class="card-body">
+    {% if wo_time_wo_count %}
+    <div class="d-flex gap-4 align-items-center flex-wrap mb-3">
+        <div>
+            <p class="h1 mb-0">{{ wo_time_total }}<span class="h3"> min</span></p>
+            <p class="text-secondary">Total time logged</p>
+        </div>
+        <div>
+            <p>Work orders with time: <strong>{{ wo_time_wo_count }}</strong></p>
+        </div>
+    </div>
+
+    <!-- By work order -->
+    {% if wo_time_by_wo %}
+    <div class="subheader mb-2">By work order</h3>
+    <div class="table-responsive mb-3">
+    <table class="table table-sm table-vcenter">
+        <thead>
+            <tr>
+                <th >Work Order</th>
+                <th >Client</th>
+                <th >Assigned To</th>
+                <th class="text-end">Time</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for wo in wo_time_by_wo %}
+            <tr>
+                <td >
+                    <a href="{% url 'core:work_order_detail' wo.pk %}" >{{ wo.work_order_number }}</a>
+                </td>
+                <td >{{ wo.client.name|default:"Walk-in" }}</td>
+                <td >{{ wo.assigned_to.get_full_name|default:wo.assigned_to.username|default:"—" }}</td>
+                <td class="text-end fw-bold">{{ wo.time_spent_display }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
+
+    <!-- By technician -->
+    {% if wo_time_by_tech %}
+    <div class="subheader mb-2">By technician <span class="text-secondary fw-normal small">(total across their assigned work orders)</span></h3>
+    <div class="table-responsive">
+    <table class="table table-sm table-vcenter">
+        <thead>
+            <tr>
+                <th >Technician</th>
+                <th class="text-end">Minutes</th>
+                <th class="text-end">Work Orders</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in wo_time_by_tech %}
+            <tr>
+                <td >{{ row.assigned_to__first_name }} {{ row.assigned_to__last_name }}{% if not row.assigned_to__first_name and not row.assigned_to__last_name %}{{ row.assigned_to__username }}{% endif %}</td>
+                <td class="text-end">{{ row.minutes }}</td>
+                <td class="text-end">{{ row.wo_count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
+    {% else %}
+    <p class="text-secondary mb-0">No work order time logged in this period.</p>
+    {% endif %}
+</div></div>{% endif %}

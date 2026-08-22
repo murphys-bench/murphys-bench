@@ -14721,3 +14721,77 @@ def test_customer_email_sends_to_a_prospect_through_the_suppression_layers(clien
     site = SiteSettings.get(); site.email_suppression_patterns = '*@example.com'; site.save()
     r = client.post(reverse('core:customer_email'), {'prospect': w['p'].pk, 'template': w['t'].pk, 'custom_email': 'other@example.com', 'subject': 's', 'body': 'b'})
     assert r.status_code == 200 and EmailSendLog.objects.order_by('-pk').first().reason == 'pattern'
+
+
+# ── Reports PDF, made on the server (replaces html2pdf in the browser) ────────
+
+_PNG_1x1 = ('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk'
+            'YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
+
+
+@pytest.mark.django_db
+def test_reports_pdf_refuses_anything_that_is_not_a_real_png(client, admin_user):
+    import base64
+    client.force_login(admin_user)
+    url = reverse('core:reports_pdf')
+    base = {'domain': 'workorders', 'start_date': '2026-08-01', 'end_date': '2026-08-21', 'section': 'wostatus'}
+    assert client.get(url).status_code == 405
+    bad = [
+        ({'chart_chartWoStatus': 'data:text/html;base64,' + base64.b64encode(b'<script>').decode()}, 'wrong type'),
+        ({'chart_chartWoStatus': 'data:image/png;base64,' + base64.b64encode(b'GIF89a not png').decode()}, 'not a png'),
+        ({'chart_chartWoStatus': 'data:image/png;base64,@@@'}, 'bad base64'),
+        ({'chart_chartWoStatus': 'data:image/png;base64,' + base64.b64encode(b'\x89PNG\r\n\x1a\n' + b'\x00' * 40).decode()}, 'truncated png'),
+        ({'chart_somethingElse': _PNG_1x1}, 'unknown chart id'),
+        ({'chart_chartWoStatus': 'data:image/png;base64,' + 'A' * (3 * 1024 * 1024)}, 'oversize'),
+    ]
+    for extra, why in bad:
+        r = client.post(url, {**base, **extra})
+        assert r.status_code == 400, why
+    assert client.post(url, {**base, 'section': 'billing'}).status_code == 400   # section from another domain
+
+
+@pytest.mark.django_db
+def test_reports_pdf_needs_the_reports_permission(client, db):
+    from core.models import Role
+    role = Role.objects.create(name='Nothing')
+    User = get_user_model()
+    u = User.objects.create_user(username='nobody', password='x', role_obj=role)
+    client.force_login(u)
+    assert client.post(reverse('core:reports_pdf'), {'domain': 'tickets'}).status_code == 403
+
+
+@pytest.mark.django_db
+def test_reports_pdf_template_renders_the_chosen_section_with_the_sent_picture(client, admin_user):
+    """The PDF uses the same section includes as the screen; `sections` narrows
+    and `pdf` swaps the canvas for the browser's picture (or an honest note)."""
+    from django.template.loader import render_to_string
+    from core.models import Client, SiteSettings
+    c = Client.objects.create(name='Acme', client_type='business')
+    WorkOrder.objects.create(client=c)
+    req = client.get('/').wsgi_request
+    ctx = ReportsView_build(req, {'domain': 'workorders', 'start_date': '2026-08-01', 'end_date': '2026-12-31'})
+    ctx.update({'pdf': True, 'sections': ['wostatus'], 'chart_images': {'chartWoStatus': _PNG_1x1}, 'site': SiteSettings.get(), 'section_label': 'Work Orders by Status'})
+    html = render_to_string('core/reports_pdf.html', ctx)
+    assert 'id="section-wostatus"' in html and 'id="section-wobyclient"' not in html
+    assert '<img src="data:image/png;base64,' in html and '<canvas' not in html
+    ctx['chart_images'] = {}
+    html = render_to_string('core/reports_pdf.html', ctx)
+    assert 'Chart not included' in html
+    # The screen still gets its canvases.
+    client.force_login(admin_user)
+    page = client.get(reverse('core:reports') + '?domain=workorders').content.decode()
+    assert 'id="chartWoStatus"' in page and 'data-mb-pdf-url' in page and 'html2pdf' not in page
+
+
+def ReportsView_build(request, params):
+    from core.views import ReportsView
+    return ReportsView.build_context(request, params)
+
+
+@pdf_skip
+@pytest.mark.django_db
+def test_reports_pdf_downloads_a_real_pdf(client, admin_user):
+    client.force_login(admin_user)
+    r = client.post(reverse('core:reports_pdf'), {'domain': 'tickets', 'start_date': '2026-08-01', 'end_date': '2026-08-21', 'section': 'all', 'chart_chartVolume': _PNG_1x1})
+    assert r.status_code == 200 and r['Content-Type'] == 'application/pdf'
+    assert r.content.startswith(b'%PDF') and 'report-tickets-all-2026-08-01-to-2026-08-21.pdf' in r['Content-Disposition']

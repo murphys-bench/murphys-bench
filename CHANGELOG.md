@@ -20,6 +20,7 @@ The new look: every screen rebuilt on Tabler. Rooms, the Board, one Work Record,
 - Rooms: Work, Register, Desk, Back Office each have their own color, adjustable per shop under Settings, Colors.
 - Relationship Desk: follow-ups (plan, due on the Board, Follow-ups list), and your own email templates sent by hand from a record or a customer with Email customer.
 - Reports: charts for Work Orders and Business Metrics, not only Tickets.
+- Reports PDF is made on the server (WeasyPrint, like quotes and repair reports) with the charts included; the browser-side PDF library is gone.
 - Settings, Display: a text size control, per browser.
 - Sign-in and two-factor screens on the new frame.
 

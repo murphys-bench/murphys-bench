@@ -1,0 +1,71 @@
+{% load mb_tabler %}<!DOCTYPE html>
+{% comment %}
+The Reports page as paper, rendered by WeasyPrint on the server (ReportsPDFView).
+The section includes are the same files the screen uses; `pdf` is set so the
+chart slots show the pictures the browser sent instead of canvases. Styles are
+deliberately a small plain stylesheet, not Tabler's: WeasyPrint only needs the
+tables and headings to read well on a page.
+{% endcomment %}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ section_label }} {{ start_date|date:"Y-m-d" }} to {{ end_date|date:"Y-m-d" }}</title>
+<style>
+    @page { size: A4; margin: 16mm 14mm; @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 9pt; color: #666; } }
+    body { font-family: Helvetica, Arial, sans-serif; font-size: 10pt; color: #111; }
+    .doc-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #333; padding-bottom: 6pt; margin-bottom: 12pt; }
+    .doc-head .company { font-size: 14pt; font-weight: bold; }
+    .doc-head .meta { text-align: right; color: #555; font-size: 9pt; }
+    .doc-head img { max-height: 40pt; max-width: 160pt; }
+    .card { border: 1px solid #ccc; border-radius: 3pt; margin: 0 0 12pt 0; page-break-inside: avoid; }
+    .card-header { background: #f3f4f6; padding: 5pt 8pt; border-bottom: 1px solid #ccc; }
+    .card-title { font-size: 11.5pt; font-weight: bold; margin: 0; display: inline; }
+    .card-actions, .d-print-none, .btn, form, select, label.form-label { display: none !important; }
+    .card-body { padding: 8pt; }
+    .card-footer { padding: 5pt 8pt; border-top: 1px solid #ddd; color: #666; font-size: 9pt; }
+    table { border-collapse: collapse; width: 100%; margin: 4pt 0 8pt; }
+    th, td { border: 1px solid #ddd; padding: 3pt 5pt; text-align: left; vertical-align: top; font-size: 9.5pt; }
+    th { background: #f9fafb; font-weight: bold; }
+    tfoot th, tfoot td { font-weight: bold; }
+    .text-end { text-align: right; }
+    .text-secondary { color: #666; }
+    .small { font-size: 8.5pt; }
+    .fw-bold, .fw-medium { font-weight: bold; }
+    .subheader { font-size: 8.5pt; text-transform: uppercase; letter-spacing: .04em; color: #666; font-weight: bold; margin: 6pt 0 2pt; }
+    .h1 { font-size: 22pt; font-weight: bold; margin: 0; }
+    .h2 { font-size: 16pt; font-weight: bold; margin: 0; }
+    .h3 { font-size: 12pt; font-weight: bold; }
+    .row { display: flex; flex-wrap: wrap; margin: 0 -4pt; }
+    .row > [class*="col"] { padding: 0 4pt; box-sizing: border-box; flex: 1 1 0; }
+    .row > .col-md-6, .row > .col-lg-6 { flex: 0 0 50%; max-width: 50%; }
+    .row > .col-md-4 { flex: 0 0 33.333%; max-width: 33.333%; }
+    .row > .col-12 { flex: 0 0 100%; max-width: 100%; }
+    .card-sm .card-body { padding: 6pt; }
+    .card-status-start { display: none; }
+    .d-flex { display: flex; } .gap-4 { gap: 14pt; } .align-items-center { align-items: center; } .flex-wrap { flex-wrap: wrap; }
+    .border-start { border-left: 1px solid #ddd; } .ps-4 { padding-left: 10pt; }
+    .chart { margin: 6pt 0 10pt; text-align: center; } .chart img { max-height: 220pt; }
+    .text-green { color: #2f7d32; } .text-yellow { color: #9a6700; } .text-red { color: #b42318; } .text-blue { color: #1d4ed8; }
+    a { color: inherit; text-decoration: none; }
+    p { margin: 0 0 4pt; }
+    .badge { border: 1px solid #999; border-radius: 3pt; padding: 0 3pt; font-size: 8pt; }
+</style>
+</head>
+<body>
+<div class="doc-head">
+    <div>
+        {% if site.company_logo %}<img src="{{ site.company_logo.url }}" alt=""><br>{% endif %}
+        <span class="company">{{ site.company_name|default:"Murphy's Bench" }}</span>
+    </div>
+    <div class="meta">
+        <div><strong>{{ domains|get_item:domain|get_item:"label" }} report</strong>: {{ section_label }}</div>
+        <div>{{ start_date|date:"M j, Y" }} to {{ end_date|date:"M j, Y" }}</div>
+        <div>Made {% now "M j, Y g:i A" %}</div>
+    </div>
+</div>
+{% if domain == 'financial' %}{% include "core/reports/_financial.html" %}{% endif %}
+{% if domain == 'tickets' %}{% include "core/reports/_tickets.html" %}{% endif %}
+{% if domain == 'workorders' %}{% include "core/reports/_workorders.html" %}{% endif %}
+{% if domain == 'metrics' %}{% include "core/reports/_metrics.html" %}{% endif %}
+</body>
+</html>

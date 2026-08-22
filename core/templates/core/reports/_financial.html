@@ -1,0 +1,176 @@
+{% load mb_tabler %}
+{# financial report sections. Shared by the screen (reports.html) and the PDF (reports_pdf.html); `sections` limits what renders, `pdf` swaps canvases for the browser-supplied pictures. #}
+<!-- Billing Summary -->
+{% if 'billing' in sections %}<div class="card mb-3" id="section-billing">
+    <div class="card-header"><h3 class="card-title">Billing Summary</h3></div><div class="card-body">
+
+    <!-- Three metric cards -->
+    <div class="row g-3 mb-3">
+        <div class="col-md"><div class="card card-sm"><div class="card-status-start bg-blue"></div><div class="card-body"><div class="subheader">Invoiced (period)</div><div class="h2 mb-0">${{ invoiced_total|floatformat:2 }}</div><div class="text-secondary small">{{ start_date|date:"M j" }} – {{ end_date|date:"M j, Y" }}</div></div></div></div>
+        <div class="col-md"><div class="card card-sm"><div class="card-status-start bg-green"></div><div class="card-body"><div class="subheader">Collected (period)</div><div class="h2 mb-0">${{ paid_total|floatformat:2 }}</div><div class="text-secondary small">Work orders + counter sales, {{ start_date|date:"M j" }} – {{ end_date|date:"M j, Y" }}</div></div></div></div>
+        <div class="col-md"><div class="card card-sm"><div class="card-status-start bg-red"></div><div class="card-body"><div class="subheader">Outstanding (current)</div><div class="h2 mb-0">${{ outstanding_total|floatformat:2 }}</div><div class="text-secondary small">Uninvoiced + unpaid, all time</div></div></div></div>
+    </div>
+
+    <!-- Outstanding by client -->
+    {% if outstanding_by_client %}
+    <div class="subheader mb-2">Outstanding by Client</h3>
+    <table class="table table-sm table-vcenter">
+        <thead>
+            <tr>
+                <th >Client</th>
+                <th class="text-end">Outstanding</th>
+                <th class="text-end d-print-none">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in outstanding_by_client %}
+            <tr>
+                <td >
+                    <a href="{% url 'core:client_detail' row.work_order__client__pk %}"
+                       >{{ row.work_order__client__name }}</a>
+                </td>
+                <td class="text-end fw-medium">${{ row.total|floatformat:2 }}</td>
+                <td class="text-end d-print-none">
+                    <a href="{% url 'core:client_invoice_export' row.work_order__client__pk %}?status=uninvoiced"
+                       class="btn btn-sm">CSV</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-secondary mb-0">No outstanding balances.</p>
+    {% endif %}
+</div></div>{% endif %}
+
+<!-- Counter Sales -->
+{% if 'countersales' in sections %}<div class="card mb-3" id="section-countersales">
+    <div class="card-header"><h3 class="card-title">Counter Sales</h3><div class="card-actions"><a href="{% url 'core:sale_list' %}" class="btn btn-sm d-print-none">View all sales →</a></div></div><div class="card-body">
+    <div class="row g-3 mb-3">
+        <div class="col-md"><div class="card card-sm"><div class="card-status-start bg-green"></div><div class="card-body"><div class="subheader">Collected (period)</div><div class="h2 mb-0">${{ counter_sales_total|floatformat:2 }}</div><div class="text-secondary small">{{ start_date|date:"M j" }} – {{ end_date|date:"M j, Y" }}</div></div></div></div>
+        <div class="col-md"><div class="card card-sm"><div class="card-status-start bg-secondary"></div><div class="card-body"><div class="subheader">Sales (period)</div><div class="h2 mb-0">{{ counter_sales_count }}</div><div class="text-secondary small">Walk-in / counter, excludes recurring</div></div></div></div>
+    </div>
+    {% if counter_sales_list %}
+    <table class="table table-sm table-vcenter">
+        <thead>
+            <tr>
+                <th >Sale #</th>
+                <th >Customer</th>
+                <th >Method</th>
+                <th class="text-end">Amount</th>
+                <th >Paid</th>
+                <th class="pb-2 text-end d-print-none">Receipt</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for sale in counter_sales_list %}
+            <tr>
+                <td >{{ sale.sale_number }}</td>
+                <td >{{ sale.display_name }}</td>
+                <td >{{ sale.get_payment_method_display|default:"—" }}</td>
+                <td class="text-end fw-medium">${{ sale.amount|floatformat:2 }}</td>
+                <td >{{ sale.paid_at|date:"M j, Y" }}</td>
+                <td class="py-2 text-end d-print-none">
+                    <a href="{% url 'core:sale_receipt_print' sale.pk %}" target="_blank" class="btn btn-sm">Print</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-secondary mb-0">No counter sales in this period.</p>
+    {% endif %}
+</div></div>{% endif %}
+
+<!-- Revenue breakdown — a revenue statement, not a P&L (MB tracks no costs) -->
+{% if 'revenue' in sections %}<div class="card mb-3" id="section-revenue">
+    <div class="card-header"><h3 class="card-title">Revenue</h3><div class="card-actions"><form method="get" class="d-flex align-items-center gap-2 d-print-none">
+            <input type="hidden" name="domain" value="financial">
+            <input type="hidden" name="start_date" value="{{ start_date|date:'Y-m-d' }}">
+            <input type="hidden" name="end_date" value="{{ end_date|date:'Y-m-d' }}">
+            <label class="form-label mb-0 text-nowrap">Group by</label>
+            <select name="granularity" class="form-select form-select-sm" data-mb-submit-on-change>
+                <option value="day" {% if revenue_granularity == 'day' %}selected{% endif %}>Day</option>
+                <option value="week" {% if revenue_granularity == 'week' %}selected{% endif %}>Week</option>
+                <option value="month" {% if revenue_granularity == 'month' %}selected{% endif %}>Month</option>
+                <option value="year" {% if revenue_granularity == 'year' %}selected{% endif %}>Year</option>
+            </select>
+        </form></div></div><div class="card-body">
+    <p class="text-secondary">Combines paid work orders and completed counter sales — the same "Collected" figure above, broken down. Not a profit/loss statement — Murphy's Bench doesn't track costs or expenses.</p>
+
+    <div class="row g-3 mb-3"><div class="col-md-4"><div class="card card-sm"><div class="card-status-start bg-green"></div><div class="card-body"><div class="subheader">Total Revenue (period)</div><div class="h2 mb-0">${{ revenue_total|floatformat:2 }}</div></div></div></div></div>
+
+    <div class="row g-3">
+        <div>
+            <div class="subheader mb-2">By {{ revenue_granularity }}</h3>
+            {% if revenue_by_period %}
+            <table class="table table-sm table-vcenter">
+                <tbody>
+                    {% for period, amount in revenue_by_period %}
+                    <tr>
+                        <td >{{ period }}</td>
+                        <td class="text-end fw-medium">${{ amount|floatformat:2 }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-secondary mb-0">No revenue in this period.</p>
+            {% endif %}
+        </div>
+
+        <div>
+            <div class="subheader mb-2">By client type</h3>
+            {% if revenue_by_client_type %}
+            <table class="table table-sm table-vcenter">
+                <tbody>
+                    {% for label, amount in revenue_by_client_type %}
+                    <tr>
+                        <td >{{ label }}</td>
+                        <td class="text-end fw-medium">${{ amount|floatformat:2 }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-secondary mb-0">No revenue in this period.</p>
+            {% endif %}
+        </div>
+
+        <div>
+            <div class="subheader mb-2">By category</h3>
+            {% if revenue_by_category %}
+            <table class="table table-sm table-vcenter">
+                <tbody>
+                    {% for label, amount in revenue_by_category %}
+                    <tr>
+                        <td >{{ label }}</td>
+                        <td class="text-end fw-medium">${{ amount|floatformat:2 }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-secondary mb-0">No categorized revenue in this period.</p>
+            {% endif %}
+        </div>
+
+        <div>
+            <div class="subheader mb-2">By source</h3>
+            {% if revenue_by_source %}
+            <table class="table table-sm table-vcenter">
+                <tbody>
+                    {% for label, amount in revenue_by_source %}
+                    <tr>
+                        <td >{{ label }}</td>
+                        <td class="text-end fw-medium">${{ amount|floatformat:2 }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-secondary mb-0">No revenue in this period.</p>
+            {% endif %}
+        </div>
+    </div>
+</div></div>{% endif %}

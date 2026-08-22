@@ -1,0 +1,5 @@
+{% load mb_tabler %}{% comment %}
+One chart slot. On screen: a canvas that mb-reports.js draws with Chart.js.
+In the PDF: the PNG the browser took of that same canvas, if it sent one;
+otherwise a one-line note so the gap is visible rather than silent.
+{% endcomment %}{% if pdf %}{% with img=chart_images|get_item:chart %}{% if img %}<div class="chart{% if extra %} {{ extra }}{% endif %}"><img src="{{ img }}" alt="Chart" style="max-width:100%;height:auto;"></div>{% else %}<div class="text-secondary small">Chart not included.</div>{% endif %}{% endwith %}{% else %}<div class="{% if extra %}{{ extra }}{% else %}mb-3{% endif %}" style="height:{{ height }}px;{% if width %}width:{{ width }}px;flex-shrink:0;{% endif %}"><canvas id="{{ chart }}"></canvas></div>{% endif %}

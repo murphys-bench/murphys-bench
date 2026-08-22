@@ -55,17 +55,29 @@
         };
     }
 
+    // PDF: made on the server (WeasyPrint), like every other paper MB produces.
+    // The browser contributes only the pictures of its charts (PNG of each
+    // canvas inside the chosen section); the server checks each one is a real
+    // PNG of sane size before it goes into the document. Posted as a plain
+    // form so the browser handles the download itself.
     function downloadPDF(key) {
+        var menu = document.querySelector('[data-mb-pdf-url]');
         var el = key === 'all' ? document.getElementById('reports-content') : document.getElementById('section-' + key);
-        if (!el || !window.html2pdf) { alert('Section not available.'); return; }
+        if (!el || !menu) { alert('Section not available.'); return; }
         var r = range();
-        html2pdf().set({
-            margin: 10,
-            filename: 'report-' + (key === 'all' ? 'all-reports' : key) + '-' + r.start + '-to-' + r.end + '.pdf',
-            image: { type: 'jpeg', quality: 0.95 },
-            html2canvas: { scale: 2, useCORS: true },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-        }).from(el).save();
+        var form = document.createElement('form');
+        form.method = 'post'; form.action = menu.getAttribute('data-mb-pdf-url'); form.style.display = 'none';
+        function add(name, value) { var i = document.createElement('input'); i.type = 'hidden'; i.name = name; i.value = value; form.appendChild(i); }
+        var csrf = (document.querySelector('input[name=csrfmiddlewaretoken]') || {}).value;
+        if (!csrf) { try { csrf = JSON.parse(document.body.getAttribute('hx-headers') || '{}')['X-CSRFToken']; } catch (e) {} }
+        add('csrfmiddlewaretoken', csrf || '');
+        add('domain', (document.querySelector('#reports-date-form [name=domain]') || {}).value || '');
+        add('start_date', r.start); add('end_date', r.end); add('section', key);
+        var g = document.querySelector('select[name=granularity]'); if (g) add('granularity', g.value);
+        el.querySelectorAll('canvas[id]').forEach(function (c) {
+            try { add('chart_' + c.id, c.toDataURL('image/png')); } catch (e) { /* a chart that cannot be read is simply left out */ }
+        });
+        document.body.appendChild(form); form.submit(); form.remove();
     }
 
     function charts() {

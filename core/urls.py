@@ -63,6 +63,7 @@ urlpatterns = [
     path('prospects/<int:pk>/mark-lost/', views.ProspectMarkLostView.as_view(), name='prospect_mark_lost'),
     path('prospects/<int:pk>/delete/', views.ProspectDeleteView.as_view(), name='prospect_delete'),
 
+    path('reports/pdf/', views.ReportsPDFView.as_view(), name='reports_pdf'),
     path('follow-ups/', views.FollowUpListView.as_view(), name='follow_up_list'),
     path('follow-ups/new/', views.FollowUpCreateView.as_view(), name='follow_up_create'),
     path('follow-ups/<int:pk>/done/', views.FollowUpDoneView.as_view(), name='follow_up_done'),

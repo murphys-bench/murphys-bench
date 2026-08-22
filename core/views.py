@@ -19,6 +19,7 @@ from django.db import IntegrityError
 from django.core.exceptions import PermissionDenied
 from django.contrib.contenttypes.models import ContentType
 from django.http import FileResponse, Http404, HttpResponseBadRequest
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.html import escape
 from two_factor.views import SetupView as TwoFactorSetupView
@@ -4779,7 +4780,7 @@ REPORTS_DOMAINS = {
     },
     'workorders': {
         'label': 'Work Orders',
-        'sections': ['wostatus', 'wobyclient', 'wolist', 'mileage'],
+        'sections': ['wostatus', 'woweek', 'wobyclient', 'wolist', 'mileage'],
     },
     # Performance/metrics — deliberately separate from Financial (money) and
     # from Tickets/Work Orders (raw activity data): SLA, resolution time,
@@ -4792,12 +4793,24 @@ REPORTS_DOMAINS = {
 }
 
 
+def _can_view_reports(user):
+    return _is_admin(user) or user.has_perm_flag('can_view_reports')
+
+
 class ReportsView(LoginRequiredMixin, View):
     def get(self, request):
-        if not (_is_admin(request.user) or request.user.has_perm_flag('can_view_reports')):
+        if not _can_view_reports(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
+        context = self.build_context(request, request.GET)
+        context['sections'] = REPORTS_DOMAINS[context['domain']]['sections']
+        return render(request, 'core/reports.html', context)
 
+    @staticmethod
+    def build_context(request, params):
+        """Everything the Reports page and the Reports PDF need, from the same
+        domain / start_date / end_date parameters. `params` is request.GET for
+        the page and request.POST for the PDF, so both show the same numbers."""
         from datetime import timedelta, date
         from django.db.models import Count, F, Q, Sum
         from django.db.models.functions import TruncDay
@@ -4805,13 +4818,13 @@ class ReportsView(LoginRequiredMixin, View):
         # Domain side-menu (Slice 1 of the Reports restructure): resolved early
         # so heavier domain-specific computation (e.g. Financial's revenue
         # breakdowns) can be skipped entirely when a different domain is active.
-        domain = request.GET.get('domain', 'financial')
+        domain = params.get('domain', 'financial')
         if domain not in REPORTS_DOMAINS:
             domain = 'financial'
 
         # Date range
-        end_date_str = request.GET.get('end_date', '')
-        start_date_str = request.GET.get('start_date', '')
+        end_date_str = params.get('end_date', '')
+        start_date_str = params.get('start_date', '')
         try:
             end_date = date.fromisoformat(end_date_str)
         except ValueError:
@@ -5048,7 +5061,7 @@ class ReportsView(LoginRequiredMixin, View):
             from decimal import Decimal
             from django.contrib.contenttypes.models import ContentType
 
-            revenue_granularity = request.GET.get('granularity', 'month')
+            revenue_granularity = params.get('granularity', 'month')
             if revenue_granularity not in ('day', 'week', 'month', 'year'):
                 revenue_granularity = 'month'
 
@@ -5333,7 +5346,7 @@ class ReportsView(LoginRequiredMixin, View):
             'wo_time_by_tech': wo_time_by_tech,
             'wo_time_by_wo': wo_time_by_wo,
         }
-        return render(request, 'core/reports.html', context)
+        return context
 
 
 class ReportsCSVView(LoginRequiredMixin, View):
@@ -9360,3 +9373,110 @@ class EmailTemplateDeleteView(SettingsAdminMixin, View):
             tmpl.delete()
             messages.success(request, f'Email template "{tmpl.name}" deleted.')
         return redirect(f"{reverse('core:settings')}?tab=email_templates")
+
+
+# ── Reports as a PDF, made on the server ──────────────────────────────────────
+
+# Every chart slot the report includes know about; a picture for any other name
+# is refused. Keep in step with core/templates/core/reports/_*.html.
+REPORT_CHART_IDS = frozenset({
+    'chartVolume', 'chartStatus', 'chartClients',
+    'chartWoStatus', 'chartWoClients', 'chartWoWeek',
+    'chartResolution', 'chartSlaTech', 'chartBacklog',
+})
+_CHART_PNG_MAX_BYTES = 2 * 1024 * 1024
+_CHART_MAX_SIDE = 4000
+
+_REPORT_SECTION_LABELS = {
+    'billing': 'Billing Summary', 'countersales': 'Counter Sales', 'revenue': 'Revenue',
+    'techperf': 'Technician Performance', 'volume': 'Ticket Volume', 'status': 'Tickets by Status',
+    'byclient': 'Tickets by Client', 'bytech': 'Tickets by Technician', 'resolution': 'Resolution Time',
+    'sla': 'SLA Compliance', 'backlog': 'Backlog Health', 'conversion': 'Conversion Rate',
+    'tickettime': 'Ticket Time Logged', 'wotime': 'Work Order Time Logged', 'wostatus': 'Work Orders by Status',
+    'woweek': 'Work Orders per Week', 'wobyclient': 'Work Orders by Client', 'wolist': 'Work Orders',
+    'mileage': 'Mileage',
+}
+
+
+class _BadChartImage(Exception):
+    pass
+
+
+def _decode_chart_png(value):
+    """Take one browser-supplied chart picture (a data URL) and return it as a
+    checked data URL, or raise. The browser already drew the chart on screen;
+    this only accepts a real PNG of sane size so nothing else can ride in."""
+    import base64
+    import binascii
+    import io
+    from PIL import Image, UnidentifiedImageError
+    prefix = 'data:image/png;base64,'
+    if not isinstance(value, str) or not value.startswith(prefix):
+        raise _BadChartImage('not a PNG data URL')
+    b64 = value[len(prefix):]
+    if len(b64) > _CHART_PNG_MAX_BYTES * 4 // 3 + 4:
+        raise _BadChartImage('too large')
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except (binascii.Error, ValueError):
+        raise _BadChartImage('bad base64')
+    if len(raw) > _CHART_PNG_MAX_BYTES or not raw.startswith(b'\x89PNG\r\n\x1a\n'):
+        raise _BadChartImage('not a PNG')
+    try:
+        with Image.open(io.BytesIO(raw)) as im:
+            if im.format != 'PNG':
+                raise _BadChartImage('not a PNG')
+            w, h = im.size
+            if w > _CHART_MAX_SIDE or h > _CHART_MAX_SIDE or w < 1 or h < 1:
+                raise _BadChartImage('bad dimensions')
+            im.verify()
+    except (UnidentifiedImageError, OSError, ValueError):
+        raise _BadChartImage('unreadable PNG')
+    return prefix + base64.b64encode(raw).decode('ascii')
+
+
+class ReportsPDFView(LoginRequiredMixin, View):
+    """POST: the Reports page as a PDF, rendered on the server with WeasyPrint
+    like every other paper Murphy's Bench produces. The numbers come from the
+    same build_context as the page. Charts are drawn in the browser, so the
+    page sends a PNG of each one (chart_<id>); each is checked as a real PNG of
+    sane size before it goes anywhere near the document, and anything else is
+    refused outright. Same permission as the page itself."""
+
+    def post(self, request):
+        if not _can_view_reports(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        from .pdf_utils import render_pdf
+        params = request.POST
+        ctx = ReportsView.build_context(request, params)
+        domain = ctx['domain']
+        all_sections = REPORTS_DOMAINS[domain]['sections']
+        section = params.get('section') or 'all'
+        if section != 'all' and section not in all_sections:
+            return HttpResponseBadRequest('Unknown report section.')
+        ctx['sections'] = all_sections if section == 'all' else [section]
+        images = {}
+        for key in params:
+            if not key.startswith('chart_'):
+                continue
+            cid = key[len('chart_'):]
+            if cid not in REPORT_CHART_IDS:
+                return HttpResponseBadRequest('Unknown chart.')
+            try:
+                images[cid] = _decode_chart_png(params.get(key))
+            except _BadChartImage as exc:
+                return HttpResponseBadRequest(f'Chart picture refused: {exc}.')
+        ctx.update({'pdf': True, 'chart_images': images, 'site': SiteSettings.get(),
+                    'section_label': _REPORT_SECTION_LABELS.get(section, 'All sections')})
+        html = render_to_string('core/reports_pdf.html', ctx, request=request)
+        try:
+            pdf_bytes = render_pdf(html)
+        except Exception:
+            logger.exception('Reports PDF render failed (domain=%s section=%s).', domain, section)
+            return HttpResponse('The PDF could not be rendered on this server; see the log.',
+                                status=500, content_type='text/plain')
+        name = f"report-{domain}-{section}-{ctx['start_date']:%Y-%m-%d}-to-{ctx['end_date']:%Y-%m-%d}.pdf"
+        resp = HttpResponse(pdf_bytes, content_type='application/pdf')
+        resp['Content-Disposition'] = f'attachment; filename="{name}"'
+        return resp

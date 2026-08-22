@@ -200,3 +200,12 @@ _DEVICE_ICONS = {
 def device_icon(heroicon_name):
     """DeviceType.icon holds the old Heroicon name; map it to the Tabler sprite."""
     return _DEVICE_ICONS.get(heroicon_name, 'device-laptop')
+
+
+@register.filter
+def get_item(mapping, key):
+    """dict lookup by a variable key (Django templates cannot do d[var])."""
+    try:
+        return mapping.get(key)
+    except AttributeError:
+        return None
