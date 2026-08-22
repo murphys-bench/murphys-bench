@@ -14684,3 +14684,18 @@ def test_follow_up_needs_exactly_one_customer_or_prospect(client, admin_user, de
         FollowUp.objects.create(client=w['a'], prospect=w['p'], kind='planned', due_on=timezone.localdate())
     with pytest.raises(IntegrityError), transaction.atomic():
         FollowUp.objects.create(kind='planned', due_on=timezone.localdate())
+
+
+@pytest.mark.django_db
+def test_customer_email_renders_for_a_prospect(client, admin_user, desk_world):
+    """Round 2: a prospect has display_name, not name; the greeting must not
+    blow up and the screen must not report a false template error."""
+    client.force_login(admin_user)
+    w = desk_world
+    from core.models import EmailTemplate
+    t = EmailTemplate.objects.create(name='Hello', subject_template='Hello {{ customer_name }}', body_template='Hi {{ customer_name }} at {{ client.name }}')
+    r = client.get(reverse('core:customer_email'), {'prospect': w['p'].pk, 'template': t.pk})
+    assert r.status_code == 200
+    body = r.content.decode()
+    assert 'syntax error' not in body
+    assert 'value="Hello Lee P"' in body and 'Hi Lee P at Lee P' in body

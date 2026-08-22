@@ -93,7 +93,9 @@
             // HTMX requests: the form (or button) carries data-mb-confirm; the request is
             // held until the modal's OK, then issued with the confirm skipped.
             document.addEventListener('htmx:confirm', function (ev) {
-                var el = ev.target.closest ? ev.target.closest('[data-mb-confirm]') : null;
+                var te = ev.detail && ev.detail.triggeringEvent;
+                var btn = te && te.submitter && te.submitter.hasAttribute('data-mb-confirm') ? te.submitter : null;
+                var el = btn || (ev.target.closest ? ev.target.closest('[data-mb-confirm]') : null);
                 if (!el) return;
                 ev.preventDefault();
                 ask(el.getAttribute('data-mb-confirm'), function () { ev.detail.issueRequest(true); });

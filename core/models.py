@@ -416,6 +416,12 @@ class Prospect(models.Model):
         return self.contact_name
 
     @property
+    def name(self):
+        """What a Client calls its name. Lets a prospect stand in for a client
+        wherever a template or greeting reads {{ client.name }}."""
+        return self.display_name
+
+    @property
     def is_promoted(self):
         return self.promoted_to_id is not None
 
@@ -2785,7 +2791,7 @@ class FollowUp(models.Model):
         db_table = 'follow_ups'
         ordering = ['due_on', 'created_at']
         constraints = [
-            # Exactly one of client / prospect (outside review, Aug 21 2026, P2).
+            # Exactly one of client / prospect.
             models.CheckConstraint(
                 name='follow_up_exactly_one_of_client_or_prospect',
                 condition=(models.Q(client__isnull=False, prospect__isnull=True)

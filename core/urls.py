@@ -299,8 +299,6 @@ urlpatterns = [
     path('settings/tech-skills/new/', views.TechSkillCreateView.as_view(), name='tech_skill_create'),
     path('settings/tech-skills/<int:pk>/delete/', views.TechSkillDeleteView.as_view(), name='tech_skill_delete'),
 
-    # Settings — Dashboard Tiles
-
     # Settings — Custom Fields
     path('settings/custom-fields/new/', views.CustomFieldCreateView.as_view(), name='cf_create'),
     path('settings/custom-fields/<int:pk>/edit/', views.CustomFieldUpdateView.as_view(), name='cf_update'),

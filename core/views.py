@@ -9091,11 +9091,10 @@ def _resolve_desk_context(request):
     and refuse any combination that does not describe one customer.
 
     Precedence: the follow-up, then the work order, then the ticket, decide the
-    customer; an explicit client/prospect id must agree with them. This is what
-    stops a crafted request from sending customer B an email filled with
-    customer A's ticket, or marking an unrelated follow-up done (outside review,
-    Aug 21 2026, P1). Returns a dict with follow_up, work_order, ticket, client,
-    prospect; raises _ConflictingContext on any mismatch.
+    customer; an explicit client/prospect id must agree with them, so a request
+    can never send customer B an email filled with customer A's ticket, or mark
+    an unrelated follow-up done. Returns a dict with follow_up, work_order,
+    ticket, client, prospect; raises _ConflictingContext on any mismatch.
     """
     from .models import FollowUp
     src = request.POST if request.method == 'POST' else request.GET
