@@ -14,8 +14,6 @@ python-decouple==3.8
 gunicorn==26.0.0
 
 # Frontend
-django-crispy-forms==2.1
-crispy-tailwind==1.0.3
 django-htmx==1.17.3
 
 # Testing

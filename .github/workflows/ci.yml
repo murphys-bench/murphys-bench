@@ -111,11 +111,6 @@ jobs:
           echo "SECRET_KEY=$(python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())')" >> "$GITHUB_ENV"
           echo "FIELD_ENCRYPTION_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> "$GITHUB_ENV"
 
-      - name: Build self-hosted CSS
-        # Compiles tailwind/input.css -> static/css/app.css via the pinned
-        # standalone Tailwind CLI (no Node). Catches build/purge regressions —
-        # e.g. a dynamic class that isn't safelisted — that page-load tests miss.
-        run: scripts/build_css.sh
 
       - name: Django system checks
         run: python manage.py check

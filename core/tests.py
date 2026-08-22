@@ -396,9 +396,8 @@ def test_email_branding_falls_back_to_app_settings():
     from core.models import SiteSettings
     s = SiteSettings.get()
     s.email_header_color = ''
-    s.color_title_bar = '#123456'
     s.save()
-    assert _email_header_color(s) == '#123456'    # blank -> app Title Bar color
+    assert _email_header_color(s) == '#1f2937'    # blank -> the default (the old Title Bar field left with the Tailwind frame)
     s.email_header_color = '#abcdef'
     s.save()
     assert _email_header_color(s) == '#abcdef'     # dedicated email value wins
@@ -9509,7 +9508,7 @@ def test_failed_send_records_why_not_just_that_it_failed(client, admin_user, cli
 # ── Static refs actually resolve under production (manifest) storage ─────────
 #
 # conftest's _plain_static_storage swaps the test suite onto plain StaticFilesStorage
-# so a fresh install that hasn't run build_css.sh + collectstatic isn't buried in 120
+# so a fresh install that hasn't run collectstatic isn't buried in 120
 # "Missing staticfiles manifest entry" failures. That trade would otherwise lose one
 # real regression class: a {% static %} in a TEMPLATE naming a file that doesn't exist.
 # Plain storage returns a URL for anything; collectstatic only walks static dirs, never
@@ -9530,7 +9529,7 @@ def _staticfiles_manifest_ok():
 
 manifest_skip = pytest.mark.skipif(
     not _staticfiles_manifest_ok(),
-    reason='no staticfiles manifest on this runner — run build_css.sh + collectstatic',
+    reason='no staticfiles manifest on this runner — run collectstatic',
 )
 
 
@@ -13789,25 +13788,6 @@ def test_board_bench_holds_only_open_work_in_triage_order(client, client_obj):
     client.force_login(tech)
     shown = [w.work_order_number for w in client.get(reverse('core:dashboard')).context['work_orders']]
     assert shown == [urgent.work_order_number, biz_new.work_order_number, res_old.work_order_number]
-
-
-@pytest.mark.django_db
-def test_finished_work_leaves_the_my_work_sidebar(client, client_obj):
-    """Pre-existing, same class: the sidebar never excluded 'completed'.
-
-    It excluded 'closed' and 'cancelled' only — so a finished job stayed in My
-    Work indefinitely, while the dashboard's own open-WO query excluded exactly
-    those jobs correctly. Two views, two definitions, one of them wrong.
-    """
-    tech = _role_tech('sidebar_tech', can_edit_workorder=True)
-    done = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
-                                    client=client_obj, assigned_to=tech, status='completed')
-    live = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
-                                    client=client_obj, assigned_to=tech, status='in_progress')
-    client.force_login(tech)
-    body = client.get(reverse('core:sidebar_fragment')).content.decode()
-    assert live.work_order_number in body
-    assert done.work_order_number not in body, 'a completed job stayed in My Work'
 
 
 @pytest.mark.django_db

@@ -144,7 +144,6 @@ urlpatterns = [
     path('queues/<int:pk>/edit/', views.QueueEditView.as_view(), name='queue_edit'),
     path('queues/<int:pk>/delete/', views.QueueDeleteView.as_view(), name='queue_delete'),
     # Sidebar fragment
-    path('sidebar/', views.SidebarFragmentView.as_view(), name='sidebar_fragment'),
     # Reports
     path('reports/', views.ReportsView.as_view(), name='reports'),
     path('reports/csv/<str:report>/', views.ReportsCSVView.as_view(), name='reports_csv'),
@@ -301,7 +300,6 @@ urlpatterns = [
     path('settings/tech-skills/<int:pk>/delete/', views.TechSkillDeleteView.as_view(), name='tech_skill_delete'),
 
     # Settings — Dashboard Tiles
-    path('settings/dashboard-tiles/<int:pk>/edit/', views.DashboardTileUpdateView.as_view(), name='dashboard_tile_update'),
 
     # Settings — Custom Fields
     path('settings/custom-fields/new/', views.CustomFieldCreateView.as_view(), name='cf_create'),

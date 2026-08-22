@@ -67,7 +67,7 @@ def _load_logo_resized(path, mime_type, max_px=480):
 def _email_header_color(site):
     """The email header bar color — the dedicated email setting, else the app's
     Title Bar color, else a dark fallback."""
-    return getattr(site, 'email_header_color', '') or site.color_title_bar or '#1f2937'
+    return getattr(site, 'email_header_color', '') or '#1f2937'
 
 
 def _email_logo_field(site):

@@ -27,7 +27,7 @@ from .models import (
     FollowUp,
     WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, ChecklistItem,
     Ticket, TicketReply, TicketWorkLog, TicketLock, TicketLink, Attachment, SiteSettings,
-    KBCategory, KBArticle, TicketQueue, DashboardTile, User,
+    KBCategory, KBArticle, TicketQueue, User,
     CustomField, CustomFieldChoice, CustomFieldValue,
     CatalogItem, LineItem, ContactPhone,
     Contact, RepairType, RepairTypeCategory,
@@ -1540,9 +1540,8 @@ class NotificationCountView(LoginRequiredMixin, View):
                  + _tickets_awaiting_reply(request.user).count())
         style = request.GET.get('style')
         template = {
-            'header': 'core/partials/notification_badge_header.html',
             'tabler': 'core/partials/notification_badge_tabler.html',
-        }.get(style, 'core/partials/notification_badge.html')
+        }.get(style, 'core/partials/notification_badge_tabler.html')
         return render(request, template, {'count': count})
 
 
@@ -4723,41 +4722,6 @@ class QueueDeleteView(LoginRequiredMixin, View):
 
 # ─── Sidebar Fragment ─────────────────────────────────────────────────────────
 
-class SidebarFragmentView(LoginRequiredMixin, View):
-    """HTMX endpoint: returns sidebar content (my tickets + my WOs)."""
-    def get(self, request):
-        is_admin = _is_admin(request.user)
-
-        ticket_qs = Ticket.objects.select_related('client').prefetch_related('replies').exclude(
-            status__in=TICKET_CLOSED_STATUSES
-        )
-        if is_admin:
-            ticket_qs = ticket_qs.order_by('-updated_at')
-        else:
-            ticket_qs = ticket_qs.filter(
-                Q(assigned_to=request.user) | Q(created_by=request.user)
-            ).distinct().order_by('-updated_at')
-
-        # Pre-existing: this excluded 'closed' and 'cancelled' but never
-        # 'completed', which is the state technicians actually set — so finished
-        # jobs stayed in the My Work sidebar indefinitely, while the dashboard's
-        # own open-WO query excluded them correctly.
-        wo_qs = WorkOrder.objects.select_related('client').prefetch_related('notes').exclude(
-            status__in=WO_CLOSED_STATUSES
-        )
-        if is_admin:
-            wo_qs = wo_qs.order_by('-updated_at')
-        else:
-            wo_qs = wo_qs.filter(assigned_to=request.user).order_by('-updated_at')
-
-        return render(request, 'core/partials/sidebar_content.html', {
-            'my_tickets': list(ticket_qs[:20]),
-            'my_wos': list(wo_qs[:20]),
-            'is_admin': is_admin,
-        })
-
-
-# ─── Reports ──────────────────────────────────────────────────────────────────
 
 def _median(values):
     """Median of a list of numbers, or None if empty. Median (not mean) so one
@@ -7234,7 +7198,6 @@ SETTINGS_TABS = [
     ('sla_plans',        'SLA Plans',        None),
     ('help_topics',      'Help Topics',      None),
     ('tech_skills',      'Tech Skills',      None),
-    ('dashboard_tiles',  'Dashboard Tiles',  None),
     ('custom_fields',    'Custom Fields',    None),
     ('account_security', 'Account Security', None),
     ('users',            'Users',            None),
@@ -7255,7 +7218,7 @@ SETTINGS_TAB_GROUPS = [
     ('Tickets & Work Orders', [
         'repair_types', 'device_types', 'checklist_items', 'canned_responses', 'statuses',
         'help_topics', 'sla_plans', 'tech_skills', 'custom_fields',
-        'dashboard_tiles', 'kb_categories',
+        'kb_categories',
     ]),
     ('Integrations', ['invoice_ninja', 'attachments', 'mileage']),
     ('Access & Security', ['account_security', 'users', 'roles', 'credentials', 'security']),
@@ -7684,8 +7647,6 @@ class SettingsView(SettingsAdminMixin, View):
             ctx.update(_checklist_items_context())
         if active_tab == 'device_types':
             ctx.update(_device_types_context())
-        if active_tab == 'colors':
-            ctx.update(_colors_context(forms_map.get('colors')))
         if active_tab == 'display':
             ctx.update(_display_context())
         if active_tab == 'credentials':
@@ -7709,8 +7670,6 @@ class SettingsView(SettingsAdminMixin, View):
             ctx['sla_plans_all'] = SLAPlan.objects.filter(is_active=True)
         if active_tab == 'tech_skills':
             ctx['tech_skills'] = TechSkill.objects.all()
-        if active_tab == 'dashboard_tiles':
-            ctx['dashboard_tiles'] = DashboardTile.objects.all()
         if active_tab == 'custom_fields':
             ctx['custom_fields'] = CustomField.objects.prefetch_related('choices').all()
             ctx['help_topics_all'] = HelpTopic.objects.filter(is_active=True)
@@ -7789,8 +7748,6 @@ class SettingsView(SettingsAdminMixin, View):
             ctx.update(_canned_responses_context())
         if tab == 'checklist_items':
             ctx.update(_checklist_items_context())
-        if tab == 'colors':
-            ctx.update(_colors_context(forms_map.get('colors') or form))
         if tab == 'display':
             ctx.update(_display_context())
         if active_tab == 'maintenance':
@@ -8157,50 +8114,6 @@ def _checklist_items_context():
         'cli_device_types': list(DeviceType.objects.values_list('slug', 'label')),
     }
 
-
-_STATUS_COLOR_ROWS = [
-    ('new',         'New',         'color_status_new',         '#dbeafe'),
-    ('assigned',    'Assigned',    'color_status_assigned',    '#ede9fe'),
-    ('in_progress', 'In Progress', 'color_status_in_progress', '#fef9c3'),
-    ('completed',   'Completed',   'color_status_completed',   '#dcfce7'),
-    ('closed',      'Closed',      'color_status_closed',      '#f3f4f6'),
-    ('cancelled',   'Cancelled',   'color_status_cancelled',   '#fee2e2'),
-]
-
-
-# (label, bg field, bg default, text field, text default) for the owner dashboard.
-_DASH_COLOR_ROWS = [
-    ('Open tickets',         'color_dash_tickets_bg',     '#e6f1fb', 'color_dash_tickets_text',     '#0c447c'),
-    ('Open work orders',     'color_dash_workorders_bg',  '#e1f5ee', 'color_dash_workorders_text',  '#0f6e56'),
-    ('Ready to bill',        'color_dash_ready_bg',       '#eaf3de', 'color_dash_ready_text',       '#27500a'),
-    ('Outstanding invoices', 'color_dash_outstanding_bg', '#faeeda', 'color_dash_outstanding_text', '#633806'),
-    ('Backlog < 1 day',      'color_dash_backlog1_bg',    '#eaf3de', 'color_dash_backlog1_text',    '#3b6d11'),
-    ('Backlog 1–3 days',     'color_dash_backlog2_bg',    '#faeeda', 'color_dash_backlog2_text',    '#854f0b'),
-    ('Backlog 3–7 days',     'color_dash_backlog3_bg',    '#faece7', 'color_dash_backlog3_text',    '#993c1d'),
-    ('Backlog 7+ days',      'color_dash_backlog4_bg',    '#fcebeb', 'color_dash_backlog4_text',    '#a32d2d'),
-]
-
-
-def _colors_context(form):
-    """Build color_status_rows + color_dash_rows with current values from the form."""
-    rows = []
-    for status_key, status_label, field_name, default_hex in _STATUS_COLOR_ROWS:
-        if form:
-            field = form[field_name]
-            current = field.value() or default_hex
-        else:
-            current = default_hex
-        rows.append((status_key, status_label, field_name, current))
-
-    dash_rows = []
-    for label, bg_name, bg_def, txt_name, txt_def in _DASH_COLOR_ROWS:
-        bg = (form[bg_name].value() or bg_def) if form else bg_def
-        txt = (form[txt_name].value() or txt_def) if form else txt_def
-        dash_rows.append({
-            'label': label, 'bg_name': bg_name, 'bg': bg,
-            'txt_name': txt_name, 'txt': txt,
-        })
-    return {'color_status_rows': rows, 'color_dash_rows': dash_rows}
 
 
 def _display_context():
@@ -8889,42 +8802,9 @@ class TechSkillDeleteView(SettingsAdminMixin, View):
 # Dashboard Tiles
 # ---------------------------------------------------------------------------
 
-_DT_REDIRECT = 'core:settings'
-_DT_TAB = '?tab=dashboard_tiles'
-
-
-class DashboardTileUpdateView(SettingsAdminMixin, View):
-    def post(self, request, pk):
-        if not _is_admin(request.user):
-            from django.core.exceptions import PermissionDenied; raise PermissionDenied
-        import json as _json
-        tile = get_object_or_404(DashboardTile, pk=pk)
-        tile.label = request.POST.get('label', tile.label).strip()
-        tile.visible_to = request.POST.get('visible_to', tile.visible_to)
-        tile.is_active = request.POST.get('is_active') == 'on'
-        try:
-            tile.sort_order = int(request.POST.get('sort_order', tile.sort_order))
-        except ValueError:
-            pass
-        raw_filter = request.POST.get('status_filter', '').strip()
-        if raw_filter:
-            try:
-                tile.status_filter = _json.loads(raw_filter)
-            except Exception:
-                tile.status_filter = [s.strip() for s in raw_filter.split(',') if s.strip()]
-        else:
-            tile.status_filter = []
-        tile.save()
-        return redirect(reverse_lazy(_DT_REDIRECT) + _DT_TAB)
-
-
-# ---------------------------------------------------------------------------
-# Custom Fields
-# ---------------------------------------------------------------------------
 
 _CF_REDIRECT = 'core:settings'
 _CF_TAB = '?tab=custom_fields'
-
 
 class CustomFieldCreateView(SettingsAdminMixin, View):
     def post(self, request):

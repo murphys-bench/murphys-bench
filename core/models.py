@@ -2528,12 +2528,6 @@ class SiteSettings(models.Model):
     # the destinations due at that tick; if both are due it ships one snapshot to both.
 
     # Status badge colors — hex values rendered as CSS variables
-    color_status_new         = models.CharField(max_length=7, default='#dbeafe', blank=True)  # blue-100
-    color_status_assigned    = models.CharField(max_length=7, default='#ede9fe', blank=True)  # violet-100
-    color_status_in_progress = models.CharField(max_length=7, default='#fef9c3', blank=True)  # yellow-100
-    color_status_completed   = models.CharField(max_length=7, default='#dcfce7', blank=True)  # green-100
-    color_status_closed      = models.CharField(max_length=7, default='#f3f4f6', blank=True)  # gray-100
-    color_status_cancelled   = models.CharField(max_length=7, default='#fee2e2', blank=True)  # red-100
 
     # Site logo (displayed in nav bar; separate from company_logo on reports)
     # Room accents on the Tabler frame (ruled Aug 21 2026: per-shop adjustable).
@@ -2554,35 +2548,10 @@ class SiteSettings(models.Model):
     )
 
     # Site palette
-    color_primary     = models.CharField(max_length=7, default='#111827', blank=True)  # gray-900 — nav/toolbar bg
-    color_nav_text    = models.CharField(max_length=7, default='#ffffff', blank=True)  # white — nav link text
     color_accent      = models.CharField(max_length=7, default='#2563eb', blank=True)  # blue-600 — links, buttons
-    color_sidebar_bg  = models.CharField(max_length=7, default='#1f2937', blank=True)  # gray-800 — sidebar bg
-    color_sidebar_text = models.CharField(max_length=7, default='#ffffff', blank=True)  # white — sidebar text
-    color_page_bg        = models.CharField(max_length=7, default='#f1f5f9', blank=True)  # page background
-    color_page_title     = models.CharField(max_length=7, default='#111827', blank=True)  # page heading text color
-    color_title_bar      = models.CharField(max_length=7, default='#ffffff', blank=True)  # page title bar background
-    color_section_header      = models.CharField(max_length=7, default='#f8fafc', blank=True)  # section header bar bg
-    color_section_header_text = models.CharField(max_length=7, default='#111827', blank=True)  # section header text + links
 
     # Owner/admin dashboard — bg + text per surface, so each tile/card/backlog
     # tier is fully themeable in Settings > Colors (defaults are the mockup pastels).
-    color_dash_tickets_bg      = models.CharField(max_length=7, default='#e6f1fb', blank=True)  # Open tickets tile/card
-    color_dash_tickets_text    = models.CharField(max_length=7, default='#0c447c', blank=True)
-    color_dash_workorders_bg   = models.CharField(max_length=7, default='#e1f5ee', blank=True)  # Open work orders tile/card
-    color_dash_workorders_text = models.CharField(max_length=7, default='#0f6e56', blank=True)
-    color_dash_ready_bg        = models.CharField(max_length=7, default='#eaf3de', blank=True)  # Ready to bill tile
-    color_dash_ready_text      = models.CharField(max_length=7, default='#27500a', blank=True)
-    color_dash_outstanding_bg   = models.CharField(max_length=7, default='#faeeda', blank=True)  # Outstanding invoices tile
-    color_dash_outstanding_text = models.CharField(max_length=7, default='#633806', blank=True)
-    color_dash_backlog1_bg     = models.CharField(max_length=7, default='#eaf3de', blank=True)  # Backlog < 1 day
-    color_dash_backlog1_text   = models.CharField(max_length=7, default='#3b6d11', blank=True)
-    color_dash_backlog2_bg     = models.CharField(max_length=7, default='#faeeda', blank=True)  # Backlog 1-3 days
-    color_dash_backlog2_text   = models.CharField(max_length=7, default='#854f0b', blank=True)
-    color_dash_backlog3_bg     = models.CharField(max_length=7, default='#faece7', blank=True)  # Backlog 3-7 days
-    color_dash_backlog3_text   = models.CharField(max_length=7, default='#993c1d', blank=True)
-    color_dash_backlog4_bg     = models.CharField(max_length=7, default='#fcebeb', blank=True)  # Backlog 7+ days
-    color_dash_backlog4_text   = models.CharField(max_length=7, default='#a32d2d', blank=True)
 
     # ⚠ NOT a cosmetic timestamp — this is the guard that stops `seed_demo_data`
     # injecting fake clients into a real shop. scripts/install.sh stamps it once the
@@ -3122,36 +3091,6 @@ class TicketQueue(models.Model):
     @property
     def is_system_queue(self):
         return self.owner is None
-
-
-class DashboardTile(models.Model):
-    """Configurable tile on the dashboard. Two rows: ticket and workorder."""
-
-    ROW_CHOICES = [('ticket', 'Tickets'), ('workorder', 'Work Orders')]
-    VISIBLE_TO_CHOICES = [('all', 'All Users'), ('admin', 'Admins Only'), ('tech', 'Techs Only')]
-
-    row = models.CharField(max_length=12, choices=ROW_CHOICES)
-    label = models.CharField(max_length=100)
-    status_filter = models.JSONField(
-        default=list,
-        help_text='List of status values to count. Empty = count all.',
-    )
-    link_url = models.CharField(
-        max_length=200,
-        blank=True,
-        help_text='URL the tile links to. Use relative paths.',
-    )
-    sort_order = models.IntegerField(default=0)
-    is_active = models.BooleanField(default=True)
-    visible_to = models.CharField(max_length=10, choices=VISIBLE_TO_CHOICES, default='all')
-    icon = models.CharField(max_length=10, blank=True, help_text='Optional emoji icon.')
-
-    class Meta:
-        db_table = 'dashboard_tiles'
-        ordering = ['row', 'sort_order']
-
-    def __str__(self):
-        return f'{self.get_row_display()} — {self.label}'
 
 
 class CustomField(models.Model):

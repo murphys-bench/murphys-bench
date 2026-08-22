@@ -4,9 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Murphy's Bench{% endblock %}</title>
+    <meta name="htmx-config" content='{"allowEval": false}'>
     {% comment %}
     THE TABLER FRAME. Pages rebuilt on Tabler extend this; pages not yet rebuilt
-    keep extending core/base.html (the Tailwind frame). The two never share a
+    extended core/base.html (the Tailwind frame, deleted in v0.14.0). The two never shared a
     page, so the two stylesheets never fight. When the last page moves, this
     file becomes base.html and the old one is deleted.
     Rules live in mb-docs/MB-ON-TABLER-DESIGN-RULES.md.

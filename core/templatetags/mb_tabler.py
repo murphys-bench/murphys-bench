@@ -6,8 +6,8 @@ and the symbol lands in the sprite. A name that is not in ICONS renders nothing
 and logs a warning; the test suite asserts every name used in templates is in
 the sprite so that cannot reach a box silently.
 
-The legacy {% icon %} tag in mb_icons.py keeps serving the Tailwind pages until
-they are rebuilt; this module is the replacement, not an extension.
+The legacy {% icon %} tag left with the Tailwind frame in v0.14.0; mb_icons.py
+keeps only the status helpers and text filters.
 """
 import logging
 import re

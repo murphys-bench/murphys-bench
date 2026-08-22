@@ -28,7 +28,7 @@ manual_abort() {
     echo "  Pre-update backup: ${BACKUP_TARBALL:-<none>}" >&2
     echo "  Recover by hand:" >&2
     echo "    cd $APP && git checkout --force $PREV && $VENV/pip install -r requirements.txt \\" >&2
-    echo "      && scripts/build_css.sh && $VENV/python manage.py collectstatic --noinput \\" >&2
+    echo "      && $VENV/python manage.py collectstatic --noinput \\" >&2
     echo "      && RESTORE_YES=1 scripts/restore.sh $BACKUP_TARBALL" >&2
     exit 2
 }
@@ -41,14 +41,13 @@ rollback() {
         echo "  Auto-rollback DISABLED (--no-rollback) — the box may be in a broken state." >&2
         echo "  Pre-update backup: $BACKUP_TARBALL ; previous code: $PREV ($PREV_VER)" >&2
         echo "  Recover: cd $APP && git checkout --force $PREV && $VENV/pip install -r requirements.txt \\" >&2
-        echo "    && scripts/build_css.sh && $VENV/python manage.py collectstatic --noinput \\" >&2
+        echo "    && $VENV/python manage.py collectstatic --noinput \\" >&2
         echo "    && RESTORE_YES=1 scripts/restore.sh $BACKUP_TARBALL" >&2
         exit 1
     fi
     log "UPDATE FAILED ($why) — AUTO-ROLLING BACK to $PREV ($PREV_VER)..."
     git checkout --force --quiet "$PREV"                          || manual_abort "git checkout $PREV"
     "$VENV/pip" install -q -r requirements.txt                    || manual_abort "pip install"
-    "$APP/scripts/build_css.sh"                                   || manual_abort "build_css"
     "$VENV/python" manage.py collectstatic --noinput >/dev/null   || manual_abort "collectstatic"
     # restore.sh restores the DB (+ protected/ + media/), restarts, and health-checks.
     RESTORE_YES=1 "$APP/scripts/restore.sh" "$BACKUP_TARBALL"     || manual_abort "DB restore"
@@ -222,8 +221,8 @@ log "code: $PREV_VER ($PREV) -> $NEW_VER ($NEW)"
 # 5) Database migrations.
 "$VENV/python" manage.py migrate --noinput || rollback "migrate failed"
 
-# 6) Build the self-hosted Tailwind stylesheet (standalone CLI, no Node), then collect static.
-"$APP/scripts/build_css.sh" || rollback "CSS build failed"
+# 6) Collect static. (Until v0.13.4 a Tailwind build ran first; the frame is
+#    Tabler now, vendored, nothing to compile.)
 "$VENV/python" manage.py collectstatic --noinput >/dev/null || rollback "collectstatic failed"
 # collectstatic writes new files with the app user's umask; nginx serves them as
 # www-data. Without this, an update can leave freshly-added assets unreadable and

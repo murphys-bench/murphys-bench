@@ -8,6 +8,38 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased (v0.14.0)
+
+The new look: every screen rebuilt on Tabler. Rooms, the Board, one Work Record, the Relationship Desk.
+
+### Added
+
+- The Board at `/` replaces both dashboards: tiles that mean decisions, four regions (Tickets, Bench, Follow-ups, Unsorted), triage order.
+- One Work Record for a ticket and its work order; convert in place; History section.
+- Client Hub with Service Agreement status set in place; intake asks who first and shows what is already open.
+- Rooms: Work, Register, Desk, Back Office each have their own color, adjustable per shop under Settings, Colors.
+- Relationship Desk: follow-ups (plan, due on the Board, Follow-ups list), and your own email templates sent by hand from a record or a customer with Email customer.
+- Reports: charts for Work Orders and Business Metrics, not only Tickets.
+- Settings, Display: a text size control, per browser.
+- Sign-in and two-factor screens on the new frame.
+
+### Changed
+
+- Every list shares one worklist skeleton; filters survive paging.
+- Destructive actions confirm in a dialog instead of a browser pop-up.
+- Settings is one page per tab; the Colors tab offers only what the frame reads (logos, accent, room colors); statuses are colored on the Statuses tab.
+- Account Security carries the Settings sidebar.
+
+### Removed
+
+- Tailwind, Alpine and the old frame. No CSS build step on install or update; `scripts/build_css.sh` is a no-op for one release so older updaters still work.
+- The configurable dashboard tiles and the old nav/page/section/dashboard color settings (the Board and the new frame do not read them).
+- The `django-crispy-forms` and `crispy-tailwind` packages (unused).
+
+### Security
+
+- Content-Security-Policy `script-src` is now `'self'` only: no inline scripts, no `unsafe-eval`. HTMX runs with `allowEval` off.
+
 ## v0.13.4 — 2026-08-19
 
 Dependency hardening.
