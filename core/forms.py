@@ -896,22 +896,10 @@ class ColorSettingsForm(forms.ModelForm):
             'site_logo', 'login_logo',
             'color_accent',
             'color_room_register', 'color_room_desk', 'color_room_office',
-            
-            
-            
-            
-            
-            
         ]
         _hex_fields = [
             'color_accent',
             'color_room_register', 'color_room_desk', 'color_room_office',
-            
-            
-            
-            
-            
-            
         ]
         widgets = {f: forms.TextInput(attrs={'class': _HEX_INPUT, 'maxlength': 7, 'placeholder': '#rrggbb'})
                    for f in _hex_fields}
