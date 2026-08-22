@@ -1,0 +1,20 @@
+# Vendored front-end packages. One line per file: package, version, source URL,
+# SHA-256 of the file AS FETCHED (before the sourcemap comment was stripped),
+# date fetched. Verified against jsDelivr at fetch time, never copied from a
+# third-party mirror. The Monday scheduled audit compares these versions against
+# the packages' GitHub releases and opens an issue when a newer one exists.
+#
+# Stripping: tabler.min.css and tabler.min.js each carried a trailing
+# sourceMappingURL comment pointing at a .map file that is not vendored;
+# ManifestStaticFilesStorage follows those and fails collectstatic on a missing
+# file, so the comment is removed. Nothing else is changed.
+
+@tabler/core 1.4.0 https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css sha256=7ef750bd10546a695d0b12767ad8048bd8f3ec5de7daefb1067f9d0daa3d1c9a fetched=2026-08-21
+@tabler/core 1.4.0 https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/js/tabler.min.js sha256=b60c76160e97624574dbb8cf10abe6aee9a6493b60096fdfc15dd1dd2bd99eb9 fetched=2026-08-21
+@tabler/icons-sprite 3.46.0 https://cdn.jsdelivr.net/npm/@tabler/icons-sprite@3.46.0/dist/tabler-sprite.svg sha256=51bab6fa61b2a527793e0a5f41b2ab065e52d1d1e4e91283554aa7a9456d7118 fetched=2026-08-21
+
+# tabler-icons/3.46.0/mb-sprite.svg is NOT the upstream file. It is the subset
+# of the sprite above that MB actually uses, built by scripts/build_icon_sprite.py
+# from the icon list in core/templatetags/mb_tabler.py. Re-run that script after
+# adding an icon name; it downloads the pinned sprite, verifies the SHA-256
+# above, and rewrites the subset.

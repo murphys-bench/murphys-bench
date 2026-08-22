@@ -1,0 +1,44 @@
+{% load mb_tabler %}
+{% comment %}Contact add/edit fields (the view reads plain POST names; phones are
+parallel lists phone_type / phone_number / phone_label). Pass contact=None for a
+new contact.{% endcomment %}
+<div class="row g-2">
+    <div class="col-md-3"><label class="form-label required">First name</label><input type="text" name="first_name" value="{{ contact.first_name|default:'' }}" required class="form-control form-control-sm"></div>
+    <div class="col-md-3"><label class="form-label">Last name</label><input type="text" name="last_name" value="{{ contact.last_name|default:'' }}" class="form-control form-control-sm"></div>
+    <div class="col-md-3"><label class="form-label">Title</label><input type="text" name="title" value="{{ contact.title|default:'' }}" class="form-control form-control-sm"></div>
+    <div class="col-md-3"><label class="form-label">Email</label><input type="email" name="email" value="{{ contact.email|default:'' }}" class="form-control form-control-sm"></div>
+    <div class="col-12">
+        <label class="form-label">Phone numbers</label>
+        <div data-mb-phone-list="{{ contact.pk|default:'new' }}">
+            {% for p in contact.phone_numbers.all %}
+            <div class="input-group input-group-sm mb-1" data-mb-row>
+                <select name="phone_type" class="form-select form-select-sm" style="max-width: 7rem;">{% for v, l in p.PHONE_TYPE_CHOICES %}<option value="{{ v }}" {% if p.phone_type == v %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+                <input type="text" name="phone_number" value="{{ p.number }}" class="form-control" placeholder="Number">
+                <input type="text" name="phone_label" value="{{ p.label }}" class="form-control" placeholder="Label (optional)">
+                <button type="button" class="btn btn-sm" data-mb-remove-row title="Remove">{% ticon 'x' 'icon-sm' %}</button>
+            </div>
+            {% empty %}
+            <div class="input-group input-group-sm mb-1" data-mb-row>
+                <select name="phone_type" class="form-select form-select-sm" style="max-width: 7rem;"><option value="cell">Cell</option><option value="home">Home</option><option value="work">Work</option><option value="other">Other</option></select>
+                <input type="text" name="phone_number" class="form-control" placeholder="Number">
+                <input type="text" name="phone_label" class="form-control" placeholder="Label (optional)">
+                <button type="button" class="btn btn-sm" data-mb-remove-row title="Remove">{% ticon 'x' 'icon-sm' %}</button>
+            </div>
+            {% endfor %}
+        </div>
+        <template id="phone-row-tpl-{{ contact.pk|default:'new' }}">
+            <div class="input-group input-group-sm mb-1" data-mb-row>
+                <select name="phone_type" class="form-select form-select-sm" style="max-width: 7rem;"><option value="cell">Cell</option><option value="home">Home</option><option value="work">Work</option><option value="other">Other</option></select>
+                <input type="text" name="phone_number" class="form-control" placeholder="Number">
+                <input type="text" name="phone_label" class="form-control" placeholder="Label (optional)">
+                <button type="button" class="btn btn-sm" data-mb-remove-row title="Remove">{% ticon 'x' 'icon-sm' %}</button>
+            </div>
+        </template>
+        <button type="button" class="btn btn-sm btn-ghost-secondary" data-mb-add-row="#phone-row-tpl-{{ contact.pk|default:'new' }}" data-mb-add-row-into="[data-mb-phone-list='{{ contact.pk|default:'new' }}']">{% ticon 'plus' 'icon-sm' %} Phone</button>
+    </div>
+    <div class="col-md-8"><label class="form-label">Notes</label><input type="text" name="notes" value="{{ contact.notes|default:'' }}" class="form-control form-control-sm"></div>
+    <div class="col-md-4 d-flex align-items-end gap-3">
+        <label class="form-check m-0"><input type="checkbox" name="is_primary" value="1" class="form-check-input" {% if contact.is_primary %}checked{% endif %}><span class="form-check-label">Primary</span></label>
+        <label class="form-check m-0"><input type="checkbox" name="receives_email" value="1" class="form-check-input" {% if contact is None or contact.receives_email %}checked{% endif %}><span class="form-check-label">Receives email</span></label>
+    </div>
+</div>

@@ -59,7 +59,7 @@ def _plain_static_storage(settings):
     cache-busting. That backend raises on any {% static %} whose file isn't in the
     built manifest — so on a fresh manual install that hasn't run build_css.sh +
     collectstatic yet, 120 tests failed with "Missing staticfiles manifest entry
-    for 'css/app.css'". That reads like broken code; it's a skipped build step.
+    for a hashed asset". That reads like broken code; it's a skipped collectstatic.
     (Found on a 26.04 install shakeout, Jul 2026.)
 
     The manifest path is still covered:

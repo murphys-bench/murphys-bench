@@ -1,0 +1,31 @@
+{% load mb_tabler %}
+<div class="card mb-3">
+    <div class="card-header"><div><h3 class="card-title">Repair types</h3><div class="card-subtitle">Group repair types into categories, or leave them uncategorised.</div></div></div>
+    <form method="post" action="{% url 'core:rt_category_create' %}" class="card-body">{% csrf_token %}<div class="input-group"><input type="text" name="name" class="form-control" placeholder="New category name" required><button type="submit" class="btn btn-primary">Add category</button></div></form>
+</div>
+{% for cat in rt_categories %}
+<div class="card mb-3">
+    <div class="card-header py-2">
+        <button type="button" class="btn btn-sm btn-ghost-secondary btn-icon me-2" data-bs-toggle="collapse" data-bs-target="#rtc-{{ cat.pk }}" data-mb-group="rtc-{{ cat.pk }}" aria-expanded="false">{% ticon 'chevron-down' 'icon-sm' %}</button>
+        <h3 class="card-title">{{ cat.name }} <span class="text-secondary fw-normal">({{ cat.repair_types.count }})</span></h3>
+        <div class="card-actions btn-list">
+            <form method="post" action="{% url 'core:rt_category_reorder' cat.pk %}" class="d-inline">{% csrf_token %}<input type="hidden" name="direction" value="up"><button type="submit" class="btn btn-sm btn-ghost-secondary btn-icon" title="Move up">{% ticon 'chevron-up' 'icon-sm' %}</button></form>
+            <form method="post" action="{% url 'core:rt_category_reorder' cat.pk %}" class="d-inline">{% csrf_token %}<input type="hidden" name="direction" value="down"><button type="submit" class="btn btn-sm btn-ghost-secondary btn-icon" title="Move down">{% ticon 'chevron-down' 'icon-sm' %}</button></form>
+            <form method="post" action="{% url 'core:rt_category_delete' cat.pk %}" class="d-inline" data-mb-confirm="Delete the category {{ cat.name }}? Its repair types become uncategorised.">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger btn-icon" title="Delete category">{% ticon 'x' 'icon-sm' %}</button></form>
+        </div>
+    </div>
+    <div class="collapse" id="rtc-{{ cat.pk }}">
+        <div class="list-group list-group-flush">
+            {% for rt in cat.repair_types.all %}{% include "core/settings/_repair_type_row.html" with rt=rt cat_pk=cat.pk %}{% endfor %}
+        </div>
+        <form method="post" action="{% url 'core:rt_create' %}" class="card-footer">{% csrf_token %}<input type="hidden" name="category_id" value="{{ cat.pk }}"><div class="input-group"><input type="text" name="name" class="form-control" placeholder="New repair type" required><button type="submit" class="btn">Add</button></div></form>
+    </div>
+</div>
+{% endfor %}
+<div class="card">
+    <div class="card-header py-2"><h3 class="card-title">Uncategorised <span class="text-secondary fw-normal">({{ rt_uncategorised|length }})</span></h3></div>
+    <div class="list-group list-group-flush">
+        {% for rt in rt_uncategorised %}{% include "core/settings/_repair_type_row.html" with rt=rt cat_pk="" %}{% empty %}<div class="list-group-item text-secondary">No uncategorised repair types.</div>{% endfor %}
+    </div>
+    <form method="post" action="{% url 'core:rt_create' %}" class="card-footer">{% csrf_token %}<input type="hidden" name="category_id" value=""><div class="input-group"><input type="text" name="name" class="form-control" placeholder="Add an uncategorised repair type" required><button type="submit" class="btn">Add</button></div></form>
+</div>

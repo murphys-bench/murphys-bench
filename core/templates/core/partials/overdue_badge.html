@@ -1,20 +1,11 @@
+{% load mb_tabler %}
 {% if ticket.is_overdue %}
   {% if ticket.overdue_is_acknowledged %}
-    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-yellow-100 text-yellow-800 border border-yellow-300">
-      {% load mb_icons %}{% icon "exclamation-triangle" 4 %} Overdue — Acknowledged {{ ticket.overdue_acknowledged_at|date:"M j, Y" }} by {{ ticket.overdue_acknowledged_by.get_full_name|default:ticket.overdue_acknowledged_by.username }}
-    </span>
+    <span class="badge bg-yellow-lt">{% ticon 'clock' 'icon-sm' %} Overdue, acknowledged {{ ticket.overdue_acknowledged_at|date:"M j" }} by {{ ticket.overdue_acknowledged_by.get_full_name|default:ticket.overdue_acknowledged_by.username }}</span>
   {% else %}
     <div id="overdue-section">
-      <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-semibold bg-red-100 text-red-800 border border-red-300">
-        🔴 Overdue since {{ ticket.due_at|date:"M j, Y g:i A" }}
-      </span>
-      <button
-        hx-get="{% url 'core:ticket_acknowledge_overdue' ticket.pk %}"
-        hx-target="#overdue-section"
-        hx-swap="innerHTML"
-        class="ml-2 px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700">
-        Acknowledge Overdue
-      </button>
+      <span class="badge bg-red-lt">{% ticon 'clock' 'icon-sm' %} Overdue since {{ ticket.due_at|date:"M j, g:i A" }}</span>
+      <button hx-get="{% url 'core:ticket_acknowledge_overdue' ticket.pk %}" hx-target="#overdue-section" hx-swap="innerHTML" class="btn btn-sm btn-outline-danger ms-2">Acknowledge</button>
     </div>
   {% endif %}
 {% endif %}

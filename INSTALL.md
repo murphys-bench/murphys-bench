@@ -296,7 +296,6 @@ Keep a separate secure copy of `FIELD_ENCRYPTION_KEY`. If it is lost, encrypted 
 
 ```bash
 mkdir -p logs media protected backups
-scripts/build_css.sh
 venv/bin/python manage.py migrate
 venv/bin/python manage.py collectstatic --noinput
 venv/bin/python manage.py createsuperuser

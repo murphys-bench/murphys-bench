@@ -89,5 +89,3 @@ inbound_fetch.lock
 backup-config.env
 
 # Tailwind standalone CLI cache + compiled output (built on deploy by scripts/build_css.sh)
-.tailwind/
-static/css/app.css

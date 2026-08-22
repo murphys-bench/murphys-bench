@@ -1,0 +1,39 @@
+{% load static mb_tabler %}<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Murphy's Bench{% endblock %}</title>
+    <meta name="htmx-config" content='{"allowEval": false}'>
+    <link rel="icon" type="image/svg+xml" href="{% static 'favicon.svg' %}">
+    <link rel="stylesheet" href="{% static 'vendor/tabler/1.4.0/tabler.min.css' %}">
+    <link rel="stylesheet" href="{% static 'css/mb-chrome.css' %}">
+    <script src="{% static 'js/mb-boot.js' %}"></script>
+    <script defer src="{% static 'vendor/tabler/1.4.0/tabler.min.js' %}"></script>
+    <script defer src="{% static 'js/mb-chrome.js' %}"></script>
+</head>
+{% comment %}
+The focused layout: sign-in and the two-factor screens. No sidebar, one card in
+the middle of the page. The frame proper is base_tabler.html.
+{% endcomment %}
+<body class="d-flex flex-column">
+    <div class="page page-center">
+        <div class="container container-tight py-4">
+            <div class="text-center mb-4">
+                {% if site_settings.login_logo %}
+                <a href="/"><img src="{{ site_settings.login_logo.url }}" alt="{{ site_settings.company_name|default:'Murphy&#39;s Bench' }}" style="max-width:100%;max-height:min(560px, 32vh);width:auto;height:auto;"></a>
+                {% else %}
+                <a href="/" class="navbar-brand navbar-brand-autodark"><span class="h2 mb-0">{% ticon 'tool' %} {{ site_settings.company_name|default:"Murphy's Bench" }}</span></a>
+                {% endif %}
+            </div>
+            <div class="card card-md">
+                <div class="card-body">
+                    {% if messages %}{% for message in messages %}<div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-info{% endif %}">{{ message }}</div>{% endfor %}{% endif %}
+                    {% block content %}{% endblock %}
+                </div>
+            </div>
+            {% block below_card %}{% endblock %}
+        </div>
+    </div>
+</body>
+</html>

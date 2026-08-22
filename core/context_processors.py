@@ -1,4 +1,5 @@
 from .models import SiteSettings
+from .templatetags.mb_icons import all_status_defs
 
 # Role flags exposed to every template so a button the user cannot use is not
 # drawn. These mirror the _can_* helpers in views.py one-for-one; the helpers are
@@ -31,8 +32,7 @@ def site_settings(request):
         which silently dropped the legacy `role == 'admin'` fallback that
         has_perm_flag still honours. A legacy admin got 200 from /settings/ while
         the nav offered them no way in and the user list drew them the non-admin
-        backlink. Found by a reviewer, on the fix for the previous instance of
-        this same class.
+        backlink: the second instance of this class of defect.
       - `can_manage_users` used has_perm_flag where the server uses _role_flag,
         which differ for a user with no role at all.
       - the eleven ticket/work-order flags were rebuilt as
@@ -47,6 +47,8 @@ def site_settings(request):
     user = getattr(request, 'user', None)
     context = {
         'site_settings': SiteSettings.get(),
+        # Tabler frame: status colors as CSS variables, from the shop's status table.
+        'mb_status_defs': all_status_defs(),
         'is_admin': False,
         'can_view_prospects': False,
         'can_view_estimates': False,
@@ -75,7 +77,7 @@ def site_settings(request):
     # Each of these DOES have its own helper, so call it rather than rebuilding
     # what it happens to do today. This was written as
     # `is_admin or _role_flag(user, name)` — equivalent to every helper's current
-    # body, and a reviewer confirmed the results matched. Equivalence is not
+    # body, and the results matched. Equivalence is not
     # delegation: the moment one helper grows a condition the others lack (a
     # record-state check is the obvious candidate), the chrome silently stops
     # following it. Resolving by name keeps that impossible.
@@ -88,3 +90,14 @@ def site_settings(request):
             )
         context[name] = bool(helper(user))
     return context
+
+
+def desk_counts(request):
+    """Count-by-status pulse for the Desk nav: follow-ups due today or past."""
+    if not getattr(request, 'user', None) or not request.user.is_authenticated:
+        return {}
+    try:
+        from .models import FollowUp
+        return {'follow_ups_due': FollowUp.objects.due().count()}
+    except Exception:
+        return {}

@@ -1,77 +1,63 @@
-{% extends "core/base.html" %}
-{% load mb_icons %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
 
 {% block title %}{{ sale.sale_number }} - Murphy's Bench{% endblock %}
+{% block room %}register{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-4">
-        <div>
-            <a href="{% url 'core:sale_list' %}" class="text-gray-400 hover:text-gray-600 text-sm">← Sales</a>
-            <h1 class="text-2xl font-bold text-gray-900">{{ sale.sale_number }}</h1>
-            <p class="text-sm text-gray-500">{{ sale.display_name }}</p>
-        </div>
-        <div class="flex items-center gap-3">
-            {% include "core/partials/header_bell.html" %}
-            <span class="inline-flex px-3 py-1 rounded-full text-sm font-medium
-                {% if sale.status == 'completed' %}bg-green-100 text-green-800
-                {% elif sale.status == 'void' %}bg-gray-200 text-gray-600
-                {% else %}bg-yellow-100 text-yellow-800{% endif %}">
-                {{ sale.get_status_display }}
-            </span>
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <div class="page-pretitle"><a href="{% url 'core:sale_list' %}">Sales</a></div>
+                <h2 class="page-title">{{ sale.sale_number }}</h2>
+                <div class="text-secondary"><span class="status-dot me-1" style="--tblr-status-color: {% if sale.status == 'completed' %}var(--tblr-green){% elif sale.status == 'void' %}var(--tblr-secondary){% else %}var(--tblr-yellow){% endif %};"></span>{{ sale.get_status_display }} &middot; {{ sale.display_name }}</div>
+            </div>
+            <div class="col-auto">
+                <div class="btn-group" role="group">
+                    {% if sale.status == 'completed' %}
+                    <a href="{% url 'core:sale_receipt_print' sale.pk %}" target="_blank" class="btn">{% ticon 'printer' 'icon-sm' %} Print receipt</a>
+                    <a href="{% url 'core:sale_receipt_email' sale.pk %}" class="btn">{% ticon 'mail' 'icon-sm' %} Email receipt</a>
+                    {% elif sale.status != 'void' and not sale.is_recurring %}
+                    <a href="{% url 'core:pos_sale_settle' sale.pk %}" class="btn btn-success">Settle at the Register</a>
+                    {% endif %}
+                    {% if sale.status != 'completed' %}
+                    <form method="post" action="{% url 'core:sale_delete' sale.pk %}" data-mb-confirm="Delete {{ sale.sale_number }} permanently?">{% csrf_token %}<button type="submit" class="btn btn-outline-danger">Delete</button></form>
+                    {% endif %}
+                </div>
+            </div>
         </div>
     </div>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="max-w-3xl space-y-6">
-
-    {% include "core/partials/sale_customer_card.html" %}
-
-    {% include "core/partials/sale_line_items_editor.html" %}
-
-    <!-- Checkout / payment. Recurring Lane C sales still use the draft-push
-         card (a different lane — monthly billing, unaffected by the POS).
-         Counter sales are now settled at the POS (settlement is POS-only) —
-         this card is read-only, linking into the register. -->
-    {% if sale.is_recurring %}
-        {% include "core/partials/sale_recurring_card.html" %}
-    {% else %}
-        <div class="bg-white rounded-lg shadow-md border-l-4 {% if sale.status == 'completed' %}border-green-500{% else %}border-blue-500{% endif %} p-6">
-            <div class="flex items-center gap-3 mb-1">
-                <div class="shrink-0 w-9 h-9 rounded-full {% if sale.status == 'completed' %}bg-green-100 text-green-600{% else %}bg-blue-100 text-blue-600{% endif %} flex items-center justify-center">
-                    {% icon "cash" 5 %}
-                </div>
-                <h2 class="text-base font-semibold text-gray-900">Payment</h2>
+<div class="row row-cards">
+    <div class="col-12 col-lg-7">
+        {% include "core/partials/sale_customer_card.html" %}
+        {% include "core/partials/sale_line_items_editor.html" %}
+    </div>
+    <div class="col-12 col-lg-5">
+        {# Recurring (monthly billing) sales use the draft-push card. Counter sales settle at the Register only; this card is read-only and points there. #}
+        {% if sale.is_recurring %}
+            {% include "core/partials/sale_recurring_card.html" %}
+        {% else %}
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">Payment</h3></div>
+            <div class="card-body">
+                {% if sale.status == 'completed' %}
+                    <div class="fw-medium">Paid</div>
+                    <div class="text-secondary">{{ sale.get_payment_method_display|default:"" }}, ${{ sale.amount|default:"0.00" }}{% if sale.paid_at %}, {{ sale.paid_at|date:"M j, Y g:i A" }}{% endif %}{% if sale.reference %}, ref {{ sale.reference }}{% endif %}</div>
+                    {% if sale.invoice_ninja_id %}<div class="mt-2"><span class="badge bg-green-lt">Invoice Ninja #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }}{% if sale.in_status %} &middot; {{ sale.in_status }}{% endif %}</span></div>{% endif %}
+                {% elif sale.status == 'void' %}
+                    <div class="text-secondary">This sale is void.</div>
+                {% else %}
+                    <div class="text-secondary mb-3">Not yet settled.</div>
+                    <a href="{% url 'core:pos_sale_settle' sale.pk %}" class="btn btn-success">Settle at the Register</a>
+                {% endif %}
             </div>
-            {% if sale.status == 'completed' %}
-                <p class="text-sm text-gray-700">Paid — {{ sale.get_payment_method_display|default:"—" }}, ${{ sale.amount|default:"0.00" }}.</p>
-                <div class="mt-3 flex flex-wrap gap-3">
-                    <a href="{% url 'core:sale_receipt_print' sale.pk %}" target="_blank" class="text-sm text-blue-600 hover:underline">Print Receipt</a>
-                    <a href="{% url 'core:sale_receipt_email' sale.pk %}" class="text-sm text-blue-600 hover:underline">Email Receipt</a>
-                </div>
-            {% elif sale.status == 'void' %}
-                <p class="text-sm text-gray-500">This sale is void.</p>
-            {% else %}
-                <p class="text-sm text-gray-500 mb-3">Not yet settled.</p>
-                <a href="{% url 'core:pos_sale_settle' sale.pk %}" class="inline-block px-5 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium">
-                    Settle at Register
-                </a>
-            {% endif %}
         </div>
-    {% endif %}
-
-    <!-- Actions -->
-    <div class="flex flex-wrap gap-3">
-        {% if sale.status != 'completed' %}
-            <form method="post" action="{% url 'core:sale_delete' sale.pk %}"
-                  onsubmit="return confirm('Delete this sale permanently?');">
-                {% csrf_token %}
-                <button type="submit" class="px-5 py-2 text-red-600 hover:text-red-800 font-medium">Delete</button>
-            </form>
         {% endif %}
     </div>
-
 </div>
 {% endblock %}

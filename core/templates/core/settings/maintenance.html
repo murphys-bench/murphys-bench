@@ -1,0 +1,62 @@
+{% load mb_tabler %}
+<form method="post" class="card mb-3">{% csrf_token %}<input type="hidden" name="tab" value="backups">
+    <div class="card-header"><div><h3 class="card-title">Backups</h3><div class="card-subtitle">Each backup is a consistent snapshot of the database, attachments and settings, shipped <strong>off this server</strong> to the destinations below; the MB server itself is never a backup location.</div></div></div>
+    <div class="card-body border-bottom">{% include 'core/partials/backup_status.html' %}</div>
+    <div class="card-body">
+        {% for err in forms.backups.non_field_errors %}<div class="alert alert-danger">{{ err }}</div>{% endfor %}
+        {% for field in forms.backups %}{% if field.errors %}<div class="alert alert-danger">{{ field.label }}: {{ field.errors|join:", " }}</div>{% endif %}{% endfor %}
+        <div class="card mb-3">
+            <div class="card-header"><label class="form-check form-switch mb-0">{{ forms.backups.backup_onsite_enabled|tabler_input:"" }}<span class="form-check-label fw-medium">Onsite (NAS / network share)</span></label></div>
+            <div class="card-body">
+                <div class="form-hint mb-3">MB connects to the share directly over the network; no server-side setup needed.</div>
+                <div class="row g-3">
+                    <div class="col-md-6"><label class="form-label">NAS address</label>{{ forms.backups.backup_onsite_host|tabler_input }}<div class="form-hint">IP address or hostname.</div></div>
+                    <div class="col-md-6"><label class="form-label">Share name</label>{{ forms.backups.backup_onsite_share|tabler_input }}</div>
+                    <div class="col-md-6"><label class="form-label">Username</label>{{ forms.backups.backup_onsite_username|tabler_input }}</div>
+                    <div class="col-md-6"><label class="form-label">Password</label>{{ forms.backups.backup_onsite_password|tabler_input }}<div class="form-hint">Stored encrypted; written into an rclone config the backup script reads.</div></div>
+                    <div class="col-12"><label class="form-label">Folder</label>{{ forms.backups.backup_onsite_folder|tabler_input }}<div class="form-hint">Optional subfolder within the share.</div></div>
+                    <div class="col-md-4"><label class="form-label">Retention</label>{{ forms.backups.backup_onsite_retention_mode|tabler_input }}</div>
+                    <div class="col-md-2"><label class="form-label">Value</label>{{ forms.backups.backup_onsite_retention_value|tabler_input }}</div>
+                    <div class="col-md-6 form-hint align-self-end">Copies, or days.</div>
+                    <div class="col-md-6"><label class="form-label">Schedule, days</label>{{ forms.backups.backup_onsite_schedule_days|tabler_input }}<div class="form-hint"><code>daily</code>, or weekdays like <code>mon,tue,wed,thu,fri</code>.</div></div>
+                    <div class="col-md-6"><label class="form-label">Schedule, times</label>{{ forms.backups.backup_onsite_schedule_times|tabler_input }}<div class="form-hint">One or more <code>HH:MM</code>, e.g. <code>06:00,18:00</code>. Runs within about 5 minutes.</div></div>
+                </div>
+            </div>
+            <div class="card-footer d-flex align-items-center gap-2"><button type="submit" formaction="{% url 'core:backup_test' 'onsite' %}" class="btn">Test onsite</button><span class="text-secondary small">Save first, then test.</span></div>
+        </div>
+        <div class="card">
+            <div class="card-header"><label class="form-check form-switch mb-0">{{ forms.backups.backup_offsite_enabled|tabler_input:"" }}<span class="form-check-label fw-medium">Offsite (S3-compatible)</span></label></div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-12"><label class="form-label">Endpoint</label>{{ forms.backups.backup_s3_endpoint|tabler_input }}<div class="form-hint">S3 endpoint host, e.g. <code>s3.us-west-002.backblazeb2.com</code> (Backblaze B2), or your AWS/Wasabi/MinIO endpoint.</div></div>
+                    <div class="col-md-6"><label class="form-label">Bucket</label>{{ forms.backups.backup_s3_bucket|tabler_input }}</div>
+                    <div class="col-md-6"><label class="form-label">Region</label>{{ forms.backups.backup_s3_region|tabler_input }}</div>
+                    <div class="col-12"><label class="form-label">Folder / prefix</label>{{ forms.backups.backup_s3_path|tabler_input }}</div>
+                    <div class="col-md-6"><label class="form-label">Access key ID</label>{{ forms.backups.backup_s3_access_key|tabler_input }}</div>
+                    <div class="col-md-6"><label class="form-label">Secret access key</label>{{ forms.backups.backup_s3_secret_key|tabler_input }}<div class="form-hint">Stored encrypted; written into an rclone config the backup script reads.</div></div>
+                    <div class="col-md-4"><label class="form-label">Retention</label>{{ forms.backups.backup_offsite_retention_mode|tabler_input }}</div>
+                    <div class="col-md-2"><label class="form-label">Value</label>{{ forms.backups.backup_offsite_retention_value|tabler_input }}</div>
+                    <div class="col-md-6 form-hint align-self-end">Copies, or days.</div>
+                    <div class="col-md-6"><label class="form-label">Schedule, days</label>{{ forms.backups.backup_offsite_schedule_days|tabler_input }}<div class="form-hint"><code>daily</code>, or weekdays like <code>mon,wed,fri</code>.</div></div>
+                    <div class="col-md-6"><label class="form-label">Schedule, times</label>{{ forms.backups.backup_offsite_schedule_times|tabler_input }}<div class="form-hint">One or more <code>HH:MM</code>, e.g. <code>02:00</code>.</div></div>
+                </div>
+            </div>
+            <div class="card-footer d-flex align-items-center gap-2"><button type="submit" formaction="{% url 'core:backup_test' 'offsite' %}" class="btn">Test offsite</button><span class="text-secondary small">Save first, then test.</span></div>
+        </div>
+    </div>
+    <div class="card-footer"><button type="submit" class="btn btn-primary">Save backup settings</button></div>
+</form>
+<div class="card mb-3">
+    <div class="card-header"><div><h3 class="card-title">Restore</h3><div class="card-subtitle">Put this server back to the state captured in a backup. This <strong>replaces</strong> the current database, attachments and media. Your current data is copied aside first, but getting it back is a command-line step, so treat this as one-way.</div></div></div>
+    <div class="card-body">
+        {% include 'core/partials/restore_status.html' %}
+        <div id="restore-archives">
+            <button type="button" class="btn" hx-get="{% url 'core:restore_archives' %}" hx-target="#restore-archives" hx-swap="outerHTML">Show available backups</button>
+            <div class="form-hint mt-2">Reads the backup destination configured above, which can take a few seconds.</div>
+        </div>
+    </div>
+</div>
+<div class="card">
+    <div class="card-header"><div><h3 class="card-title">Software updates</h3><div class="card-subtitle">Update Murphy's Bench to the latest release without the command line. The update <strong>backs up first</strong>, applies the new version, restarts, and <strong>automatically rolls back</strong> (code and database) if anything fails. It runs in the background; this page keeps you posted.</div></div></div>
+    <div class="card-body">{% include 'core/partials/update_status.html' %}</div>
+</div>

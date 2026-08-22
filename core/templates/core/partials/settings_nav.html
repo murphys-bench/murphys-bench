@@ -1,0 +1,15 @@
+{% load mb_tabler %}
+{# The Settings sidebar. Expects tab_groups and active_tab; shared by settings.html and the Account Security page. #}
+        <div class="card">
+            {% for group_label, group_tabs, group_active in tab_groups %}
+            <button type="button" class="list-group-item list-group-item-action d-flex align-items-center fw-medium border-bottom-0" data-bs-toggle="collapse" data-bs-target="#stg-{{ forloop.counter }}" aria-expanded="{{ group_active|yesno:'true,false' }}" data-mb-group="stg-{{ forloop.counter }}">{{ group_label }}<span class="ms-auto">{% ticon 'chevron-down' 'icon-sm' %}</span></button>
+            <div class="collapse {% if group_active %}show{% endif %} list-group list-group-flush border-bottom" id="stg-{{ forloop.counter }}">
+                {% for key, label in group_tabs %}
+                {% if key == 'account_security' %}<a href="{% url 'two_factor:profile' %}" class="list-group-item list-group-item-action">{{ label }}</a>
+                {% elif key == 'users' %}<a href="{% url 'core:user_list' %}" class="list-group-item list-group-item-action">{{ label }}</a>
+                {% elif key == 'roles' %}<a href="{% url 'core:role_list' %}" class="list-group-item list-group-item-action">{{ label }}</a>
+                {% else %}<a href="?tab={{ key }}" class="list-group-item list-group-item-action {% if active_tab == key %}active{% endif %}">{{ label }}</a>{% endif %}
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>

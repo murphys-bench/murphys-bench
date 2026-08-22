@@ -5,7 +5,7 @@ from .models import (
     WorkOrderItem, Mileage, RepairType, Checklist, ChecklistItem, CannedResponse, CannedResponseCategory,
     SiteSettings, Attachment, EmailTemplate, SuppressedAddress, EmailSendLog,
     Role, TechSkill, SLAPlan, HelpTopic, KBCategory, KBArticle,
-    InboundEmailLog, TicketQueue, DashboardTile,
+    InboundEmailLog, TicketQueue,
     CustomField, CustomFieldChoice, CustomFieldValue,
     CatalogItem, LineItem, ContactPhone, MFAResetLog,
 )
@@ -112,7 +112,7 @@ class ContactAdmin(admin.ModelAdmin):
 # Device Admin
 class DeviceAdminForm(forms.ModelForm):
     """Admin edits device_type through the same table-driven choices the app
-    forms use, so an unknown slug cannot be typed in raw (outside review, Aug 15)."""
+    forms use, so an unknown slug cannot be typed in raw."""
     class Meta:
         model = Device
         fields = '__all__'
@@ -506,14 +506,6 @@ class TicketQueueAdmin(admin.ModelAdmin):
     list_filter = ['is_active']
     search_fields = ['name']
     readonly_fields = ['created_at']
-
-
-@admin.register(DashboardTile)
-class DashboardTileAdmin(admin.ModelAdmin):
-    list_display = ['label', 'row', 'visible_to', 'sort_order', 'is_active']
-    list_filter = ['row', 'visible_to', 'is_active']
-    list_editable = ['sort_order', 'is_active']
-    ordering = ['row', 'sort_order']
 
 
 class CustomFieldChoiceInline(admin.TabularInline):

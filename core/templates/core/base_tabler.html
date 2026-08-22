@@ -1,0 +1,331 @@
+{% load static mb_tabler %}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Murphy's Bench{% endblock %}</title>
+    <meta name="htmx-config" content='{"allowEval": false}'>
+    <link rel="icon" type="image/svg+xml" href="{% static 'favicon.svg' %}">
+    {% comment %}
+    THE TABLER FRAME. Pages rebuilt on Tabler extend this; pages not yet rebuilt
+    extended core/base.html (the Tailwind frame, deleted in v0.14.0). The two never shared a
+    page, so the two stylesheets never fight. When the last page moves, this
+    file becomes base.html and the old one is deleted.
+    Rules live in mb-docs/MB-ON-TABLER-DESIGN-RULES.md.
+    {% endcomment %}
+    <link rel="stylesheet" href="{% static 'vendor/tabler/1.4.0/tabler.min.css' %}">
+    <link rel="stylesheet" href="{% static 'css/mb-chrome.css' %}">
+    {# Sync on purpose: sets the theme + sidebar state before first paint. #}
+    <script src="{% static 'js/mb-boot.js' %}"></script>
+    <script defer src="{% static 'js/htmx-1.9.12.min.js' %}"></script>
+    <script defer src="{% static 'vendor/tabler/1.4.0/tabler.min.js' %}"></script>
+    <script defer src="{% static 'js/mb-chrome.js' %}"></script>
+    {% with s=site_settings %}
+    <style>
+        :root {
+            --tblr-primary: {{ s.color_accent|default:"#206bc4" }};
+            --tblr-primary-rgb: {{ s.color_accent|hex_rgb }};
+            /* Room accents, per shop (Settings > Colors). */
+            --mb-room-register: {{ s.color_room_register|default:"#2fb344" }};
+            --mb-room-desk: {{ s.color_room_desk|default:"#ae3ec9" }};
+            --mb-room-office: {{ s.color_room_office|default:"#6c7a91" }};
+            /* Status colors by slug: one variable per StatusDefinition, both entity types.
+               Templates reference var(--mb-status-<entity>-<slug>); never a hex. */
+            {% for sd in mb_status_defs %}--mb-status-{{ sd.entity_type }}-{{ sd.slug }}: {{ sd.color }};
+            {% endfor %}
+        }
+    </style>
+    {% endwith %}
+</head>
+<body data-room="{% block room %}work{% endblock %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+<div class="page">
+{% if user.is_authenticated %}
+{% with u=request.resolver_match.url_name s=site_settings %}
+<aside class="navbar navbar-vertical navbar-expand-lg" data-bs-theme="dark"
+       style="--tblr-navbar-bg: {{ s.color_sidebar_bg|default:'#1f2937' }}; --tblr-navbar-color: {{ s.color_sidebar_text|default:'#ffffff' }};">
+    <div class="container-fluid">
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mb-sidebar"
+                aria-controls="mb-sidebar" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="navbar-brand navbar-brand-autodark">
+            <a href="{% url 'core:dashboard' %}">
+                {% if s.site_logo %}
+                    <img src="{{ s.site_logo.url }}" alt="{{ s.company_name|default:"Murphy's Bench" }}">
+                {% else %}
+                    {{ s.company_name|default:"Murphy's Bench" }}
+                {% endif %}
+            </a>
+        </div>
+        <div class="collapse navbar-collapse" id="mb-sidebar">
+            <div class="d-flex flex-column w-100" style="min-height:0;">
+
+                {# The front door: one New button in the chrome (ruled Aug 20). #}
+                <div class="px-2 pt-3 pb-2">
+                    <div class="dropdown w-100">
+                        <button class="btn btn-primary w-100 dropdown-toggle" type="button"
+                                data-bs-toggle="dropdown" aria-expanded="false" title="New">
+                            {% ticon 'plus' %}<span class="nav-link-title ms-1">New</span>
+                        </button>
+                        <div class="dropdown-menu">
+                            <a class="dropdown-item" href="{% url 'core:ticket_create' %}">Ticket</a>
+                            <a class="dropdown-item" href="{% url 'core:work_order_create' %}">Work Order</a>
+                            <a class="dropdown-item" href="{% url 'core:client_create' %}">Client</a>
+                            {% if can_view_estimates %}<form method="post" action="{% url 'core:estimate_create' %}">{% csrf_token %}<button type="submit" class="dropdown-item">Estimate</button></form>{% endif %}
+                            {% if can_view_prospects %}<a class="dropdown-item" href="{% url 'core:prospect_create' %}">Prospect</a>{% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <div id="mb-nav-scroll" class="flex-fill overflow-auto" style="min-height:0;">
+                <ul class="navbar-nav">
+                    <li class="nav-item {% if u == 'dashboard' %}active{% endif %}">
+                        <a class="nav-link" href="{% url 'core:dashboard' %}" title="Board">
+                            <span class="nav-link-icon">{% ticon 'home' %}</span>
+                            <span class="nav-link-title">Board</span>
+                        </a>
+                    </li>
+                    <li class="nav-item mt-2 mb-room-group">
+                        <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-work" aria-expanded="true" aria-controls="mb-grp-work" data-mb-group="mb-grp-work">
+                            <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-work, var(--tblr-primary));"></span>
+                            <span class="mb-when-expanded">Work</span>
+                            <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
+                        </button>
+                        <ul class="navbar-nav collapse show" id="mb-grp-work">
+                            <li class="nav-item {% if u and 'ticket' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:ticket_list' %}" title="Tickets">
+                                    <span class="nav-link-icon">{% ticon 'ticket' %}</span>
+                                    <span class="nav-link-title">Tickets</span>
+                                </a>
+                            </li>
+                            <li class="nav-item {% if u and 'work_order' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:work_order_list' %}" title="Work Orders">
+                                    <span class="nav-link-icon">{% ticon 'tool' %}</span>
+                                    <span class="nav-link-title">Work Orders</span>
+                                </a>
+                            </li>
+                            {% if can_view_estimates %}
+                            <li class="nav-item {% if u and 'estimate' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:estimate_list' %}" title="Estimates">
+                                    <span class="nav-link-icon">{% ticon 'file-text' %}</span>
+                                    <span class="nav-link-title">Estimates</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                            <li class="nav-item {% if u and 'mileage' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:mileage_list' %}" title="Mileage">
+                                    <span class="nav-link-icon">{% ticon 'map-pin' %}</span>
+                                    <span class="nav-link-title">Mileage</span>
+                                </a>
+                            </li>
+                            <li class="nav-item {% if u and 'device' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:device_list' %}" title="Devices">
+                                    <span class="nav-link-icon">{% ticon 'device-laptop' %}</span>
+                                    <span class="nav-link-title">Devices</span>
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
+                    <li class="nav-item mt-2 mb-room-group">
+                        <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-desk" aria-expanded="true" aria-controls="mb-grp-desk" data-mb-group="mb-grp-desk">
+                            <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-desk, var(--tblr-primary));"></span>
+                            <span class="mb-when-expanded">Desk</span>
+                            <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
+                        </button>
+                        <ul class="navbar-nav collapse show" id="mb-grp-desk">
+                            <li class="nav-item {% if u and 'client' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:client_list' %}" title="Clients">
+                                    <span class="nav-link-icon">{% ticon 'users' %}</span>
+                                    <span class="nav-link-title">Clients</span>
+                                </a>
+                            </li>
+                            {% if can_view_prospects %}
+                            <li class="nav-item {% if u and 'prospect' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:prospect_list' %}" title="Prospects">
+                                    <span class="nav-link-icon">{% ticon 'user-plus' %}</span>
+                                    <span class="nav-link-title">Prospects</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                            <li class="nav-item {% if u and 'follow_up' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:follow_up_list' %}" title="Follow-ups">
+                                    <span class="nav-link-icon">{% ticon 'heart-handshake' %}</span>
+                                    <span class="nav-link-title">Follow-ups</span>
+                                    {% if follow_ups_due %}<span class="badge bg-purple ms-auto">{{ follow_ups_due }}</span>{% endif %}
+                                </a>
+                            </li>
+                            {% if is_admin %}
+                            <li class="nav-item {% if u and 'contract' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:contract_list' %}" title="Contracts">
+                                    <span class="nav-link-icon">{% ticon 'contract' %}</span>
+                                    <span class="nav-link-title">Contracts</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                        </ul>
+                    </li>
+                    {% if can_view_sales %}
+                    <li class="nav-item mt-2 mb-room-group">
+                        <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-register" aria-expanded="true" aria-controls="mb-grp-register" data-mb-group="mb-grp-register">
+                            <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-register, var(--tblr-primary));"></span>
+                            <span class="mb-when-expanded">Register</span>
+                            <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
+                        </button>
+                        <ul class="navbar-nav collapse show" id="mb-grp-register">
+                            <li class="nav-item {% if u and 'pos' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:pos_home' %}" title="Register">
+                                    <span class="nav-link-icon">{% ticon 'cash-register' %}</span>
+                                    <span class="nav-link-title">Register</span>
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
+                    {% endif %}
+                    <li class="nav-item mt-2 mb-room-group">
+                        <button type="button" class="nav-link mb-room-heading w-100" data-bs-toggle="collapse" data-bs-target="#mb-grp-back-office" aria-expanded="true" aria-controls="mb-grp-back-office" data-mb-group="mb-grp-back-office">
+                            <span class="status-dot me-2" style="--tblr-status-color: var(--mb-room-office, var(--tblr-primary));"></span>
+                            <span class="mb-when-expanded">Back Office</span>
+                            <span class="ms-auto mb-when-expanded mb-room-chevron">{% ticon 'chevron-down' 'icon-sm' %}</span>
+                        </button>
+                        <ul class="navbar-nav collapse show" id="mb-grp-back-office">
+                            <li class="nav-item {% if u and 'catalog' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:catalog_list' %}" title="Products &amp; Services">
+                                    <span class="nav-link-icon">{% ticon 'tag' %}</span>
+                                    <span class="nav-link-title">Products &amp; Services</span>
+                                </a>
+                            </li>
+                            <li class="nav-item {% if u and 'kb' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:kb_list' %}" title="Knowledge Base">
+                                    <span class="nav-link-icon">{% ticon 'book' %}</span>
+                                    <span class="nav-link-title">Knowledge Base</span>
+                                </a>
+                            </li>
+                            {% if is_admin %}
+                            <li class="nav-item {% if u and 'queue' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:queue_list' %}" title="Queues">
+                                    <span class="nav-link-icon">{% ticon 'filter' %}</span>
+                                    <span class="nav-link-title">Queues</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                            {% if is_admin %}
+                            <li class="nav-item {% if u and 'report' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:reports' %}" title="Reports">
+                                    <span class="nav-link-icon">{% ticon 'chart-bar' %}</span>
+                                    <span class="nav-link-title">Reports</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                            {% if is_admin %}
+                            <li class="nav-item {% if u == 'settings' %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:settings' %}" title="Settings">
+                                    <span class="nav-link-icon">{% ticon 'settings' %}</span>
+                                    <span class="nav-link-title">Settings</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                            {% if can_manage_users and not is_admin %}
+                            <li class="nav-item {% if u and 'user' in u %}active{% endif %}">
+                                <a class="nav-link" href="{% url 'core:user_list' %}" title="Users">
+                                    <span class="nav-link-icon">{% ticon 'user' %}</span>
+                                    <span class="nav-link-title">Users</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                        </ul>
+                    </li>
+                </ul>
+                </div>
+
+                {# Bottom: who you are, attention, account, display. #}
+                <ul class="navbar-nav mt-auto border-top pt-2" style="border-color:rgba(255,255,255,.1)!important;">
+                    <li class="nav-item {% if u and 'notification' in u %}active{% endif %}">
+                        <a class="nav-link" href="{% url 'core:notifications' %}" title="Notifications">
+                            <span class="nav-link-icon">{% ticon 'bell' %}</span>
+                            <span class="nav-link-title">Notifications</span>
+                            <span hx-get="{% url 'core:notification_count' %}?style=tabler" hx-trigger="load, every 60s"
+                                  hx-swap="innerHTML" class="ms-auto"></span>
+                        </a>
+                    </li>
+                    {% if not is_admin %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'core:my_security' %}" title="My Security">
+                            <span class="nav-link-icon">{% ticon 'lock' %}</span>
+                            <span class="nav-link-title">My Security</span>
+                        </a>
+                    </li>
+                    {% endif %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'accounts:logout' %}" title="Log out">
+                            <span class="nav-link-icon">{% ticon 'logout' %}</span>
+                            <span class="nav-link-title">Log out</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <button type="button" class="nav-link w-100 text-start" data-mb-toggle="theme" title="Toggle dark mode">
+                            <span class="nav-link-icon">{% ticon 'moon' %}</span>
+                            <span class="nav-link-title" data-mb-theme-label>Dark mode</span>
+                        </button>
+                    </li>
+                    <li class="nav-item d-none d-lg-block">
+                        <button type="button" class="nav-link w-100 text-start" data-mb-toggle="sidebar" title="Collapse sidebar">
+                            <span class="nav-link-icon mb-when-expanded">{% ticon 'layout-sidebar-left-collapse' %}</span>
+                            <span class="nav-link-icon mb-when-collapsed">{% ticon 'layout-sidebar-left-expand' %}</span>
+                            <span class="nav-link-title">Collapse</span>
+                        </button>
+                    </li>
+                    <li class="nav-item mb-when-expanded">
+                        <div class="nav-link" style="opacity:.6;">
+                            <div class="text-truncate">
+                                <div>{{ user.get_full_name|default:user.username }}</div>
+                                <div class="small">{{ user.role_obj.name|default:user.role|default:"" }}</div>
+                            </div>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</aside>
+{% endwith %}
+{% endif %}
+
+<div class="page-wrapper">
+    {% block page_header %}{% endblock %}
+    <div class="page-body">
+        <div class="container-fluid">
+            {% if messages %}
+            {% for message in messages %}
+            <div class="alert alert-dismissible {% if message.tags == 'success' %}alert-success{% elif message.tags == 'error' %}alert-danger{% elif message.tags == 'warning' %}alert-warning{% else %}alert-info{% endif %}" role="alert">
+                {{ message }}
+                <a class="btn-close" data-bs-dismiss="alert" aria-label="Dismiss"></a>
+            </div>
+            {% endfor %}
+            {% endif %}
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+</div>
+</div>
+<div class="modal modal-blur fade" id="mb-confirm" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered" role="document">
+        <div class="modal-content">
+            <div class="modal-body text-center py-4">
+                <div class="text-red mb-2">{% ticon 'alert-triangle' 'icon-lg' %}</div>
+                <h3>Are you sure?</h3>
+                <div class="text-secondary" data-mb-confirm-text></div>
+            </div>
+            <div class="modal-footer">
+                <div class="w-100">
+                    <div class="row">
+                        <div class="col"><button type="button" class="btn w-100" data-bs-dismiss="modal">Cancel</button></div>
+                        <div class="col"><button type="button" class="btn btn-danger w-100" data-mb-confirm-ok>Yes, do it</button></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

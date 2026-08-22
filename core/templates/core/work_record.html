@@ -1,0 +1,640 @@
+{% extends "core/base_tabler.html" %}
+{% load static mb_tabler mb_icons %}
+{% comment %}
+ARCHETYPE 3, THE WORK RECORD. One work item, its whole lifecycle, one page
+(ruled Aug 20 2026). Rendered for /tickets/<pk>/ and /work-orders/<pk>/ alike:
+`ticket` and `work_order` may each be present or None. Ticket-phase sections on
+top (who, request, conversation), work-order-phase sections below (details,
+work performed, checklist, bench notes, time, settlement). Every section is
+PRESENT even when quiet; a ticket with no work order shows the work-order
+section collapsed with convert-in-place. The action bar is the same bar in the
+same place on every record. Status is carried by color (stripe + dot/word); the
+status control sits with the reply.
+{% endcomment %}
+
+{% block title %}{% if ticket %}{{ ticket.ticket_number }}{% if work_order %} / {{ work_order.work_order_number }}{% endif %}{% else %}{{ work_order.work_order_number }}{% endif %} - Murphy's Bench{% endblock %}
+
+{% block page_header %}
+{% with client=record_client %}
+<div class="page-header d-print-none mb-stripe" style="--mb-stripe: {% if work_order %}var(--mb-status-workorder-{{ work_order.status }}, var(--tblr-secondary)){% else %}var(--mb-status-ticket-{{ ticket.status }}, var(--tblr-secondary)){% endif %};">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <div class="page-pretitle">
+                    {% if ticket %}{{ ticket.ticket_number }}{% endif %}{% if ticket and work_order %} &middot; {% endif %}{% if work_order %}{{ work_order.work_order_number }}{% endif %}
+                </div>
+                <h2 class="page-title">
+                    {% if client %}<a href="{% url 'core:client_detail' client.pk %}" class="text-reset">{{ client.name }}</a>
+                        {% if client.is_unsorted %}<span class="badge bg-indigo-lt ms-2">Needs triage</span>
+                        {% elif client.client_type == 'business' %}<span class="badge bg-azure-lt ms-2">Business</span>
+                        {% else %}<span class="badge bg-secondary-lt ms-2">Residential</span>{% endif %}
+                    {% else %}Walk-in{% endif %}
+                </h2>
+                <div class="text-secondary">
+                    {% if ticket %}{{ ticket.subject }}{% elif work_order.reported_problem %}{{ work_order.reported_problem|truncatechars:100 }}{% elif work_order.repair_type %}{{ work_order.repair_type }}{% endif %}
+                    {% if work_order and work_order.device %} &middot; {{ work_order.device }}{% elif ticket and ticket.device %} &middot; {{ ticket.device }}{% endif %}
+                </div>
+            </div>
+            <div class="col-auto text-end">
+                {# ── The action bar: same groups, same place, every record ── #}
+                <div class="btn-group" role="group" aria-label="Record actions">
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">Owner / Device</button>
+                        <div class="dropdown-menu">
+                            {% if client %}
+                            <a class="dropdown-item" href="{% url 'core:client_detail' client.pk %}">View client</a>
+                            <a class="dropdown-item" href="{% url 'core:client_edit' client.pk %}">Edit client</a>
+                            {% endif %}
+                            {% with dev=record_device %}
+                            {% if dev %}<a class="dropdown-item" href="{% url 'core:device_edit' dev.pk %}">Edit device</a>{% endif %}
+                            {% endwith %}
+                            {% if work_order and can_edit_workorder %}<button class="dropdown-item" type="button" data-bs-toggle="collapse" data-bs-target="#device-change">Change device</button>{% endif %}
+                        </div>
+                    </div>
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">Work Item</button>
+                        <div class="dropdown-menu">
+                            {% if ticket and can_edit_ticket and ticket.status != 'closed' %}<a class="dropdown-item" href="{% url 'core:ticket_edit' ticket.pk %}">Edit ticket</a>{% endif %}
+                            {% if work_order and can_edit_workorder %}<a class="dropdown-item" href="{% url 'core:work_order_edit' work_order.pk %}">Edit work order</a>{% endif %}
+                            {% if ticket and not work_order and can_create_workorder and can_edit_ticket %}<form method="post" action="{% url 'core:ticket_convert' ticket.pk %}">{% csrf_token %}<button type="submit" class="dropdown-item">Convert to Work Order</button></form>{% endif %}
+                            {% if work_order and work_order.service_type == 'onsite' %}<a class="dropdown-item" href="{% url 'core:wo_mileage_create' work_order.pk %}">Log mileage</a>{% endif %}
+                            <a class="dropdown-item" href="#sec-history">History</a>
+                            <a class="dropdown-item" href="{% url 'core:kb_list' %}{% if ticket %}?q={{ ticket.subject|urlencode }}{% endif %}">Search KB</a>
+                            {% if ticket and can_delete_ticket and not work_order %}
+                            <div class="dropdown-divider"></div>
+                            <form method="post" action="{% url 'core:ticket_delete' ticket.pk %}" data-mb-confirm="Delete {{ ticket.ticket_number }} and every reply on it? This cannot be undone.">
+                                {% csrf_token %}<button type="submit" class="dropdown-item text-danger">Delete ticket</button>
+                            </form>
+                            {% endif %}
+                            {% if work_order and is_admin %}
+                            <div class="dropdown-divider"></div>
+                            <form method="post" action="{% url 'core:work_order_delete' work_order.pk %}" data-mb-confirm="Permanently delete {{ work_order.work_order_number }}? This removes its line items, notes and attachments. This cannot be undone.">
+                                {% csrf_token %}<button type="submit" class="dropdown-item text-danger">Delete work order</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">Print</button>
+                        <div class="dropdown-menu">
+                            {% if work_order %}
+                            <a class="dropdown-item" href="{% url 'core:work_order_print' work_order.pk %}" target="_blank">Repair report</a>
+                            <a class="dropdown-item" href="{% url 'core:work_order_print' work_order.pk %}?type=claim" target="_blank">Claim ticket</a>
+                            {% else %}<span class="dropdown-item text-secondary">Nothing to print until there is a work order</span>{% endif %}
+                        </div>
+                    </div>
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">Email</button>
+                        <div class="dropdown-menu">
+                            {% if work_order %}<a class="dropdown-item" href="{% url 'core:work_order_email_report' work_order.pk %}">Email repair report</a>{% endif %}
+                            {% if ticket and ticket.status != 'closed' and can_reply_customer %}<a class="dropdown-item" href="#reply-form">Reply to client</a>{% endif %}
+                            {% if client and not client.is_unsorted %}<a class="dropdown-item" href="{% url 'core:customer_email' %}?{% if work_order %}work_order={{ work_order.pk }}{% else %}ticket={{ ticket.pk }}{% endif %}">Email customer (your templates)</a>
+                            <a class="dropdown-item" href="{% url 'core:client_detail' client.pk %}#relationship">Plan a follow-up</a>{% endif %}
+                            {% if not work_order and not ticket %}<span class="dropdown-item text-secondary">Nothing to send</span>{% endif %}
+                        </div>
+                    </div>
+                    <a class="btn" href="#status-control" title="Status is changed next to the reply">
+                        {% if work_order %}<span class="status-dot me-1" style="--tblr-status-color: var(--mb-status-workorder-{{ work_order.status }}, var(--tblr-secondary));"></span>{{ work_order.status|status_word:'workorder' }}{% else %}<span class="status-dot me-1" style="--tblr-status-color: var(--mb-status-ticket-{{ ticket.status }}, var(--tblr-secondary));"></span>{{ ticket.status|status_word:'ticket' }}{% endif %}
+                    </a>
+                </div>
+                <div class="text-secondary small mt-1">
+                    {% if work_order %}{{ days_open }} day{{ days_open|pluralize }} open{% if work_order.completed_date %}, completed {{ work_order.completed_date|date:"M j" }}{% endif %}{% elif ticket %}Opened {{ ticket.created_at|date:"M j, Y" }} ({{ ticket.created_at|age_short }} ago){% endif %}
+                    {% if ticket and ticket.due_at and not ticket.first_responded_at %} &middot; response due {{ ticket.due_at|date:"M j g:i A" }}{% endif %}
+                    {% if ticket and ticket.priority != 'normal' %} &middot; <span class="{% if ticket.priority == 'urgent' or ticket.priority == 'high' %}text-orange{% endif %}">{{ ticket.get_priority_display }} priority</span>{% elif work_order and work_order.priority != 'normal' %} &middot; <span class="{% if work_order.priority == 'urgent' or work_order.priority == 'high' %}text-orange{% endif %}">{{ work_order.get_priority_display }} priority</span>{% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endwith %}
+{% endblock %}
+
+{% block content %}
+{% if ticket %}
+<div data-mb-lock-release="{% url 'core:ticket_lock_release' ticket.pk %}" data-mb-csrf="{{ csrf_token }}"></div>
+<div id="lock-banner-wrapper" hx-get="{% url 'core:ticket_lock_status' ticket.pk %}" hx-trigger="load, every 30s" hx-target="#lock-banner-wrapper" hx-swap="innerHTML">
+    {% include "core/partials/ticket_lock_banner.html" with lock_user=lock_user %}
+</div>
+{% if ticket.wo_complete %}
+<div class="alert alert-success">{% ticon 'check' 'icon-sm' %} <strong>Work is complete.</strong> Contact the client and close this ticket when done.</div>
+{% endif %}
+{% if ticket.needs_response %}
+<div class="alert alert-warning">
+    <div class="d-flex align-items-center gap-2">
+        <div class="flex-fill">
+            {% if ticket.status in ticket.CLOSED_AT_STATUSES %}<strong>Client replied after this ticket was closed.</strong> Reopen to respond, or dismiss with a note.{% else %}<strong>Client replied, response needed.</strong> Reply below to clear this, or dismiss with a note.{% endif %}
+        </div>
+        {% if ticket.status in ticket.CLOSED_AT_STATUSES and can_close_tickets %}
+        <form method="post" action="{% url 'core:ticket_reopen' ticket.pk %}">{% csrf_token %}<button type="submit" class="btn btn-sm">Reopen</button></form>
+        {% endif %}
+        {% if can_edit_ticket %}<button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#dismiss-response">Dismiss</button>{% endif %}
+    </div>
+    <div class="collapse mt-2" id="dismiss-response">
+        <form method="post" action="{% url 'core:ticket_dismiss_response' ticket.pk %}" class="input-group">
+            {% csrf_token %}
+            <input type="text" name="note" class="form-control" placeholder="Reason for dismissing" required>
+            <button type="submit" class="btn">Confirm</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+<div id="overdue-section" class="mb-2">{% include "core/partials/overdue_badge.html" %}</div>
+{% endif %}
+
+<div class="accordion" id="record">
+
+    {# ══ WHO ═══════════════════════════════════════════════════════════ #}
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#sec-who" aria-expanded="true">{{ record_standing }}</button></h2>
+        <div id="sec-who" class="accordion-collapse collapse show">
+            <div class="accordion-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        {% with client=record_client contact=record_contact %}
+                        <div class="subheader">{{ record_standing }}</div>
+                        {% if client %}
+                        <div class="fw-medium"><a href="{% url 'core:client_detail' client.pk %}" class="text-reset">{{ client.name }}</a></div>
+                        {% if contact %}<div>{{ contact.first_name }} {{ contact.last_name }}{% if contact.email %} &middot; {{ contact.email }}{% endif %}</div>{% endif %}
+                        {% if client.phone %}<div class="text-secondary">{{ client.phone }}</div>{% endif %}
+                        {% if client.email %}<div class="text-secondary">{{ client.email }}</div>{% endif %}
+                        {% if client.address_line1 %}<div class="text-secondary small">{{ client.address_line1 }}{% if client.address_line2 %}, {{ client.address_line2 }}{% endif %}, {{ client.address_city }}{% if client.address_state %}, {{ client.address_state }}{% endif %} {{ client.address_zip }}</div>{% endif %}
+                        {% else %}
+                        <div class="text-secondary">Walk-in (anonymous){% if contact %} &middot; {{ contact.first_name }} {{ contact.last_name }}{% endif %}</div>
+                        {% endif %}
+                        {% endwith %}
+                    </div>
+                    <div class="col-md-6">
+                        {% if work_order %}
+                        {% url 'core:work_order_quick_update' work_order.pk as wo_quick_update_url %}
+                        {% include "core/partials/device_card.html" with device=work_order.device spec_cpu=work_order.cpu spec_ram=work_order.ram spec_storage=work_order.storage change_action=wo_quick_update_url client_devices=client_devices current_device_id=work_order.device_id show_credentials=True cred_work_order=work_order %}
+                        {% else %}
+                        {% include "core/partials/device_card.html" with device=ticket.device show_credentials=True cred_ticket=ticket %}
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ══ REQUEST (ticket phase) ════════════════════════════════════════ #}
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#sec-request" aria-expanded="true">Request</button></h2>
+        <div id="sec-request" class="accordion-collapse collapse show">
+            <div class="accordion-body">
+                {% if ticket %}
+                <h3 class="mb-1">{{ ticket.subject }}</h3>
+                <div class="mb-3" style="white-space: pre-wrap;">{{ ticket.description }}</div>
+                <div class="row g-3">
+                    <div class="col-6 col-md-3">
+                        <div class="subheader">Priority</div>
+                        <span id="ticket-priority-badge" class="{% if ticket.priority == 'urgent' or ticket.priority == 'high' %}text-orange fw-medium{% endif %}">{% if ticket.priority == 'urgent' or ticket.priority == 'high' %}{% ticon 'alert-triangle' 'icon-sm' %} {% endif %}{{ ticket.get_priority_display }}</span>
+                        {% if can_edit_ticket %}
+                        <button type="button" class="btn btn-sm btn-ghost-secondary ms-1" data-bs-toggle="collapse" data-bs-target="#priority-edit">Change</button>
+                        <form method="post" action="{% url 'core:ticket_priority_update' ticket.pk %}" class="collapse mt-1 input-group input-group-sm" id="priority-edit">
+                            {% csrf_token %}
+                            <select name="priority" class="form-select form-select-sm">{% for value, label in ticket.PRIORITY_CHOICES %}<option value="{{ value }}" {% if ticket.priority == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+                            <button type="submit" class="btn btn-sm">Save</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="subheader">Assigned to</div>
+                        {% if ticket.assigned_to %}{{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }} <span class="badge bg-secondary-lt">L{{ ticket.assigned_to.level }}</span>{% else %}<span class="text-secondary">Unassigned</span> <span class="badge bg-secondary-lt">needs L{{ ticket.escalation_level }}</span>{% endif %}
+                        {% if ticket.escalation_pending %}<span class="badge bg-orange-lt">awaiting L{{ ticket.escalation_level }} pickup</span>{% endif %}
+                        <div class="mt-1 d-flex flex-wrap gap-1">
+                            {% if ticket.assigned_to != request.user %}
+                            <form method="post" action="{% url 'core:ticket_assign' ticket.pk %}">{% csrf_token %}<input type="hidden" name="claim" value="1"><button type="submit" class="btn btn-sm">Claim</button></form>
+                            {% endif %}
+                            {% if can_assign_ticket %}<button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#assign-edit">{% if is_admin %}Assign{% else %}Transfer{% endif %}</button>{% endif %}
+                            {% if ticket.can_escalate and can_edit_ticket %}
+                            <form method="post" action="{% url 'core:ticket_escalate' ticket.pk %}">{% csrf_token %}<button type="submit" class="btn btn-sm text-orange">{% ticon 'arrow-up' 'icon-sm' %} Escalate</button></form>
+                            {% endif %}
+                        </div>
+                        {% if can_assign_ticket %}
+                        <form method="post" action="{% url 'core:ticket_assign' ticket.pk %}" class="collapse mt-1 input-group input-group-sm" id="assign-edit">
+                            {% csrf_token %}
+                            <select name="assigned_to" class="form-select form-select-sm"><option value="">Unassigned</option>{% for u in all_users %}<option value="{{ u.pk }}" {% if ticket.assigned_to_id == u.pk %}selected{% endif %}>{{ u.get_full_name|default:u.username }} (L{{ u.level }})</option>{% endfor %}</select>
+                            <button type="submit" class="btn btn-sm">Save</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="subheader">Source &middot; topic</div>
+                        {{ ticket.get_source_display }}{% if ticket.help_topic %} &middot; {{ ticket.help_topic.name }}{% endif %}
+                        {% if ticket.sla_plan %}<div class="text-secondary small">{{ ticket.sla_plan.name }}{% if ticket.due_at %}, due {{ ticket.due_at|date:"M j, g:i A" }}{% endif %}</div>{% endif %}
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="subheader">Time on ticket</div>
+                        <span id="ticket-time-spent-wrapper">{% include "core/partials/ticket_time_spent.html" %}</span>
+                    </div>
+                    {% for entry in ticket_custom_fields %}
+                    <div class="col-6 col-md-3">
+                        <div class="subheader">{{ entry.field.label }}</div>
+                        {% if entry.field.field_type == 'checkbox' %}{% if entry.value == '1' %}Yes{% else %}No{% endif %}{% else %}{{ entry.value|default:"" }}{% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="empty py-2">
+                    <p class="empty-title">This work arrived without a ticket</p>
+                    <p class="empty-subtitle text-secondary">Walk-in or direct work order. The request is recorded on the work order below.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    {# ══ CONVERSATION (ticket phase) ══════════════════════════════════ #}
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#sec-conversation" aria-expanded="true">Conversation{% if ticket %} <span class="badge bg-blue-lt ms-2">{{ ticket.replies.count }}</span>{% endif %}</button></h2>
+        <div id="sec-conversation" class="accordion-collapse collapse show">
+            <div class="accordion-body">
+                {% if ticket %}
+                <div id="replies-list" class="d-flex flex-column gap-2 mb-3">
+                    {% for item in thread %}
+                        {% if item.is_event %}
+                        <div class="text-secondary small ps-2 border-start border-2">
+                            {{ item.created_at|date:"M j, Y g:i A" }} &middot; {% if item.actor %}{{ item.actor.get_full_name|default:item.actor.username }}{% else %}System{% endif %}:
+                            {% for c in item.changes %}{{ c.field|cut:"_"|capfirst }} {{ c.old|default:"none" }} &rarr; {{ c.new|default:"none" }}{% if not forloop.last %}; {% endif %}{% endfor %}
+                        </div>
+                        {% else %}
+                        {% include "core/partials/ticket_reply_item.html" with reply=item.reply %}
+                        {% endif %}
+                    {% empty %}
+                        <div class="text-secondary" id="no-replies-msg">No replies yet.</div>
+                    {% endfor %}
+                </div>
+                {% if work_order %}
+                <div class="mb-3">
+                    <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#msg-bench">{% ticon 'message-circle' 'icon-sm' %} Message Bench Tech</button>
+                    <form class="collapse mt-2" id="msg-bench" hx-post="{% url 'core:ticket_message_tech' ticket.pk %}" hx-target="#replies-list" hx-swap="beforeend" data-mb-reset-after="#msg-bench">
+                        {% csrf_token %}
+                        <div class="text-secondary small mb-1">Internal note to the bench tech on {{ work_order.work_order_number }} ({{ work_order.assigned_to.get_full_name|default:"unassigned" }}). The client never sees this.</div>
+                        <textarea name="content" rows="3" class="form-control" required placeholder="e.g. Client approved the SSD upgrade, go ahead."></textarea>
+                        <button type="submit" class="btn btn-sm mt-2">Send to Bench Tech</button>
+                    </form>
+                </div>
+                {% endif %}
+
+                {% if ticket.status != 'closed' %}
+                <div class="row g-3" id="reply-form">
+                    <div class="col-lg-8">
+                        {% if can_reply_internal or can_reply_customer %}
+                        <form hx-post="{% url 'core:ticket_reply_add' ticket.pk %}" hx-target="#replies-list" hx-swap="beforeend" hx-encoding="multipart/form-data">
+                            {% csrf_token %}
+                            {% if can_reply_customer and can_reply_internal %}
+                            <div class="mb-2">
+                                <label class="form-check form-check-inline"><input type="radio" name="reply_type" value="customer_visible" class="form-check-input" checked><span class="form-check-label">{% ticon 'user' 'icon-sm' %} To the client</span></label>
+                                <label class="form-check form-check-inline"><input type="radio" name="reply_type" value="internal" class="form-check-input"><span class="form-check-label">{% ticon 'lock' 'icon-sm' %} Internal note</span></label>
+                            </div>
+                            {% else %}
+                            {% comment %}One grant only: the hidden input MUST stay (the view defaults reply_type to 'internal').{% endcomment %}
+                            <input type="hidden" name="reply_type" value="{% if can_reply_customer %}customer_visible{% else %}internal{% endif %}">
+                            <div class="text-secondary small mb-2">{% if can_reply_customer %}Goes to the client.{% else %}Internal note; the client never sees this.{% endif %}</div>
+                            {% endif %}
+                            <div class="mb-2 input-group input-group-sm" data-mb-show-for="reply_type=customer_visible">
+                                <select name="cc_mode" class="form-select form-select-sm" style="max-width: 6rem;"><option value="bcc" selected>BCC</option><option value="cc">CC</option></select>
+                                <input type="text" name="cc_emails" class="form-control" placeholder="Also send to (comma-separated emails, optional)">
+                            </div>
+                            <textarea name="content" rows="6" class="form-control mb-2" placeholder="Write the reply" required data-mb-draft="mb_draft_{{ ticket.pk }}"></textarea>
+                            <div class="d-flex align-items-center gap-2">
+                                <input type="file" name="attachments" multiple class="form-control form-control-sm" style="max-width: 20rem;">
+                                <button type="submit" class="btn btn-primary ms-auto">{% ticon 'send' 'icon-sm' %} Send reply</button>
+                            </div>
+                        </form>
+                        {% endif %}
+                    </div>
+                    <div class="col-lg-4" id="status-control">
+                        {% comment %}Status sits WITH the reply, changed when there is a reason (ruled Aug 18).{% endcomment %}
+                        {% if can_edit_ticket or can_close_tickets %}
+                        <form method="post" action="{% url 'core:ticket_status_update' ticket.pk %}">
+                            {% csrf_token %}
+                            <label class="form-label">Ticket status</label>
+                            <div class="input-group">
+                                <select name="status" class="form-select">
+                                    {% for sd in ticket_statuses %}
+                                    {% if sd.slug in ticket.CLOSED_AT_STATUSES %}{% if can_close_tickets %}<option value="{{ sd.slug }}" {% if ticket.status == sd.slug %}selected{% endif %}>{{ sd.label }}</option>{% endif %}{% elif can_edit_ticket %}<option value="{{ sd.slug }}" {% if ticket.status == sd.slug %}selected{% endif %}>{{ sd.label }}</option>{% endif %}
+                                    {% endfor %}
+                                </select>
+                                <button type="submit" class="btn">Set</button>
+                            </div>
+                        </form>
+                        {% endif %}
+                        {% if ticket.wo_complete and can_close_tickets %}
+                        <form method="post" action="{% url 'core:ticket_close' ticket.pk %}" class="mt-2">{% csrf_token %}<button type="submit" class="btn btn-success w-100">Close ticket</button></form>
+                        {% endif %}
+                    </div>
+                </div>
+                {% else %}
+                <div class="text-secondary">This ticket is closed.</div>
+                {% endif %}
+                {% else %}
+                <div class="empty py-2">
+                    <p class="empty-title">No client conversation</p>
+                    <p class="empty-subtitle text-secondary">There is no ticket behind this work order, so there is no client thread. Bench notes are below.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    {# ══ WORK ORDER phase ══════════════════════════════════════════════ #}
+    {% if work_order %}
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#sec-wo" aria-expanded="true">Work order <span class="text-secondary ms-2">{{ work_order.work_order_number }}</span></button></h2>
+        <div id="sec-wo" class="accordion-collapse collapse show">
+            <div class="accordion-body">
+                {% if not ticket %}
+                <div class="subheader">Reported issue / work requested</div>
+                <div class="mb-3" style="white-space: pre-wrap;">{{ work_order.reported_problem|default:"Nothing recorded yet." }}</div>
+                {% elif work_order.reported_problem %}
+                <div class="subheader">Work requested</div>
+                <div class="mb-3" style="white-space: pre-wrap;">{{ work_order.reported_problem }}</div>
+                {% endif %}
+                <div class="row g-3">
+                    <div class="col-6 col-md-3"><div class="subheader">Repair type</div>{{ work_order.repair_type|default:"" }}</div>
+                    <div class="col-6 col-md-3"><div class="subheader">Service</div>{{ work_order.get_service_type_display }}{% if work_order.scheduled_date %}, {{ work_order.scheduled_date|date:"M j" }}{% endif %}</div>
+                    <div class="col-6 col-md-3">
+                        <div class="subheader">Bench tech</div>
+                        {{ work_order.assigned_to.get_full_name|default:"Unassigned" }}{% if work_order.assigned_to %} <span class="badge bg-secondary-lt">L{{ work_order.assigned_to.level }}</span>{% endif %}
+                        {% if work_order.assigned_to != request.user %}<form method="post" action="{% url 'core:wo_claim' work_order.pk %}" class="d-inline ms-1">{% csrf_token %}<button type="submit" class="btn btn-sm">Claim</button></form>{% endif %}
+                    </div>
+                    <div class="col-6 col-md-3"><div class="subheader">Time on bench</div><span id="time-spent-wrapper">{% include "core/partials/wo_time_spent.html" %}</span></div>
+                    {% if work_order.priority != 'normal' %}<div class="col-6 col-md-3"><div class="subheader">Priority</div><span class="{% if work_order.priority == 'urgent' or work_order.priority == 'high' %}text-orange fw-medium{% endif %}">{{ work_order.get_priority_display }}</span></div>{% endif %}
+                    {% if work_order.invoice_ninja_ref %}<div class="col-6 col-md-3"><div class="subheader">Invoice Ninja ref</div><span class="font-monospace">{{ work_order.invoice_ninja_ref }}</span></div>{% endif %}
+                    {% for entry in wo_custom_fields %}
+                    <div class="col-6 col-md-3"><div class="subheader">{{ entry.field.label }}</div>{% if entry.field.field_type == 'checkbox' %}{% if entry.value == '1' %}Yes{% else %}No{% endif %}{% else %}{{ entry.value|default:"" }}{% endif %}</div>
+                    {% endfor %}
+                </div>
+                {% if can_edit_workorder or can_close_workorder %}
+                <div class="mt-3">
+                    <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#wo-edit">{% ticon 'pencil' 'icon-sm' %} Edit details</button>
+                    <form method="post" action="{% url 'core:work_order_quick_update' work_order.pk %}" class="collapse mt-2" id="wo-edit">
+                        {% csrf_token %}
+                        <input type="hidden" name="device" value="{{ work_order.device_id|default:'' }}">
+                        <div class="row g-2">
+                            <div class="col-md-3"><label class="form-label">Status</label><select name="status" class="form-select form-select-sm">{% for val, label in wo_status_choices %}<option value="{{ val }}" {% if work_order.status == val %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+                            <div class="col-md-3"><label class="form-label">Priority</label><select name="priority" class="form-select form-select-sm">{% for val, label in work_order.PRIORITY_CHOICES %}<option value="{{ val }}" {% if work_order.priority == val %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+                            <div class="col-md-3"><label class="form-label">Service type</label><select name="service_type" class="form-select form-select-sm">{% for val, label in work_order.SERVICE_TYPE_CHOICES %}<option value="{{ val }}" {% if work_order.service_type == val %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+                            <div class="col-md-3"><label class="form-label">Repair type</label><select name="repair_type" class="form-select form-select-sm"><option value="">None</option>{% for rt in all_repair_types %}<option value="{{ rt.pk }}" {% if work_order.repair_type_id == rt.pk %}selected{% endif %}>{{ rt.name }}</option>{% endfor %}<option value="custom">Custom (type below)</option></select><input type="text" name="custom_repair_type" class="form-control form-control-sm mt-1" placeholder="Custom repair type"></div>
+                            <div class="col-md-3"><label class="form-label">Bench tech</label><select name="assigned_to" class="form-select form-select-sm"><option value="">Unassigned</option>{% for u in all_users %}<option value="{{ u.pk }}" {% if work_order.assigned_to_id == u.pk %}selected{% endif %}>{{ u.get_full_name|default:u.username }} (L{{ u.level }})</option>{% endfor %}</select></div>
+                            <div class="col-md-3"><label class="form-label">Scheduled</label><input type="date" name="scheduled_date" value="{{ work_order.scheduled_date|date:'Y-m-d'|default:'' }}" class="form-control form-control-sm"></div>
+                            <div class="col-md-3"><label class="form-label">Contact</label><select name="contact" class="form-select form-select-sm"><option value="">None</option>{% for c in client_contacts %}<option value="{{ c.pk }}" {% if work_order.contact_id == c.pk %}selected{% endif %}>{{ c.first_name }} {{ c.last_name }}</option>{% endfor %}</select></div>
+                            <div class="col-md-3"><label class="form-label">Invoice Ninja ref</label><input type="text" name="invoice_ninja_ref" value="{{ work_order.invoice_ninja_ref }}" class="form-control form-control-sm"></div>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-sm mt-2">Save</button>
+                    </form>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#sec-work" aria-expanded="true">Work performed{% if work_order.line_items_total %} <span class="text-secondary ms-2">${{ work_order.line_items_total|floatformat:2 }}</span>{% endif %}</button></h2>
+        <div id="sec-work" class="accordion-collapse collapse show">
+            <div class="accordion-body">
+                {% if can_edit_workorder %}
+                <div class="mb-2">
+                    <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#wp-custom">{% ticon 'plus' 'icon-sm' %} Custom line</button>
+                    {% if catalog_by_category %}<button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#wp-catalog">{% ticon 'tag' 'icon-sm' %} From catalog</button>{% endif %}
+                </div>
+                <form class="collapse mb-3" id="wp-custom" method="post" action="{% url 'core:work_performed_custom' work_order.pk %}" hx-post="{% url 'core:work_performed_custom' work_order.pk %}" hx-target="#work-performed-section" hx-swap="innerHTML" data-mb-reset-after="#wp-custom">
+                    {% csrf_token %}
+                    <div class="row g-2">
+                        <div class="col-md-2"><select name="kind" class="form-select form-select-sm"><option value="labor">Labor</option><option value="part">Part</option></select></div>
+                        <div class="col-md-5"><input type="text" name="custom_label" class="form-control form-control-sm" placeholder="What was done / part name" required></div>
+                        <div class="col-md-2"><input type="number" name="quantity" value="1" min="0" step="0.01" class="form-control form-control-sm" placeholder="Qty"></div>
+                        <div class="col-md-2"><input type="number" name="unit_price" min="0" step="0.01" class="form-control form-control-sm" placeholder="Unit $ (optional)"></div>
+                        <div class="col-md-1"><button type="submit" class="btn btn-sm btn-primary w-100">Log</button></div>
+                        <div class="col-12"><input type="text" name="notes" class="form-control form-control-sm" placeholder="Details (optional)"></div>
+                    </div>
+                </form>
+                <div class="collapse mb-3" id="wp-catalog">
+                    {% for category, items in catalog_by_category.items %}
+                    <div class="mb-2">
+                        <div class="subheader">{{ category }}</div>
+                        <div class="d-flex flex-wrap gap-1">
+                            {% for item in items %}
+                            <form method="post" action="{% url 'core:work_performed_log' work_order.pk item.pk %}" hx-post="{% url 'core:work_performed_log' work_order.pk item.pk %}" hx-target="#work-performed-section" hx-swap="innerHTML">{% csrf_token %}<button type="submit" class="btn btn-sm">{{ item.name }}</button></form>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                <div id="work-performed-section">
+                    {% include "core/partials/work_performed.html" with entries=wp_entries work_order=work_order %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sec-checklist" aria-expanded="false">Pre / post checklist{% if checklist_checked_count %} <span class="text-secondary ms-2">{{ checklist_checked_count }} checked</span>{% endif %}</button></h2>
+        <div id="sec-checklist" class="accordion-collapse collapse">
+            <div class="accordion-body">
+                {% if can_edit_workorder %}
+                <form method="post" action="{% url 'core:work_order_apply_checklist' work_order.pk %}" class="mb-2">{% csrf_token %}<button type="submit" class="btn btn-sm">{% ticon 'refresh' 'icon-sm' %} Apply checklist</button></form>
+                {% endif %}
+                <div id="checklist-wrapper">{% include "core/partials/checklist_list.html" with items=checklist_items checked_count=checklist_checked_count work_order=work_order %}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#sec-notes" aria-expanded="true">Bench notes <span class="badge bg-blue-lt ms-2">{{ work_order.notes.count }}</span></button></h2>
+        <div id="sec-notes" class="accordion-collapse collapse show">
+            <div class="accordion-body">
+                <div class="d-flex align-items-center mb-2">
+                    {% if ticket %}<button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#msg-ticket">{% ticon 'message-circle' 'icon-sm' %} Message Ticket Tech</button>{% endif %}
+                    <button type="button" class="btn btn-sm btn-ghost-secondary ms-auto" data-mb-order-toggle="#notes-list">Newest first</button>
+                </div>
+                {% if ticket %}
+                <form class="collapse mb-3" id="msg-ticket" hx-post="{% url 'core:wo_message_tech' work_order.pk %}" hx-target="#wo-msg-result" hx-swap="innerHTML" data-mb-reset-after="#msg-ticket">
+                    {% csrf_token %}
+                    <div class="text-secondary small mb-1">Client contact goes through the ticket. Internal note to the ticket tech ({{ ticket.assigned_to.get_full_name|default:"unassigned" }}).</div>
+                    <textarea name="content" rows="3" class="form-control" required placeholder="e.g. Please confirm with the client before I replace the drive."></textarea>
+                    <button type="submit" class="btn btn-sm mt-2">Send to Ticket Tech</button>
+                </form>
+                <div id="wo-msg-result"></div>
+                {% endif %}
+                <div id="notes-list" class="d-flex flex-column-reverse gap-2 mb-3">
+                    {% for note in work_order.notes.all %}{% include "core/partials/note_item.html" %}{% empty %}<div class="text-secondary" id="no-notes-msg">No bench notes yet.</div>{% endfor %}
+                </div>
+                <form hx-post="{% url 'core:work_order_note_add' work_order.pk %}" hx-target="#notes-list" hx-swap="beforeend" hx-encoding="multipart/form-data" data-mb-reset-after="">
+                    {% csrf_token %}
+                    <div class="mb-2 d-flex flex-wrap align-items-center gap-2">
+                        <label class="form-check form-check-inline m-0"><input type="radio" name="note_type" value="internal" class="form-check-input" checked><span class="form-check-label">{% ticon 'lock' 'icon-sm' %} Internal</span></label>
+                        <label class="form-check form-check-inline m-0"><input type="radio" name="note_type" value="customer_visible" class="form-check-input"><span class="form-check-label">{% ticon 'user' 'icon-sm' %} On the repair report</span></label>
+                        <div class="dropdown ms-auto">
+                            <button type="button" class="btn btn-sm dropdown-toggle" data-bs-toggle="dropdown" data-mb-canned="#canned-menu" data-mb-canned-target="#note-textarea" data-mb-canned-url="{% url 'core:cr_picker' %}" data-mb-canned-stream-radio="note_type">{% ticon 'file-text' 'icon-sm' %} Canned response</button>
+                            <div class="dropdown-menu dropdown-menu-end" id="canned-menu" style="max-height: 18rem; overflow-y: auto;"></div>
+                        </div>
+                    </div>
+                    <textarea name="content" id="note-textarea" rows="5" class="form-control mb-2" placeholder="Add a bench note" required></textarea>
+                    <div class="d-flex align-items-center gap-2">
+                        <input type="file" name="attachments" multiple class="form-control form-control-sm" style="max-width: 20rem;">
+                        <button type="submit" class="btn btn-primary ms-auto">Add note</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#sec-settle" aria-expanded="true">Settlement <span class="text-secondary ms-2">{{ invoice.get_billing_status_display }}</span></button></h2>
+        <div id="sec-settle" class="accordion-collapse collapse show">
+            <div class="accordion-body">
+                <div class="row g-3">
+                    <div class="col-lg-6">{% include "core/partials/billing_card.html" %}</div>
+                    <div class="col-lg-6">
+                        <div class="subheader">Register</div>
+                        {% if work_order.invoice.billing_status == 'paid' %}
+                        <div>Paid, invoice <span class="font-monospace">#{{ work_order.invoice_ninja_ref|default:work_order.invoice_ninja_id }}</span>.</div>
+                        <a href="{% url 'core:pos_wo_receipt' work_order.pk %}" class="btn btn-sm mt-2">View receipt</a>
+                        {% elif work_order.invoice_ninja_id %}
+                        <div>Sent as draft, invoice <span class="font-monospace">#{{ work_order.invoice_ninja_ref|default:work_order.invoice_ninja_id }}</span>. Not yet paid.</div>
+                        {% if work_order.status == 'completed' %}<a href="{% url 'core:pos_wo_settle' work_order.pk %}" class="btn btn-success btn-sm mt-2">{% ticon 'cash-register' 'icon-sm' %} Settle at Register</a>{% endif %}
+                        {% elif work_order.status == 'completed' %}
+                        <div>Ready to settle (total ${{ work_order.line_items_total|default:0|floatformat:2 }}).</div>
+                        <a href="{% url 'core:pos_wo_settle' work_order.pk %}" class="btn btn-success btn-sm mt-2">{% ticon 'cash-register' 'icon-sm' %} Settle at Register</a>
+                        {% else %}
+                        <div class="text-secondary">Complete this work order to settle it at the Register.</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    {# ── No work order yet: the section is present, collapsed, with convert-in-place ── #}
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sec-wo" aria-expanded="false">Work order <span class="text-secondary ms-2">none yet</span></button></h2>
+        <div id="sec-wo" class="accordion-collapse collapse">
+            <div class="accordion-body">
+                <div class="empty py-2">
+                    <p class="empty-title">No work order yet</p>
+                    <p class="empty-subtitle text-secondary">Bench work, parts, checklist and settlement appear here once this ticket becomes a work order.</p>
+                    {% if ticket and can_create_workorder and can_edit_ticket %}
+                    <div class="empty-action"><form method="post" action="{% url 'core:ticket_convert' ticket.pk %}">{% csrf_token %}<button type="submit" class="btn btn-primary">Convert to Work Order</button></form></div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {# ══ TIMER (every record; logs to the work order when there is one, else the ticket) ══ #}
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sec-time" aria-expanded="false">Timer</button></h2>
+        <div id="sec-time" class="accordion-collapse collapse">
+            <div class="accordion-body" data-mb-timer="{% if work_order %}wo_timer_{{ work_order.pk }}{% else %}ticket_timer_{{ ticket.pk }}{% endif %}">
+                <div class="d-flex flex-wrap align-items-center gap-3">
+                    <div class="h1 m-0 font-monospace" data-mb-timer-display>00:00:00</div>
+                    <button type="button" class="btn btn-success" data-mb-timer-start>{% ticon 'player-play' 'icon-sm' %} Start</button>
+                    <button type="button" class="btn" data-mb-timer-pause disabled>{% ticon 'player-pause' 'icon-sm' %} Pause</button>
+                    <button type="button" class="btn btn-ghost-secondary" data-mb-timer-reset>Reset</button>
+                    {% if work_order %}
+                    <form hx-post="{% url 'core:work_order_add_time' work_order.pk %}" hx-target="#time-spent-wrapper" hx-swap="innerHTML" class="ms-auto">
+                    {% else %}
+                    <form hx-post="{% url 'core:ticket_add_time' ticket.pk %}" hx-target="#ticket-time-spent-wrapper" hx-swap="innerHTML" class="ms-auto">
+                    {% endif %}
+                        {% csrf_token %}
+                        <input type="hidden" name="minutes" value="0" data-mb-timer-minutes>
+                        <button type="submit" class="btn btn-primary" data-mb-timer-log disabled>Log <span data-mb-timer-label>0</span> min to the {% if work_order %}work order{% else %}ticket{% endif %}</button>
+                    </form>
+                </div>
+                <div class="text-secondary small mt-2">The timer is manual and lives in this browser. Time can also be logged after the fact.</div>
+            </div>
+        </div>
+    </div>
+
+    {# ══ ATTACHMENTS & RELATED ═════════════════════════════════════════ #}
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sec-files" aria-expanded="false">Attachments &amp; related</button></h2>
+        <div id="sec-files" class="accordion-collapse collapse">
+            <div class="accordion-body">
+                <div class="row g-3">
+                    <div class="col-lg-6">
+                        <div class="subheader">Files</div>
+                        {% if ticket_attachments %}{% include "core/partials/attachment_list.html" with attachments=ticket_attachments %}{% endif %}
+                        {% if wo_attachments %}{% include "core/partials/attachment_list.html" with attachments=wo_attachments %}{% endif %}
+                        {% if not ticket_attachments and not wo_attachments %}<div class="text-secondary">No files on the record itself. Files attached to replies and notes sit with them.</div>{% endif %}
+                        {% if work_order %}
+                        <form method="post" action="{% url 'core:work_order_upload' work_order.pk %}" enctype="multipart/form-data" class="input-group input-group-sm mt-2">
+                            {% csrf_token %}
+                            <input type="file" name="attachments" multiple required class="form-control form-control-sm">
+                            <button type="submit" class="btn btn-sm">{% ticon 'upload' 'icon-sm' %} Upload</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                    <div class="col-lg-6">
+                        {% if ticket %}
+                        <div class="subheader">Linked tickets</div>
+                        <div id="linked-tickets-section">{% include "core/partials/ticket_linked_list.html" %}</div>
+                        {% endif %}
+                        {% with client=record_client %}
+                        {% if client_open_wos or client_open_tickets %}
+                        <div class="subheader mt-3">Other open work for {{ client.name }}</div>
+                        <div class="list-group list-group-flush">
+                            {% for w in client_open_wos %}
+                            <a href="{% url 'core:work_order_detail' w.pk %}" class="list-group-item list-group-item-action mb-stripe px-2" style="--mb-stripe: var(--mb-status-workorder-{{ w.status }}, var(--tblr-secondary));">
+                                <span class="font-monospace">{{ w.work_order_number }}</span> &middot; {{ w.reported_problem|default:w.repair_type|default:""|truncatechars:60 }}
+                                <span class="text-secondary small d-block">{{ w.status|status_word:'workorder' }} &middot; {{ w.assigned_to.get_full_name|default:"unassigned" }}</span>
+                            </a>
+                            {% endfor %}
+                            {% for t in client_open_tickets %}
+                            <a href="{% url 'core:ticket_detail' t.pk %}" class="list-group-item list-group-item-action mb-stripe px-2" style="--mb-stripe: var(--mb-status-ticket-{{ t.status }}, var(--tblr-secondary));">
+                                <span class="font-monospace">{{ t.ticket_number }}</span> &middot; {{ t.subject|truncatechars:60 }}
+                                <span class="text-secondary small d-block">{{ t.status|status_word:'ticket' }}</span>
+                            </a>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        {% endwith %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ══ HISTORY (the facts the old "Details & history" pages held, plus the full audit trail) ══ #}
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sec-history" aria-expanded="false">History</button></h2>
+        <div id="sec-history" class="accordion-collapse collapse">
+            <div class="accordion-body">
+                <div class="row g-3 mb-3">
+                    {% if ticket %}
+                    <div class="col-6 col-md-3"><div class="subheader">Ticket opened</div>{{ ticket.created_at|date:"M j, Y g:i A" }}{% if ticket.created_by %}<div class="text-secondary small">by {{ ticket.created_by.get_full_name|default:ticket.created_by.username }}</div>{% endif %}</div>
+                    <div class="col-6 col-md-3"><div class="subheader">Ticket updated</div>{{ ticket.updated_at|date:"M j, Y g:i A" }}</div>
+                    {% if ticket.closed_at %}<div class="col-6 col-md-3"><div class="subheader">Ticket closed</div>{{ ticket.closed_at|date:"M j, Y g:i A" }}</div>{% endif %}
+                    {% if ticket.first_responded_at %}<div class="col-6 col-md-3"><div class="subheader">First response</div>{{ ticket.first_responded_at|date:"M j, Y g:i A" }}</div>{% endif %}
+                    {% endif %}
+                    {% if work_order %}
+                    <div class="col-6 col-md-3"><div class="subheader">Work order opened</div>{{ work_order.created_at|date:"M j, Y g:i A" }}<div class="text-secondary small">{{ days_open }} day{{ days_open|pluralize }} open</div></div>
+                    <div class="col-6 col-md-3"><div class="subheader">Work order updated</div>{{ work_order.updated_at|date:"M j, Y g:i A" }}</div>
+                    {% if work_order.completed_date %}<div class="col-6 col-md-3"><div class="subheader">Completed</div>{{ work_order.completed_date|date:"M j, Y g:i A" }}</div>{% endif %}
+                    {% if work_order.invoice_ninja_ref or work_order.invoice_ninja_id %}<div class="col-6 col-md-3"><div class="subheader">Invoice Ninja</div><span class="font-monospace">{{ work_order.invoice_ninja_ref|default:work_order.invoice_ninja_id }}</span></div>{% endif %}
+                    {% endif %}
+                </div>
+                <div class="subheader">Every recorded change</div>
+                <div class="small">
+                    {% for item in ticket_audit %}
+                    <div class="mb-1"><span class="text-secondary">{{ item.entry.timestamp|date:"M j, Y g:i A" }} &middot; {% if item.entry.actor %}{{ item.entry.actor.get_full_name|default:item.entry.actor.username }}{% else %}System{% endif %} &middot; ticket</span>
+                        {% if item.changes %}{% for c in item.changes %} {{ c.field|cut:"_"|capfirst }}: {{ c.old|default:"none"|truncatechars:40 }} &rarr; {{ c.new|default:"none"|truncatechars:40 }}{% if not forloop.last %};{% endif %}{% endfor %}{% else %} {{ item.entry.get_action_display }}{% endif %}</div>
+                    {% endfor %}
+                    {% for item in wo_audit %}
+                    <div class="mb-1"><span class="text-secondary">{{ item.entry.timestamp|date:"M j, Y g:i A" }} &middot; {% if item.entry.actor %}{{ item.entry.actor.get_full_name|default:item.entry.actor.username }}{% else %}System{% endif %} &middot; work order</span>
+                        {% if item.changes %}{% for c in item.changes %} {{ c.field|cut:"_"|capfirst }}: {{ c.old|default:"none"|truncatechars:40 }} &rarr; {{ c.new|default:"none"|truncatechars:40 }}{% if not forloop.last %};{% endif %}{% endfor %}{% else %} {{ item.entry.get_action_display }}{% endif %}</div>
+                    {% endfor %}
+                    {% if not ticket_audit and not wo_audit %}<div class="text-secondary">No changes recorded yet.</div>{% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}<script defer src="{% static 'js/mb-record.js' %}"></script>{% endblock %}

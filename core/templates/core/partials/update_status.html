@@ -1,162 +1,58 @@
 {% comment %}
-In-app update status fragment (Settings → Updates). Rendered on the settings page
-and re-rendered by UpdateStatusView/UpdateCheckView/UpdateTriggerView. While a run
-is queued/running it polls itself every 3s; terminal states stop polling.
+In-app update status fragment (Settings, Maintenance, Software updates). Rendered
+on the settings page and re-rendered by UpdateStatusView/UpdateCheckView/
+UpdateTriggerView. While a run is queued/running it polls itself every 3s.
 {% endcomment %}
-<div id="update-status"
-     {% if update_status.state == 'queued' or update_status.state == 'running' %}
-     hx-get="{% url 'core:update_status' %}"
-     hx-trigger="every 3s"
-     hx-swap="outerHTML"
-     {% endif %}>
-
-  <div class="flex items-center justify-between flex-wrap gap-3 border border-gray-200 rounded-md p-4 bg-gray-50">
-    <div class="text-sm">
-      <div class="text-gray-500">Installed version</div>
-      <div class="text-lg font-semibold text-gray-900">{{ update_current }}</div>
+<div id="update-status" {% if update_status.state == 'queued' or update_status.state == 'running' %}hx-get="{% url 'core:update_status' %}" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+    <div class="row g-3 mb-3">
+        <div class="col-6"><div class="card card-sm"><div class="card-body"><div class="subheader">Installed version</div><div class="h3 mb-0">{{ update_current }}</div></div></div></div>
+        <div class="col-6"><div class="card card-sm"><div class="card-body"><div class="subheader">Latest available</div><div class="h3 mb-0">{{ update_available|default:"" }}</div>{% if update_available %}<a href="{% url 'core:update_changelog' %}" target="_blank" class="small">View changelog</a>{% endif %}</div></div></div>
     </div>
-    <div class="text-sm text-right">
-      <div class="text-gray-500">Latest available</div>
-      <div class="text-lg font-semibold text-gray-900">{{ update_available|default:"—" }}</div>
-      {% if update_available %}
-      <a href="{% url 'core:update_changelog' %}" target="_blank" class="text-xs text-blue-600 hover:underline">View changelog</a>
-      {% endif %}
-    </div>
-  </div>
-
-  {% if update_status.state == 'queued' or update_status.state == 'running' %}
-    <div class="mt-4 flex items-center gap-3 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-md p-4">
-      <svg class="animate-spin h-5 w-5 text-blue-600" viewBox="0 0 24 24" fill="none">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-      </svg>
-      <span>Update in progress — backing up, applying, and restarting. This page updates automatically.</span>
-    </div>
-  {% elif update_status.stranded %}
-    <div class="mt-4 text-sm text-red-900 bg-red-100 border-2 border-red-400 rounded-md p-4">
-      <div class="font-bold">✗ Update failed and <u>could not be rolled back</u>.</div>
-      <p class="mt-2">
-        This install is now on <strong>{{ update_current }}</strong>, which it never finished
-        verifying, and the service may not be running the code you see here. Do not press
-        Update again.
-      </p>
-      <p class="mt-2">
-        The new code is already here — what failed is the install around it. Finish it
-        from a terminal on this machine, in the install directory:
-      </p>
-      {% comment %}
-      Deliberately NOT `git pull`. update.sh deploys with `git checkout --detach`, so
-      every box that has ever used this button is on a detached HEAD, where `git pull`
-      exits 1 with "You are not currently on a branch". install.sh does no git
-      operations at all — it installs whatever tree is present, which on a stranded box
-      is already the target. Nothing needs fetching here.
-      {% endcomment %}
-      <pre class="mt-1 text-xs bg-gray-900 text-gray-100 rounded-md p-3 overflow-x-auto">scripts/install.sh</pre>
-      <p class="mt-2">The log below is from this failure.</p>
-    </div>
-  {% elif update_status.stale %}
-    {% comment %}
-    The recorded result no longer describes this box (updated by hand since, for
-    example). Don't report a state that isn't true any more: drop the banner,
-    keep the log reachable below.
-    {% endcomment %}
-  {% elif update_status.state == 'succeeded' %}
-    {% if update_incomplete %}
-      {% comment %}
-      A green tick here would be the exact defect this panel exists to remove: the
-      code arrived, so update.sh legitimately exits 0, but part of the release is
-      not running and saying "succeeded" is how that stayed invisible. Report the
-      consequence, not the exit code.
-      {% endcomment %}
-      <div class="mt-4 text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-md p-4">
-        ⚠ The update itself succeeded{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %}
-        and this server is now on <strong>{{ update_current }}</strong>, but
-        <strong>this install is incomplete</strong> and part of this release is not working.
-      </div>
-    {% else %}
-      <div class="mt-4 text-sm text-green-800 bg-green-50 border border-green-200 rounded-md p-4">
-        ✓ Last update succeeded{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %}.
-        Now on <strong>{{ update_current }}</strong>.
-      </div>
-    {% endif %}
-  {% elif update_status.state == 'failed' %}
-    <div class="mt-4 text-sm text-red-800 bg-red-50 border border-red-200 rounded-md p-4">
-      ✗ Last update <strong>failed</strong>{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %}
-      and was automatically rolled back. The app is back on <strong>{{ update_current }}</strong>. See the log below.
-    </div>
-  {% endif %}
-
-  {% comment %}
-  Rendered on EVERY visit while the marker exists, not only after an update. The
-  install stays incomplete until someone runs the fix, so the warning has to stay
-  visible for as long as it is true rather than scrolling away with one status
-  entry. scripts/update.sh deletes the marker the moment the install is whole.
-  {% endcomment %}
-  {% if update_incomplete %}
-    <div class="mt-3 text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-md p-4">
-      <p class="font-medium">This install is incomplete.</p>
-      {% comment %}
-      This lead-in must NOT name the problem. The marker has two independent halves
-      (missing system services, and a web server that cannot read this install's
-      stylesheets) and it states its own case precisely, with the command that fixes
-      it. Diagnosing here as "system services" told an operator whose ACTUAL problem
-      was file permissions the wrong thing, in bold, above the text that had it right.
-      Found on mb-test 2026-08-05 by repairing the units on a doubly-broken box and
-      looking at the card, which is a state no test was rendering.
-      {% endcomment %}
-      <p class="mt-1">
-        Updating moved new code onto this server, but part of what this release needs is
-        not in place, and no button here can put it there: Murphy's Bench runs as an
-        unprivileged user on purpose. What is missing, and the command that fixes it:
-      </p>
-      <pre class="mt-2 text-xs bg-gray-900 text-gray-100 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">{{ update_incomplete }}</pre>
-    </div>
-  {% endif %}
-
-  {% if update_status.log_tail %}
-    <details class="mt-3" {% if update_status.state == 'failed' and not update_status.stale %}open{% endif %}>
-      <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
-        {% if update_status.stale %}Log from an earlier update attempt{% else %}Update log (last lines){% endif %}
-      </summary>
-      <pre class="mt-2 text-xs bg-gray-900 text-gray-100 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">{{ update_status.log_tail }}</pre>
-    </details>
-  {% endif %}
-
-  <div class="mt-5 flex items-center gap-3 flex-wrap">
-    <form method="post" action="{% url 'core:update_check' %}"
-          hx-post="{% url 'core:update_check' %}" hx-target="#update-status" hx-swap="outerHTML">
-      {% csrf_token %}
-      <button type="submit"
-              class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-200">
-        Check for updates
-      </button>
-    </form>
-
     {% if update_status.state == 'queued' or update_status.state == 'running' %}
-      <button type="button" disabled
-              class="px-5 py-2 bg-blue-300 text-white text-sm font-medium rounded-md cursor-not-allowed">
-        Updating…
-      </button>
+    <div class="alert alert-info d-flex align-items-center gap-2"><span class="spinner-border spinner-border-sm"></span><span>Update in progress: backing up, applying, and restarting. This page updates on its own.</span></div>
     {% elif update_status.stranded %}
-      {% comment %}
-      The box sits on the target tag, so "you're on the latest release" would be
-      literally true and completely misleading — the code was never verified and
-      the service may not be running it. Say what to do instead, and offer no
-      Update button: pressing it again is the wrong move.
-      {% endcomment %}
-      <span class="text-sm font-medium text-red-800">Recover from a terminal before updating again.</span>
-    {% elif update_is_available %}
-      <form method="post" action="{% url 'core:update_start' %}"
-            hx-post="{% url 'core:update_start' %}" hx-target="#update-status" hx-swap="outerHTML"
-            hx-confirm="Update Murphy's Bench from {{ update_current }} to {{ update_available }}? It backs up first and automatically rolls back if anything fails.">
-        {% csrf_token %}
-        <button type="submit"
-                class="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
-          Update to latest ({{ update_available }})
-        </button>
-      </form>
-    {% else %}
-      <span class="text-sm text-gray-500">You're on the latest release.</span>
+    <div class="alert alert-danger">
+        <div class="fw-bold">Update failed and could not be rolled back.</div>
+        <p class="mt-2">This install is now on <strong>{{ update_current }}</strong>, which it never finished verifying, and the service may not be running the code you see here. Do not press Update again.</p>
+        <p class="mt-2">The new code is already here; what failed is the install around it. Finish it from a terminal on this machine, in the install directory:</p>
+        {% comment %}Deliberately NOT `git pull`. update.sh deploys with `git checkout --detach`, so every box that has ever used this button is on a detached HEAD, where `git pull` exits 1. install.sh does no git operations; it installs whatever tree is present, which on a stranded box is already the target.{% endcomment %}
+        <pre class="mb-2">scripts/install.sh</pre>
+        <p class="mb-0">The log below is from this failure.</p>
+    </div>
+    {% elif update_status.stale %}
+    {% comment %}The recorded result no longer describes this box (updated by hand since, for example). Drop the banner, keep the log reachable below.{% endcomment %}
+    {% elif update_status.state == 'succeeded' %}
+        {% if update_incomplete %}
+        {% comment %}A green tick here would be the exact defect this panel exists to remove: the code arrived, so update.sh exits 0, but part of the release is not running. Report the consequence, not the exit code.{% endcomment %}
+        <div class="alert alert-warning">The update itself succeeded{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %} and this server is now on <strong>{{ update_current }}</strong>, but <strong>this install is incomplete</strong> and part of this release is not working.</div>
+        {% else %}
+        <div class="alert alert-success">Last update succeeded{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %}. Now on <strong>{{ update_current }}</strong>.</div>
+        {% endif %}
+    {% elif update_status.state == 'failed' %}
+    <div class="alert alert-danger">Last update <strong>failed</strong>{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %} and was automatically rolled back. The app is back on <strong>{{ update_current }}</strong>. See the log below.</div>
     {% endif %}
-  </div>
+    {% comment %}Rendered on EVERY visit while the marker exists, not only after an update. The lead-in must NOT name the problem: the marker has two independent halves (missing system services, and a web server that cannot read this install's stylesheets) and states its own case precisely, with the command that fixes it. Found on mb-test 2026-08-05.{% endcomment %}
+    {% if update_incomplete %}
+    <div class="alert alert-warning">
+        <div class="fw-medium">This install is incomplete.</div>
+        <p class="mt-1">Updating moved new code onto this server, but part of what this release needs is not in place, and no button here can put it there: Murphy's Bench runs as an unprivileged user on purpose. What is missing, and the command that fixes it:</p>
+        <pre class="mb-0" style="white-space: pre-wrap;">{{ update_incomplete }}</pre>
+    </div>
+    {% endif %}
+    {% if update_status.log_tail %}
+    <details class="mt-3" {% if update_status.state == 'failed' and not update_status.stale %}open{% endif %}><summary class="text-secondary small">{% if update_status.stale %}Log from an earlier update attempt{% else %}Update log (last lines){% endif %}</summary><pre class="mt-2 small" style="white-space: pre-wrap;">{{ update_status.log_tail }}</pre></details>
+    {% endif %}
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <form method="post" action="{% url 'core:update_check' %}" hx-post="{% url 'core:update_check' %}" hx-target="#update-status" hx-swap="outerHTML">{% csrf_token %}<button type="submit" class="btn">Check for updates</button></form>
+        {% if update_status.state == 'queued' or update_status.state == 'running' %}
+        <button type="button" class="btn btn-primary" disabled>Updating</button>
+        {% elif update_status.stranded %}
+        {% comment %}The box sits on the target tag, so "you're on the latest release" would be literally true and completely misleading. Say what to do instead, and offer no Update button.{% endcomment %}
+        <span class="text-red fw-medium">Recover from a terminal before updating again.</span>
+        {% elif update_is_available %}
+        <form method="post" action="{% url 'core:update_start' %}" hx-post="{% url 'core:update_start' %}" hx-target="#update-status" hx-swap="outerHTML" data-mb-confirm="Update Murphy's Bench from {{ update_current }} to {{ update_available }}? It backs up first and automatically rolls back if anything fails.">{% csrf_token %}<button type="submit" class="btn btn-primary">Update to latest ({{ update_available }})</button></form>
+        {% else %}
+        <span class="text-secondary">You're on the latest release.</span>
+        {% endif %}
+    </div>
 </div>

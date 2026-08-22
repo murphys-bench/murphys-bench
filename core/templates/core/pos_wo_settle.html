@@ -1,138 +1,91 @@
-{% extends "core/base.html" %}
-{% load mb_icons %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
 
 {% block title %}Settle {{ wo.work_order_number }} - Murphy's Bench{% endblock %}
+{% block room %}register{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
-        <a href="{% url 'core:pos_home' %}" class="text-sm text-gray-400 hover:text-gray-600">← Register</a>
-        <h1 class="text-2xl font-bold text-gray-900">{{ wo.work_order_number }}</h1>
-        <p class="text-sm text-gray-500">{% if wo.client %}{{ wo.client.name }}{% else %}Walk-in{% endif %}</p>
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col"><div class="page-pretitle"><a href="{% url 'core:pos_home' %}">Register</a></div><h2 class="page-title">{{ wo.work_order_number }}</h2><div class="text-secondary">{% if wo.client %}{{ wo.client.name }}{% else %}Walk-in{% endif %}</div></div>
+            <div class="col-auto"><a href="{% url 'core:work_order_detail' wo.pk %}" class="btn">Open the work order</a></div>
+        </div>
     </div>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="max-w-2xl mx-auto space-y-6">
-
-    <!-- Line items -->
-    <div class="bg-white rounded-lg shadow-md border-l-4 border-amber-500 p-6">
-        <div class="flex items-center gap-3 mb-3">
-            <div class="shrink-0 w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center text-amber-600">
-                {% icon "tag" 5 %}
-            </div>
-            <h2 class="text-base font-semibold text-gray-900">Line Items</h2>
-        </div>
-        <table class="w-full text-sm">
-            <tbody class="divide-y divide-gray-100">
-                {% for li in wo.line_items.all %}
-                {% if li.unit_price != None %}
-                <tr>
-                    <td class="py-2 text-gray-900">{{ li.description }}{% if li.quantity != 1 %} <span class="text-gray-400">× {{ li.quantity|floatformat:"-2" }}</span>{% endif %}</td>
-                    <td class="py-2 text-right text-gray-900">${{ li.line_total|floatformat:2 }}</td>
-                </tr>
-                {% endif %}
+<div class="row row-cards">
+    <div class="col-12 col-lg-7">
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">Line items</h3></div>
+            <table class="table card-table table-vcenter">
+                <tbody>
+                {% for li in wo.line_items.all %}{% if li.unit_price != None %}
+                    <tr><td>{{ li.description }}{% if li.quantity != 1 %} <span class="text-secondary">&times; {{ li.quantity|floatformat:"-2" }}</span>{% endif %}</td><td class="text-end">${{ li.line_total|floatformat:2 }}</td></tr>
+                {% endif %}{% empty %}
+                    <tr><td colspan="2" class="text-secondary">No line items on this work order.</td></tr>
                 {% endfor %}
-            </tbody>
-            <tfoot>
-                <tr class="border-t-2 border-gray-200">
-                    <td class="py-2 font-semibold text-gray-900">Total</td>
-                    <td class="py-2 text-right font-bold text-gray-900">${{ amount|floatformat:2 }}</td>
-                </tr>
-            </tfoot>
-        </table>
-    </div>
-
-    <!-- Current IN state -->
-    {% if wo.invoice_ninja_id %}
-    <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
-        <p class="text-sm text-blue-800">
-            Already sent to Invoice Ninja as invoice
-            <strong>#{{ wo.invoice_ninja_ref|default:wo.invoice_ninja_id }}</strong>
-            {% if wo.invoice.in_status %}({{ wo.invoice.in_status }}){% endif %}.
-            Settling below will use this same invoice — not create a new one.
-        </p>
-    </div>
-    {% endif %}
-
-    <!-- Settle -->
-    <div class="bg-white rounded-lg shadow-md border-l-4 border-green-500 p-6">
-        <div class="flex items-center gap-3 mb-4">
-            <div class="shrink-0 w-9 h-9 rounded-full bg-green-100 flex items-center justify-center text-green-600">
-                {% icon "cash" 5 %}
-            </div>
-            <h2 class="text-base font-semibold text-gray-900">Settle</h2>
+                </tbody>
+                <tfoot><tr><th>Total</th><th class="text-end">${{ amount|floatformat:2 }}</th></tr></tfoot>
+            </table>
         </div>
-        <form method="post" action="{% url 'core:pos_wo_settle' wo.pk %}" class="space-y-4">
-            {% csrf_token %}
-            {% if amount %}
-            {# Payment inputs only make sense when there's an amount to collect. #}
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-2">Payment method</label>
-                <div class="flex flex-wrap gap-3">
-                    {% for value, label in payment_methods %}
-                    {% if value != 'no_charge' %}
-                    <label class="flex items-center gap-1.5 text-sm">
-                        <input type="radio" name="payment_method" value="{{ value }}">
-                        {{ label }}
-                    </label>
-                    {% endif %}
-                    {% endfor %}
-                </div>
-                <p class="text-xs text-gray-400 mt-1">For a card, run it in Square first, then enter the confirmation as the reference below.</p>
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Reference</label>
-                <input type="text" name="reference" placeholder="Check # or Square confirmation (optional for cash)"
-                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-            </div>
-            {% else %}
-            <p class="text-sm text-gray-500">No priced line items — settle this work order as No Charge, or add priced items on the work order first.</p>
-            {% endif %}
-            <div class="flex flex-wrap gap-3 pt-2">
-                {% if amount %}
-                <button type="submit" name="action" value="pay"
-                        class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">
-                    Mark Paid — ${{ amount|floatformat:2 }}
-                </button>
-                {% if invoice_ninja_enabled %}
-                {# Bill Later == push an unpaid draft to Invoice Ninja; no local #}
-                {# standalone-invoice equivalent yet, so hidden when IN is off. #}
-                <button type="submit" name="action" value="draft"
-                        class="px-5 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-200 font-medium">
-                    Bill Later (Draft)
-                </button>
-                {% endif %}
-                {% endif %}
-                {# No Charge: settle at $0 (warranty/goodwill) and print a receipt. #}
-                {# Primary (green) when there's nothing to charge, secondary otherwise. #}
-                <button type="submit" name="action" value="no_charge"
-                        onclick="return confirm('Settle this work order as No Charge — $0.00?');"
-                        class="px-5 py-2 font-medium rounded-md {% if amount %}bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200{% else %}bg-green-600 text-white hover:bg-green-700{% endif %}">
-                    No Charge
-                </button>
-            </div>
-        </form>
-
-        {% comment %}
-        Third settlement action: trigger Invoice Ninja to charge the client's
-        stored card token. Distinct from the "Card" payment method above (which
-        records a charge the operator already ran in Square by hand). Only for a
-        client-owned WO with a card on file, a permitted user, priced lines, and
-        not already Paid. Links to a confirm screen; the charge (and a draft
-        push if needed) happens there. Its own form so it never submits the
-        settle radio/reference above.
-        {% endcomment %}
-        {% if can_process_payments and wo.client and amount and invoice_ninja_enabled and wo.invoice.in_status|lower != 'paid' %}
-        <div class="mt-4 pt-4 border-t border-gray-100">
-            <a href="{% url 'core:pos_wo_charge' wo.pk %}"
-               class="inline-block px-5 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 font-medium">
-                Charge card on file — ${{ amount|floatformat:2 }}
-            </a>
-            <p class="text-xs text-gray-400 mt-1">Charges the client's stored card via Invoice Ninja. Murphy's Bench never touches the card.</p>
-        </div>
+        {% if wo.invoice_ninja_id %}
+        <div class="alert alert-info">Already sent to Invoice Ninja as invoice <strong>#{{ wo.invoice_ninja_ref|default:wo.invoice_ninja_id }}</strong>{% if wo.invoice.in_status %} ({{ wo.invoice.in_status }}){% endif %}. Settling uses this same invoice, it does not create a new one.</div>
         {% endif %}
+    </div>
+    <div class="col-12 col-lg-5">
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">Settle</h3></div>
+            <div class="card-body">
+                <form method="post" action="{% url 'core:pos_wo_settle' wo.pk %}" id="wo-settle-form">
+                    {% csrf_token %}
+                    {% if amount %}
+                    <div class="mb-3">
+                        <label class="form-label">Payment method</label>
+                        <div class="form-selectgroup">
+                            {% for value, label in payment_methods %}{% if value != 'no_charge' %}
+                            <label class="form-selectgroup-item"><input type="radio" name="payment_method" value="{{ value }}" class="form-selectgroup-input"><span class="form-selectgroup-label">{{ label }}</span></label>
+                            {% endif %}{% endfor %}
+                        </div>
+                        <div class="form-hint">For a card, run it in Square first, then enter the confirmation as the reference.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Reference</label>
+                        <input type="text" name="reference" class="form-control" placeholder="Check # or Square confirmation (optional for cash)">
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button type="submit" name="action" value="pay" class="btn btn-success">Mark paid, ${{ amount|floatformat:2 }}</button>
+                        {% if invoice_ninja_enabled %}
+                        {# Bill Later == push an unpaid draft to Invoice Ninja; hidden when IN is off. #}
+                        <button type="submit" name="action" value="draft" class="btn">Bill later (draft in Invoice Ninja)</button>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <p class="text-secondary">No priced line items. Settle as No Charge, or add priced items on the work order first.</p>
+                    {% endif %}
+                </form>
+                {# No Charge: settle at $0 (warranty/goodwill) and print a receipt. Its own form so the modal confirm applies only to it. #}
+                <form method="post" action="{% url 'core:pos_wo_settle' wo.pk %}" class="mt-2 d-grid" data-mb-confirm="Settle {{ wo.work_order_number }} as No Charge, $0.00?">
+                    {% csrf_token %}
+                    <button type="submit" name="action" value="no_charge" class="btn {% if amount %}btn-outline-secondary{% else %}btn-success{% endif %}">No charge</button>
+                </form>
+            </div>
+            {% comment %}
+            Third settlement action: Invoice Ninja charges the client's stored card
+            token. Distinct from the "Card" payment method above (a charge the
+            operator already ran in Square by hand). Only for a client-owned WO with
+            a card on file, a permitted user, priced lines, and not already Paid.
+            Links to a confirm screen; the charge happens there.
+            {% endcomment %}
+            {% if can_process_payments and wo.client and amount and invoice_ninja_enabled and wo.invoice.in_status|lower != 'paid' %}
+            <div class="card-footer">
+                <a href="{% url 'core:pos_wo_charge' wo.pk %}" class="btn btn-success w-100">Charge card on file, ${{ amount|floatformat:2 }}</a>
+                <div class="form-hint mt-1">Charges the client's stored card through Invoice Ninja. Murphy's Bench never touches the card.</div>
+            </div>
+            {% endif %}
+        </div>
     </div>
 </div>
 {% endblock %}

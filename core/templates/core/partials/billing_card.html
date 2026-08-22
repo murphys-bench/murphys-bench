@@ -1,215 +1,49 @@
-{% comment %}HTMX partial — billing state card on WO detail{% endcomment %}
-<div id="billing-card"
-     class="bg-white rounded-lg shadow p-5"
-     x-data="{ editing: false }">
-
-    <div class="flex items-center justify-between mb-3">
-        <h2 class="text-base font-semibold text-gray-900">Billing</h2>
-        <button type="button" @click="editing = !editing"
-                class="text-xs text-gray-400 hover:text-gray-600">
-            <span x-show="!editing">Edit</span>
-            <span x-show="editing" x-cloak>Cancel</span>
-        </button>
+{% load mb_tabler %}
+{% comment %}HTMX partial: billing state of the one settlement object on a work order.{% endcomment %}
+<div id="billing-card">
+    <div class="d-flex align-items-center gap-2">
+        <span class="subheader m-0">Billing</span>
+        <span class="status-dot ms-1" style="--tblr-status-color: {% if invoice.billing_status == 'uninvoiced' %}var(--tblr-secondary){% elif invoice.billing_status == 'invoiced' %}var(--tblr-blue){% elif invoice.billing_status == 'disputed' %}var(--tblr-red){% else %}var(--tblr-green){% endif %};"></span>{{ invoice.get_billing_status_display }}
+        {% if invoice.amount %}<span class="fw-medium">${{ invoice.amount }}</span>{% elif invoice.billing_status == 'invoiced' %}<span class="text-orange small">no amount recorded</span>{% endif %}
+        <button type="button" class="btn btn-sm btn-ghost-secondary ms-auto" data-bs-toggle="collapse" data-bs-target="#billing-edit">Edit</button>
     </div>
-
-    <!-- Display mode -->
-    <div x-show="!editing">
-        <!-- Status badge + amount -->
-        <div class="flex items-center gap-3 mb-3">
-            <span class="px-2 py-1 text-xs font-semibold rounded-full
-                {% if invoice.billing_status == 'uninvoiced' %}bg-gray-100 text-gray-600
-                {% elif invoice.billing_status == 'invoiced' %}bg-blue-100 text-blue-700
-                {% elif invoice.billing_status == 'paid' %}bg-green-100 text-green-700
-                {% elif invoice.billing_status == 'paid_direct' %}bg-green-100 text-green-700
-                {% elif invoice.billing_status == 'disputed' %}bg-red-100 text-red-700
-                {% endif %}">
-                {{ invoice.get_billing_status_display }}
-            </span>
-            {% if invoice.amount %}
-            <span class="text-sm font-medium text-gray-700">${{ invoice.amount }}</span>
-            {% elif invoice.billing_status == 'invoiced' %}
-            <span class="text-xs text-amber-700">no amount recorded</span>
-            {% endif %}
-        </div>
-
-        {% if billing_error %}
-        <div class="text-xs text-red-700 bg-red-50 rounded px-2 py-1.5 mb-3">{{ billing_error }}</div>
-        {% endif %}
-
-        <!-- Dates + payment method -->
-        {% if invoice.invoiced_date or invoice.paid_date %}
-        <div class="text-xs text-gray-500 space-y-1 mb-3">
-            {% if invoice.invoiced_date %}
-            <div>Invoiced: {{ invoice.invoiced_date|date:"M d, Y" }}</div>
-            {% endif %}
-            {% if invoice.paid_date %}
-            <div>Paid: {{ invoice.paid_date|date:"M d, Y" }}{% if invoice.payment_method %} — {{ invoice.get_payment_method_display }}{% endif %}</div>
-            {% endif %}
-        </div>
-        {% endif %}
-
-        {% if invoice.notes %}
-        <div class="mb-3 p-2 bg-gray-50 rounded text-xs text-gray-600 whitespace-pre-wrap">{{ invoice.notes }}</div>
-        {% endif %}
-
-        <!-- Invoice Ninja status -->
-        {% if work_order.invoice_ninja_id %}
-        <div class="mb-3 border-t border-gray-100 pt-3">
-            <div class="flex items-center justify-between gap-2">
-                <div class="text-xs text-gray-500">
-                    IN status:
-                    {% if invoice.in_status %}
-                    <span class="font-medium text-gray-700">{{ invoice.in_status }}</span>
-                    {% if invoice.in_status_checked_at %}
-                    <span class="text-gray-400 ml-1">— checked {{ invoice.in_status_checked_at|date:"M d g:ia" }}</span>
-                    {% endif %}
-                    {% else %}
-                    <span class="text-gray-400">not checked</span>
-                    {% endif %}
-                </div>
-                <form hx-post="{% url 'core:wo_billing_check_in' work_order.pk %}"
-                      hx-target="#billing-card" hx-swap="outerHTML">
-                    {% csrf_token %}
-                    <button type="submit"
-                            class="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600 hover:bg-gray-200 font-medium whitespace-nowrap">
-                        Check IN
-                    </button>
-                </form>
-            </div>
-        </div>
-        {% endif %}
-
-        <!-- Quick action buttons -->
-        <div class="flex flex-wrap gap-2">
-            {% if invoice.billing_status == 'uninvoiced' %}
-            <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}"
-                  hx-target="#billing-card" hx-swap="outerHTML">
-                {% csrf_token %}
-                <input type="hidden" name="billing_status" value="invoiced">
-                <button type="submit"
-                        class="text-xs px-3 py-1.5 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 font-medium">
-                    Mark Invoiced
-                </button>
-            </form>
-            {% if invoice.amount is not None %}
-            <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}"
-                  hx-target="#billing-card" hx-swap="outerHTML">
-                {% csrf_token %}
-                <input type="hidden" name="billing_status" value="paid_direct">
-                <button type="submit"
-                        class="text-xs px-3 py-1.5 rounded bg-green-100 text-green-700 hover:bg-green-200 font-medium">
-                    Paid Direct
-                </button>
-            </form>
-            {% else %}
-            {% comment %}Same invariant as the invoiced branch below: no paid
-            status without an amount, or the job drops out of revenue totals.
-            The server refuses the quick action regardless of this markup.{% endcomment %}
-            <span class="text-xs text-amber-700 self-center">
-                Paid Direct needs an amount; enter it with Edit.
-            </span>
-            {% endif %}
-            {% elif invoice.billing_status == 'invoiced' %}
-            {% if invoice.amount is not None %}
-            <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}"
-                  hx-target="#billing-card" hx-swap="outerHTML">
-                {% csrf_token %}
-                <input type="hidden" name="billing_status" value="paid">
-                <button type="submit"
-                        class="text-xs px-3 py-1.5 rounded bg-green-100 text-green-700 hover:bg-green-200 font-medium">
-                    Mark Paid
-                </button>
-            </form>
-            {% else %}
-            {% comment %}A self-healed IN draft: invoiced, amount deliberately
-            blank. One-click Mark Paid would record 'paid, no amount', which
-            drops the job from revenue totals. The full edit records the amount
-            from IN first; the server refuses the quick action regardless.{% endcomment %}
-            <span class="text-xs text-amber-700">
-                Enter the amount (Edit) before marking paid; without one this job drops out of revenue totals.
-            </span>
-            {% endif %}
-            {% elif invoice.billing_status == 'disputed' %}
-            <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}"
-                  hx-target="#billing-card" hx-swap="outerHTML">
-                {% csrf_token %}
-                <input type="hidden" name="billing_status" value="uninvoiced">
-                <button type="submit"
-                        class="text-xs px-3 py-1.5 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium">
-                    Reset to Uninvoiced
-                </button>
-            </form>
-            {% endif %}
-        </div>
+    {% if billing_error %}<div class="text-danger small mt-1">{{ billing_error }}</div>{% endif %}
+    <div class="text-secondary small">
+        {% if invoice.invoiced_date %}Invoiced {{ invoice.invoiced_date|date:"M j, Y" }}{% endif %}
+        {% if invoice.paid_date %}{% if invoice.invoiced_date %} &middot; {% endif %}Paid {{ invoice.paid_date|date:"M j, Y" }}{% if invoice.payment_method %} by {{ invoice.get_payment_method_display }}{% endif %}{% endif %}
     </div>
-
-    <!-- Edit mode -->
-    <div x-show="editing" x-cloak>
-        <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}"
-              hx-target="#billing-card" hx-swap="outerHTML"
-              class="space-y-3">
-            {% csrf_token %}
-            <input type="hidden" name="full_edit" value="1">
-
-            <div>
-                <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Status</label>
-                <select name="billing_status"
-                        class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                    {% for val, label in invoice.BILLING_STATUS_CHOICES %}
-                    <option value="{{ val }}" {% if invoice.billing_status == val %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div>
-                <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Amount ($)</label>
-                <input type="number" name="amount" step="0.01" min="0"
-                       value="{{ invoice.amount|default:'' }}"
-                       placeholder="0.00"
-                       class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-            </div>
-
-            <div>
-                <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Invoiced Date</label>
-                <input type="date" name="invoiced_date"
-                       value="{{ invoice.invoiced_date|date:'Y-m-d'|default:'' }}"
-                       class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-            </div>
-
-            <div>
-                <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Paid Date</label>
-                <input type="date" name="paid_date"
-                       value="{{ invoice.paid_date|date:'Y-m-d'|default:'' }}"
-                       class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-            </div>
-
-            <div>
-                <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Payment Method</label>
-                <select name="payment_method"
-                        class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                    <option value="">— None —</option>
-                    {% for val, label in invoice.PAYMENT_METHOD_CHOICES %}
-                    <option value="{{ val }}" {% if invoice.payment_method == val %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div>
-                <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Billing Notes</label>
-                <textarea name="notes" rows="2"
-                          class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">{{ invoice.notes }}</textarea>
-            </div>
-
-            <div class="flex gap-2 justify-end">
-                <button type="button" @click="editing = false"
-                        class="px-3 py-1.5 bg-gray-100 text-gray-600 text-sm rounded hover:bg-gray-200 font-medium">
-                    Cancel
-                </button>
-                <button type="submit"
-                        class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 font-medium">
-                    Save Billing
-                </button>
-            </div>
-        </form>
+    {% if invoice.notes %}<div class="small mt-1" style="white-space: pre-wrap;">{{ invoice.notes }}</div>{% endif %}
+    {% if work_order.invoice_ninja_id %}
+    <div class="d-flex align-items-center gap-2 mt-1 small">
+        <span class="text-secondary">Invoice Ninja: {% if invoice.in_status %}<span class="fw-medium">{{ invoice.in_status }}</span>{% if invoice.in_status_checked_at %}, checked {{ invoice.in_status_checked_at|date:"M j g:ia" }}{% endif %}{% else %}not checked{% endif %}</span>
+        <form hx-post="{% url 'core:wo_billing_check_in' work_order.pk %}" hx-target="#billing-card" hx-swap="outerHTML">{% csrf_token %}<button type="submit" class="btn btn-sm">Check IN</button></form>
     </div>
+    {% endif %}
+    <div class="d-flex flex-wrap gap-1 mt-2">
+        {% if invoice.billing_status == 'uninvoiced' %}
+        <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}" hx-target="#billing-card" hx-swap="outerHTML">{% csrf_token %}<input type="hidden" name="billing_status" value="invoiced"><button type="submit" class="btn btn-sm">Mark Invoiced</button></form>
+        {% if invoice.amount is not None %}
+        <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}" hx-target="#billing-card" hx-swap="outerHTML">{% csrf_token %}<input type="hidden" name="billing_status" value="paid_direct"><button type="submit" class="btn btn-sm btn-success">Paid Direct</button></form>
+        {% else %}<span class="text-orange small align-self-center">Paid Direct needs an amount; enter it with Edit.</span>{% endif %}
+        {% elif invoice.billing_status == 'invoiced' %}
+        {% if invoice.amount is not None %}
+        <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}" hx-target="#billing-card" hx-swap="outerHTML">{% csrf_token %}<input type="hidden" name="billing_status" value="paid"><button type="submit" class="btn btn-sm btn-success">Mark Paid</button></form>
+        {% else %}<span class="text-orange small">Enter the amount (Edit) before marking paid; without one this job drops out of revenue totals.</span>{% endif %}
+        {% elif invoice.billing_status == 'disputed' %}
+        <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}" hx-target="#billing-card" hx-swap="outerHTML">{% csrf_token %}<input type="hidden" name="billing_status" value="uninvoiced"><button type="submit" class="btn btn-sm">Reset to Uninvoiced</button></form>
+        {% endif %}
+    </div>
+    <form hx-post="{% url 'core:wo_billing_update' work_order.pk %}" hx-target="#billing-card" hx-swap="outerHTML" class="collapse mt-2" id="billing-edit">
+        {% csrf_token %}
+        <input type="hidden" name="full_edit" value="1">
+        <div class="row g-2">
+            <div class="col-6"><label class="form-label">Status</label><select name="billing_status" class="form-select form-select-sm">{% for val, label in invoice.BILLING_STATUS_CHOICES %}<option value="{{ val }}" {% if invoice.billing_status == val %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+            <div class="col-6"><label class="form-label">Amount ($)</label><input type="number" name="amount" step="0.01" min="0" value="{{ invoice.amount|default:'' }}" class="form-control form-control-sm"></div>
+            <div class="col-6"><label class="form-label">Invoiced date</label><input type="date" name="invoiced_date" value="{{ invoice.invoiced_date|date:'Y-m-d'|default:'' }}" class="form-control form-control-sm"></div>
+            <div class="col-6"><label class="form-label">Paid date</label><input type="date" name="paid_date" value="{{ invoice.paid_date|date:'Y-m-d'|default:'' }}" class="form-control form-control-sm"></div>
+            <div class="col-6"><label class="form-label">Payment method</label><select name="payment_method" class="form-select form-select-sm"><option value="">None</option>{% for val, label in invoice.PAYMENT_METHOD_CHOICES %}<option value="{{ val }}" {% if invoice.payment_method == val %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+            <div class="col-12"><label class="form-label">Billing notes</label><textarea name="notes" rows="2" class="form-control form-control-sm">{{ invoice.notes }}</textarea></div>
+        </div>
+        <button type="submit" class="btn btn-sm btn-primary mt-2">Save billing</button>
+    </form>
 </div>

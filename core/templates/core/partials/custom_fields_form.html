@@ -1,0 +1,21 @@
+{% comment %}Shop-defined extra fields on a ticket or work order form. Expects custom_field_entries.{% endcomment %}
+{% if custom_field_entries %}
+<div class="card mb-3">
+    <div class="card-header"><h3 class="card-title">Additional information</h3></div>
+    <div class="card-body">
+        <div class="row g-3">
+            {% for entry in custom_field_entries %}
+            <div class="col-md-6">
+                <label class="form-label {% if entry.field.is_required %}required{% endif %}">{{ entry.field.label }}</label>
+                {% if entry.field.field_type == 'text' %}<input type="text" name="cf_{{ entry.field.pk }}" value="{{ entry.value }}" {% if entry.field.is_required %}required{% endif %} class="form-control">
+                {% elif entry.field.field_type == 'textarea' %}<textarea name="cf_{{ entry.field.pk }}" rows="3" {% if entry.field.is_required %}required{% endif %} class="form-control">{{ entry.value }}</textarea>
+                {% elif entry.field.field_type == 'select' %}<select name="cf_{{ entry.field.pk }}" {% if entry.field.is_required %}required{% endif %} class="form-select"><option value=""></option>{% for choice in entry.field.choices.all %}<option value="{{ choice.label }}" {% if entry.value == choice.label %}selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select>
+                {% elif entry.field.field_type == 'checkbox' %}<label class="form-check"><input type="checkbox" name="cf_{{ entry.field.pk }}" value="1" {% if entry.value == '1' %}checked{% endif %} class="form-check-input"><span class="form-check-label">Yes</span></label>
+                {% elif entry.field.field_type == 'date' %}<input type="date" name="cf_{{ entry.field.pk }}" value="{{ entry.value }}" {% if entry.field.is_required %}required{% endif %} class="form-control">{% endif %}
+                {% if entry.field.help_text %}<div class="form-hint">{{ entry.field.help_text }}</div>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}

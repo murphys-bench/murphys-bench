@@ -894,34 +894,12 @@ class ColorSettingsForm(forms.ModelForm):
         model = SiteSettings
         fields = [
             'site_logo', 'login_logo',
-            'color_primary', 'color_nav_text', 'color_accent',
-            'color_sidebar_bg', 'color_sidebar_text',
-            'color_page_bg', 'color_page_title', 'color_title_bar', 'color_section_header', 'color_section_header_text',
-            'color_status_new', 'color_status_assigned', 'color_status_in_progress',
-            'color_status_completed', 'color_status_closed', 'color_status_cancelled',
-            'color_dash_tickets_bg', 'color_dash_tickets_text',
-            'color_dash_workorders_bg', 'color_dash_workorders_text',
-            'color_dash_ready_bg', 'color_dash_ready_text',
-            'color_dash_outstanding_bg', 'color_dash_outstanding_text',
-            'color_dash_backlog1_bg', 'color_dash_backlog1_text',
-            'color_dash_backlog2_bg', 'color_dash_backlog2_text',
-            'color_dash_backlog3_bg', 'color_dash_backlog3_text',
-            'color_dash_backlog4_bg', 'color_dash_backlog4_text',
+            'color_accent',
+            'color_room_register', 'color_room_desk', 'color_room_office',
         ]
         _hex_fields = [
-            'color_primary', 'color_nav_text', 'color_accent',
-            'color_sidebar_bg', 'color_sidebar_text',
-            'color_page_bg', 'color_page_title', 'color_title_bar', 'color_section_header', 'color_section_header_text',
-            'color_status_new', 'color_status_assigned', 'color_status_in_progress',
-            'color_status_completed', 'color_status_closed', 'color_status_cancelled',
-            'color_dash_tickets_bg', 'color_dash_tickets_text',
-            'color_dash_workorders_bg', 'color_dash_workorders_text',
-            'color_dash_ready_bg', 'color_dash_ready_text',
-            'color_dash_outstanding_bg', 'color_dash_outstanding_text',
-            'color_dash_backlog1_bg', 'color_dash_backlog1_text',
-            'color_dash_backlog2_bg', 'color_dash_backlog2_text',
-            'color_dash_backlog3_bg', 'color_dash_backlog3_text',
-            'color_dash_backlog4_bg', 'color_dash_backlog4_text',
+            'color_accent',
+            'color_room_register', 'color_room_desk', 'color_room_office',
         ]
         widgets = {f: forms.TextInput(attrs={'class': _HEX_INPUT, 'maxlength': 7, 'placeholder': '#rrggbb'})
                    for f in _hex_fields}
@@ -1036,8 +1014,8 @@ class UserCreateForm(forms.ModelForm):
         if 'level' in self.fields:
             # ⚠ Escalation level is a permission, not profile decoration.
             # _scope_tickets_for() lets a technician see tickets escalated up to
-            # THEIR level, so raising your own level widens what you can read. A
-            # reviewer set an L1 delegated manager to L3 through this form. Cap
+            # THEIR level, so raising your own level widens what you can read: an
+            # L1 delegated manager could set themselves to L3 through this form. Cap
             # the choices at the actor's own level: you cannot grant a reach you
             # do not have.
             self.fields['level'].choices = [
@@ -1086,8 +1064,8 @@ class UserEditForm(forms.ModelForm):
 
         ⚠ Fields are DELETED, not disabled — a disabled input is still honoured
         if it is posted, and this form is reachable by a plain POST. See the twin
-        on UserCreateForm; this is the one an outside reviewer used to make a
-        non-admin user-manager an administrator by posting is_staff=on.
+        on UserCreateForm; posting is_staff=on to this one once made a non-admin
+        user-manager an administrator.
         """
         from core.views import _is_admin, _assignable_roles_for
         if _is_admin(actor):
@@ -1098,8 +1076,8 @@ class UserEditForm(forms.ModelForm):
         if 'level' in self.fields:
             # ⚠ Escalation level is a permission, not profile decoration.
             # _scope_tickets_for() lets a technician see tickets escalated up to
-            # THEIR level, so raising your own level widens what you can read. A
-            # reviewer set an L1 delegated manager to L3 through this form. Cap
+            # THEIR level, so raising your own level widens what you can read: an
+            # L1 delegated manager could set themselves to L3 through this form. Cap
             # the choices at the actor's own level: you cannot grant a reach you
             # do not have.
             self.fields['level'].choices = [

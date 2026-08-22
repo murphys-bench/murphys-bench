@@ -1,0 +1,10 @@
+{% load mb_tabler %}
+<form method="post" class="card">
+    {% csrf_token %}<input type="hidden" name="tab" value="security">
+    <div class="card-header"><div><h3 class="card-title">Security</h3><div class="card-subtitle">Authentication and access controls.</div></div></div>
+    <div class="card-body">
+        <label class="form-check form-switch">{{ forms.security.require_mfa|tabler_input }}<span class="form-check-label">Require two-factor authentication</span><span class="form-check-description">All users must enroll in TOTP before using the app. Users without it are sent to setup right after login.</span></label>
+        {% if settings.require_mfa %}<div class="text-warning mt-2">{% ticon 'alert-triangle' 'icon-sm' %} MFA enforcement is on.</div>{% else %}<div class="text-secondary mt-2">MFA enforcement is off; users may choose to enroll.</div>{% endif %}
+    </div>
+    <div class="card-footer d-flex align-items-center gap-3"><button type="submit" class="btn btn-primary">Save security settings</button><a href="{% url 'core:user_list' %}" class="btn">Manage users and MFA</a></div>
+</form>

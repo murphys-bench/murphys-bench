@@ -311,10 +311,6 @@ ENVEOF
     log ".env created (chmod 600)"
 fi
 
-# 6) Build the self-hosted Tailwind stylesheet BEFORE collectstatic (no Node).
-log "building CSS (self-hosted Tailwind)..."
-"$APP/scripts/build_css.sh" || fail "CSS build failed"
-
 # 7) Initialize Django.
 log "running migrations..."
 "$VENV/python" manage.py migrate --noinput || fail "migrate failed"

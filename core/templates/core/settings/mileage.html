@@ -1,0 +1,10 @@
+{% load mb_tabler %}
+<form method="post" class="card">
+    {% csrf_token %}<input type="hidden" name="tab" value="mileage">
+    <div class="card-header"><div><h3 class="card-title">Mileage and Google Maps</h3><div class="card-subtitle">Auto-calculates onsite trip distances.</div></div></div>
+    <div class="card-body">
+        <div class="mb-3"><label class="form-label">Google Maps API key</label>{{ forms.mileage.google_maps_api_key|tabler_input }}<div class="form-hint">Needs the Distance Matrix API enabled; restrict the key to it in Google Cloud Console.</div></div>
+        <div class="mb-3"><label class="form-label">Shop address (origin)</label>{{ forms.mileage.shop_address|tabler_input }}<div class="form-hint">Starting point for onsite mileage.</div></div>
+    </div>
+    <div class="card-footer"><button type="submit" class="btn btn-primary">Save mileage settings</button></div>
+</form>

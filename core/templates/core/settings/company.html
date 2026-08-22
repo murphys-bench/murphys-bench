@@ -1,0 +1,32 @@
+{% load mb_tabler %}
+<form method="post" enctype="multipart/form-data" class="card">
+    {% csrf_token %}<input type="hidden" name="tab" value="company">
+    <div class="card-header"><div><h3 class="card-title">Company information</h3><div class="card-subtitle">Appears on repair reports and in the sidebar.</div></div></div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-12"><label class="form-label">Company name</label>{{ forms.company.company_name|tabler_input }}</div>
+            <div class="col-12"><label class="form-label">Address line 1</label>{{ forms.company.company_address_line1|tabler_input }}</div>
+            <div class="col-12"><label class="form-label">Address line 2</label>{{ forms.company.company_address_line2|tabler_input }}</div>
+            <div class="col-md-6"><label class="form-label">Phone</label>{{ forms.company.company_phone|tabler_input }}</div>
+            <div class="col-md-6"><label class="form-label">Email</label>{{ forms.company.company_email|tabler_input }}</div>
+            <div class="col-12"><label class="form-label">Logo</label>{% if settings.company_logo %}<div class="mb-2"><img src="{{ settings.company_logo.url }}" alt="Company logo" style="max-height:4rem;" class="border rounded p-1"></div>{% endif %}{{ forms.company.company_logo|tabler_input }}<div class="form-hint">PNG, JPG, or SVG. Horizontal with a transparent background works best.</div></div>
+        </div>
+    </div>
+    <div class="card-footer"><button type="submit" class="btn btn-primary">Save company info</button></div>
+</form>
+<div class="card mt-3">
+    <div class="card-header"><div><h3 class="card-title">Report header preview</h3><div class="card-subtitle">Save first to see changes here.</div></div></div>
+    <div class="card-body">
+        <div class="d-flex align-items-start gap-4 border rounded p-3">
+            {% if settings.company_logo %}<img src="{{ settings.company_logo.url }}" alt="Logo" style="max-height:3.5rem;">{% else %}<div class="avatar avatar-lg bg-secondary-lt">Logo</div>{% endif %}
+            <div class="flex-fill">
+                <div class="fw-bold">{{ settings.company_name|default:"Your Company Name" }}</div>
+                {% if settings.company_address_line1 %}<div>{{ settings.company_address_line1 }}</div>{% endif %}
+                {% if settings.company_address_line2 %}<div>{{ settings.company_address_line2 }}</div>{% endif %}
+                {% if settings.company_phone %}<div>{{ settings.company_phone }}</div>{% endif %}
+                {% if settings.company_email %}<div>{{ settings.company_email }}</div>{% endif %}
+            </div>
+            <div class="text-end"><div class="fw-bold font-monospace h3 mb-0">WO-00001</div><div class="subheader">Repair report</div><div class="text-secondary small">Intake: {{ "now"|date:"M d, Y" }}</div></div>
+        </div>
+    </div>
+</div>

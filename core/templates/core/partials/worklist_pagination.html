@@ -1,0 +1,14 @@
+{% load mb_tabler %}
+{% if is_paginated %}
+<div class="card-footer d-flex align-items-center">
+    <p class="m-0 text-secondary">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</p>
+    <ul class="pagination m-0 ms-auto">
+        <li class="page-item {% if not page_obj.has_previous %}disabled{% endif %}">
+            <a class="page-link" href="{% if page_obj.has_previous %}{% url_replace page=page_obj.previous_page_number %}{% else %}#{% endif %}">Previous</a>
+        </li>
+        <li class="page-item {% if not page_obj.has_next %}disabled{% endif %}">
+            <a class="page-link" href="{% if page_obj.has_next %}{% url_replace page=page_obj.next_page_number %}{% else %}#{% endif %}">Next</a>
+        </li>
+    </ul>
+</div>
+{% endif %}

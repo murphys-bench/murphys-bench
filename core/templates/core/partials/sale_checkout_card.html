@@ -1,95 +1,62 @@
-{% load mb_icons %}
+{% load mb_tabler %}
 {% comment %}
-Checkout / payment card for a Sale. Draft → payment form; completed → recorded
-payment + Invoice Ninja status with a retry / re-send path.
+Checkout / payment card for a Sale. Draft: the payment form (the Register's one
+money action). Completed: the recorded payment, Invoice Ninja status, retry or
+re-send. The view swaps this card out-of-band after line-item changes.
 {% endcomment %}
-<div class="bg-white rounded-lg shadow p-6" id="sale-checkout-card" {% if oob %}hx-swap-oob="true"{% endif %}>
-
+<div class="card" id="sale-checkout-card" {% if oob %}hx-swap-oob="true"{% endif %}>
     {% if sale.status == 'completed' %}
-        <h2 class="text-base font-semibold text-gray-900 mb-4">Payment</h2>
-        <dl class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div><dt class="text-gray-500">Method</dt><dd class="text-gray-900">{{ sale.get_payment_method_display|default:"—" }}</dd></div>
-            <div><dt class="text-gray-500">Amount</dt><dd class="text-gray-900 font-semibold">${{ sale.amount|default:"0.00" }}</dd></div>
-            <div><dt class="text-gray-500">Paid</dt><dd class="text-gray-900">{{ sale.paid_at|date:"M j, Y g:i A"|default:"—" }}</dd></div>
-            {% if sale.reference %}<div><dt class="text-gray-500">Reference</dt><dd class="text-gray-900">{{ sale.reference }}</dd></div>{% endif %}
-        </dl>
-
-        <div class="mt-4 pt-4 border-t border-gray-100 flex flex-wrap gap-3">
-            <a href="{% url 'core:sale_receipt_print' sale.pk %}" target="_blank"
-               class="text-sm text-blue-600 hover:underline">Print Receipt</a>
-            <a href="{% url 'core:sale_receipt_email' sale.pk %}"
-               class="text-sm text-blue-600 hover:underline">Email Receipt</a>
+        <div class="card-header"><h3 class="card-title">Payment</h3></div>
+        <div class="card-body">
+            <dl class="row mb-0">
+                <dt class="col-5 text-secondary">Method</dt><dd class="col-7">{{ sale.get_payment_method_display|default:"" }}</dd>
+                <dt class="col-5 text-secondary">Amount</dt><dd class="col-7 fw-bold">${{ sale.amount|default:"0.00" }}</dd>
+                <dt class="col-5 text-secondary">Paid</dt><dd class="col-7">{{ sale.paid_at|date:"M j, Y g:i A"|default:"" }}</dd>
+                {% if sale.reference %}<dt class="col-5 text-secondary">Reference</dt><dd class="col-7">{{ sale.reference }}</dd>{% endif %}
+            </dl>
+            <div class="btn-list mt-3">
+                <a href="{% url 'core:sale_receipt_print' sale.pk %}" target="_blank" class="btn">{% ticon 'printer' 'icon-sm' %} Print receipt</a>
+                <a href="{% url 'core:sale_receipt_email' sale.pk %}" class="btn">{% ticon 'mail' 'icon-sm' %} Email receipt</a>
+            </div>
         </div>
-
-        <div class="mt-4 pt-4 border-t border-gray-100">
+        <div class="card-footer">
             {% if sale.invoice_ninja_id %}
-                <div class="flex flex-wrap items-center gap-3">
-                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                        Invoice Ninja → #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }}{% if sale.in_status %} · {{ sale.in_status }}{% endif %}
-                    </span>
-                    {% if not sale.client_id %}<span class="text-xs text-gray-400">billed to Walk-In</span>{% endif %}
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <span class="badge bg-green-lt">Invoice Ninja #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }}{% if sale.in_status %} &middot; {{ sale.in_status }}{% endif %}</span>
+                    {% if not sale.client_id %}<span class="text-secondary small">billed to Walk-In</span>{% endif %}
                     {% if invoice_ninja_enabled %}
-                    <form method="post" action="{% url 'core:sale_send_in' sale.pk %}"
-                          onsubmit="return confirm('Re-send this sale to Invoice Ninja? This creates another paid invoice.');">
-                        {% csrf_token %}
-                        <input type="hidden" name="confirm_resend" value="1">
-                        <button type="submit" class="text-xs text-gray-500 hover:text-gray-700 underline">Re-send</button>
-                    </form>
+                    <form method="post" action="{% url 'core:sale_send_in' sale.pk %}" class="ms-auto" data-mb-confirm="Re-send this sale to Invoice Ninja? This creates another paid invoice there.">{% csrf_token %}<input type="hidden" name="confirm_resend" value="1"><button type="submit" class="btn btn-sm">Re-send</button></form>
                     {% endif %}
                 </div>
             {% elif invoice_ninja_enabled %}
-                <p class="text-sm text-yellow-700 mb-2">Not yet sent to Invoice Ninja.</p>
-                <form method="post" action="{% url 'core:sale_send_in' sale.pk %}">
-                    {% csrf_token %}
-                    <button type="submit" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 font-medium">
-                        Retry Send to Invoice Ninja
-                    </button>
-                </form>
+                <div class="text-warning mb-2">Not yet sent to Invoice Ninja.</div>
+                <form method="post" action="{% url 'core:sale_send_in' sale.pk %}">{% csrf_token %}<button type="submit" class="btn">Retry send to Invoice Ninja</button></form>
             {% else %}
-                <p class="text-sm text-gray-400">Recorded in Murphy's Bench only (Invoice Ninja not enabled).</p>
+                <span class="text-secondary">Recorded in Murphy's Bench only (Invoice Ninja not enabled).</span>
             {% endif %}
         </div>
-
     {% elif sale.status == 'draft' %}
-        <h2 class="text-base font-semibold text-gray-900 mb-4">Checkout</h2>
-        {% if has_priced_lines %}
-            <form method="post" action="{% url 'core:sale_checkout' sale.pk %}" class="space-y-4">
+        <div class="card-header"><h3 class="card-title">Checkout</h3></div>
+        <div class="card-body">
+            {% if has_priced_lines %}
+            <form method="post" action="{% url 'core:sale_checkout' sale.pk %}">
                 {% csrf_token %}
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                        <label class="block text-sm text-gray-600 mb-1">Payment method</label>
-                        {{ checkout_form.payment_method }}
-                    </div>
-                    <div>
-                        <label class="block text-sm text-gray-600 mb-1">Amount ($)</label>
-                        {{ checkout_form.amount }}
-                    </div>
-                    <div>
-                        <label class="block text-sm text-gray-600 mb-1">Reference</label>
-                        {{ checkout_form.reference }}
-                    </div>
-                </div>
-                <button type="submit" class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium">
-                    Complete Sale
-                </button>
-                {% if invoice_ninja_enabled %}
-                <p class="text-xs text-gray-400">Completing records the payment and sends a paid invoice to Invoice Ninja{% if not sale.client_id %} (under Walk-In){% endif %}.</p>
-                {% endif %}
+                <div class="mb-3"><label class="form-label required">Payment method</label>{{ checkout_form.payment_method|tabler_input }}</div>
+                <div class="mb-3"><label class="form-label required">Amount ($)</label>{{ checkout_form.amount|tabler_input }}</div>
+                <div class="mb-3"><label class="form-label">Reference</label>{{ checkout_form.reference|tabler_input }}</div>
+                <div class="d-grid"><button type="submit" class="btn btn-success">Complete sale</button></div>
+                {% if invoice_ninja_enabled %}<div class="form-hint mt-2">Completing records the payment and sends a paid invoice to Invoice Ninja{% if not sale.client_id %} (under Walk-In){% endif %}.</div>{% endif %}
             </form>
-        {% else %}
-            <p class="text-sm text-gray-500">Add a priced line item above to take payment, or record this as no charge below.</p>
-        {% endif %}
-
-        {# No Charge: complete at $0 (goodwill/handout) and print a receipt — #}
-        {# available with or without priced lines, never touches Invoice Ninja. #}
-        <form method="post" action="{% url 'core:sale_checkout' sale.pk %}"
-              class="mt-4 pt-4 border-t border-gray-100"
-              onsubmit="return confirm('Complete this sale as No Charge — $0.00?');">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="no_charge">
-            <button type="submit" class="px-5 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-200 font-medium">
-                Complete as No Charge
-            </button>
-        </form>
+            {% else %}
+            <p class="text-secondary">Add a priced line item to take payment, or record this as no charge.</p>
+            {% endif %}
+        </div>
+        {# No Charge: complete at $0 (goodwill/handout) and print a receipt; never touches Invoice Ninja. #}
+        <div class="card-footer">
+            <form method="post" action="{% url 'core:sale_checkout' sale.pk %}" class="d-grid" data-mb-confirm="Complete {{ sale.sale_number }} as No Charge, $0.00?">
+                {% csrf_token %}<input type="hidden" name="action" value="no_charge">
+                <button type="submit" class="btn {% if has_priced_lines %}btn-outline-secondary{% else %}btn-success{% endif %}">Complete as no charge</button>
+            </form>
+        </div>
     {% endif %}
 </div>

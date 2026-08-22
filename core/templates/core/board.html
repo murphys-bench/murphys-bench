@@ -1,0 +1,222 @@
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
+
+{% block title %}Board — Murphy's Bench{% endblock %}
+
+{% block page_header %}
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <div class="page-pretitle">Home</div>
+                <h2 class="page-title">Board</h2>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+{% comment %}
+Archetype 1, The Board. Tiles are decisions, not counts: each one names a thing
+that needs doing and links to the worklist filtered to exactly that. Regions
+are static: tickets, bench, follow-ups, unsorted, always present, same order,
+with an empty state that says something real. Cards carry the PCRT grammar:
+who + standing, id, the problem in a few words, status by color, age, money
+where money exists, and the card itself is the one action (open it).
+{% endcomment %}
+
+<div class="row row-deck row-cards mb-3">
+    {% for t in tiles %}
+    <div class="col-6 col-md-4 col-xl-2">
+        <a href="{{ t.url }}" class="card card-sm card-link">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <span class="status-dot me-2 {% if t.count %}status-dot-animated{% endif %}" style="--tblr-status-color: var(--tblr-{{ t.tone }});"></span>
+                    <div class="subheader">{{ t.label }}</div>
+                </div>
+                <div class="h1 mb-0 mt-1">{% if t.money %}${{ t.count|floatformat:2 }}{% else %}{{ t.count }}{% endif %}</div>
+                {% if not t.count %}<div class="text-secondary small">{{ t.empty }}</div>{% endif %}
+            </div>
+        </a>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="row row-cards">
+
+    {# ── Tickets ──────────────────────────────────────────────────────── #}
+    <div class="col-12 col-xl-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Tickets</h3>
+                <span class="badge bg-blue-lt ms-2">{{ ticket_total }}</span>
+                <div class="card-actions">
+                    <a href="{% url 'core:ticket_list' %}" class="btn btn-sm">All tickets</a>
+                </div>
+            </div>
+            {% if tickets %}
+            <div class="list-group list-group-flush">
+                {% for t in tickets %}
+                <a href="{% url 'core:ticket_detail' t.pk %}" class="list-group-item list-group-item-action mb-stripe"
+                   style="--mb-stripe: var(--mb-status-ticket-{{ t.status }}, var(--tblr-secondary));">
+                    <div class="row align-items-center g-2">
+                        <div class="col text-truncate">
+                            <div class="text-truncate">
+                                <span class="fw-medium">{{ t.client.name }}</span>
+                                {% if t.client.client_type == 'business' %}<span class="badge bg-azure-lt ms-1">Business</span>
+                                {% else %}<span class="badge bg-secondary-lt ms-1">Residential</span>{% endif %}
+                                {% if t.priority == 'urgent' or t.priority == 'high' %}<span class="text-orange ms-1 small fw-medium">{% ticon 'alert-triangle' 'icon-sm' %} {{ t.get_priority_display }}</span>{% endif %}
+                                {% if t.is_overdue %}<span class="text-red ms-1" title="Past response deadline">{% ticon 'clock' 'icon-sm' %}</span>{% endif %}
+                                {% if t.needs_response %}<span class="text-green ms-1" title="Client replied, awaiting answer">{% ticon 'mail' 'icon-sm' %}</span>{% endif %}
+                            </div>
+                            <div class="text-secondary small text-truncate">{{ t.ticket_number }} &middot; {{ t.subject }}</div>
+                        </div>
+                        <div class="col-auto text-end small">
+                            <div><span class="status-dot me-1" style="--tblr-status-color: var(--mb-status-ticket-{{ t.status }}, var(--tblr-secondary));"></span>{{ t.status|status_word:'ticket' }}</div>
+                            <div class="text-secondary">{{ t.created_at|age_short }}{% if t.assigned_to %} &middot; {{ t.assigned_to.first_name|default:t.assigned_to.username }}{% else %} &middot; unclaimed{% endif %}</div>
+                        </div>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+            {% if ticket_total > region_cap %}
+            <div class="card-footer text-secondary small">Showing the first {{ region_cap }} of {{ ticket_total }} in triage order.</div>
+            {% endif %}
+            {% else %}
+            <div class="card-body">
+                <div class="empty py-3">
+                    <p class="empty-title">No open tickets</p>
+                    <p class="empty-subtitle text-secondary">Nothing is waiting. Bench work is below.</p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {# ── Bench ────────────────────────────────────────────────────────── #}
+    <div class="col-12 col-xl-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Bench</h3>
+                <span class="badge bg-blue-lt ms-2">{{ wo_total }}</span>
+                <div class="card-actions">
+                    <a href="{% url 'core:work_order_list' %}" class="btn btn-sm">All work orders</a>
+                </div>
+            </div>
+            {% if work_orders %}
+            <div class="list-group list-group-flush">
+                {% for w in work_orders %}
+                <a href="{% url 'core:work_order_detail' w.pk %}" class="list-group-item list-group-item-action mb-stripe"
+                   style="--mb-stripe: var(--mb-status-workorder-{{ w.status }}, var(--tblr-secondary));">
+                    <div class="row align-items-center g-2">
+                        <div class="col text-truncate">
+                            <div class="text-truncate">
+                                <span class="fw-medium">{% if w.client %}{{ w.client.name }}{% else %}Walk-in{% endif %}</span>
+                                {% if w.client %}{% if w.client.client_type == 'business' %}<span class="badge bg-azure-lt ms-1">Business</span>
+                                {% else %}<span class="badge bg-secondary-lt ms-1">Residential</span>{% endif %}{% endif %}
+                                {% if w.priority == 'urgent' or w.priority == 'high' %}<span class="text-orange ms-1 small fw-medium">{% ticon 'alert-triangle' 'icon-sm' %} {{ w.get_priority_display }}</span>{% endif %}
+                            </div>
+                            <div class="text-secondary small text-truncate">
+                                {{ w.work_order_number }}
+                                {% if w.device %} &middot; {{ w.device }}{% endif %}
+                                {% if w.reported_problem %} &middot; {{ w.reported_problem|truncatechars:60 }}{% elif w.repair_type %} &middot; {{ w.repair_type }}{% endif %}
+                            </div>
+                        </div>
+                        <div class="col-auto text-end small">
+                            <div><span class="status-dot me-1" style="--tblr-status-color: var(--mb-status-workorder-{{ w.status }}, var(--tblr-secondary));"></span>{{ w.status|status_word:'workorder' }}</div>
+                            <div class="text-secondary">
+                                {{ w.created_at|age_short }}
+                                {% if w.line_items_total %} &middot; ${{ w.line_items_total|floatformat:2 }}{% endif %}
+                                {% if w.assigned_to %} &middot; {{ w.assigned_to.first_name|default:w.assigned_to.username }}{% else %} &middot; unclaimed{% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+            {% if wo_total > region_cap %}
+            <div class="card-footer text-secondary small">Showing the first {{ region_cap }} of {{ wo_total }} in triage order.</div>
+            {% endif %}
+            {% else %}
+            <div class="card-body">
+                <div class="empty py-3">
+                    <p class="empty-title">The bench is clear</p>
+                    <p class="empty-subtitle text-secondary">No open work orders.</p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {# ── Follow-ups ───────────────────────────────────────────────────── #}
+    <div class="col-12 col-xl-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Follow-ups due</h3>
+                <span class="badge bg-purple-lt ms-2">{{ follow_up_total }}</span>
+                <div class="card-actions"><a href="{% url 'core:follow_up_list' %}" class="btn btn-sm">All follow-ups</a></div>
+            </div>
+            {% if follow_ups %}
+            <div class="list-group list-group-flush">
+                {% for f in follow_ups %}
+                <a href="{% if f.client %}{% url 'core:client_detail' f.client.pk %}{% else %}{% url 'core:prospect_detail' f.prospect.pk %}{% endif %}#relationship" class="list-group-item list-group-item-action mb-stripe" style="--mb-stripe: var(--mb-room-desk, var(--tblr-purple));">
+                    <div class="row align-items-center g-2">
+                        <div class="col text-truncate">
+                            <div class="text-truncate"><span class="fw-medium">{{ f.who_name }}</span>{% if f.prospect %} <span class="badge bg-secondary-lt ms-1">Prospect</span>{% endif %}</div>
+                            <div class="text-secondary small text-truncate">{{ f.get_kind_display }}{% if f.note %} &middot; {{ f.note|truncatechars:60 }}{% endif %}{% if f.record %} &middot; {% if f.work_order %}{{ f.work_order.work_order_number }}{% else %}{{ f.ticket.ticket_number }}{% endif %}{% endif %}</div>
+                        </div>
+                        <div class="col-auto text-end small {% if f.is_overdue %}text-red fw-medium{% else %}text-secondary{% endif %}">{{ f.due_on|date:"M j" }}{% if f.is_overdue %}, overdue{% endif %}</div>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="card-body">
+                <div class="empty py-3">
+                    <p class="empty-title">No follow-ups due</p>
+                    <p class="empty-subtitle text-secondary">Thank-yous, satisfaction checks and planned touches land here on the day they are due. Plan one from a customer's Relationship panel.</p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {# ── Unsorted ─────────────────────────────────────────────────────── #}
+    <div class="col-12 col-xl-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Unsorted inbound</h3>
+                <span class="badge bg-indigo-lt ms-2">{{ unsorted_total }}</span>
+                <div class="card-actions">
+                    <a href="{% url 'core:ticket_list' %}?triage=1" class="btn btn-sm">Triage</a>
+                </div>
+            </div>
+            {% if unsorted %}
+            <div class="list-group list-group-flush">
+                {% for t in unsorted %}
+                <a href="{% url 'core:ticket_detail' t.pk %}" class="list-group-item list-group-item-action mb-stripe"
+                   style="--mb-stripe: var(--tblr-indigo);">
+                    <div class="row align-items-center g-2">
+                        <div class="col text-truncate">
+                            <div class="fw-medium text-truncate">{{ t.subject }}</div>
+                            <div class="text-secondary small text-truncate">{{ t.ticket_number }}{% if t.contact %} &middot; {{ t.contact.email }}{% endif %}</div>
+                        </div>
+                        <div class="col-auto text-secondary small">{{ t.created_at|age_short }}</div>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="card-body">
+                <div class="empty py-3">
+                    <p class="empty-title">No unsorted inbound</p>
+                    <p class="empty-subtitle text-secondary">Every message matched a client.</p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

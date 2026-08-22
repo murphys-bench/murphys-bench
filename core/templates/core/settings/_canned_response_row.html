@@ -1,0 +1,12 @@
+<div class="list-group-item">
+    <div class="d-flex align-items-start gap-2">
+        <div class="flex-fill"><div class="fw-medium">{{ cr.label }}</div><div class="text-secondary small" style="white-space: pre-wrap;">{{ cr.body }}</div></div>
+        <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#cr-edit-{{ cr.pk }}">Edit</button>
+        <form method="post" action="{% url 'core:cr_delete' cr.pk %}" data-mb-confirm="Delete the canned response {{ cr.label }}?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Delete</button></form>
+    </div>
+    <form method="post" action="{% url 'core:cr_update' cr.pk %}" class="collapse mt-2" id="cr-edit-{{ cr.pk }}">{% csrf_token %}<input type="hidden" name="category_id" value="{{ cat_pk }}">
+        <div class="mb-2"><input type="text" name="label" value="{{ cr.label }}" class="form-control" required></div>
+        <div class="mb-2"><textarea name="body" rows="3" class="form-control font-monospace">{{ cr.body }}</textarea></div>
+        <button type="submit" class="btn btn-primary">Save</button>
+    </form>
+</div>

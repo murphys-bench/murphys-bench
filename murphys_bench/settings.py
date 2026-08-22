@@ -126,6 +126,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'core.context_processors.site_settings',
+                'core.context_processors.desk_counts',
             ],
         },
     },
@@ -307,9 +308,9 @@ CSRF_COOKIE_HTTPONLY = True
 # ── Content-Security-Policy ─────────────────────────────────────────────────
 # Emitted by core.middleware.ContentSecurityPolicyMiddleware. The front-end is
 # fully self-hosted (no CDN), so every fetchable origin is 'self'. script-src
-# keeps 'unsafe-eval'/'unsafe-inline' BY NECESSITY: Alpine.js evaluates its 400+
-# template expressions via new Function() and the app has inline <script> blocks
-# and inline event handlers. The real hardening is in the other directives —
+# is 'self' only since v0.14.0: Alpine and every inline <script> and inline
+# event handler left with the old frame; HTMX runs with allowEval off (the
+# htmx-config meta in base_tabler.html). Together with the other directives:
 # default-src/connect-src 'self' (an injected script can't exfiltrate cross-origin),
 # frame-ancestors 'none' (clickjacking), object-src 'none', base-uri/form-action 'self'.
 # SHIPS ENFORCING. It used to default to report-only, which meant it enforced
@@ -320,7 +321,7 @@ CSRF_COOKIE_HTTPONLY = True
 # (violations still report to /csp-report/), or CSP_POLICY='' to disable outright.
 CSP_POLICY = config('CSP_POLICY', default=(
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-eval' 'unsafe-inline'; "
+    "script-src 'self'; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data:; "
     "font-src 'self'; "

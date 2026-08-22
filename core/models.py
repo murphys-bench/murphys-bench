@@ -416,6 +416,12 @@ class Prospect(models.Model):
         return self.contact_name
 
     @property
+    def name(self):
+        """What a Client calls its name. Lets a prospect stand in for a client
+        wherever a template or greeting reads {{ client.name }}."""
+        return self.display_name
+
+    @property
     def is_promoted(self):
         return self.promoted_to_id is not None
 
@@ -539,7 +545,7 @@ class DeviceType(models.Model):
     def delete(self, *args, **kwargs):
         # Refused at the model, not only in the Settings view, so Django admin
         # and the shell cannot orphan devices or silently un-scope checklist
-        # items (outside review, Aug 15).
+        # items.
         device_count, checklist_count = self.usage()
         if device_count or checklist_count:
             raise models.ProtectedError(
@@ -2528,14 +2534,13 @@ class SiteSettings(models.Model):
     # the destinations due at that tick; if both are due it ships one snapshot to both.
 
     # Status badge colors — hex values rendered as CSS variables
-    color_status_new         = models.CharField(max_length=7, default='#dbeafe', blank=True)  # blue-100
-    color_status_assigned    = models.CharField(max_length=7, default='#ede9fe', blank=True)  # violet-100
-    color_status_in_progress = models.CharField(max_length=7, default='#fef9c3', blank=True)  # yellow-100
-    color_status_completed   = models.CharField(max_length=7, default='#dcfce7', blank=True)  # green-100
-    color_status_closed      = models.CharField(max_length=7, default='#f3f4f6', blank=True)  # gray-100
-    color_status_cancelled   = models.CharField(max_length=7, default='#fee2e2', blank=True)  # red-100
 
     # Site logo (displayed in nav bar; separate from company_logo on reports)
+    # Room accents on the Tabler frame (ruled Aug 21 2026: per-shop adjustable).
+    # A room shows which room it is by looking different; these are the looks.
+    color_room_register = models.CharField(max_length=7, default='#2fb344', blank=True)
+    color_room_desk     = models.CharField(max_length=7, default='#ae3ec9', blank=True)
+    color_room_office   = models.CharField(max_length=7, default='#6c7a91', blank=True)
     site_logo = models.ImageField(
         upload_to='site/', blank=True, null=True,
         help_text='Logo shown in the nav bar. PNG or SVG recommended. Leave blank to show text.',
@@ -2549,35 +2554,10 @@ class SiteSettings(models.Model):
     )
 
     # Site palette
-    color_primary     = models.CharField(max_length=7, default='#111827', blank=True)  # gray-900 — nav/toolbar bg
-    color_nav_text    = models.CharField(max_length=7, default='#ffffff', blank=True)  # white — nav link text
     color_accent      = models.CharField(max_length=7, default='#2563eb', blank=True)  # blue-600 — links, buttons
-    color_sidebar_bg  = models.CharField(max_length=7, default='#1f2937', blank=True)  # gray-800 — sidebar bg
-    color_sidebar_text = models.CharField(max_length=7, default='#ffffff', blank=True)  # white — sidebar text
-    color_page_bg        = models.CharField(max_length=7, default='#f1f5f9', blank=True)  # page background
-    color_page_title     = models.CharField(max_length=7, default='#111827', blank=True)  # page heading text color
-    color_title_bar      = models.CharField(max_length=7, default='#ffffff', blank=True)  # page title bar background
-    color_section_header      = models.CharField(max_length=7, default='#f8fafc', blank=True)  # section header bar bg
-    color_section_header_text = models.CharField(max_length=7, default='#111827', blank=True)  # section header text + links
 
     # Owner/admin dashboard — bg + text per surface, so each tile/card/backlog
     # tier is fully themeable in Settings > Colors (defaults are the mockup pastels).
-    color_dash_tickets_bg      = models.CharField(max_length=7, default='#e6f1fb', blank=True)  # Open tickets tile/card
-    color_dash_tickets_text    = models.CharField(max_length=7, default='#0c447c', blank=True)
-    color_dash_workorders_bg   = models.CharField(max_length=7, default='#e1f5ee', blank=True)  # Open work orders tile/card
-    color_dash_workorders_text = models.CharField(max_length=7, default='#0f6e56', blank=True)
-    color_dash_ready_bg        = models.CharField(max_length=7, default='#eaf3de', blank=True)  # Ready to bill tile
-    color_dash_ready_text      = models.CharField(max_length=7, default='#27500a', blank=True)
-    color_dash_outstanding_bg   = models.CharField(max_length=7, default='#faeeda', blank=True)  # Outstanding invoices tile
-    color_dash_outstanding_text = models.CharField(max_length=7, default='#633806', blank=True)
-    color_dash_backlog1_bg     = models.CharField(max_length=7, default='#eaf3de', blank=True)  # Backlog < 1 day
-    color_dash_backlog1_text   = models.CharField(max_length=7, default='#3b6d11', blank=True)
-    color_dash_backlog2_bg     = models.CharField(max_length=7, default='#faeeda', blank=True)  # Backlog 1-3 days
-    color_dash_backlog2_text   = models.CharField(max_length=7, default='#854f0b', blank=True)
-    color_dash_backlog3_bg     = models.CharField(max_length=7, default='#faece7', blank=True)  # Backlog 3-7 days
-    color_dash_backlog3_text   = models.CharField(max_length=7, default='#993c1d', blank=True)
-    color_dash_backlog4_bg     = models.CharField(max_length=7, default='#fcebeb', blank=True)  # Backlog 7+ days
-    color_dash_backlog4_text   = models.CharField(max_length=7, default='#a32d2d', blank=True)
 
     # ⚠ NOT a cosmetic timestamp — this is the guard that stops `seed_demo_data`
     # injecting fake clients into a real shop. scripts/install.sh stamps it once the
@@ -2730,7 +2710,11 @@ class EmailTemplate(models.Model):
         ('ticket_resolved', 'Ticket Resolved'),
     ]
 
-    trigger = models.CharField(max_length=30, choices=TRIGGER_CHOICES, unique=True)
+    # Event templates carry a trigger and are sent by code. Custom templates
+    # (Mike, Aug 21 2026: "what if I want 5, or 8?") carry a name instead and
+    # are sent by a person from a Work Record or Client Hub, or by a follow-up.
+    trigger = models.CharField(max_length=30, choices=TRIGGER_CHOICES, unique=True, null=True, blank=True)
+    name = models.CharField(max_length=100, blank=True, help_text='Custom templates only; event templates are named by their event.')
     subject_template = models.CharField(
         max_length=255,
         help_text='Django template syntax. Variables: {{ ticket.ticket_number }}, {{ ticket.subject }}, {{ customer_name }}, {{ client.name }}, {{ contact.first_name }}, {{ status }}, {{ tech_name }}',
@@ -2751,10 +2735,93 @@ class EmailTemplate(models.Model):
 
     class Meta:
         db_table = 'email_templates'
-        ordering = ['trigger']
+        ordering = ['trigger', 'name']
+
+    @property
+    def is_custom(self):
+        return not self.trigger
+
+    @property
+    def label(self):
+        return self.name if self.is_custom else self.get_trigger_display()
 
     def __str__(self):
-        return f'{self.get_trigger_display()}'
+        return self.label
+
+
+class FollowUpQuerySet(models.QuerySet):
+    def open(self):
+        return self.filter(done_at__isnull=True)
+
+    def due(self):
+        from django.utils import timezone
+        return self.open().filter(due_on__lte=timezone.localdate())
+
+
+class FollowUp(models.Model):
+    """A planned touch with a customer or prospect: a thank-you, a satisfaction
+    check, a promised call-back. The Relationship Desk's unit of work. Lives on
+    the Board while due, on the Follow-ups list always, and is done when the
+    person says so (or when its email goes out)."""
+
+    KIND_CHOICES = [
+        ('thank_you', 'Thank-you'),
+        ('satisfaction', 'Satisfaction check'),
+        ('planned', 'Planned touch'),
+        ('other', 'Other'),
+    ]
+
+    client = models.ForeignKey('Client', on_delete=models.CASCADE, null=True, blank=True, related_name='follow_ups')
+    prospect = models.ForeignKey('Prospect', on_delete=models.CASCADE, null=True, blank=True, related_name='follow_ups')
+    ticket = models.ForeignKey('Ticket', on_delete=models.SET_NULL, null=True, blank=True, related_name='follow_ups')
+    work_order = models.ForeignKey('WorkOrder', on_delete=models.SET_NULL, null=True, blank=True, related_name='follow_ups')
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default='planned')
+    note = models.TextField(blank=True)
+    due_on = models.DateField(db_index=True)
+    template = models.ForeignKey('EmailTemplate', on_delete=models.SET_NULL, null=True, blank=True, related_name='follow_ups',
+                                 help_text='Email to send when this follow-up is carried out.')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='follow_ups_created')
+    created_at = models.DateTimeField(auto_now_add=True)
+    done_at = models.DateTimeField(null=True, blank=True)
+    done_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='follow_ups_done')
+
+    objects = FollowUpQuerySet.as_manager()
+
+    class Meta:
+        db_table = 'follow_ups'
+        ordering = ['due_on', 'created_at']
+        constraints = [
+            # Exactly one of client / prospect.
+            models.CheckConstraint(
+                name='follow_up_exactly_one_of_client_or_prospect',
+                condition=(models.Q(client__isnull=False, prospect__isnull=True)
+                           | models.Q(client__isnull=True, prospect__isnull=False)),
+            ),
+        ]
+
+    @property
+    def who(self):
+        return self.client or self.prospect
+
+    @property
+    def who_name(self):
+        if self.client_id:
+            return self.client.name
+        if self.prospect_id:
+            return self.prospect.display_name
+        return ''
+
+    @property
+    def is_overdue(self):
+        from django.utils import timezone
+        return self.done_at is None and self.due_on < timezone.localdate()
+
+    @property
+    def record(self):
+        return self.work_order or self.ticket
+
+    def __str__(self):
+        return f'{self.get_kind_display()} for {self.who_name} on {self.due_on}'
 
 
 class BlockedSender(models.Model):
@@ -3038,36 +3105,6 @@ class TicketQueue(models.Model):
     @property
     def is_system_queue(self):
         return self.owner is None
-
-
-class DashboardTile(models.Model):
-    """Configurable tile on the dashboard. Two rows: ticket and workorder."""
-
-    ROW_CHOICES = [('ticket', 'Tickets'), ('workorder', 'Work Orders')]
-    VISIBLE_TO_CHOICES = [('all', 'All Users'), ('admin', 'Admins Only'), ('tech', 'Techs Only')]
-
-    row = models.CharField(max_length=12, choices=ROW_CHOICES)
-    label = models.CharField(max_length=100)
-    status_filter = models.JSONField(
-        default=list,
-        help_text='List of status values to count. Empty = count all.',
-    )
-    link_url = models.CharField(
-        max_length=200,
-        blank=True,
-        help_text='URL the tile links to. Use relative paths.',
-    )
-    sort_order = models.IntegerField(default=0)
-    is_active = models.BooleanField(default=True)
-    visible_to = models.CharField(max_length=10, choices=VISIBLE_TO_CHOICES, default='all')
-    icon = models.CharField(max_length=10, blank=True, help_text='Optional emoji icon.')
-
-    class Meta:
-        db_table = 'dashboard_tiles'
-        ordering = ['row', 'sort_order']
-
-    def __str__(self):
-        return f'{self.get_row_display()} — {self.label}'
 
 
 class CustomField(models.Model):

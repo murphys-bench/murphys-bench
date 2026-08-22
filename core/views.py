@@ -18,15 +18,17 @@ from django.db.models.functions import Coalesce
 from django.db import IntegrityError
 from django.core.exceptions import PermissionDenied
 from django.contrib.contenttypes.models import ContentType
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, HttpResponseBadRequest
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.html import escape
 from two_factor.views import SetupView as TwoFactorSetupView
 from .middleware import mfa_setup_is_mandatory
 from .models import (
+    FollowUp,
     WorkOrder, WorkOrderNote, WorkOrderItem, Client, Device, Mileage, ChecklistItem,
     Ticket, TicketReply, TicketWorkLog, TicketLock, TicketLink, Attachment, SiteSettings,
-    KBCategory, KBArticle, TicketQueue, DashboardTile, User,
+    KBCategory, KBArticle, TicketQueue, User,
     CustomField, CustomFieldChoice, CustomFieldValue,
     CatalogItem, LineItem, ContactPhone,
     Contact, RepairType, RepairTypeCategory,
@@ -71,10 +73,13 @@ def csp_report(request):
     detail = report.get('csp-report', report) if isinstance(report, dict) else report
     if isinstance(detail, dict):
         logger.warning(
-            'CSP violation: blocked=%s directive=%s document=%s',
+            'CSP violation: blocked=%s directive=%s document=%s source=%s line=%s sample=%s',
             detail.get('blocked-uri'),
             detail.get('violated-directive') or detail.get('effective-directive'),
             detail.get('document-uri'),
+            detail.get('source-file'),
+            detail.get('line-number'),
+            (detail.get('script-sample') or '')[:80],
         )
     else:
         logger.warning('CSP violation (unparsed shape)')
@@ -290,9 +295,9 @@ def _role_grants(role):
 #
 # ⚠ THE HISTORY, because it is the reason this is a table and not a chain of ifs.
 # "You cannot act on someone who outranks you" has now been implemented three
-# times and been wrong twice. First it meant "is not an admin", and a reviewer
-# handed a manager a role carrying card charging. Then it also meant "holds no
-# permission I lack", and a reviewer reset an L3 technician's password from an L1
+# times and been wrong twice. First it meant "is not an admin", which let a
+# manager hand themselves a role carrying card charging. Then it also meant "holds
+# no permission I lack", which let an L1 manager reset an L3 technician's password
 # manager account — because escalation level is rank too: _scope_tickets_for()
 # shows a technician tickets escalated up to their level, so taking over an L3
 # account buys visibility an L1 was never granted.
@@ -348,9 +353,9 @@ def _may_act_on_user(actor, target):
     and satisfy _is_admin(); it exposes `role_obj`, so they could assign
     themselves a role carrying can_manage_settings and satisfy it that way; and
     the set-password view took any target, so they could reset an admin's
-    password and simply log in as them. All three were reproduced by an outside
-    reviewer against the first version of this. I enforced the checkbox without
-    asking what the checkbox could reach.
+    password and simply log in as them. All three were reproducible against the
+    first version of this: it enforced the checkbox without asking what the
+    checkbox could reach.
 
     The rule is the ordinary one for delegated user administration: you cannot
     grant what you do not hold, and you cannot act on someone who outranks you.
@@ -365,8 +370,8 @@ def _assignable_roles_for(actor):
     The rule is the general one: a role is assignable only if everything it
     grants is something the actor already holds. This started as "exclude roles
     with can_manage_settings", which was the rule stated in the docstring above
-    it implemented too narrowly — a reviewer showed a delegated manager handing
-    themselves card charging, MFA reset, the org credential vault or ticket
+    it implemented too narrowly: a delegated manager could hand themselves card
+    charging, MFA reset, the org credential vault or ticket
     deletion, none of which touch Settings. Comparing the whole permission set
     covers every flag now and every flag added later.
     """
@@ -565,235 +570,115 @@ def _custom_fields_with_values(fields, obj):
     return result
 
 
-_TILE_COLOR_CLASSES = {
-    'blue':   {'card': 'bg-blue-50 border-l-4 border-blue-400',   'num': 'text-blue-700',   'icon': 'text-blue-400'},
-    'yellow': {'card': 'bg-yellow-50 border-l-4 border-yellow-400', 'num': 'text-yellow-700', 'icon': 'text-yellow-400'},
-    'red':    {'card': 'bg-red-50 border-l-4 border-red-500',     'num': 'text-red-700',    'icon': 'text-red-400'},
-    'green':  {'card': 'bg-green-50 border-l-4 border-green-400', 'num': 'text-green-700',  'icon': 'text-green-500'},
-    'gray':   {'card': 'bg-gray-50 border-l-4 border-gray-400',   'num': 'text-gray-600',   'icon': 'text-gray-400'},
-}
+# ── The Board ────────────────────────────────────────────────────────────────
+# The shop's home screen (archetype 1, ruled Aug 20 2026): where work waits, in
+# triage order, for everyone, with the tiles row gated by role. Regions are
+# STATIC: always present, same place, designed empty states. Replaced the
+# owner/tech dashboards and their configurable DashboardTile row on Aug 21 2026
+# (tabler-rebuild batch 2); tiles now surface DECISIONS, never totals.
+
+# Triage order, as Mike stated it Aug 13: emergencies always visible, then
+# Business before Residential, then severity of effect, then age (oldest first).
+_PRIORITY_RANK = {'urgent': 0, 'high': 1, 'normal': 2, 'low': 3}
 
 
-def _tile_color(tile):
-    if 'overdue=1' in tile.link_url or '/overdue' in tile.link_url:
-        return 'red'
-    statuses = set(tile.status_filter or [])
-    active = {'open', 'in_progress', 'assigned'}
-    waiting = {'waiting_on_customer', 'waiting_on_parts', 'waiting'}
-    completed = {'completed', 'closed', 'resolved'}
-    if statuses & completed and not (statuses & (active | waiting)):
-        return 'green'
-    if statuses & waiting and not (statuses & active):
-        return 'yellow'
-    if statuses == {'new'}:
-        return 'gray'
-    return 'blue'
+def _board_order(qs):
+    from django.db.models import Case, When, Value, IntegerField
+    return qs.annotate(
+        _prio=Case(*[When(priority=k, then=Value(v)) for k, v in _PRIORITY_RANK.items()],
+                   default=Value(9), output_field=IntegerField()),
+        _biz=Case(When(client__client_type='business', then=Value(0)),
+                  default=Value(1), output_field=IntegerField()),
+    ).order_by('_prio', '_biz', 'created_at')
 
 
-def _tile_count(tile, user, is_admin):
-    """Return the count for a DashboardTile."""
-    statuses = tile.status_filter or []
-    if tile.row == 'ticket':
-        qs = Ticket.objects.all()
-        if not is_admin:
-            qs = qs.filter(assigned_to=user)
-        if statuses:
-            qs = qs.filter(status__in=statuses)
-        else:
-            qs = qs.exclude(status__in=TICKET_CLOSED_STATUSES)
-        if '/overdue' in tile.link_url or 'overdue=1' in tile.link_url:
-            qs = Ticket.overdue_queryset(qs)
-    else:
-        qs = WorkOrder.objects.all()
-        if not is_admin:
-            qs = qs.filter(assigned_to=user)
-        if statuses:
-            qs = qs.filter(status__in=statuses)
-        else:
-            qs = qs.exclude(status__in=WO_CLOSED_STATUSES)
-    return qs.count()
-
-
-class DashboardView(LoginRequiredMixin, View):
-    template_name = 'core/dashboard.html'
-
-    def _admin_dashboard(self, request):
-        """Owner/manager view: business metrics first (open work, money to bill
-        and money owed), the two live worklists, and a backlog-aging strip."""
-        from django.db.models import Sum
-        now = timezone.now()
-
-        open_tickets_qs = (
-            Ticket.objects.select_related('client', 'assigned_to')
-            .exclude(status__in=TICKET_CLOSED_STATUSES)
-        )
-        open_wo_qs = (
-            WorkOrder.objects.select_related('client', 'assigned_to', 'device')
-            .exclude(status__in=WO_CLOSED_STATUSES)
-        )
-
-        # Ready to bill = the work is done (completed) but nothing has been sent yet.
-        ready_to_bill_count = WorkOrder.objects.filter(
-            status='completed', invoice__billing_status='uninvoiced'
-        ).count()
-        # Outstanding = billed and waiting to be paid (money owed) — deliberately
-        # NOT the uninvoiced set above, so the two figures never double-count.
-        outstanding_total = (
-            Invoice.objects.filter(billing_status='invoiced')
-            .aggregate(t=Sum('amount'))['t'] or 0
-        )
-
-        # Backlog aging on unresolved tickets. Excludes 'converted' (those have a
-        # live work order), matching the Reports backlog metric.
-        backlog_qs = (
-            Ticket.objects.exclude(status__in=Ticket.CLOSED_STATUSES)
-            .exclude(source='system').only('created_at')
-        )
-        buckets = {'lt1': 0, 'b1to3': 0, 'b3to7': 0, 'gt7': 0}
-        for t in backlog_qs:
-            age_days = (now - t.created_at).total_seconds() / 86400
-            if age_days < 1:
-                buckets['lt1'] += 1
-            elif age_days < 3:
-                buckets['b1to3'] += 1
-            elif age_days < 7:
-                buckets['b3to7'] += 1
-            else:
-                buckets['gt7'] += 1
-
-        context = {
-            'is_admin': True,
-            'open_ticket_count': open_tickets_qs.count(),
-            'open_tickets': open_tickets_qs.order_by('-created_at')[:12],
-            'open_wo_count': open_wo_qs.count(),
-            'open_work_orders': open_wo_qs.order_by('-created_at')[:12],
-            'ready_to_bill_count': ready_to_bill_count,
-            'outstanding_total': outstanding_total,
-            'backlog_buckets': buckets,
-            'backlog_total': sum(buckets.values()),
-        }
-        return render(request, self.template_name, context)
+class BoardView(LoginRequiredMixin, View):
+    template_name = 'core/board.html'
+    REGION_CAP = 40
 
     def get(self, request):
-        is_admin = _is_admin(request.user)
-        if is_admin:
-            return self._admin_dashboard(request)
+        from django.db.models import Sum
+        user = request.user
+        is_admin = _is_admin(user)
 
-        # --- technician dashboard (unchanged) ---
-        tiles_qs = DashboardTile.objects.filter(is_active=True)
-        ticket_tiles = []
-        wo_tiles = []
-        for tile in tiles_qs:
-            if tile.visible_to == 'admin' and not is_admin:
-                continue
-            if tile.visible_to == 'tech' and is_admin:
-                continue
-            entry = {
-                'tile': tile,
-                'count': _tile_count(tile, request.user, is_admin),
-                'colors': _TILE_COLOR_CLASSES[_tile_color(tile)],
-            }
-            if tile.row == 'ticket':
-                ticket_tiles.append(entry)
-            else:
-                wo_tiles.append(entry)
-
-        # Recent open work orders (tech sees own, admin sees all)
-        wo_qs = WorkOrder.objects.select_related('client', 'assigned_to', 'device').exclude(status__in=WO_CLOSED_STATUSES)
-        if not is_admin:
-            wo_qs = wo_qs.filter(assigned_to=request.user)
-        open_work_orders = wo_qs.order_by('-created_at')[:10]
-
-        # ⚠ Was ['closed', 'cancelled'] — a second hand-written list of what
-        # "finished" means, sitting three lines below the constant that exists to
-        # be the only one. Retiring the `closed` status left it naming a state
-        # nothing can hold, so a dashboard panel called "Recently Closed" could
-        # never show a completed job again.
-        recently_closed = WorkOrder.objects.select_related('client', 'assigned_to').filter(
-            status__in=WO_CLOSED_STATUSES
-        ).order_by('-updated_at')[:5]
-
-        # Team workload (admin only)
-        team_workload = []
-        if is_admin:
-            techs = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
-            open_wo_statuses = ['new', 'in_progress', 'waiting_on_customer', 'on_hold']
-            open_ticket_statuses = ['new', 'open', 'in_progress', 'waiting_on_customer', 'converted']
-            for tech in techs:
-                open_wos = WorkOrder.objects.filter(assigned_to=tech, status__in=open_wo_statuses).count()
-                open_tickets = Ticket.objects.filter(assigned_to=tech, status__in=open_ticket_statuses).count()
-                if open_wos or open_tickets:
-                    team_workload.append({
-                        'tech': tech,
-                        'open_wos': open_wos,
-                        'open_tickets': open_tickets,
-                        'total': open_wos + open_tickets,
-                    })
-            team_workload.sort(key=lambda x: -x['total'])
-
-        ticket_qs = Ticket.objects.select_related('client', 'assigned_to').exclude(status__in=TICKET_CLOSED_STATUSES)
-        if not is_admin:
-            ticket_qs = ticket_qs.filter(assigned_to=request.user)
-        open_tickets = ticket_qs.order_by('-created_at')[:10]
-
-        needs_response_qs = Ticket.objects.filter(needs_response=True)
-        if not is_admin:
-            needs_response_qs = needs_response_qs.filter(assigned_to=request.user)
-        needs_response_count = needs_response_qs.count()
-
-        # Unsorted/Unverified triage bucket — inbound from senders not yet matched
-        # to a real client. These are unassigned, so they sit in every tech's
-        # claim pool; the tech dashboard surfaces them as their own tile.
-        triage_count = (
-            Ticket.objects.filter(client__is_unsorted=True)
-            .exclude(status__in=TICKET_CLOSED_STATUSES).count()
-        )
-
-        # Tickets escalated above their owner's level, awaiting pickup by someone higher.
-        # Admins see all of them; a tech sees those escalated up to their own level.
-        escalated_qs = (
-            Ticket.objects.select_related('client', 'assigned_to')
-            .filter(assigned_to__isnull=False, escalation_level__gt=models_F('assigned_to__level'))
+        open_tickets = (
+            Ticket.objects.select_related('client', 'assigned_to', 'sla_plan')
             .exclude(status__in=TICKET_CLOSED_STATUSES)
+            .exclude(client__is_unsorted=True)
+        )
+        open_tickets = _scope_tickets_for(open_tickets, user)
+        open_wos = (
+            WorkOrder.objects.select_related('client', 'assigned_to', 'device', 'invoice')
+            .exclude(status__in=WO_CLOSED_STATUSES)
+        )
+        open_wos = _scope_assignable_for(open_wos, user)
+        # Unsorted inbound is unclaimed by definition, so it is in every tech's pool.
+        unsorted = (
+            Ticket.objects.select_related('client')
+            .filter(client__is_unsorted=True)
+            .exclude(status__in=TICKET_CLOSED_STATUSES)
+            .order_by('created_at')
+        )
+
+        overdue_count = Ticket.overdue_queryset(open_tickets).count()
+        awaiting_count = _tickets_awaiting_reply(user).count()
+        escalated_qs = (
+            open_tickets.filter(assigned_to__isnull=False,
+                                escalation_level__gt=models_F('assigned_to__level'))
         )
         if not is_admin:
-            escalated_qs = escalated_qs.filter(
-                escalation_level__lte=request.user.level
-            ).exclude(assigned_to=request.user)
-        escalated_to_me = list(escalated_qs.order_by('-updated_at')[:10])
+            escalated_qs = escalated_qs.filter(escalation_level__lte=user.level).exclude(assigned_to=user)
+        escalated_count = escalated_qs.count()
 
-        # Tech-only "My Mileage" card — techs have no Mileage nav link, so this is
-        # their entry point to log/view their own miles. (Admins see Team Workload.)
-        my_mileage_total = None
-        my_mileage_recent = []
-        if not is_admin:
-            from django.db.models import Sum
-            today = timezone.now().date()
-            my_mileage_total = Mileage.objects.filter(
-                technician=request.user,
-                trip_date__year=today.year, trip_date__month=today.month,
-            ).aggregate(t=Sum('miles'))['t'] or 0
-            my_mileage_recent = list(
-                Mileage.objects.filter(technician=request.user).order_by('-trip_date')[:5]
-            )
+        tiles = [
+            {'label': 'Past SLA', 'count': overdue_count, 'tone': 'red',
+             'url': reverse('core:ticket_list') + '?overdue=1',
+             'empty': 'No ticket is past its response deadline'},
+            {'label': 'Awaiting your reply', 'count': awaiting_count, 'tone': 'green',
+             'url': reverse('core:ticket_list') + '?needs_response=1',
+             'empty': 'Every client reply has been answered'},
+            {'label': 'Unsorted inbound', 'count': unsorted.count(), 'tone': 'indigo',
+             'url': reverse('core:ticket_list') + '?triage=1',
+             'empty': 'Every message matched a client'},
+            {'label': 'Escalated to you', 'count': escalated_count, 'tone': 'orange',
+             'url': reverse('core:ticket_list') + '?assigned_to=me',
+             'empty': 'Nothing is waiting on a higher level'},
+        ]
+        if is_admin:
+            ready_to_bill = WorkOrder.objects.filter(
+                status='completed', invoice__billing_status='uninvoiced').count()
+            outstanding = (Invoice.objects.filter(billing_status='invoiced')
+                           .aggregate(t=Sum('amount'))['t'] or 0)
+            tiles += [
+                {'label': 'Ready to bill', 'count': ready_to_bill, 'tone': 'teal',
+                 'url': reverse('core:work_order_list') + '?billing=ready',
+                 'empty': 'No finished work is waiting to be billed'},
+                {'label': 'Outstanding', 'count': outstanding, 'money': True, 'tone': 'yellow',
+                 'url': reverse('core:work_order_list') + '?billing=outstanding',
+                 'empty': 'Nothing invoiced is unpaid'},
+            ]
 
+        tickets = list(_board_order(open_tickets)[:self.REGION_CAP])
+        wos = list(_board_order(open_wos)[:self.REGION_CAP])
         context = {
-            'ticket_tiles': ticket_tiles,
-            'wo_tiles': wo_tiles,
-            'open_work_orders': open_work_orders,
-            'recently_closed': recently_closed,
-            'active_clients': Client.objects.filter(is_active=True, is_unsorted=False).count(),
-            'total_devices': Device.objects.filter(is_active=True).count(),
             'is_admin': is_admin,
-            'team_workload': team_workload,
-            'needs_response_count': needs_response_count,
-            'triage_count': triage_count,
-            'open_tickets': open_tickets,
-            'escalated_to_me': escalated_to_me,
-            'my_mileage_total': my_mileage_total,
-            'my_mileage_recent': my_mileage_recent,
+            'tiles': tiles,
+            'tickets': tickets,
+            'ticket_total': open_tickets.count(),
+            'work_orders': wos,
+            'wo_total': open_wos.count(),
+            'unsorted': list(unsorted[:self.REGION_CAP]),
+            'follow_ups': list(FollowUp.objects.due().select_related('client', 'prospect', 'ticket', 'work_order')[:self.REGION_CAP]),
+            'follow_up_total': FollowUp.objects.due().count(),
+            'unsorted_total': unsorted.count(),
+            'region_cap': self.REGION_CAP,
         }
         return render(request, self.template_name, context)
+
+
+# Kept under its old name so the URLconf and every `core:dashboard` reverse keep
+# working; the route IS the Board now.
+DashboardView = BoardView
 
 
 # Statuses that mean a work order is finished: off the active list, settleable at the
@@ -853,7 +738,7 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
                 Q(client__name__icontains=search)
             )
 
-        return queryset.order_by('-created_at')
+        return queryset.select_related('invoice').order_by('-created_at')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -870,10 +755,90 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
         return context
 
 
+def _record_identity(ticket, wo):
+    """Who/what the record is about, resolved once so templates never do a
+    `|default:` across two objects that may each be None."""
+    client = ticket.client if ticket else (wo.client if wo else None)
+    # Standing is the WORD, not a chip (Mike, Aug 21): a Client has a Service
+    # Agreement; everyone else, walk-ins included, is a Customer.
+    has_sa = bool(client) and (client.is_managed or client.contracts.filter(status='active').exists())
+    return {
+        'record_client': client,
+        'record_standing': 'Client' if has_sa else 'Customer',
+        'record_contact': (ticket.contact if ticket else None) or (wo.contact if wo else None),
+        'record_device': (wo.device if wo else None) or (ticket.device if ticket else None),
+    }
+
+
+def _wo_record_context(request, wo):
+    """Everything the Work Record needs to render the WORK ORDER phase."""
+    from django.utils import timezone
+    context = {}
+    # Days open
+    end = wo.completed_date.date() if wo.completed_date else timezone.now().date()
+    context['days_open'] = (end - wo.created_at.date()).days
+    context['wo_audit'] = _audit_entries(wo)
+    ct = ContentType.objects.get_for_model(WorkOrder)
+    context['wo_attachments'] = Attachment.objects.filter(content_type=ct, object_id=wo.pk)
+    # Linked ticket for overdue badge
+    context['linked_ticket'] = getattr(wo, 'ticket', None)
+    # Custom fields
+    fields = _get_custom_fields_for_workorder(wo)
+    context['wo_custom_fields'] = _custom_fields_with_values(fields, wo)
+    # Catalog picker (Products & Services) grouped by category, services first
+    context['catalog_by_category'] = _catalog_by_category()
+    context['wp_entries'] = _line_items_for(wo)
+    # Inline update form data
+    context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
+    context['all_repair_types'] = RepairType.objects.filter(is_active=True).order_by('name')
+    context['client_contacts'] = Contact.objects.filter(client=wo.client).order_by('last_name', 'first_name')
+    context['client_devices'] = Device.objects.filter(client=wo.client).order_by('name')
+    # Device credentials (single store on Device) — job context = this WO
+    if wo.device_id:
+        context.update(_device_cred_context(request.user, wo.device, work_order=wo))
+    # Open tickets for this client (cross-visibility panel)
+    linked_ticket_pk = getattr(wo.ticket, 'pk', None) if hasattr(wo, 'ticket') else None
+    open_tickets = (
+        Ticket.objects
+        .filter(client=wo.client)
+        .exclude(status__in=TICKET_CLOSED_STATUSES)
+        .select_related('created_by')
+        .prefetch_related('replies')
+        .order_by('-created_at')
+    )
+    if linked_ticket_pk:
+        open_tickets = open_tickets.exclude(pk=linked_ticket_pk)
+    context['client_open_tickets'] = open_tickets
+    checklist_items = list(wo.items.filter(item_type='checklist').order_by('created_at'))
+    context['checklist_items'] = checklist_items
+    context['checklist_checked_count'] = sum(1 for i in checklist_items if i.pre_check or i.post_check)
+    # Billing
+    invoice, _ = Invoice.objects.get_or_create(work_order=wo)
+    context['invoice'] = invoice
+    # Dynamic status choices for inline status dropdown. Statuses that finish a
+    # WO are dropped for a user without the close grant, so the dropdown cannot
+    # offer a move the server will refuse.
+    choices = list(
+        StatusDefinition.objects.filter(entity_type='workorder', is_active=True)
+        .order_by('sort_order').values_list('slug', 'label')
+    )
+    if not _can_close_workorder(request.user):
+        # The WO's CURRENT status always survives the filter even when it is a
+        # closing one. Dropping it would leave an already-completed WO showing
+        # some other status preselected, and the next save of an unrelated
+        # field would silently reopen it.
+        choices = [
+            c for c in choices
+            if c[0] not in WO_CLOSED_STATUSES or c[0] == wo.status
+        ]
+    context['wo_status_choices'] = choices
+    return context
+
+
 class WorkOrderDetailView(LoginRequiredMixin, DetailView):
     """Display full details of a single work order"""
     model = WorkOrder
-    template_name = 'core/work_order_detail.html'
+    template_name = 'core/work_record.html'
     context_object_name = 'work_order'
 
     def get_queryset(self):
@@ -884,87 +849,18 @@ class WorkOrderDetailView(LoginRequiredMixin, DetailView):
         return _scope_assignable_for(qs, self.request.user)
 
     def get_context_data(self, **kwargs):
-        from django.utils import timezone
         context = super().get_context_data(**kwargs)
         wo = self.object
-        # Days open
-        end = wo.completed_date.date() if wo.completed_date else timezone.now().date()
-        context['days_open'] = (end - wo.created_at.date()).days
-        context['audit_log'] = _audit_entries(self.object)
-        ct = ContentType.objects.get_for_model(WorkOrder)
-        context['wo_attachments'] = Attachment.objects.filter(content_type=ct, object_id=self.object.pk)
-        # Linked ticket for overdue badge
-        context['linked_ticket'] = getattr(self.object, 'ticket', None)
-        # Custom fields
-        fields = _get_custom_fields_for_workorder(self.object)
-        context['custom_field_values'] = _custom_fields_with_values(fields, self.object)
-        # Catalog picker (Products & Services) grouped by category, services first
-        context['catalog_by_category'] = _catalog_by_category()
-        context['wp_entries'] = _line_items_for(self.object)
-        # Inline update form data
-        context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
-        context['all_repair_types'] = RepairType.objects.filter(is_active=True).order_by('name')
-        context['client_contacts'] = Contact.objects.filter(client=wo.client).order_by('last_name', 'first_name')
-        context['client_devices'] = Device.objects.filter(client=wo.client).order_by('name')
-        # Device credentials (single store on Device) — job context = this WO
-        if wo.device_id:
-            context.update(_device_cred_context(self.request.user, wo.device, work_order=wo))
-        # Open tickets for this client (cross-visibility panel)
-        linked_ticket_pk = getattr(self.object.ticket, 'pk', None) if hasattr(self.object, 'ticket') else None
-        open_tickets = (
-            Ticket.objects
-            .filter(client=wo.client)
-            .exclude(status__in=TICKET_CLOSED_STATUSES)
-            .select_related('created_by')
-            .prefetch_related('replies')
-            .order_by('-created_at')
-        )
-        if linked_ticket_pk:
-            open_tickets = open_tickets.exclude(pk=linked_ticket_pk)
-        context['client_open_tickets'] = open_tickets
-        checklist_items = list(self.object.items.filter(item_type='checklist').order_by('created_at'))
-        context['checklist_items'] = checklist_items
-        context['checklist_checked_count'] = sum(1 for i in checklist_items if i.pre_check or i.post_check)
-        # Billing
-        invoice, _ = Invoice.objects.get_or_create(work_order=self.object)
-        context['invoice'] = invoice
-        # Dynamic status choices for inline status dropdown. Statuses that finish a
-        # WO are dropped for a user without the close grant, so the dropdown cannot
-        # offer a move the server will refuse.
-        choices = list(
-            StatusDefinition.objects.filter(entity_type='workorder', is_active=True)
-            .order_by('sort_order').values_list('slug', 'label')
-        )
-        if not _can_close_workorder(self.request.user):
-            # The WO's CURRENT status always survives the filter even when it is a
-            # closing one. Dropping it would leave an already-completed WO showing
-            # some other status preselected, and the next save of an unrelated
-            # field would silently reopen it.
-            choices = [
-                c for c in choices
-                if c[0] not in WO_CLOSED_STATUSES or c[0] == self.object.status
-            ]
-        context['wo_status_choices'] = choices
-        return context
-
-
-class WorkOrderMetaView(LoginRequiredMixin, DetailView):
-    """Low-frequency WO metadata (audit dates, invoice ref) — split off the
-    main detail page to keep it from crowding the right rail."""
-    model = WorkOrder
-    template_name = 'core/work_order_meta.html'
-    context_object_name = 'work_order'
-
-    def get_queryset(self):
-        qs = WorkOrder.objects.select_related('client')
-        return _scope_assignable_for(qs, self.request.user)
-
-    def get_context_data(self, **kwargs):
-        from django.utils import timezone
-        context = super().get_context_data(**kwargs)
-        wo = self.object
-        end = wo.completed_date.date() if wo.completed_date else timezone.now().date()
-        context['days_open'] = (end - wo.created_at.date()).days
+        context.update(_wo_record_context(self.request, wo))
+        ticket = getattr(wo, 'ticket', None)
+        context['ticket'] = ticket
+        if ticket:
+            context.update(_ticket_record_context(self.request, ticket))
+            # Job context for credentials is the work order when one exists.
+            if wo.device_id:
+                context.update(_device_cred_context(self.request.user, wo.device, work_order=wo))
+        context['record_kind'] = 'work_order'
+        context.update(_record_identity(ticket, wo))
         return context
 
 
@@ -1055,8 +951,8 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
         # ⚠ Permission to FINISH a work order is not permission to rewrite it. This
         # panel posts every field at once, so letting a closing request through
         # wholesale handed a close-only role the priority, assignee, contact,
-        # device, repair type, schedule and invoice ref as well — a reviewer
-        # reproduced it by posting status=completed&priority=urgent. When the user
+        # device, repair type, schedule and invoice ref as well (post
+        # status=completed&priority=urgent and watch). When the user
         # may close but not edit, the status is the only thing that moves; the rest
         # of the request is ignored rather than rejected, so the normal Complete
         # button still works for them.
@@ -1262,6 +1158,18 @@ class ClientDetailView(LoginRequiredMixin, DetailView):
             amount__isnull=False,
         ).aggregate(total=Sum('amount'))['total']
         context['outstanding_balance'] = outstanding
+        # Standing is the word: Client (active Service Agreement) or Customer.
+        context['has_sa'] = self.object.is_managed or self.object.contracts.filter(status='active').exists()
+        from .models import FollowUp
+        context['follow_ups'] = list(FollowUp.objects.filter(client=self.object).open().select_related('template', 'ticket', 'work_order'))
+        context['done_follow_ups'] = list(FollowUp.objects.filter(client=self.object, done_at__isnull=False).order_by('-done_at')[:5])
+        context['custom_templates'] = EmailTemplate.objects.filter(trigger__isnull=True, is_active=True)
+        context['follow_up_kinds'] = FollowUp.KIND_CHOICES
+        context['open_tickets'] = (_scope_tickets_for(Ticket.objects.filter(client=self.object), self.request.user)
+                                   .exclude(status__in=TICKET_CLOSED_STATUSES).order_by('-created_at'))
+        context['open_wos'] = (_scope_assignable_for(WorkOrder.objects.filter(client=self.object), self.request.user)
+                               .exclude(status__in=WO_CLOSED_STATUSES).select_related('assigned_to', 'repair_type')
+                               .order_by('-created_at'))
         if self.object.is_managed:
             context['catalog_by_category'] = _catalog_by_category()
             context['recurring_entries'] = _line_items_for(self.object)
@@ -1491,6 +1399,8 @@ class MileageListView(LoginRequiredMixin, ListView):
         from django.db.models import Sum
         total = self.get_queryset().aggregate(total=Sum('miles'))['total'] or 0
         context['total_miles'] = total
+        if _is_admin(self.request.user):
+            context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
         return context
 
 
@@ -1632,11 +1542,10 @@ class NotificationCountView(LoginRequiredMixin, View):
     def get(self, request):
         count = (request.user.notifications.unread().count()
                  + _tickets_awaiting_reply(request.user).count())
-        template = (
-            'core/partials/notification_badge_header.html'
-            if request.GET.get('style') == 'header'
-            else 'core/partials/notification_badge.html'
-        )
+        style = request.GET.get('style')
+        template = {
+            'tabler': 'core/partials/notification_badge_tabler.html',
+        }.get(style, 'core/partials/notification_badge_tabler.html')
         return render(request, template, {'count': count})
 
 
@@ -1918,15 +1827,26 @@ class ClientCreateView(LoginRequiredMixin, CreateView):
     form_class = ClientForm
     template_name = 'core/client_form.html'
 
+    def _next(self):
+        from django.utils.http import url_has_allowed_host_and_scheme
+        nxt = self.request.POST.get('next') or self.request.GET.get('next') or ''
+        return nxt if url_has_allowed_host_and_scheme(nxt, allowed_hosts={self.request.get_host()}) else ''
+
     def get_success_url(self):
+        # Came from an intake form? Go back to it with the new customer selected.
+        nxt = self._next()
+        if nxt:
+            sep = '&' if '?' in nxt else '?'
+            return f'{nxt}{sep}client={self.object.pk}'
         return reverse_lazy('core:client_detail', kwargs={'pk': self.object.pk})
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context.setdefault('device_form', DeviceQuickAddForm(prefix='device'))
         context['device_types'] = DeviceType.objects.all()
-        context['title'] = 'New Client'
-        context['cancel_url'] = reverse_lazy('core:client_list')
+        context['title'] = 'New Customer'
+        context['next_url'] = self._next()
+        context['cancel_url'] = self._next() or reverse_lazy('core:client_list')
         return context
 
     def post(self, request, *args, **kwargs):
@@ -2041,6 +1961,14 @@ class ProspectDetailView(ProspectAccessMixin, DetailView):
     model = Prospect
     template_name = 'core/prospect_detail.html'
     context_object_name = 'prospect'
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['follow_ups'] = list(FollowUp.objects.filter(prospect=self.object).open().select_related('template'))
+        ctx['done_follow_ups'] = list(FollowUp.objects.filter(prospect=self.object, done_at__isnull=False).order_by('-done_at')[:5])
+        ctx['custom_templates'] = EmailTemplate.objects.filter(trigger__isnull=True, is_active=True)
+        ctx['follow_up_kinds'] = FollowUp.KIND_CHOICES
+        return ctx
 
 
 class ProspectCreateView(ProspectAccessMixin, CreateView):
@@ -3329,6 +3257,21 @@ class DeviceCreateView(LoginRequiredMixin, CreateView):
         return initial
 
     def form_valid(self, form):
+        # Intake at the device: a customer who is not on the books yet can be
+        # created here in the same motion (Mike, Aug 21). Only when no owner was
+        # picked and a new-customer name was typed.
+        new_name = (self.request.POST.get('new_client_name') or '').strip()
+        if new_name and not form.cleaned_data.get('client'):
+            if Client.objects.filter(name=new_name).exists():
+                form.add_error('client', f'"{new_name}" already exists; pick them from the list.')
+                return self.form_invalid(form)
+            owner = Client.objects.create(
+                name=new_name,
+                client_type=self.request.POST.get('new_client_type') or 'residential',
+                phone=(self.request.POST.get('new_client_phone') or '').strip(),
+                email=(self.request.POST.get('new_client_email') or '').strip(),
+            )
+            form.instance.client = owner
         self.object = form.save()
         if self.request.POST.get('save_and_create_wo'):
             return redirect(
@@ -3815,9 +3758,81 @@ class TicketListView(LoginRequiredMixin, ListView):
         return context
 
 
+def _ticket_record_context(request, ticket):
+    """Everything the Work Record needs to render the TICKET phase. Shared by the
+    ticket route and the work-order route (a converted ticket and its WO are one
+    page, ruled Aug 20 2026)."""
+    context = {}
+    # Determine lock warning state
+    try:
+        lock = ticket.lock
+        if not lock.is_expired() and lock.locked_by != request.user:
+            context['lock_user'] = lock.locked_by
+    except TicketLock.DoesNotExist:
+        pass
+    # WO dependency context
+    wo = getattr(ticket, 'work_order_created', None)
+    if wo:
+        context['linked_wo'] = wo
+        context['wo_is_open'] = wo.status not in WO_CLOSED_STATUSES
+    # Linked tickets
+    context['linked_tickets'] = ticket.get_linked_tickets()
+    # Device credentials (single store on Device) — job context = this ticket
+    if ticket.device_id:
+        context.update(_device_cred_context(request.user, ticket.device, ticket=ticket))
+    context['ticket_audit'] = _audit_entries(ticket)
+    # Ticket-level attachments
+    ct = ContentType.objects.get_for_model(Ticket)
+    context['ticket_attachments'] = Attachment.objects.filter(content_type=ct, object_id=ticket.pk)
+    # Custom fields
+    fields = _get_custom_fields_for_ticket(ticket)
+    context['ticket_custom_fields'] = _custom_fields_with_values(fields, ticket)
+    # Open WOs for this client (cross-visibility panel)
+    linked_wo_pk = wo.pk if wo else None
+    open_wos = (
+        WorkOrder.objects
+        .filter(client=ticket.client)
+        .exclude(status__in=WO_CLOSED_STATUSES)
+        .select_related('assigned_to', 'repair_type')
+        .prefetch_related('notes')
+        .order_by('-created_at')
+    )
+    if linked_wo_pk:
+        open_wos = open_wos.exclude(pk=linked_wo_pk)
+    context['client_open_wos'] = open_wos
+    context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
+    context['is_admin'] = _is_admin(request.user)
+    # The quick dropdown offers only statuses a person may set. 'Converted to
+    # Work Order' is set by TicketConvertView, never by hand: offered here it
+    # renamed the ticket, created nothing, and hid the button that converts.
+    #
+    # The ticket's OWN status is always included even when action-owned:
+    # without it a converted ticket has no matching <option>, the browser
+    # silently displays the first choice instead, and clicking Set moves the
+    # ticket out of 'converted' by accident. Present only when current, it
+    # renders selected and re-posting it is a no-op.
+    context['ticket_statuses'] = StatusDefinition.objects.filter(
+        entity_type='ticket', is_active=True,
+    ).filter(
+        Q(operator_selectable=True) | Q(slug=ticket.status)
+    ).order_by('sort_order')
+    # The thread: replies plus the status / priority / owner changes as dated
+    # events (ruled Aug 18: "the OSTicket way is fine"). Audit rows used to live
+    # in a log no page rendered.
+    events = []
+    for item in context['ticket_audit']:
+        changes = [c for c in item['changes'] if c['field'] in ('status', 'priority', 'assigned_to', 'escalation_level')]
+        if changes:
+            events.append({'is_event': True, 'created_at': item['entry'].timestamp,
+                           'actor': item['entry'].actor, 'changes': changes})
+    thread = [{'is_event': False, 'created_at': r.created_at, 'reply': r} for r in ticket.replies.all()]
+    context['thread'] = sorted(thread + events, key=lambda x: x['created_at'])
+    return context
+
+
 class TicketDetailView(LoginRequiredMixin, DetailView):
     model = Ticket
-    template_name = 'core/ticket_detail.html'
+    template_name = 'core/work_record.html'
     context_object_name = 'ticket'
 
     def get_queryset(self):
@@ -3846,76 +3861,13 @@ class TicketDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         ticket = self.object
-        # Determine lock warning state
-        try:
-            lock = ticket.lock
-            if not lock.is_expired() and lock.locked_by != self.request.user:
-                context['lock_user'] = lock.locked_by
-        except TicketLock.DoesNotExist:
-            pass
-        # WO dependency context
+        context.update(_ticket_record_context(self.request, ticket))
         wo = getattr(ticket, 'work_order_created', None)
+        context['work_order'] = wo
         if wo:
-            context['linked_wo'] = wo
-            context['wo_is_open'] = wo.status not in WO_CLOSED_STATUSES
-        # Linked tickets
-        context['linked_tickets'] = ticket.get_linked_tickets()
-        # Device credentials (single store on Device) — job context = this ticket
-        if ticket.device_id:
-            context.update(_device_cred_context(self.request.user, ticket.device, ticket=ticket))
-        context['audit_log'] = _audit_entries(ticket)
-        # Ticket-level attachments
-        ct = ContentType.objects.get_for_model(Ticket)
-        context['ticket_attachments'] = Attachment.objects.filter(content_type=ct, object_id=ticket.pk)
-        # Custom fields
-        fields = _get_custom_fields_for_ticket(ticket)
-        context['custom_field_values'] = _custom_fields_with_values(fields, ticket)
-        # Open WOs for this client (cross-visibility panel)
-        linked_wo_pk = wo.pk if wo else None
-        open_wos = (
-            WorkOrder.objects
-            .filter(client=ticket.client)
-            .exclude(status__in=WO_CLOSED_STATUSES)
-            .select_related('assigned_to', 'repair_type')
-            .prefetch_related('notes')
-            .order_by('-created_at')
-        )
-        if linked_wo_pk:
-            open_wos = open_wos.exclude(pk=linked_wo_pk)
-        context['client_open_wos'] = open_wos
-        context['all_users'] = User.objects.filter(is_active=True).order_by('first_name', 'last_name')
-        context['is_admin'] = _is_admin(self.request.user)
-        # The quick dropdown offers only statuses a person may set. 'Converted to
-        # Work Order' is set by TicketConvertView, never by hand: offered here it
-        # renamed the ticket, created nothing, and hid the button that converts.
-        #
-        # The ticket's OWN status is always included even when action-owned:
-        # without it a converted ticket has no matching <option>, the browser
-        # silently displays the first choice instead, and clicking Set moves the
-        # ticket out of 'converted' by accident. Present only when current, it
-        # renders selected and re-posting it is a no-op.
-        context['ticket_statuses'] = StatusDefinition.objects.filter(
-            entity_type='ticket', is_active=True,
-        ).filter(
-            Q(operator_selectable=True) | Q(slug=self.object.status)
-        ).order_by('sort_order')
-        return context
-
-
-class TicketMetaView(LoginRequiredMixin, DetailView):
-    """Low-frequency ticket metadata (source, audit dates, linked tickets) —
-    split off the main detail page to keep it from crowding the right rail."""
-    model = Ticket
-    template_name = 'core/ticket_meta.html'
-    context_object_name = 'ticket'
-
-    def get_queryset(self):
-        qs = Ticket.objects.select_related('client', 'created_by')
-        return _scope_tickets_for(qs, self.request.user)
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['linked_tickets'] = self.object.get_linked_tickets()
+            context.update(_wo_record_context(self.request, wo))
+        context['record_kind'] = 'ticket'
+        context.update(_record_identity(ticket, wo))
         return context
 
 
@@ -4186,8 +4138,8 @@ class TicketConvertView(LoginRequiredMixin, View):
     role denied WO creation must not reach one through the ticket page. It also
     drives the ticket to 'converted', a terminal state — so a role denied ticket
     editing could otherwise finish a ticket here that it cannot finish anywhere
-    else. An outside reviewer spotted the second half; requiring only the WO grant
-    left "Edit Tickets" saying less than it meant.
+    else. Requiring only the WO grant left "Edit Tickets" saying less than it
+    meant.
     """
 
     def dispatch(self, request, *args, **kwargs):
@@ -4207,11 +4159,10 @@ class TicketConvertView(LoginRequiredMixin, View):
         return getattr(ticket, 'work_order_created', None)
 
     def get(self, request, pk):
-        ticket = _get_scoped_ticket_or_404(request, pk)
-        if self._existing_work_order(ticket):
-            return redirect('core:ticket_detail', pk=pk)
-        form = TicketConvertForm()
-        return render(request, 'core/ticket_convert.html', {'ticket': ticket, 'form': form})
+        # Conversion happens IN PLACE on the Work Record (ruled Aug 20/21): there
+        # is no separate page any more. A GET just lands on the record.
+        _get_scoped_ticket_or_404(request, pk)
+        return redirect('core:ticket_detail', pk=pk)
 
     def post(self, request, pk):
         ticket = _get_scoped_ticket_or_404(request, pk)
@@ -4220,7 +4171,9 @@ class TicketConvertView(LoginRequiredMixin, View):
 
         form = TicketConvertForm(request.POST)
         if not form.is_valid():
-            return render(request, 'core/ticket_convert.html', {'ticket': ticket, 'form': form})
+            messages.error(request, 'Could not convert: ' + '; '.join(
+                f'{k}: {", ".join(v)}' for k, v in form.errors.items()))
+            return redirect('core:ticket_detail', pk=pk)
 
         work_order = WorkOrder.objects.create(
             work_order_number=WorkOrder.generate_work_order_number(from_ticket_number=ticket.ticket_number),
@@ -4465,6 +4418,40 @@ class TicketAcknowledgeOverdueView(LoginRequiredMixin, View):
         return render(request, 'core/partials/overdue_badge.html', {'ticket': ticket})
 
 
+class IntakeClientPanelView(LoginRequiredMixin, View):
+    """HTMX: who this is, at the moment of intake. Standing (Client / Customer),
+    type, and the open work already on the books, so a duplicate is visible
+    before a second ticket is created (the duplicate-prevention affordance)."""
+
+    def get(self, request):
+        client_id = request.GET.get('client')
+        client = Client.objects.filter(pk=client_id).first() if client_id else None
+        ctx = {'client': client}
+        if client:
+            ctx['has_sa'] = client.is_managed or client.contracts.filter(status='active').exists()
+            ctx['open_tickets'] = (_scope_tickets_for(Ticket.objects.filter(client=client), request.user)
+                                   .exclude(status__in=TICKET_CLOSED_STATUSES).order_by('-created_at')[:8])
+            ctx['open_wos'] = (_scope_assignable_for(WorkOrder.objects.filter(client=client), request.user)
+                               .exclude(status__in=WO_CLOSED_STATUSES).order_by('-created_at')[:8])
+        return render(request, 'core/partials/intake_client_panel.html', ctx)
+
+
+class ContractStatusUpdateView(SaleAccessMixin, View):
+    """Set a Service Agreement's status in place on the client hub (ruled Aug 20:
+    "SA status is settable in place on that card")."""
+
+    def post(self, request, pk):
+        contract = get_object_or_404(Contract, pk=pk)
+        new = request.POST.get('status')
+        if new in dict(Contract.STATUS_CHOICES):
+            contract.status = new
+            contract.save(update_fields=['status'])
+            messages.success(request, f'{contract.contract_number} is now {contract.get_status_display()}.')
+        else:
+            messages.error(request, 'Unknown agreement status.')
+        return redirect('core:client_detail', pk=contract.client_id)
+
+
 class TicketContactsByClientView(LoginRequiredMixin, View):
     """HTMX: return <option> elements for contacts belonging to a given client."""
 
@@ -4482,7 +4469,7 @@ class TicketContactsByClientView(LoginRequiredMixin, View):
         dev_opts = '<option value="">---------</option>'
         for d in devices:
             dev_opts += f'<option value="{d.pk}">{escape(str(d))}</option>'
-        select_cls = 'w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500'
+        select_cls = 'form-select'
         opts += f'<select name="device" id="id_device" hx-swap-oob="true" class="{select_cls}">{dev_opts}</select>'
         return HttpResponse(opts)
 
@@ -4739,41 +4726,6 @@ class QueueDeleteView(LoginRequiredMixin, View):
 
 # ─── Sidebar Fragment ─────────────────────────────────────────────────────────
 
-class SidebarFragmentView(LoginRequiredMixin, View):
-    """HTMX endpoint: returns sidebar content (my tickets + my WOs)."""
-    def get(self, request):
-        is_admin = _is_admin(request.user)
-
-        ticket_qs = Ticket.objects.select_related('client').prefetch_related('replies').exclude(
-            status__in=TICKET_CLOSED_STATUSES
-        )
-        if is_admin:
-            ticket_qs = ticket_qs.order_by('-updated_at')
-        else:
-            ticket_qs = ticket_qs.filter(
-                Q(assigned_to=request.user) | Q(created_by=request.user)
-            ).distinct().order_by('-updated_at')
-
-        # Pre-existing: this excluded 'closed' and 'cancelled' but never
-        # 'completed', which is the state technicians actually set — so finished
-        # jobs stayed in the My Work sidebar indefinitely, while the dashboard's
-        # own open-WO query excluded them correctly.
-        wo_qs = WorkOrder.objects.select_related('client').prefetch_related('notes').exclude(
-            status__in=WO_CLOSED_STATUSES
-        )
-        if is_admin:
-            wo_qs = wo_qs.order_by('-updated_at')
-        else:
-            wo_qs = wo_qs.filter(assigned_to=request.user).order_by('-updated_at')
-
-        return render(request, 'core/partials/sidebar_content.html', {
-            'my_tickets': list(ticket_qs[:20]),
-            'my_wos': list(wo_qs[:20]),
-            'is_admin': is_admin,
-        })
-
-
-# ─── Reports ──────────────────────────────────────────────────────────────────
 
 def _median(values):
     """Median of a list of numbers, or None if empty. Median (not mean) so one
@@ -4828,7 +4780,7 @@ REPORTS_DOMAINS = {
     },
     'workorders': {
         'label': 'Work Orders',
-        'sections': ['wostatus', 'wobyclient', 'wolist', 'mileage'],
+        'sections': ['wostatus', 'woweek', 'wobyclient', 'wolist', 'mileage'],
     },
     # Performance/metrics — deliberately separate from Financial (money) and
     # from Tickets/Work Orders (raw activity data): SLA, resolution time,
@@ -4841,12 +4793,24 @@ REPORTS_DOMAINS = {
 }
 
 
+def _can_view_reports(user):
+    return _is_admin(user) or user.has_perm_flag('can_view_reports')
+
+
 class ReportsView(LoginRequiredMixin, View):
     def get(self, request):
-        if not (_is_admin(request.user) or request.user.has_perm_flag('can_view_reports')):
+        if not _can_view_reports(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
+        context = self.build_context(request, request.GET)
+        context['sections'] = REPORTS_DOMAINS[context['domain']]['sections']
+        return render(request, 'core/reports.html', context)
 
+    @staticmethod
+    def build_context(request, params):
+        """Everything the Reports page and the Reports PDF need, from the same
+        domain / start_date / end_date parameters. `params` is request.GET for
+        the page and request.POST for the PDF, so both show the same numbers."""
         from datetime import timedelta, date
         from django.db.models import Count, F, Q, Sum
         from django.db.models.functions import TruncDay
@@ -4854,13 +4818,13 @@ class ReportsView(LoginRequiredMixin, View):
         # Domain side-menu (Slice 1 of the Reports restructure): resolved early
         # so heavier domain-specific computation (e.g. Financial's revenue
         # breakdowns) can be skipped entirely when a different domain is active.
-        domain = request.GET.get('domain', 'financial')
+        domain = params.get('domain', 'financial')
         if domain not in REPORTS_DOMAINS:
             domain = 'financial'
 
         # Date range
-        end_date_str = request.GET.get('end_date', '')
-        start_date_str = request.GET.get('start_date', '')
+        end_date_str = params.get('end_date', '')
+        start_date_str = params.get('start_date', '')
         try:
             end_date = date.fromisoformat(end_date_str)
         except ValueError:
@@ -5097,7 +5061,7 @@ class ReportsView(LoginRequiredMixin, View):
             from decimal import Decimal
             from django.contrib.contenttypes.models import ContentType
 
-            revenue_granularity = request.GET.get('granularity', 'month')
+            revenue_granularity = params.get('granularity', 'month')
             if revenue_granularity not in ('day', 'week', 'month', 'year'):
                 revenue_granularity = 'month'
 
@@ -5175,6 +5139,7 @@ class ReportsView(LoginRequiredMixin, View):
         wo_status_counts = []
         wo_by_client = []
         wo_list = []
+        wo_by_week = []
         if domain == 'workorders':
             wos_in_range = WorkOrder.objects.filter(
                 created_at__range=(start_dt, end_dt)
@@ -5188,6 +5153,11 @@ class ReportsView(LoginRequiredMixin, View):
                 wos_in_range.values('client__name').annotate(count=Count('id')).order_by('-count')[:15]
             )
             wo_list = list(wos_in_range.order_by('-created_at')[:100])
+            from django.db.models.functions import TruncWeek
+            wo_by_week = [
+                (r['week'].date().isoformat(), r['count'])
+                for r in wos_in_range.annotate(week=TruncWeek('created_at')).values('week').annotate(count=Count('id')).order_by('week')
+            ]
 
         # 10. Technician performance
         tech_perf = []
@@ -5310,6 +5280,8 @@ class ReportsView(LoginRequiredMixin, View):
             'status_data': status_data,
             # 3
             'by_client': by_client,
+            'by_client_labels': [r['client__name'] for r in by_client],
+            'by_client_data': [r['count'] for r in by_client],
             # 4
             'by_tech': by_tech,
             # 5
@@ -5353,6 +5325,14 @@ class ReportsView(LoginRequiredMixin, View):
             'revenue_total': revenue_total,
             # 13
             'wo_status_counts': wo_status_counts,
+            'chart_data': {
+                'chartWoStatus': {'type': 'doughnut', 'labels': [r['label'] for r in wo_status_counts], 'data': [r['count'] for r in wo_status_counts]},
+                'chartWoClients': {'type': 'bar', 'horizontal': True, 'label': 'Work orders', 'labels': [r['client__name'] or 'Walk-in' for r in wo_by_client], 'data': [r['count'] for r in wo_by_client]},
+                'chartWoWeek': {'type': 'bar', 'label': 'Work orders', 'labels': [w for w, _ in wo_by_week], 'data': [c for _, c in wo_by_week]},
+                'chartResolution': {'type': 'bar', 'horizontal': True, 'label': 'Avg hours', 'labels': [r['name'] for r in avg_res_by_tech], 'data': [r['avg_hours'] for r in avg_res_by_tech]},
+                'chartSlaTech': {'type': 'bar', 'label': 'SLA met %', 'max': 100, 'labels': [r['label'] for r in sla_by_tech if r.get('sla_rate') is not None], 'data': [r['sla_rate'] for r in sla_by_tech if r.get('sla_rate') is not None]},
+                'chartBacklog': {'type': 'bar', 'label': 'Open tickets', 'labels': ['Under 1 day', '1 to 3 days', '3 to 7 days', '7+ days'], 'data': [backlog_buckets['lt_1d'], backlog_buckets['1_3d'], backlog_buckets['3_7d'], backlog_buckets['7d_plus']]},
+            },
             'wo_by_client': wo_by_client,
             'wo_list': wo_list,
             # 14
@@ -5366,7 +5346,7 @@ class ReportsView(LoginRequiredMixin, View):
             'wo_time_by_tech': wo_time_by_tech,
             'wo_time_by_wo': wo_time_by_wo,
         }
-        return render(request, 'core/reports.html', context)
+        return context
 
 
 class ReportsCSVView(LoginRequiredMixin, View):
@@ -6113,9 +6093,8 @@ def _guard_line_host(request, host):
     ⚠ Do NOT gate these views on a single flag before the host is loaded. A
     blanket can_edit_workorder check was added here and it locked sales-only and
     estimate-only roles out of their own line items: the check ran first, so this
-    function never got the chance to say which permission applied. An outside
-    reviewer reproduced both. Whatever the shared endpoint is called, the record
-    being edited decides who may edit it.
+    function never got the chance to say which permission applied. Whatever the
+    shared route is called, the record being edited decides who may edit it.
 
     Each host maps to the permission that already protects its own screens, so
     this cannot become a backdoor around them.
@@ -7234,7 +7213,6 @@ SETTINGS_TABS = [
     ('sla_plans',        'SLA Plans',        None),
     ('help_topics',      'Help Topics',      None),
     ('tech_skills',      'Tech Skills',      None),
-    ('dashboard_tiles',  'Dashboard Tiles',  None),
     ('custom_fields',    'Custom Fields',    None),
     ('account_security', 'Account Security', None),
     ('users',            'Users',            None),
@@ -7255,7 +7233,7 @@ SETTINGS_TAB_GROUPS = [
     ('Tickets & Work Orders', [
         'repair_types', 'device_types', 'checklist_items', 'canned_responses', 'statuses',
         'help_topics', 'sla_plans', 'tech_skills', 'custom_fields',
-        'dashboard_tiles', 'kb_categories',
+        'kb_categories',
     ]),
     ('Integrations', ['invoice_ninja', 'attachments', 'mileage']),
     ('Access & Security', ['account_security', 'users', 'roles', 'credentials', 'security']),
@@ -7684,8 +7662,6 @@ class SettingsView(SettingsAdminMixin, View):
             ctx.update(_checklist_items_context())
         if active_tab == 'device_types':
             ctx.update(_device_types_context())
-        if active_tab == 'colors':
-            ctx.update(_colors_context(forms_map.get('colors')))
         if active_tab == 'display':
             ctx.update(_display_context())
         if active_tab == 'credentials':
@@ -7709,8 +7685,6 @@ class SettingsView(SettingsAdminMixin, View):
             ctx['sla_plans_all'] = SLAPlan.objects.filter(is_active=True)
         if active_tab == 'tech_skills':
             ctx['tech_skills'] = TechSkill.objects.all()
-        if active_tab == 'dashboard_tiles':
-            ctx['dashboard_tiles'] = DashboardTile.objects.all()
         if active_tab == 'custom_fields':
             ctx['custom_fields'] = CustomField.objects.prefetch_related('choices').all()
             ctx['help_topics_all'] = HelpTopic.objects.filter(is_active=True)
@@ -7730,7 +7704,8 @@ class SettingsView(SettingsAdminMixin, View):
                         'is_active': False,
                     }
                 )
-            ctx['email_templates'] = EmailTemplate.objects.select_related('signature').all()
+            ctx['email_templates'] = EmailTemplate.objects.filter(trigger__isnull=False).select_related('signature')
+            ctx['custom_templates'] = EmailTemplate.objects.filter(trigger__isnull=True).select_related('signature').order_by('name')
             ctx['email_signatures'] = EmailSignature.objects.all()
             from .forms import EmailBrandingForm
             from .email_utils import _email_header_color
@@ -7788,8 +7763,6 @@ class SettingsView(SettingsAdminMixin, View):
             ctx.update(_canned_responses_context())
         if tab == 'checklist_items':
             ctx.update(_checklist_items_context())
-        if tab == 'colors':
-            ctx.update(_colors_context(forms_map.get('colors') or form))
         if tab == 'display':
             ctx.update(_display_context())
         if active_tab == 'maintenance':
@@ -8157,50 +8130,6 @@ def _checklist_items_context():
     }
 
 
-_STATUS_COLOR_ROWS = [
-    ('new',         'New',         'color_status_new',         '#dbeafe'),
-    ('assigned',    'Assigned',    'color_status_assigned',    '#ede9fe'),
-    ('in_progress', 'In Progress', 'color_status_in_progress', '#fef9c3'),
-    ('completed',   'Completed',   'color_status_completed',   '#dcfce7'),
-    ('closed',      'Closed',      'color_status_closed',      '#f3f4f6'),
-    ('cancelled',   'Cancelled',   'color_status_cancelled',   '#fee2e2'),
-]
-
-
-# (label, bg field, bg default, text field, text default) for the owner dashboard.
-_DASH_COLOR_ROWS = [
-    ('Open tickets',         'color_dash_tickets_bg',     '#e6f1fb', 'color_dash_tickets_text',     '#0c447c'),
-    ('Open work orders',     'color_dash_workorders_bg',  '#e1f5ee', 'color_dash_workorders_text',  '#0f6e56'),
-    ('Ready to bill',        'color_dash_ready_bg',       '#eaf3de', 'color_dash_ready_text',       '#27500a'),
-    ('Outstanding invoices', 'color_dash_outstanding_bg', '#faeeda', 'color_dash_outstanding_text', '#633806'),
-    ('Backlog < 1 day',      'color_dash_backlog1_bg',    '#eaf3de', 'color_dash_backlog1_text',    '#3b6d11'),
-    ('Backlog 1–3 days',     'color_dash_backlog2_bg',    '#faeeda', 'color_dash_backlog2_text',    '#854f0b'),
-    ('Backlog 3–7 days',     'color_dash_backlog3_bg',    '#faece7', 'color_dash_backlog3_text',    '#993c1d'),
-    ('Backlog 7+ days',      'color_dash_backlog4_bg',    '#fcebeb', 'color_dash_backlog4_text',    '#a32d2d'),
-]
-
-
-def _colors_context(form):
-    """Build color_status_rows + color_dash_rows with current values from the form."""
-    rows = []
-    for status_key, status_label, field_name, default_hex in _STATUS_COLOR_ROWS:
-        if form:
-            field = form[field_name]
-            current = field.value() or default_hex
-        else:
-            current = default_hex
-        rows.append((status_key, status_label, field_name, current))
-
-    dash_rows = []
-    for label, bg_name, bg_def, txt_name, txt_def in _DASH_COLOR_ROWS:
-        bg = (form[bg_name].value() or bg_def) if form else bg_def
-        txt = (form[txt_name].value() or txt_def) if form else txt_def
-        dash_rows.append({
-            'label': label, 'bg_name': bg_name, 'bg': bg,
-            'txt_name': txt_name, 'txt': txt,
-        })
-    return {'color_status_rows': rows, 'color_dash_rows': dash_rows}
-
 
 def _display_context():
     font_sizes = [('11px','11'), ('12px','12'), ('13px','13'), ('14px','14'), ('15px','15'), ('16px','16'), ('18px','18')]
@@ -8562,13 +8491,15 @@ class EmailTemplateUpdateView(SettingsAdminMixin, View):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         tmpl = get_object_or_404(EmailTemplate, pk=pk)
+        if tmpl.is_custom and (request.POST.get('name') or '').strip():
+            tmpl.name = request.POST.get('name').strip()
         tmpl.subject_template = request.POST.get('subject_template', tmpl.subject_template).strip()
         tmpl.body_template = request.POST.get('body_template', tmpl.body_template).strip()
         tmpl.is_active = request.POST.get('is_active') == '1'
         sig_id = request.POST.get('signature')
         tmpl.signature_id = int(sig_id) if sig_id else None
         tmpl.save()
-        messages.success(request, f'Email template "{tmpl.get_trigger_display()}" saved.')
+        messages.success(request, f'Email template "{tmpl.label}" saved.')
         return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
 
 
@@ -8882,46 +8813,10 @@ class TechSkillDeleteView(SettingsAdminMixin, View):
         return redirect(reverse_lazy(_TS_REDIRECT) + _TS_TAB)
 
 
-# ---------------------------------------------------------------------------
-# Dashboard Tiles
-# ---------------------------------------------------------------------------
 
-_DT_REDIRECT = 'core:settings'
-_DT_TAB = '?tab=dashboard_tiles'
-
-
-class DashboardTileUpdateView(SettingsAdminMixin, View):
-    def post(self, request, pk):
-        if not _is_admin(request.user):
-            from django.core.exceptions import PermissionDenied; raise PermissionDenied
-        import json as _json
-        tile = get_object_or_404(DashboardTile, pk=pk)
-        tile.label = request.POST.get('label', tile.label).strip()
-        tile.visible_to = request.POST.get('visible_to', tile.visible_to)
-        tile.is_active = request.POST.get('is_active') == 'on'
-        try:
-            tile.sort_order = int(request.POST.get('sort_order', tile.sort_order))
-        except ValueError:
-            pass
-        raw_filter = request.POST.get('status_filter', '').strip()
-        if raw_filter:
-            try:
-                tile.status_filter = _json.loads(raw_filter)
-            except Exception:
-                tile.status_filter = [s.strip() for s in raw_filter.split(',') if s.strip()]
-        else:
-            tile.status_filter = []
-        tile.save()
-        return redirect(reverse_lazy(_DT_REDIRECT) + _DT_TAB)
-
-
-# ---------------------------------------------------------------------------
-# Custom Fields
-# ---------------------------------------------------------------------------
 
 _CF_REDIRECT = 'core:settings'
 _CF_TAB = '?tab=custom_fields'
-
 
 class CustomFieldCreateView(SettingsAdminMixin, View):
     def post(self, request):
@@ -9167,6 +9062,13 @@ class _AdminOnlyTwoFactorMixin:
 class AdminOnlyProfileView(_AdminOnlyTwoFactorMixin, TwoFactorProfileView):
     """Account Security (admin). Employees are sent to MySecurityView."""
 
+    def get_context_data(self, **kwargs):
+        # It lives in the Settings sidebar, so it carries the Settings sidebar.
+        ctx = super().get_context_data(**kwargs)
+        ctx['active_tab'] = 'account_security'
+        ctx['tab_groups'] = _grouped_settings_nav('account_security')
+        return ctx
+
 
 class AdminOnlyDisableView(_AdminOnlyTwoFactorMixin, TwoFactorDisableView):
     """Turning 2FA off is an administrative act, never self-service."""
@@ -9191,3 +9093,390 @@ class MySecurityView(LoginRequiredMixin, View):
             'has_device': bool(devices),
             'mfa_required': SiteSettings.get().require_mfa,
         })
+
+
+# ── Relationship Desk: follow-ups and hand-sent customer email (batch 6) ────
+
+class _ConflictingContext(Exception):
+    """The ids handed to a Desk action do not describe one customer."""
+
+
+def _resolve_desk_context(request):
+    """Work out WHO a follow-up or email is about from the ids in the request,
+    and refuse any combination that does not describe one customer.
+
+    Precedence: the follow-up, then the work order, then the ticket, decide the
+    customer; an explicit client/prospect id must agree with them, so a request
+    can never send customer B an email filled with customer A's ticket, or mark
+    an unrelated follow-up done. Returns a dict with follow_up, work_order,
+    ticket, client, prospect; raises _ConflictingContext on any mismatch.
+    """
+    from .models import FollowUp
+    src = request.POST if request.method == 'POST' else request.GET
+
+    def _get(model, key):
+        raw = src.get(key)
+        if not raw:
+            return None
+        try:
+            return get_object_or_404(model, pk=int(raw))
+        except (TypeError, ValueError):
+            raise _ConflictingContext(f'bad {key}')
+
+    follow_up = _get(FollowUp, 'follow_up')
+    work_order = _get(WorkOrder, 'work_order')
+    ticket = _get(Ticket, 'ticket')
+    client = _get(Client, 'client')
+    prospect = _get(Prospect, 'prospect')
+
+    if follow_up is not None:
+        for name, given, own in (('work_order', work_order, follow_up.work_order),
+                                 ('ticket', ticket, follow_up.ticket),
+                                 ('client', client, follow_up.client),
+                                 ('prospect', prospect, follow_up.prospect)):
+            if given is not None and own is not None and given.pk != own.pk:
+                raise _ConflictingContext(f'{name} does not belong to this follow-up')
+            if given is not None and own is None:
+                raise _ConflictingContext(f'{name} is not part of this follow-up')
+        work_order, ticket = follow_up.work_order, follow_up.ticket
+        client, prospect = follow_up.client, follow_up.prospect
+
+    if work_order is not None and ticket is not None and work_order.ticket_id and work_order.ticket_id != ticket.pk:
+        raise _ConflictingContext('ticket and work order do not match')
+    if work_order is not None and ticket is None and work_order.ticket_id:
+        ticket = work_order.ticket
+
+    implied = None
+    for rec in (work_order, ticket):
+        if rec is not None:
+            if rec.client_id is None:
+                raise _ConflictingContext('that record has no customer')
+            if implied is not None and implied.pk != rec.client_id:
+                raise _ConflictingContext('ticket and work order belong to different customers')
+            implied = rec.client
+    if implied is not None:
+        if client is not None and client.pk != implied.pk:
+            raise _ConflictingContext('client does not match the record')
+        if prospect is not None:
+            raise _ConflictingContext('a record belongs to a customer, not a prospect')
+        client = implied
+
+    if client is not None and prospect is not None:
+        raise _ConflictingContext('one customer or one prospect, not both')
+    return {'follow_up': follow_up, 'work_order': work_order, 'ticket': ticket, 'client': client, 'prospect': prospect}
+
+
+class FollowUpListView(LoginRequiredMixin, View):
+    """Worklist of planned touches. Segments: Due (today or past), Upcoming, Done."""
+    template_name = 'core/follow_up_list.html'
+
+    def get(self, request):
+        from .models import FollowUp
+        from django.utils import timezone
+        seg = request.GET.get('show', 'due')
+        qs = FollowUp.objects.select_related('client', 'prospect', 'ticket', 'work_order', 'template', 'created_by')
+        today = timezone.localdate()
+        if seg == 'upcoming':
+            qs = qs.open().filter(due_on__gt=today)
+        elif seg == 'done':
+            qs = qs.filter(done_at__isnull=False).order_by('-done_at')
+        elif seg == 'all':
+            qs = qs.open()
+        else:
+            seg = 'due'
+            qs = qs.due()
+        return render(request, self.template_name, {
+            'follow_ups': list(qs[:200]), 'segment': seg, 'today': today,
+            'due_count': FollowUp.objects.due().count(),
+            'upcoming_count': FollowUp.objects.open().filter(due_on__gt=today).count(),
+            'kinds': FollowUp.KIND_CHOICES,
+            'custom_templates': EmailTemplate.objects.filter(trigger__isnull=True, is_active=True),
+        })
+
+
+class FollowUpCreateView(LoginRequiredMixin, View):
+    """POST from a Client Hub, Prospect page, Work Record or the list. Returns
+    to where it came from (`next`), else the Follow-ups list."""
+
+    def post(self, request):
+        from .models import FollowUp
+        from datetime import date
+        try:
+            who = _resolve_desk_context(request)
+        except _ConflictingContext as exc:
+            return HttpResponseBadRequest(f'Cannot plan that follow-up: {exc}.')
+        client, prospect, ticket, work_order = who['client'], who['prospect'], who['ticket'], who['work_order']
+        if not client and not prospect:
+            messages.error(request, 'A follow-up needs a customer or a prospect.')
+            return redirect(request.POST.get('next') or 'core:follow_up_list')
+        try:
+            due_on = date.fromisoformat(request.POST.get('due_on', ''))
+        except ValueError:
+            messages.error(request, 'Pick a date for the follow-up.')
+            return redirect(request.POST.get('next') or 'core:follow_up_list')
+        kind = request.POST.get('kind') or 'planned'
+        if kind not in dict(FollowUp.KIND_CHOICES):
+            kind = 'other'
+        tmpl_id = request.POST.get('template') or None
+        fu = FollowUp.objects.create(
+            client=client, prospect=prospect, ticket=ticket, work_order=work_order,
+            kind=kind, note=(request.POST.get('note') or '').strip(), due_on=due_on,
+            template_id=int(tmpl_id) if tmpl_id else None, created_by=request.user,
+        )
+        messages.success(request, f'{fu.get_kind_display()} planned for {fu.who_name} on {due_on:%b %-d}.')
+        return redirect(request.POST.get('next') or 'core:follow_up_list')
+
+
+class FollowUpDoneView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        from .models import FollowUp
+        from django.utils import timezone
+        fu = get_object_or_404(FollowUp, pk=pk)
+        if fu.done_at is None:
+            fu.done_at = timezone.now(); fu.done_by = request.user; fu.save(update_fields=['done_at', 'done_by'])
+        messages.success(request, f'{fu.get_kind_display()} for {fu.who_name} marked done.')
+        return redirect(request.POST.get('next') or 'core:follow_up_list')
+
+
+class FollowUpDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        from .models import FollowUp
+        fu = get_object_or_404(FollowUp, pk=pk)
+        fu.delete()
+        messages.success(request, 'Follow-up removed.')
+        return redirect(request.POST.get('next') or 'core:follow_up_list')
+
+
+class CustomerEmailView(LoginRequiredMixin, View):
+    """Compose and send one of the shop's own (custom) email templates to a
+    customer, from a Work Record, a Client Hub, or a follow-up. GET shows the
+    rendered template (editable); POST sends the edited text. Nothing goes out
+    without a person reading it first."""
+    template_name = 'core/customer_email.html'
+
+    def _context(self, request):
+        from .email_utils import email_context, render_email_template
+        src = request.POST if request.method == 'POST' else request.GET
+        who = _resolve_desk_context(request)  # raises _ConflictingContext; get/post turn it into a 400
+        follow_up, client, prospect = who['follow_up'], who['client'], who['prospect']
+        ticket, work_order = who['ticket'], who['work_order']
+        if not client and not prospect:
+            raise Http404('No customer to email.')
+        templates = list(EmailTemplate.objects.filter(trigger__isnull=True, is_active=True).select_related('signature'))
+        chosen = None
+        tid = src.get('template') or (follow_up.template_id if follow_up and follow_up.template_id else None)
+        if tid:
+            chosen = next((t for t in templates if str(t.pk) == str(tid)), None)
+        contacts = list(client.contacts.filter(is_active=True)) if client else []
+        default_contact = next((c for c in contacts if c.is_primary and c.email), None) or next((c for c in contacts if c.email), None)
+        default_email = (prospect.email if prospect else '') or (client.email if client else '')
+        subject = body = ''
+        render_error = ''
+        if chosen is not None:
+            # Prospects render against a stand-in "client" so the same variables work.
+            who = client or prospect
+            try:
+                subject, body = render_email_template(chosen, email_context(
+                    client=who, contact=default_contact, ticket=ticket, work_order=work_order, user=request.user))
+            except Exception:
+                render_error = 'This template has a syntax error; fix it in Settings, Email Templates.'
+        return {
+            'client': client, 'prospect': prospect, 'ticket': ticket, 'work_order': work_order,
+            'follow_up': follow_up, 'templates': templates, 'chosen': chosen,
+            'contacts': contacts, 'default_contact': default_contact, 'default_email': default_email,
+            'subject': subject, 'body': body, 'render_error': render_error,
+            'back_url': (reverse('core:work_order_detail', args=[work_order.pk]) if work_order
+                         else reverse('core:ticket_detail', args=[ticket.pk]) if ticket
+                         else reverse('core:client_detail', args=[client.pk]) if client
+                         else reverse('core:prospect_detail', args=[prospect.pk])),
+        }
+
+    def get(self, request):
+        try:
+            ctx = self._context(request)
+        except _ConflictingContext as exc:
+            return HttpResponseBadRequest(f'Cannot email from that: {exc}.')
+        return render(request, self.template_name, ctx)
+
+    def post(self, request):
+        from .email_utils import send_custom_email
+        from .models import TicketReply
+        from django.utils import timezone
+        try:
+            ctx = self._context(request)
+        except _ConflictingContext as exc:
+            return HttpResponseBadRequest(f'Cannot send that: {exc}.')
+        chosen = ctx['chosen']
+        if chosen is None:
+            messages.error(request, 'Pick a template first.')
+            return render(request, self.template_name, ctx)
+        to_email = (request.POST.get('custom_email') or '').strip()
+        contact = None
+        if not to_email and request.POST.get('contact') and ctx['client']:
+            contact = ctx['client'].contacts.filter(pk=request.POST.get('contact')).first()
+            to_email = contact.email if contact else ''
+        if not to_email:
+            to_email = ctx['default_email']
+        if not to_email:
+            messages.error(request, 'Choose a contact or enter an email address.')
+            return render(request, self.template_name, ctx)
+        subject = (request.POST.get('subject') or '').strip()
+        body = request.POST.get('body') or ''
+        if not subject or not body.strip():
+            messages.error(request, 'Subject and body cannot be empty.')
+            return render(request, self.template_name, ctx)
+        who = ctx['client'] or ctx['prospect']
+        log = send_custom_email(chosen, to_email=to_email, client=who, contact=contact,
+                                ticket=ctx['ticket'], work_order=ctx['work_order'], user=request.user,
+                                subject=subject, body=body)
+        if log.status == 'sent':
+            messages.success(request, f'Sent "{subject}" to {to_email}.')
+            if ctx['ticket'] is not None:
+                TicketReply.objects.create(ticket=ctx['ticket'], reply_type='internal', created_by=request.user,
+                                           content=f'Emailed {to_email}: {subject}')
+            if ctx['follow_up'] is not None and ctx['follow_up'].done_at is None:
+                fu = ctx['follow_up']; fu.done_at = timezone.now(); fu.done_by = request.user
+                fu.save(update_fields=['done_at', 'done_by'])
+            return redirect(ctx['back_url'])
+        reason = dict(log.REASON_CHOICES).get(log.reason, log.reason)
+        messages.error(request, f'Not sent: {reason}. {log.detail}'.strip())
+        return render(request, self.template_name, ctx)
+
+
+class EmailTemplateCreateView(SettingsAdminMixin, View):
+    """Settings: add a custom (named, hand-sent) template."""
+
+    def post(self, request):
+        name = (request.POST.get('name') or '').strip()
+        if not name:
+            messages.error(request, 'Give the template a name.')
+            return redirect(f"{reverse('core:settings')}?tab=email_templates")
+        sig_id = request.POST.get('signature')
+        EmailTemplate.objects.create(
+            name=name,
+            subject_template=(request.POST.get('subject_template') or '').strip() or '{{ site_name }}: a note about your recent service',
+            body_template=(request.POST.get('body_template') or '').strip() or 'Hi {{ customer_name }},\n\n\n\nThank you,\n{{ tech_name }}',
+            signature_id=int(sig_id) if sig_id else None, is_active=True,
+        )
+        messages.success(request, f'Email template "{name}" added.')
+        return redirect(f"{reverse('core:settings')}?tab=email_templates")
+
+
+class EmailTemplateDeleteView(SettingsAdminMixin, View):
+    """Settings: delete a custom template. Event templates cannot be deleted."""
+
+    def post(self, request, pk):
+        tmpl = get_object_or_404(EmailTemplate, pk=pk)
+        if not tmpl.is_custom:
+            messages.error(request, 'Event templates stay; turn one off instead.')
+        else:
+            tmpl.delete()
+            messages.success(request, f'Email template "{tmpl.name}" deleted.')
+        return redirect(f"{reverse('core:settings')}?tab=email_templates")
+
+
+# ── Reports as a PDF, made on the server ──────────────────────────────────────
+
+# Every chart slot the report includes know about; a picture for any other name
+# is refused. Keep in step with core/templates/core/reports/_*.html.
+REPORT_CHART_IDS = frozenset({
+    'chartVolume', 'chartStatus', 'chartClients',
+    'chartWoStatus', 'chartWoClients', 'chartWoWeek',
+    'chartResolution', 'chartSlaTech', 'chartBacklog',
+})
+_CHART_PNG_MAX_BYTES = 2 * 1024 * 1024
+_CHART_MAX_SIDE = 4000
+
+_REPORT_SECTION_LABELS = {
+    'billing': 'Billing Summary', 'countersales': 'Counter Sales', 'revenue': 'Revenue',
+    'techperf': 'Technician Performance', 'volume': 'Ticket Volume', 'status': 'Tickets by Status',
+    'byclient': 'Tickets by Client', 'bytech': 'Tickets by Technician', 'resolution': 'Resolution Time',
+    'sla': 'SLA Compliance', 'backlog': 'Backlog Health', 'conversion': 'Conversion Rate',
+    'tickettime': 'Ticket Time Logged', 'wotime': 'Work Order Time Logged', 'wostatus': 'Work Orders by Status',
+    'woweek': 'Work Orders per Week', 'wobyclient': 'Work Orders by Client', 'wolist': 'Work Orders',
+    'mileage': 'Mileage',
+}
+
+
+class _BadChartImage(Exception):
+    pass
+
+
+def _decode_chart_png(value):
+    """Take one browser-supplied chart picture (a data URL) and return it as a
+    checked data URL, or raise. The browser already drew the chart on screen;
+    this only accepts a real PNG of sane size so nothing else can ride in."""
+    import base64
+    import binascii
+    import io
+    from PIL import Image, UnidentifiedImageError
+    prefix = 'data:image/png;base64,'
+    if not isinstance(value, str) or not value.startswith(prefix):
+        raise _BadChartImage('not a PNG data URL')
+    b64 = value[len(prefix):]
+    if len(b64) > _CHART_PNG_MAX_BYTES * 4 // 3 + 4:
+        raise _BadChartImage('too large')
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except (binascii.Error, ValueError):
+        raise _BadChartImage('bad base64')
+    if len(raw) > _CHART_PNG_MAX_BYTES or not raw.startswith(b'\x89PNG\r\n\x1a\n'):
+        raise _BadChartImage('not a PNG')
+    try:
+        with Image.open(io.BytesIO(raw)) as im:
+            if im.format != 'PNG':
+                raise _BadChartImage('not a PNG')
+            w, h = im.size
+            if w > _CHART_MAX_SIDE or h > _CHART_MAX_SIDE or w < 1 or h < 1:
+                raise _BadChartImage('bad dimensions')
+            im.verify()
+    except (UnidentifiedImageError, OSError, ValueError):
+        raise _BadChartImage('unreadable PNG')
+    return prefix + base64.b64encode(raw).decode('ascii')
+
+
+class ReportsPDFView(LoginRequiredMixin, View):
+    """POST: the Reports page as a PDF, rendered on the server with WeasyPrint
+    like every other paper Murphy's Bench produces. The numbers come from the
+    same build_context as the page. Charts are drawn in the browser, so the
+    page sends a PNG of each one (chart_<id>); each is checked as a real PNG of
+    sane size before it goes anywhere near the document, and anything else is
+    refused outright. Same permission as the page itself."""
+
+    def post(self, request):
+        if not _can_view_reports(request.user):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        from .pdf_utils import render_pdf
+        params = request.POST
+        ctx = ReportsView.build_context(request, params)
+        domain = ctx['domain']
+        all_sections = REPORTS_DOMAINS[domain]['sections']
+        section = params.get('section') or 'all'
+        if section != 'all' and section not in all_sections:
+            return HttpResponseBadRequest('Unknown report section.')
+        ctx['sections'] = all_sections if section == 'all' else [section]
+        images = {}
+        for key in params:
+            if not key.startswith('chart_'):
+                continue
+            cid = key[len('chart_'):]
+            if cid not in REPORT_CHART_IDS:
+                return HttpResponseBadRequest('Unknown chart.')
+            try:
+                images[cid] = _decode_chart_png(params.get(key))
+            except _BadChartImage as exc:
+                return HttpResponseBadRequest(f'Chart picture refused: {exc}.')
+        ctx.update({'pdf': True, 'chart_images': images, 'site': SiteSettings.get(),
+                    'section_label': _REPORT_SECTION_LABELS.get(section, 'All sections')})
+        html = render_to_string('core/reports_pdf.html', ctx, request=request)
+        try:
+            pdf_bytes = render_pdf(html)
+        except Exception:
+            logger.exception('Reports PDF render failed (domain=%s section=%s).', domain, section)
+            return HttpResponse('The PDF could not be rendered on this server; see the log.',
+                                status=500, content_type='text/plain')
+        name = f"report-{domain}-{section}-{ctx['start_date']:%Y-%m-%d}-to-{ctx['end_date']:%Y-%m-%d}.pdf"
+        resp = HttpResponse(pdf_bytes, content_type='application/pdf')
+        resp['Content-Disposition'] = f'attachment; filename="{name}"'
+        return resp

@@ -1,0 +1,43 @@
+{% load mb_tabler %}
+{% for stream_key, stream_label, cr_cats, cr_uncategorised in cr_streams %}
+<div class="card mb-3">
+    <div class="card-header"><div><h3 class="card-title">{{ stream_label }}</h3><div class="card-subtitle">Canned responses for the {{ stream_label }} note form on work orders.</div></div></div>
+    <form method="post" action="{% url 'core:cr_category_create' %}" class="card-body border-bottom">{% csrf_token %}<input type="hidden" name="stream" value="{{ stream_key }}"><div class="input-group"><input type="text" name="name" class="form-control" placeholder="New category name" required><button type="submit" class="btn btn-primary">Add category</button></div></form>
+    {% for cat in cr_cats %}
+    <div class="border-bottom">
+        <div class="card-body py-2 d-flex align-items-center gap-2">
+            <button type="button" class="btn btn-sm btn-ghost-secondary btn-icon" data-bs-toggle="collapse" data-bs-target="#crc-{{ cat.pk }}" data-mb-group="crc-{{ cat.pk }}" aria-expanded="false">{% ticon 'chevron-down' 'icon-sm' %}</button>
+            <span class="fw-medium flex-fill">{{ cat.name }}</span>
+            <form method="post" action="{% url 'core:cr_category_reorder' cat.pk %}" class="d-inline">{% csrf_token %}<input type="hidden" name="direction" value="up"><button type="submit" class="btn btn-sm btn-ghost-secondary btn-icon" title="Move up">{% ticon 'chevron-up' 'icon-sm' %}</button></form>
+            <form method="post" action="{% url 'core:cr_category_reorder' cat.pk %}" class="d-inline">{% csrf_token %}<input type="hidden" name="direction" value="down"><button type="submit" class="btn btn-sm btn-ghost-secondary btn-icon" title="Move down">{% ticon 'chevron-down' 'icon-sm' %}</button></form>
+            <form method="post" action="{% url 'core:cr_category_delete' cat.pk %}" class="d-inline" data-mb-confirm="Delete the category {{ cat.name }}? Its responses become uncategorised.">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger btn-icon" title="Delete category">{% ticon 'x' 'icon-sm' %}</button></form>
+        </div>
+        <div class="collapse" id="crc-{{ cat.pk }}">
+            <div class="list-group list-group-flush border-top">
+                {% for cr in cat.responses.all %}{% include "core/settings/_canned_response_row.html" with cr=cr cat_pk=cat.pk %}{% empty %}<div class="list-group-item text-secondary">No responses yet.</div>{% endfor %}
+            </div>
+            <div class="card-body border-top">
+                <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#cr-add-{{ cat.pk }}">{% ticon 'plus' 'icon-sm' %} Response</button>
+                <form method="post" action="{% url 'core:cr_create' %}" class="collapse mt-2" id="cr-add-{{ cat.pk }}">{% csrf_token %}<input type="hidden" name="stream" value="{{ stream_key }}"><input type="hidden" name="category_id" value="{{ cat.pk }}">
+                    <div class="mb-2"><input type="text" name="label" class="form-control" placeholder="Label (shown in the picker)" required></div>
+                    <div class="mb-2"><textarea name="body" rows="3" class="form-control font-monospace" placeholder="Response body"></textarea></div>
+                    <button type="submit" class="btn btn-primary">Add</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% empty %}<div class="card-body text-secondary border-bottom">No categories yet. Add one above.</div>{% endfor %}
+    {% if cr_uncategorised %}
+    <div class="card-body border-bottom"><div class="subheader">Uncategorised</div></div>
+    <div class="list-group list-group-flush border-bottom">{% for cr in cr_uncategorised %}{% include "core/settings/_canned_response_row.html" with cr=cr cat_pk="" %}{% endfor %}</div>
+    {% endif %}
+    <div class="card-body">
+        <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#cr-add-{{ stream_key }}">{% ticon 'plus' 'icon-sm' %} Uncategorised response</button>
+        <form method="post" action="{% url 'core:cr_create' %}" class="collapse mt-2" id="cr-add-{{ stream_key }}">{% csrf_token %}<input type="hidden" name="stream" value="{{ stream_key }}">
+            <div class="mb-2"><input type="text" name="label" class="form-control" placeholder="Label" required></div>
+            <div class="mb-2"><textarea name="body" rows="3" class="form-control font-monospace" placeholder="Response body"></textarea></div>
+            <button type="submit" class="btn btn-primary">Add</button>
+        </form>
+    </div>
+</div>
+{% endfor %}

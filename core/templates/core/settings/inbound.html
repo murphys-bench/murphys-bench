@@ -1,0 +1,47 @@
+{% load mb_tabler %}
+<form method="post" class="card">
+    {% csrf_token %}<input type="hidden" name="tab" value="inbound">
+    <div class="card-header"><div><h3 class="card-title">Inbound email (IMAP / POP3)</h3><div class="card-subtitle">Poll a mailbox to create tickets and process replies. Needs a cron job running <code>python manage.py fetch_inbound_email</code>.</div></div></div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-12"><label class="form-check form-switch">{{ forms.inbound.inbound_email_enabled|tabler_input }}<span class="form-check-label">Enable inbound email</span></label></div>
+            <div class="col-md-3"><label class="form-label">Protocol</label>{{ forms.inbound.inbound_protocol|tabler_input }}</div>
+            <div class="col-md-6"><label class="form-label">Host</label>{{ forms.inbound.inbound_host|tabler_input }}</div>
+            <div class="col-md-3"><label class="form-label">Port</label>{{ forms.inbound.inbound_port|tabler_input }}</div>
+            <div class="col-md-6"><label class="form-label">Username</label>{{ forms.inbound.inbound_username|tabler_input }}</div>
+            <div class="col-md-6"><label class="form-label">Password</label>{{ forms.inbound.inbound_password|tabler_input }}</div>
+            <div class="col-md-6"><label class="form-label">IMAP folder</label>{{ forms.inbound.inbound_folder|tabler_input }}</div>
+            <div class="col-md-6"><label class="form-label">Default client name</label>{{ forms.inbound.inbound_default_client_name|tabler_input }}<div class="form-hint">Used when the sender matches no existing client.</div></div>
+            <div class="col-md-4"><label class="form-label">Reopen window (days)</label>{{ forms.inbound.ticket_reopen_window_days|tabler_input }}</div>
+            <div class="col-md-8 form-hint">A reply to a resolved ticket within this many days threads in and flags it for review but leaves it resolved; a tech reopens or dismisses it. When the window runs out the ticket is marked Closed automatically with no email to the client, and a later reply starts a new linked ticket.</div>
+            <div class="col-12">
+                <label class="form-check">{{ forms.inbound.inbound_ssl|tabler_input }}<span class="form-check-label">Use SSL</span></label>
+                <label class="form-check">{{ forms.inbound.inbound_delete_after_fetch|tabler_input }}<span class="form-check-label">Delete messages after processing</span><span class="form-check-description">IMAP only. POP3 always deletes. Default: mark as read.</span></label>
+                <label class="form-check">{{ forms.inbound.strip_quoted_replies|tabler_input }}<span class="form-check-label">Strip quoted reply text</span></label>
+            </div>
+        </div>
+    </div>
+    <div class="card-footer d-flex align-items-center gap-3">
+        <button type="submit" class="btn btn-primary">Save inbound email</button>
+        <button type="button" class="btn" hx-post="{% url 'core:settings_test_inbound' %}" hx-target="#inbound-test-result" hx-swap="innerHTML">Test connection</button>
+        <span id="inbound-test-result"></span>
+    </div>
+</form>
+<div class="card mt-3">
+    <div class="card-header"><div><h3 class="card-title">Blocked senders</h3><div class="card-subtitle">Inbound email from these addresses or patterns is silently dropped. fnmatch wildcards work (for example <code>*@spammer.com</code>).</div></div></div>
+    <table class="table card-table table-vcenter">
+        <thead><tr><th>Pattern</th><th>Reason</th><th>Added</th><th></th></tr></thead>
+        <tbody>
+        {% for bs in blocked_senders %}<tr><td class="font-monospace">{{ bs.pattern }}</td><td class="text-secondary">{{ bs.reason|default:"" }}</td><td class="text-secondary text-nowrap">{{ bs.created_at|date:"M j Y" }}</td><td class="text-end"><form method="post" action="{% url 'core:blocked_sender_delete' bs.pk %}" data-mb-confirm="Remove the block on {{ bs.pattern }}?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Remove</button></form></td></tr>
+        {% empty %}<tr><td colspan="4" class="text-secondary">No blocked senders yet.</td></tr>{% endfor %}
+        </tbody>
+    </table>
+    <form method="post" action="{% url 'core:blocked_sender_add' %}" class="card-footer">
+        {% csrf_token %}
+        <div class="row g-2">
+            <div class="col-md-5"><input type="text" name="pattern" class="form-control" placeholder="spam@example.com or *@domain.com" required></div>
+            <div class="col-md-5"><input type="text" name="reason" class="form-control" placeholder="Reason (optional)"></div>
+            <div class="col-md-2 d-grid"><button type="submit" class="btn">Add block</button></div>
+        </div>
+    </form>
+</div>

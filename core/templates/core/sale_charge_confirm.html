@@ -1,57 +1,38 @@
-{% extends "core/base.html" %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
 
-{% block title %}Confirm Charge - Murphy's Bench{% endblock %}
+{% block title %}Confirm charge - Murphy's Bench{% endblock %}
+{% block room %}register{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
-        <a href="{% url 'core:sale_detail' sale.pk %}" class="text-sm text-gray-400 hover:text-gray-600">← {{ sale.sale_number }}</a>
-        <h1 class="text-2xl font-bold text-gray-900">Charge card on file</h1>
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col"><div class="page-pretitle"><a href="{% url 'core:sale_detail' sale.pk %}">{{ sale.sale_number }}</a></div><h2 class="page-title">Charge card on file</h2></div>
+        </div>
     </div>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="max-w-2xl mx-auto">
-    <div class="bg-red-50 border border-red-200 border-l-4 border-l-red-500 rounded-lg px-4 py-3 mb-4">
-        <p class="text-sm text-red-800">
-            This charges <strong>{{ sale.display_name }}</strong>'s card on file in Invoice Ninja
-            for <strong>${{ amount }}</strong> against invoice
-            <strong>#{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }}</strong>.
-            Murphy's Bench never touches the card — Invoice Ninja charges the stored Square token.
-            The charge runs asynchronously; use "Check IN" afterward to confirm it posted.
-        </p>
+<div class="row justify-content-center"><div class="col-12 col-lg-6">
+    <div class="alert alert-warning">
+        This charges <strong>{{ sale.display_name }}</strong>'s card on file in Invoice Ninja for <strong>${{ amount }}</strong> against invoice <strong>#{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }}</strong>.
+        Murphy's Bench never touches the card; Invoice Ninja charges the stored Square token. The charge runs in the background; use "Check IN" afterward to confirm it posted.
     </div>
-
-    <div class="bg-white rounded-lg shadow px-6 py-4 mb-4">
-        <dl class="divide-y divide-gray-100">
-            <div class="flex justify-between py-2">
-                <dt class="text-sm text-gray-500">Client</dt>
-                <dd class="text-sm font-medium text-gray-900">{{ sale.display_name }}</dd>
-            </div>
-            <div class="flex justify-between py-2">
-                <dt class="text-sm text-gray-500">Sale</dt>
-                <dd class="text-sm font-medium text-gray-900">{{ sale.sale_number }}</dd>
-            </div>
-            <div class="flex justify-between py-2">
-                <dt class="text-sm text-gray-500">Invoice Ninja invoice</dt>
-                <dd class="text-sm font-medium text-gray-900">#{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }}</dd>
-            </div>
-            <div class="flex justify-between py-2">
-                <dt class="text-sm text-gray-500">Amount</dt>
-                <dd class="text-base font-bold text-gray-900">${{ amount }}</dd>
-            </div>
-        </dl>
+    <div class="card mb-3">
+        <div class="card-body">
+            <dl class="row mb-0">
+                <dt class="col-5 text-secondary">Client</dt><dd class="col-7">{{ sale.display_name }}</dd>
+                <dt class="col-5 text-secondary">Sale</dt><dd class="col-7">{{ sale.sale_number }}</dd>
+                <dt class="col-5 text-secondary">Invoice Ninja invoice</dt><dd class="col-7">#{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }}</dd>
+                <dt class="col-5 text-secondary">Amount</dt><dd class="col-7 fw-bold">${{ amount }}</dd>
+            </dl>
+        </div>
     </div>
-
-    <div class="flex items-center gap-3">
-        <form method="post" action="{% url 'core:sale_charge' sale.pk %}">
-            {% csrf_token %}
-            <button type="submit" class="px-5 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 font-medium">
-                Confirm — charge ${{ amount }}
-            </button>
-        </form>
-        <a href="{% url 'core:sale_detail' sale.pk %}" class="px-5 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">Cancel</a>
+    <div class="d-flex gap-2">
+        <form method="post" action="{% url 'core:sale_charge' sale.pk %}">{% csrf_token %}<button type="submit" class="btn btn-success">Charge ${{ amount }}</button></form>
+        <a href="{% url 'core:sale_detail' sale.pk %}" class="btn">Cancel</a>
     </div>
-</div>
+</div></div>
 {% endblock %}
