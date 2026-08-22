@@ -14699,3 +14699,25 @@ def test_customer_email_renders_for_a_prospect(client, admin_user, desk_world):
     body = r.content.decode()
     assert 'syntax error' not in body
     assert 'value="Hello Lee P"' in body and 'Hi Lee P at Lee P' in body
+
+
+@pytest.mark.django_db
+def test_customer_email_sends_to_a_prospect_through_the_suppression_layers(client, admin_user, desk_world, monkeypatch):
+    """Round 3: the prospect path must reach the SMTP layer and be logged, and
+    the pattern and exact-address lists must still apply to a prospect."""
+    from core import email_utils
+    from core.models import EmailSendLog, SiteSettings, SuppressedAddress
+    client.force_login(admin_user)
+    w = desk_world
+    sent = {}
+    monkeypatch.setattr(email_utils, '_smtp_send', lambda *a, **k: (sent.update(to=a[6], subject=a[1]) or ('sent', '', '')))
+    r = client.post(reverse('core:customer_email'), {'prospect': w['p'].pk, 'template': w['t'].pk, 'subject': 'Hello Lee', 'body': 'b'})
+    assert r.status_code == 302 and sent == {'to': 'lee@example.com', 'subject': 'Hello Lee'}
+    log = EmailSendLog.objects.get(); assert log.status == 'sent' and log.ticket is None
+    SuppressedAddress.objects.create(email='lee@example.com')
+    r = client.post(reverse('core:customer_email'), {'prospect': w['p'].pk, 'template': w['t'].pk, 'subject': 's', 'body': 'b'})
+    assert r.status_code == 200 and b'Not sent' in r.content
+    assert EmailSendLog.objects.order_by('-pk').first().reason == 'exact_address'
+    site = SiteSettings.get(); site.email_suppression_patterns = '*@example.com'; site.save()
+    r = client.post(reverse('core:customer_email'), {'prospect': w['p'].pk, 'template': w['t'].pk, 'custom_email': 'other@example.com', 'subject': 's', 'body': 'b'})
+    assert r.status_code == 200 and EmailSendLog.objects.order_by('-pk').first().reason == 'pattern'

@@ -84,7 +84,9 @@ def _suppression_reason(to_email, client, site):
     caller applies when it has resolved a specific contact.
     """
     from .models import SuppressedAddress
-    if client and client.suppress_emails:
+    # A prospect can stand in for the client here; it carries no suppress flag,
+    # so only the pattern and exact-address layers apply to it.
+    if client is not None and getattr(client, 'suppress_emails', False):
         return 'client_flag', ''
     patterns = [p.strip() for p in site.email_suppression_patterns.splitlines() if p.strip()]
     for pattern in patterns:
