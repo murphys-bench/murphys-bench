@@ -72,10 +72,13 @@ def csp_report(request):
     detail = report.get('csp-report', report) if isinstance(report, dict) else report
     if isinstance(detail, dict):
         logger.warning(
-            'CSP violation: blocked=%s directive=%s document=%s',
+            'CSP violation: blocked=%s directive=%s document=%s source=%s line=%s sample=%s',
             detail.get('blocked-uri'),
             detail.get('violated-directive') or detail.get('effective-directive'),
             detail.get('document-uri'),
+            detail.get('source-file'),
+            detail.get('line-number'),
+            (detail.get('script-sample') or '')[:80],
         )
     else:
         logger.warning('CSP violation (unparsed shape)')
