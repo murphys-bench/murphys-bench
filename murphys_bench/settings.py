@@ -329,8 +329,7 @@ CSP_POLICY = config('CSP_POLICY', default=(
     "object-src 'none'; "
     "base-uri 'self'; "
     "form-action 'self'; "
-    "frame-ancestors 'none'; "
-    "report-uri /csp-report/"
+    "frame-ancestors 'none'"
 ))
 CSP_REPORT_ONLY = config('CSP_REPORT_ONLY', default=False, cast=bool)
 
