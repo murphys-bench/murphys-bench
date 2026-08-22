@@ -1026,8 +1026,8 @@ class UserCreateForm(forms.ModelForm):
         if 'level' in self.fields:
             # ⚠ Escalation level is a permission, not profile decoration.
             # _scope_tickets_for() lets a technician see tickets escalated up to
-            # THEIR level, so raising your own level widens what you can read. A
-            # reviewer set an L1 delegated manager to L3 through this form. Cap
+            # THEIR level, so raising your own level widens what you can read: an
+            # L1 delegated manager could set themselves to L3 through this form. Cap
             # the choices at the actor's own level: you cannot grant a reach you
             # do not have.
             self.fields['level'].choices = [
@@ -1076,8 +1076,8 @@ class UserEditForm(forms.ModelForm):
 
         ⚠ Fields are DELETED, not disabled — a disabled input is still honoured
         if it is posted, and this form is reachable by a plain POST. See the twin
-        on UserCreateForm; this is the one an outside reviewer used to make a
-        non-admin user-manager an administrator by posting is_staff=on.
+        on UserCreateForm; posting is_staff=on to this one once made a non-admin
+        user-manager an administrator.
         """
         from core.views import _is_admin, _assignable_roles_for
         if _is_admin(actor):
@@ -1088,8 +1088,8 @@ class UserEditForm(forms.ModelForm):
         if 'level' in self.fields:
             # ⚠ Escalation level is a permission, not profile decoration.
             # _scope_tickets_for() lets a technician see tickets escalated up to
-            # THEIR level, so raising your own level widens what you can read. A
-            # reviewer set an L1 delegated manager to L3 through this form. Cap
+            # THEIR level, so raising your own level widens what you can read: an
+            # L1 delegated manager could set themselves to L3 through this form. Cap
             # the choices at the actor's own level: you cannot grant a reach you
             # do not have.
             self.fields['level'].choices = [

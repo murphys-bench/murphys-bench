@@ -291,9 +291,9 @@ def _role_grants(role):
 #
 # ⚠ THE HISTORY, because it is the reason this is a table and not a chain of ifs.
 # "You cannot act on someone who outranks you" has now been implemented three
-# times and been wrong twice. First it meant "is not an admin", and a reviewer
-# handed a manager a role carrying card charging. Then it also meant "holds no
-# permission I lack", and a reviewer reset an L3 technician's password from an L1
+# times and been wrong twice. First it meant "is not an admin", which let a
+# manager hand themselves a role carrying card charging. Then it also meant "holds
+# no permission I lack", which let an L1 manager reset an L3 technician's password
 # manager account — because escalation level is rank too: _scope_tickets_for()
 # shows a technician tickets escalated up to their level, so taking over an L3
 # account buys visibility an L1 was never granted.
@@ -349,9 +349,9 @@ def _may_act_on_user(actor, target):
     and satisfy _is_admin(); it exposes `role_obj`, so they could assign
     themselves a role carrying can_manage_settings and satisfy it that way; and
     the set-password view took any target, so they could reset an admin's
-    password and simply log in as them. All three were reproduced by an outside
-    reviewer against the first version of this. I enforced the checkbox without
-    asking what the checkbox could reach.
+    password and simply log in as them. All three were reproducible against the
+    first version of this: it enforced the checkbox without asking what the
+    checkbox could reach.
 
     The rule is the ordinary one for delegated user administration: you cannot
     grant what you do not hold, and you cannot act on someone who outranks you.
@@ -366,8 +366,8 @@ def _assignable_roles_for(actor):
     The rule is the general one: a role is assignable only if everything it
     grants is something the actor already holds. This started as "exclude roles
     with can_manage_settings", which was the rule stated in the docstring above
-    it implemented too narrowly — a reviewer showed a delegated manager handing
-    themselves card charging, MFA reset, the org credential vault or ticket
+    it implemented too narrowly: a delegated manager could hand themselves card
+    charging, MFA reset, the org credential vault or ticket
     deletion, none of which touch Settings. Comparing the whole permission set
     covers every flag now and every flag added later.
     """
@@ -947,8 +947,8 @@ class WorkOrderQuickUpdateView(LoginRequiredMixin, View):
         # ⚠ Permission to FINISH a work order is not permission to rewrite it. This
         # panel posts every field at once, so letting a closing request through
         # wholesale handed a close-only role the priority, assignee, contact,
-        # device, repair type, schedule and invoice ref as well — a reviewer
-        # reproduced it by posting status=completed&priority=urgent. When the user
+        # device, repair type, schedule and invoice ref as well (post
+        # status=completed&priority=urgent and watch). When the user
         # may close but not edit, the status is the only thing that moves; the rest
         # of the request is ignored rather than rejected, so the normal Complete
         # button still works for them.
@@ -4134,8 +4134,8 @@ class TicketConvertView(LoginRequiredMixin, View):
     role denied WO creation must not reach one through the ticket page. It also
     drives the ticket to 'converted', a terminal state — so a role denied ticket
     editing could otherwise finish a ticket here that it cannot finish anywhere
-    else. An outside reviewer spotted the second half; requiring only the WO grant
-    left "Edit Tickets" saying less than it meant.
+    else. Requiring only the WO grant left "Edit Tickets" saying less than it
+    meant.
     """
 
     def dispatch(self, request, *args, **kwargs):
@@ -6077,9 +6077,8 @@ def _guard_line_host(request, host):
     ⚠ Do NOT gate these views on a single flag before the host is loaded. A
     blanket can_edit_workorder check was added here and it locked sales-only and
     estimate-only roles out of their own line items: the check ran first, so this
-    function never got the chance to say which permission applied. An outside
-    reviewer reproduced both. Whatever the shared endpoint is called, the record
-    being edited decides who may edit it.
+    function never got the chance to say which permission applied. Whatever the
+    shared route is called, the record being edited decides who may edit it.
 
     Each host maps to the permission that already protects its own screens, so
     this cannot become a backdoor around them.

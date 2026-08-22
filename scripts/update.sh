@@ -83,9 +83,9 @@ SYSTEMCTL=/usr/bin/systemctl
 
 # ⚠ DO NOT decide this by matching sudo's refusal text. Round 1 of this fix used
 # `sudo -n -l`, which is a false pass (it answers "permitted", true even when a
-# password is required). Round 2 read sudo's stderr prose, which an outside review
-# correctly called fragile: the wording varies by sudo version and is localized, so
-# a non-English box would silently pass.
+# password is required). Round 2 read sudo's stderr prose, which is fragile: the
+# wording varies by sudo version and is localized, so a non-English box would
+# silently pass.
 #
 # This asks a question with a machine-checkable answer instead. sudo writes its
 # refusal to STDERR, so if it refuses, stdout is empty. `systemctl is-active`

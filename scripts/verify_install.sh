@@ -447,8 +447,8 @@ head_ "Recovery instructions we print actually run on this box"
 # WHY: update.sh deploys with `git checkout --detach`, so every box that has ever
 # taken an update is on a detached HEAD, where `git pull` exits 1 with "You are
 # not currently on a branch". Both the stranded-update banner and the release
-# note tell a user with a broken box what to run — and until an outside reviewer
-# caught it, both said `git pull`. Nothing would have failed if that stayed
+# note tell a user with a broken box what to run, and for a while both said
+# `git pull`. Nothing would have failed if that stayed
 # wrong: it is text, and no test renders a terminal. This check does, on the box
 # whose checkout shape the updater actually produces.
 if git -C "$APP" symbolic-ref -q HEAD >/dev/null; then

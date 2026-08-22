@@ -112,7 +112,7 @@ class ContactAdmin(admin.ModelAdmin):
 # Device Admin
 class DeviceAdminForm(forms.ModelForm):
     """Admin edits device_type through the same table-driven choices the app
-    forms use, so an unknown slug cannot be typed in raw (outside review, Aug 15)."""
+    forms use, so an unknown slug cannot be typed in raw."""
     class Meta:
         model = Device
         fields = '__all__'

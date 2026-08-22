@@ -545,7 +545,7 @@ class DeviceType(models.Model):
     def delete(self, *args, **kwargs):
         # Refused at the model, not only in the Settings view, so Django admin
         # and the shell cannot orphan devices or silently un-scope checklist
-        # items (outside review, Aug 15).
+        # items.
         device_count, checklist_count = self.usage()
         if device_count or checklist_count:
             raise models.ProtectedError(
