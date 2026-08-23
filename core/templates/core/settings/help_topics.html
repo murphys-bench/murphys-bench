@@ -1,0 +1,22 @@
+{% load mb_tabler %}
+<div class="card">
+    <div class="card-header"><div><h3 class="card-title">Help topics</h3><div class="card-subtitle">Classify tickets by issue type. Each topic can carry a default SLA plan.</div></div></div>
+    <form method="post" action="{% url 'core:help_topic_create' %}" class="card-body border-bottom">{% csrf_token %}<div class="row g-2 align-items-end"><div class="col-md-3"><label class="form-label">Name</label><input type="text" name="name" class="form-control" placeholder="e.g. Network issue" required></div><div class="col-md-3"><label class="form-label">Description</label><input type="text" name="description" class="form-control" placeholder="Optional"></div><div class="col-md-2"><label class="form-label">Default SLA</label><select name="default_sla" class="form-select"><option value="">none</option>{% for s in sla_plans_all %}<option value="{{ s.pk }}">{{ s.name }}</option>{% endfor %}</select></div><div class="col-md-1"><label class="form-label">Sort</label><input type="number" name="sort_order" value="0" class="form-control"></div><div class="col-md-1"><label class="form-check mb-2"><input type="checkbox" name="is_active" class="form-check-input" checked><span class="form-check-label">Active</span></label></div><div class="col-md-2 d-grid"><button type="submit" class="btn btn-primary">Add topic</button></div></div></form>
+    <table class="table card-table table-vcenter">
+        <thead><tr><th>Name</th><th>Description</th><th>Default SLA</th><th>Order</th><th>Active</th><th></th></tr></thead>
+        <tbody>
+        {% for topic in help_topics %}
+        <tr>
+            <td class="fw-medium">{{ topic.name }}
+                <form method="post" action="{% url 'core:help_topic_update' topic.pk %}" class="collapse mt-2 fw-normal" id="ht-edit-{{ topic.pk }}">{% csrf_token %}<div class="row g-2 align-items-end"><div class="col-md-3"><label class="form-label">Name</label><input type="text" name="name" value="{{ topic.name }}" class="form-control" required></div><div class="col-md-3"><label class="form-label">Description</label><input type="text" name="description" value="{{ topic.description }}" class="form-control"></div><div class="col-md-2"><label class="form-label">Default SLA</label><select name="default_sla" class="form-select"><option value="">none</option>{% for s in sla_plans_all %}<option value="{{ s.pk }}" {% if topic.default_sla_id == s.pk %}selected{% endif %}>{{ s.name }}</option>{% endfor %}</select></div><div class="col-md-1"><label class="form-label">Sort</label><input type="number" name="sort_order" value="{{ topic.sort_order }}" class="form-control"></div><div class="col-md-1"><label class="form-check mb-2"><input type="checkbox" name="is_active" class="form-check-input" {% if topic.is_active %}checked{% endif %}><span class="form-check-label">Active</span></label></div><div class="col-md-2 d-grid"><button type="submit" class="btn btn-primary">Save</button></div></div></form>
+            </td>
+            <td class="text-secondary">{{ topic.description|default:""|truncatechars:40 }}</td>
+            <td class="text-secondary">{{ topic.default_sla.name|default:"" }}</td>
+            <td class="text-secondary">{{ topic.sort_order }}</td>
+            <td>{% if topic.is_active %}{% ticon 'check' 'icon-sm text-green' %}{% endif %}</td>
+            <td class="text-end text-nowrap"><button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#ht-edit-{{ topic.pk }}">Edit</button> <form method="post" action="{% url 'core:help_topic_delete' topic.pk %}" class="d-inline" data-mb-confirm="Delete the help topic {{ topic.name }}?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Delete</button></form></td>
+        </tr>
+        {% empty %}<tr><td colspan="6" class="text-secondary">No help topics yet.</td></tr>{% endfor %}
+        </tbody>
+    </table>
+</div>

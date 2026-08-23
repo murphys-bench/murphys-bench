@@ -1,73 +1,38 @@
-{% extends "core/base.html" %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
 
-{% block title %}{{ action }} Article — KB — Murphy's Bench{% endblock %}
+{% block title %}{{ action }} article - Knowledge Base - Murphy's Bench{% endblock %}
+{% block room %}office{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
-        <a href="{% url 'core:kb_list' %}" class="text-gray-400 hover:text-gray-600 text-sm">← Knowledge Base</a>
-        <h1 class="text-2xl font-bold text-gray-900 mt-1">{{ action }} KB Article</h1>
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col"><div class="page-pretitle"><a href="{% url 'core:kb_list' %}">Knowledge Base</a></div><h2 class="page-title">{{ action }} article</h2></div>
+            <div class="col-auto"><a href="{% if article %}{% url 'core:kb_detail' article.pk %}{% else %}{% url 'core:kb_list' %}{% endif %}" class="btn">Cancel</a></div>
+        </div>
     </div>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="max-w-4xl">
-    <form method="post" class="space-y-6">
-        {% csrf_token %}
-
-        {% if form.errors %}
-        <div class="bg-red-50 border border-red-200 rounded-md p-4">
-            <p class="text-red-700 text-sm font-medium">Please fix the errors below.</p>
+<div class="row justify-content-center"><div class="col-12 col-xl-9">
+<form method="post" class="card">
+    {% csrf_token %}
+    <div class="card-body">
+        {% include "core/partials/form_errors.html" %}
+        <div class="row g-3">
+            <div class="col-12"><label class="form-label required">Title</label>{{ form.title|tabler_input }}</div>
+            <div class="col-md-6"><label class="form-label">Category</label>{{ form.category|tabler_input }}</div>
+            <div class="col-md-6"><label class="form-label">Type</label>{{ form.article_type|tabler_input }}</div>
+            <div class="col-12"><label class="form-label">Content</label>{{ form.content|tabler_input }}<div class="form-hint">Markdown: headings, bold, lists, code blocks, tables.</div></div>
+            <div class="col-12">
+                <label class="form-check form-check-inline">{{ form.is_active|tabler_input }}<span class="form-check-label">Active</span></label>
+                <label class="form-check form-check-inline">{{ form.is_restricted|tabler_input }}<span class="form-check-label">Restricted (admin only)</span></label>
+            </div>
         </div>
-        {% endif %}
-
-        <div class="bg-white rounded-lg shadow p-6 space-y-5">
-
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Title</label>
-                {{ form.title }}
-                {% if form.title.errors %}<p class="text-red-600 text-sm mt-1">{{ form.title.errors.0 }}</p>{% endif %}
-            </div>
-
-            <div class="grid grid-cols-2 gap-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                    {{ form.category }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                    {{ form.article_type }}
-                </div>
-            </div>
-
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Content <span class="text-xs font-normal text-gray-400 ml-1">Markdown supported — headings, bold, lists, code blocks, tables</span></label>
-                {{ form.content }}
-                {% if form.content.errors %}<p class="text-red-600 text-sm mt-1">{{ form.content.errors.0 }}</p>{% endif %}
-            </div>
-
-            <div class="flex items-center gap-6">
-                <label class="flex items-center gap-2 text-sm text-gray-700">
-                    {{ form.is_active }} Active
-                </label>
-                <label class="flex items-center gap-2 text-sm text-gray-700">
-                    {{ form.is_restricted }} Restricted (admin-only)
-                </label>
-            </div>
-
-        </div>
-
-        <div class="flex items-center gap-3">
-            <button type="submit" class="px-5 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
-                {{ action }} Article
-            </button>
-            {% if article %}
-            <a href="{% url 'core:kb_detail' article.pk %}" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Cancel</a>
-            {% else %}
-            <a href="{% url 'core:kb_list' %}" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Cancel</a>
-            {% endif %}
-        </div>
-    </form>
-</div>
+    </div>
+    <div class="card-footer"><button type="submit" class="btn btn-primary">Save article</button></div>
+</form>
+</div></div>
 {% endblock %}

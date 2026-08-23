@@ -1,0 +1,18 @@
+{% comment %}
+One billing row's actions, shared by Contract Billing and Monthly Clients.
+Expects state, sale, is_due, prepare_url, next_url; invoice_ninja_enabled from
+the page context.
+{% endcomment %}
+<div class="btn-list justify-content-end">
+{% if state == 'not_prepared' %}
+    {% if is_due %}<form method="post" action="{{ prepare_url }}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-sm btn-primary">Prepare draft</button></form>{% endif %}
+{% elif state == 'prepared' %}
+    <a href="{% url 'core:sale_detail' sale.pk %}" class="btn btn-sm">Review</a>
+    {% if invoice_ninja_enabled %}<form method="post" action="{% url 'core:sale_send_draft' sale.pk %}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-sm btn-success">Send draft</button></form>{% endif %}
+{% elif state == 'draft_in_in' %}
+    {% if invoice_ninja_enabled %}<form method="post" action="{% url 'core:sale_check_in' sale.pk %}" class="d-inline">{% csrf_token %}<input type="hidden" name="next" value="{{ next_url }}"><button type="submit" class="btn btn-sm">Check IN</button></form>{% endif %}
+    <a href="{% url 'core:sale_detail' sale.pk %}" class="btn btn-sm">View</a>
+{% else %}
+    <a href="{% url 'core:sale_detail' sale.pk %}" class="btn btn-sm">View</a>
+{% endif %}
+</div>

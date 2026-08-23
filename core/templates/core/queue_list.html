@@ -1,80 +1,57 @@
-{% extends "core/base.html" %}
+{% extends "core/worklist_base.html" %}
+{% load mb_tabler %}
 
-{% block title %}Ticket Queues - Murphy's Bench{% endblock %}
+{% block title %}Queues - Murphy's Bench{% endblock %}
+{% block room %}office{% endblock %}
+{% block list_pretitle %}Back Office{% endblock %}
+{% block list_title %}Ticket Queues{% endblock %}
 
-{% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="px-6 py-4 flex items-center justify-between">
-        <h1 class="text-xl font-bold text-gray-900">Ticket Queues</h1>
-        <div class="flex items-center gap-3">
-            {% include "core/partials/header_bell.html" %}
-            <a href="{% url 'core:queue_create' %}"
-               class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
-                + New Queue
-            </a>
-        </div>
-    </div>
-</div>
+{% block list_actions %}
+<a href="{% url 'core:queue_create' %}" class="btn btn-primary">{% ticon 'plus' %} New Queue</a>
 {% endblock %}
 
-{% block content %}
-<div class="space-y-6">
+{% block list_search %}{% endblock %}
+{% block list_filters %}
+<span class="text-secondary small">A queue is a saved ticket filter. System queues are shared; personal queues are yours.</span>
+{% endblock %}
 
-    <!-- System Queues -->
-    <div class="bg-white rounded-lg shadow overflow-hidden">
-        <div class="px-5 py-3 border-b border-gray-200 bg-gray-50">
-            <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide">System Queues</h2>
+{% block list_body %}
+<div class="card-header"><h3 class="card-title">System queues</h3><span class="badge bg-blue-lt ms-2">{{ system_queues|length }}</span></div>
+{% if system_queues %}
+<div class="list-group list-group-flush">
+    {% for queue in system_queues %}
+    <div class="list-group-item">
+        <div class="row align-items-center g-2">
+            <div class="col"><a href="{% url 'core:queue_detail' queue.pk %}" class="text-reset fw-medium">{{ queue.name }}</a>
+                <span class="text-secondary small ms-2">sorted by {{ queue.sort_field }} {{ queue.sort_direction }}</span></div>
+            <div class="col-auto">{% if user.is_staff %}<a href="{% url 'core:queue_edit' queue.pk %}" class="btn btn-sm">Edit</a>{% endif %}</div>
         </div>
-        {% if system_queues %}
-        <ul class="divide-y divide-gray-100">
-            {% for queue in system_queues %}
-            <li class="flex items-center justify-between px-5 py-3 hover:bg-gray-50">
-                <a href="{% url 'core:queue_detail' queue.pk %}" class="text-blue-600 hover:underline font-medium">
-                    {{ queue.name }}
-                </a>
-                <div class="flex items-center gap-3">
-                    <span class="text-xs text-gray-400">Sort: {{ queue.sort_field }} {{ queue.sort_direction }}</span>
-                    {% if user.is_staff %}
-                    <a href="{% url 'core:queue_edit' queue.pk %}" class="text-xs text-gray-500 hover:text-gray-800">Edit</a>
-                    {% endif %}
-                </div>
-            </li>
-            {% endfor %}
-        </ul>
-        {% else %}
-        <p class="px-5 py-4 text-sm text-gray-400 italic">No system queues defined.</p>
-        {% endif %}
     </div>
-
-    <!-- Personal Queues -->
-    <div class="bg-white rounded-lg shadow overflow-hidden">
-        <div class="px-5 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-            <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide">My Queues</h2>
-        </div>
-        {% if my_queues %}
-        <ul class="divide-y divide-gray-100">
-            {% for queue in my_queues %}
-            <li class="flex items-center justify-between px-5 py-3 hover:bg-gray-50">
-                <a href="{% url 'core:queue_detail' queue.pk %}" class="text-blue-600 hover:underline font-medium">
-                    {{ queue.name }}
-                </a>
-                <div class="flex items-center gap-3">
-                    <a href="{% url 'core:queue_edit' queue.pk %}" class="text-xs text-gray-500 hover:text-gray-800">Edit</a>
-                    <form method="post" action="{% url 'core:queue_delete' queue.pk %}"
-                          onsubmit="return confirm('Delete queue {{ queue.name }}?')">
-                        {% csrf_token %}
-                        <button type="submit" class="text-xs text-red-500 hover:text-red-700">Delete</button>
-                    </form>
-                </div>
-            </li>
-            {% endfor %}
-        </ul>
-        {% else %}
-        <p class="px-5 py-4 text-sm text-gray-400 italic">You haven't saved any personal queues yet.
-            <a href="{% url 'core:queue_create' %}" class="text-blue-600 hover:underline">Create one →</a>
-        </p>
-        {% endif %}
-    </div>
-
+    {% endfor %}
 </div>
+{% else %}
+<div class="card-body"><div class="empty py-3"><p class="empty-title">No system queues</p><p class="empty-subtitle text-secondary">An admin can create shared queues for the whole shop.</p></div></div>
+{% endif %}
+
+<div class="card-header border-top"><h3 class="card-title">My queues</h3><span class="badge bg-blue-lt ms-2">{{ my_queues|length }}</span></div>
+{% if my_queues %}
+<div class="list-group list-group-flush">
+    {% for queue in my_queues %}
+    <div class="list-group-item">
+        <div class="row align-items-center g-2">
+            <div class="col"><a href="{% url 'core:queue_detail' queue.pk %}" class="text-reset fw-medium">{{ queue.name }}</a></div>
+            <div class="col-auto">
+                <a href="{% url 'core:queue_edit' queue.pk %}" class="btn btn-sm">Edit</a>
+                <form method="post" action="{% url 'core:queue_delete' queue.pk %}" class="d-inline" data-mb-confirm="Delete the queue {{ queue.name }}?">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card-body"><div class="empty py-3"><p class="empty-title">No personal queues yet</p><p class="empty-subtitle text-secondary">Save a filter you use often. <a href="{% url 'core:queue_create' %}">Create one</a>.</p></div></div>
+{% endif %}
 {% endblock %}

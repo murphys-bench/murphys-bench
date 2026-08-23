@@ -396,9 +396,8 @@ def test_email_branding_falls_back_to_app_settings():
     from core.models import SiteSettings
     s = SiteSettings.get()
     s.email_header_color = ''
-    s.color_title_bar = '#123456'
     s.save()
-    assert _email_header_color(s) == '#123456'    # blank -> app Title Bar color
+    assert _email_header_color(s) == '#1f2937'    # blank -> the default (the old Title Bar field left with the Tailwind frame)
     s.email_header_color = '#abcdef'
     s.save()
     assert _email_header_color(s) == '#abcdef'     # dedicated email value wins
@@ -410,7 +409,7 @@ def test_settings_email_templates_tab_renders(client, admin_user):
     client.force_login(admin_user)
     resp = client.get('/settings/?tab=email_templates')
     assert resp.status_code == 200
-    assert b'Email Branding' in resp.content
+    assert b'Email branding' in resp.content
 
 
 @pytest.mark.django_db
@@ -426,37 +425,34 @@ def test_email_branding_save_post(client, admin_user):
 
 @pytest.mark.django_db
 def test_sidebar_order_and_admin_gating(client, admin_user):
-    # Tech (non-staff) does NOT see admin-only links.
+    # Tech (non-staff) does NOT see admin-only links. Mileage is for everyone now
+    # (the Board replaced the tech dashboard's My Mileage card, Aug 21 2026).
     tech = User.objects.create_user(username='tech1', password='x', is_staff=False)
     client.force_login(tech)
     tech_body = client.get('/').content
-    for hidden in (b'title="Queues"', b'title="Mileage"', b'title="Reports"'):
+    for hidden in (b'title="Queues"', b'title="Reports"', b'title="Settings"'):
         assert hidden not in tech_body
-    assert b'title="Tickets"' in tech_body          # core links still present
-    assert b'title="Knowledge Base"' in tech_body
+    for shown in (b'title="Tickets"', b'title="Knowledge Base"', b'title="Mileage"'):
+        assert shown in tech_body
 
-    # Admin sees them, and the top order is Dashboard, Tickets, Work Orders, Clients.
+    # Admin sees them, and the top order is Board, Tickets, Work Orders, Clients.
     client.force_login(admin_user)
     body = client.get('/').content
     for shown in (b'title="Queues"', b'title="Mileage"', b'title="Reports"'):
         assert shown in body
-    order = [body.index(b'title="%s"' % t) for t in (b'Dashboard', b'Tickets', b'Work Orders', b'Clients')]
+    order = [body.index(b'title="%s"' % t) for t in (b'Board', b'Tickets', b'Work Orders', b'Clients')]
     assert order == sorted(order)
 
 
 @pytest.mark.django_db
-def test_tech_dashboard_shows_my_mileage(client, client_obj, admin_user):
+def test_tech_reaches_own_mileage_from_the_nav(client, client_obj, admin_user):
     from core.models import Mileage
     tech = User.objects.create_user(username='tech2', password='x', is_staff=False)
     Mileage.objects.create(technician=tech, trip_date='2026-06-11', miles=12, purpose='Onsite call')
 
     client.force_login(tech)
-    body = client.get('/').content
-    assert b'>My Mileage</h2>' in body      # tech sees the card heading
-    assert b'Onsite call' in body           # ...with their own entry
-
-    client.force_login(admin_user)
-    assert b'>My Mileage</h2>' not in client.get('/').content   # admin sees Team Workload instead
+    assert b'title="Mileage"' in client.get('/').content          # nav entry, not a dashboard card
+    assert b'Onsite call' in client.get(reverse('core:mileage_list')).content
 
 
 @pytest.mark.django_db
@@ -604,18 +600,22 @@ def test_transfer_flags_new_to_you_and_clears_on_open(client, client_obj):
 
 
 @pytest.mark.django_db
-def test_dashboard_surfaces_escalations_to_higher_level(client, client_obj):
+def test_board_surfaces_escalations_to_higher_level(client, client_obj):
     l2 = User.objects.create_user(username='dl2', password='x', is_staff=False, level=2)
     l3 = User.objects.create_user(username='dl3', password='x', is_staff=False, level=3)
     Ticket.objects.create(client=client_obj, subject='escd', description='d',
                           assigned_to=l2, escalation_level=3)
 
+    def tile(resp, label):
+        return next(t for t in resp.context['tiles'] if t['label'] == label)
+
     client.force_login(l3)                       # L3 it was escalated to
-    body = client.get('/').content
-    assert b'Escalated to You' in body and b'escd' in body
+    resp = client.get('/')
+    assert tile(resp, 'Escalated to you')['count'] == 1
+    assert b'escd' in resp.content               # and it sits in their Tickets region
 
     client.force_login(l2)                       # the holder doesn't see it as escalated-to-them
-    assert b'Escalated to You' not in client.get('/').content
+    assert tile(client.get('/'), 'Escalated to you')['count'] == 0
 
 
 @pytest.mark.django_db
@@ -644,9 +644,9 @@ def test_reply_form_defaults(client, client_obj, admin_user):
     t = Ticket.objects.create(client=client_obj, subject='form', description='d', assigned_to=admin_user)
     client.force_login(admin_user)
     body = client.get(f'/tickets/{t.pk}/').content
-    assert b"replyType: 'customer_visible'" in body   # Customer Visible is the default
+    assert b'value="customer_visible" class="form-check-input" checked' in body   # to-client is the default
     assert b'name="cc_mode"' in body                  # BCC/CC selector present
-    assert b'rows="8"' in body                         # larger reply box
+    assert b'rows="6"' in body                         # a real reply box, not a one-liner
     assert b'mb_draft_' in body                        # draft autosave wired
 
 
@@ -1371,9 +1371,9 @@ def test_unsorted_bucket_cannot_be_deleted(client, admin_user):
 
 
 @pytest.mark.django_db
-def test_owner_dashboard_renders_business_tiles(client, admin_user):
-    # The owner dashboard leads with business metrics, not the old triage/attention
-    # rail. Triage stays reachable via the ticket list (?triage=1), tested elsewhere.
+def test_board_renders_admin_money_tiles_and_unsorted_region(client, admin_user):
+    # Money tiles are admin-only (role-gated, ruled Aug 20); the unsorted queue is
+    # a permanent Board region, present with an empty state even when empty.
     bucket = Client.get_unsorted()
     Ticket.objects.create(client=bucket, subject='unsorted', description='d',
                           ticket_number='TKT-D-1', status='new')
@@ -1381,7 +1381,10 @@ def test_owner_dashboard_renders_business_tiles(client, admin_user):
     resp = client.get(reverse('core:dashboard'))
     assert resp.status_code == 200
     body = resp.content.decode()
-    assert 'Ready to bill' in body and 'Outstanding invoices' in body
+    assert 'Ready to bill' in body and 'Outstanding' in body
+    assert 'Unsorted inbound' in body and 'unsorted' in body
+    for region in ('Tickets', 'Bench', 'Follow-ups', 'Unsorted inbound'):
+        assert region in body
 
 
 @pytest.mark.django_db
@@ -2276,12 +2279,11 @@ def test_wo_notes_have_order_toggle_defaulting_newest_first(client, client_obj, 
     client.force_login(admin_user)
     body = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
     # localStorage-backed preference with a newest-first default
-    assert "mb_wo_notes_order" in body
-    assert "'newest'" in body
-    # the reverse-on-newest binding drives the visual order without touching DOM/HTMX swap
-    assert "flex-col-reverse" in body
+    assert 'data-mb-order-toggle="#notes-list"' in body     # the toggle, wired by mb-record.js
+    # newest-first is the rendered default: reverse column order, DOM/HTMX swap untouched
+    assert 'id="notes-list" class="d-flex flex-column-reverse' in body
     # a user-facing toggle exists
-    assert 'Newest first' in body and 'Oldest first' in body
+    assert 'Newest first' in body
 
 
 @pytest.mark.django_db
@@ -2293,7 +2295,7 @@ def test_role_edit_page_renders(client, admin_user):
     client.force_login(admin_user)
     resp = client.get(reverse('core:role_edit', args=[role.pk]))
     assert resp.status_code == 200
-    assert 'Edit Role' in resp.content.decode()
+    assert 'Save role' in resp.content.decode()
 
 
 # ── SLA response deadline: first staff reply meets it permanently ───────────
@@ -3665,7 +3667,7 @@ def test_email_report_form_page_renders(client, client_obj, admin_user):
     client.force_login(admin_user)
     resp = client.get(reverse('core:work_order_email_report', args=[wo.pk]))
     assert resp.status_code == 200
-    assert b'Email Repair Report' in resp.content
+    assert b'Email repair report' in resp.content
     assert b'wayne@davis.example' in resp.content
 
 
@@ -4781,7 +4783,7 @@ def test_sale_custom_log_refreshes_checkout_card_out_of_band(client, admin_user,
     assert 'id="sale-checkout-card"' in body
     assert 'hx-swap-oob="true"' in body
     assert 'Add at least one priced line item' not in body
-    assert 'Complete Sale' in body
+    assert 'Complete sale' in body
 
 
 @pytest.mark.django_db
@@ -7103,7 +7105,7 @@ def test_pos_sale_settle_screen_renders(client, admin_user, client_obj):
     client.force_login(admin_user)
     resp = client.get(reverse('core:pos_sale_settle', args=[sale.pk]))
     assert resp.status_code == 200
-    assert b'Complete Sale' in resp.content
+    assert b'Complete sale' in resp.content
 
 
 @pytest.mark.django_db
@@ -7878,10 +7880,7 @@ def test_mfa_setup_survives_intervening_get(client):
 # ── Owner dashboard: business metrics, billing filters, backlog age bands ────
 
 @pytest.mark.django_db
-def test_owner_dashboard_business_metrics(client, client_obj, admin_user):
-    from datetime import timedelta
-    from django.utils import timezone
-
+def test_board_money_tiles_count_decisions_not_totals(client, client_obj, admin_user):
     # Ready to bill: completed WO whose auto-invoice is still uninvoiced.
     WorkOrder.objects.create(client=client_obj, status='completed')
     # Outstanding: a WO billed (invoiced) and waiting on payment.
@@ -7895,20 +7894,21 @@ def test_owner_dashboard_business_metrics(client, client_obj, admin_user):
     paid.invoice.billing_status = 'paid'
     paid.invoice.amount = 999
     paid.invoice.save()
-    # An open WO for the open-count.
+    # An open WO for the bench.
     WorkOrder.objects.create(client=client_obj, status='in_progress')
-    # An open ticket 5 days old for the backlog band.
-    old = Ticket.objects.create(client=client_obj, subject='old', description='d')
-    Ticket.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=5))
 
     client.force_login(admin_user)
-    resp = client.get(reverse('core:dashboard'))
-    ctx = resp.context
+    ctx = client.get(reverse('core:dashboard')).context
+    tiles = {t['label']: t for t in ctx['tiles']}
+    assert tiles['Ready to bill']['count'] == 1
+    assert float(tiles['Outstanding']['count']) == 150.0   # billed only, not the paid 999
+    assert ctx['wo_total'] == 1                             # only the in_progress one is on the bench
 
-    assert ctx['ready_to_bill_count'] == 1
-    assert float(ctx['outstanding_total']) == 150.0   # billed only, not the paid 999
-    assert ctx['open_wo_count'] == 1                   # only the in_progress one
-    assert ctx['backlog_buckets']['b3to7'] == 1
+    # A technician gets no money tiles at all.
+    tech = User.objects.create_user(username='boardtech', password='x', is_staff=False)
+    client.force_login(tech)
+    labels = {t['label'] for t in client.get(reverse('core:dashboard')).context['tiles']}
+    assert 'Ready to bill' not in labels and 'Outstanding' not in labels
 
 
 @pytest.mark.django_db
@@ -7953,31 +7953,35 @@ def test_ticket_list_age_band_filter(client, client_obj, admin_user):
 
 
 @pytest.mark.django_db
-def test_settings_colors_tab_has_dashboard_block(client, admin_user):
+def test_settings_colors_tab_offers_only_fields_the_frame_reads(client, admin_user):
+    """Batch 5 (ruling 2, Aug 21): the nav/page/title/section/dashboard color
+    fields are retired. The tab offers logos and status colors only; the
+    model fields go with batch 7's migration."""
     client.force_login(admin_user)
     resp = client.get('/settings/?tab=colors')
     assert resp.status_code == 200
     body = resp.content
-    assert b'Dashboard Colors' in body
-    assert b'colors-color_dash_tickets_bg' in body
-    assert b'colors-color_dash_backlog4_text' in body
+    assert b'colors-color_accent' in body and b'colors-color_room_register' in body
+    assert b'colors-color_status_new' not in body      # statuses are colored on the Statuses tab
+    assert b'colors-color_dash_tickets_bg' not in body
+    assert b'colors-color_primary' not in body
 
 
 @pytest.mark.django_db
-def test_admin_dashboard_counts_and_marks_triage(client, admin_user):
-    # Triage tickets are open + unassigned, so they count in the admin's Open
-    # tickets and get a "Needs triage" marker in the worklist card.
+def test_board_keeps_unsorted_out_of_tickets_region(client, admin_user):
+    # Unsorted inbound has its own permanent region; it never pads the Tickets count.
     bucket = Client.get_unsorted()
     Ticket.objects.create(client=bucket, subject='unsorted inbound', description='d',
                           ticket_number='TKT-TR-1', status='new')
     client.force_login(admin_user)
     resp = client.get(reverse('core:dashboard'))
-    assert resp.context['open_ticket_count'] == 1
-    assert b'Needs triage' in resp.content
+    assert resp.context['ticket_total'] == 0
+    assert resp.context['unsorted_total'] == 1
+    assert b'unsorted inbound' in resp.content
 
 
 @pytest.mark.django_db
-def test_tech_dashboard_shows_triage_pool_tile(client, client_obj):
+def test_board_shows_unsorted_to_techs_too(client, client_obj):
     tech = User.objects.create_user(username='dtech', password='x', is_staff=False, level=1)
     bucket = Client.get_unsorted()
     Ticket.objects.create(client=bucket, subject='inbound', description='d',
@@ -7985,7 +7989,8 @@ def test_tech_dashboard_shows_triage_pool_tile(client, client_obj):
     client.force_login(tech)
     resp = client.get(reverse('core:dashboard'))
     assert resp.status_code == 200
-    assert b'Triage pool' in resp.content
+    assert resp.context['unsorted_total'] == 1
+    assert b'Unsorted inbound' in resp.content
 
 
 # ── Backup destinations + schedule (Settings → Maintenance → Backups) ─────────
@@ -8265,7 +8270,7 @@ def test_maintenance_tab_shows_backup_status_and_updates(admin_user, client, set
     body = resp.content.decode()
     assert 'Last backup succeeded' in body
     assert '4.2M' in body
-    assert 'Software Updates' in body  # Backups + Updates cards share the Maintenance tab
+    assert 'Software updates' in body  # Backups + Updates cards share the Maintenance tab
 
 
 def test_request_backup_now_writes_trigger_and_refuses_double(settings, tmp_path):
@@ -9007,10 +9012,12 @@ def test_ticket_time_spent_shown_in_details_card_not_timer(client, client_obj, a
 
     resp = client.get(reverse('core:ticket_detail', args=[ticket.pk]))
     content = resp.content.decode()
+    # On the Work Record the time total lives in the Request section, above the
+    # Timer section; the timer logs to the ticket when there is no work order.
     details_idx = content.index('id="ticket-time-spent-wrapper"')
-    timer_idx = content.index('>Timer<')
-    assert details_idx < timer_idx, 'Time Spent must appear before the Timer card (i.e. inside Details)'
-    assert 'Time Spent' in content
+    timer_idx = content.index('data-mb-timer="ticket_timer_')
+    assert details_idx < timer_idx
+    assert 'Time on ticket' in content and '15m' in content
 
 
 # ── Ticket/WO detail layout standardization + shared Device card ────────────
@@ -9031,10 +9038,9 @@ def test_ticket_detail_shows_device_card_with_notes_collapsed(client, client_obj
     content = resp.content.decode()
     assert resp.status_code == 200
     assert 'Cindis-Mac-mini' in content
-    assert 'Device Notes' in content
     assert '8GB RAM, slow boot' in content
-    # Retired standalone Device Notes card / old sidebar Details accordion
-    assert content.count('Device Notes') == 1
+    # One device block on the record, not a card per phase.
+    assert content.count('8GB RAM, slow boot') == 1
 
 
 @pytest.mark.django_db
@@ -9047,52 +9053,21 @@ def test_wo_detail_shows_device_card_with_notes(client, client_obj, admin_user):
     content = resp.content.decode()
     assert resp.status_code == 200
     assert 'Dell Laptop' in content
-    assert 'Device Notes' in content
     assert 'Battery swollen' in content
 
 
 @pytest.mark.django_db
-def test_ticket_meta_page_renders_and_holds_linked_tickets(client, client_obj, admin_user):
+def test_work_record_history_section_replaces_the_meta_pages(client, client_obj, admin_user):
+    """The old 'Details & history' pages are gone (single page carries all
+    information, Mike Aug 21); their facts live in the record's History section."""
+    from django.urls import NoReverseMatch
     ticket = Ticket.objects.create(client=client_obj, subject='S', description='D', created_by=admin_user)
     client.force_login(admin_user)
-
-    resp = client.get(reverse('core:ticket_meta', args=[ticket.pk]))
-    assert resp.status_code == 200
-    content = resp.content.decode()
-    assert 'Details &amp; History' in content or 'Details & History' in content
-    assert 'Linked Tickets' in content
-
-
-@pytest.mark.django_db
-def test_wo_meta_page_renders(client, client_obj, admin_user):
-    wo = WorkOrder.objects.create(client=client_obj)
-    client.force_login(admin_user)
-
-    resp = client.get(reverse('core:work_order_meta', args=[wo.pk]))
-    assert resp.status_code == 200
-    assert 'Days Open' in resp.content.decode()
-
-
-@pytest.mark.django_db
-def test_ticket_meta_404s_for_non_owning_non_admin_tech(client, client_obj):
-    owner = User.objects.create_user(username='meta_owner', password='x', is_staff=False)
-    other = User.objects.create_user(username='meta_other', password='x', is_staff=False)
-    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D', assigned_to=owner)
-
-    client.force_login(other)
-    resp = client.get(reverse('core:ticket_meta', args=[ticket.pk]))
-    assert resp.status_code == 404
-
-
-@pytest.mark.django_db
-def test_wo_meta_404s_for_non_owning_non_admin_tech(client, client_obj):
-    owner = User.objects.create_user(username='wo_meta_owner', password='x', is_staff=False)
-    other = User.objects.create_user(username='wo_meta_other', password='x', is_staff=False)
-    wo = WorkOrder.objects.create(client=client_obj, assigned_to=owner)
-
-    client.force_login(other)
-    resp = client.get(reverse('core:work_order_meta', args=[wo.pk]))
-    assert resp.status_code == 404
+    body = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    assert 'id="sec-history"' in body and 'Ticket opened' in body and 'Linked tickets' in body
+    for name in ('ticket_meta', 'work_order_meta'):
+        with pytest.raises(NoReverseMatch):
+            reverse(f'core:{name}', args=[ticket.pk])
 
 
 # ---------------------------------------------------------------------------
@@ -9363,7 +9338,7 @@ def test_logs_tab_merges_every_source_by_default(client, admin_user, log_fixture
     assert b'Re: Printer jam' in body            # inbound email
     assert b'Router admin' in body               # org credential
     assert b'Front desk PC' in body              # device credential
-    assert b'All Activity' in body
+    assert b'All activity' in body
 
 
 @pytest.mark.django_db
@@ -9533,7 +9508,7 @@ def test_failed_send_records_why_not_just_that_it_failed(client, admin_user, cli
 # ── Static refs actually resolve under production (manifest) storage ─────────
 #
 # conftest's _plain_static_storage swaps the test suite onto plain StaticFilesStorage
-# so a fresh install that hasn't run build_css.sh + collectstatic isn't buried in 120
+# so a fresh install that hasn't run collectstatic isn't buried in 120
 # "Missing staticfiles manifest entry" failures. That trade would otherwise lose one
 # real regression class: a {% static %} in a TEMPLATE naming a file that doesn't exist.
 # Plain storage returns a URL for anything; collectstatic only walks static dirs, never
@@ -9554,7 +9529,7 @@ def _staticfiles_manifest_ok():
 
 manifest_skip = pytest.mark.skipif(
     not _staticfiles_manifest_ok(),
-    reason='no staticfiles manifest on this runner — run build_css.sh + collectstatic',
+    reason='no staticfiles manifest on this runner — run collectstatic',
 )
 
 
@@ -10534,9 +10509,9 @@ def test_restore_ui_separates_choosing_from_restoring():
 
     # Selection is its own control, and the action button is gated on it.
     assert 'type="radio"' in tpl
-    assert ':disabled="!chosen' in tpl
+    assert 'data-mb-restore-form' in tpl and 'disabled' in tpl
     # The confirmation names the chosen backup rather than asking a generic question.
-    assert 'chosenLabel' in tpl
+    assert 'data-label=' in tpl
     # And the consequence is stated, including that it is not a one-click undo.
     assert 'will be gone' in tpl
     assert 'pre-restore' in tpl
@@ -12333,8 +12308,9 @@ def test_a_hand_marked_converted_ticket_can_still_be_converted(client, admin_use
     )
     client.force_login(admin_user)
 
-    # The real route must still open, and still work.
-    assert client.get(reverse('core:ticket_convert', args=[ticket.pk])).status_code == 200
+    # The real route must still work (conversion is in place now: GET lands on
+    # the record, POST converts).
+    assert client.get(reverse('core:ticket_convert', args=[ticket.pk])).status_code == 302
     resp = client.post(reverse('core:ticket_convert', args=[ticket.pk]), {})
     assert resp.status_code == 302
     ticket.refresh_from_db()
@@ -12355,10 +12331,12 @@ def test_converted_ticket_offers_a_route_to_its_work_order(client, admin_user, c
     wo = ticket.work_order_created
 
     body = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
-    assert f'Go to {wo.work_order_number}' in body
+    # The work order is ON the ticket's page now (one Work Record), and the
+    # bar links to the WO route as well.
+    assert wo.work_order_number in body
     assert reverse('core:work_order_detail', args=[wo.pk]) in body
     # And it must not offer a second conversion.
-    assert 'Convert to Work Order</a>' not in body
+    assert 'Convert to Work Order' not in body
 
     # A second attempt at the convert view is refused, on the work order's
     # existence rather than on the status string.
@@ -13036,10 +13014,10 @@ def test_converting_a_ticket_needs_both_grants(client, client_obj):
     tkt_only = _role_tech('t_conv_tkt', can_edit_ticket=True)      # no WO create
     both = _role_tech('t_conv_both', can_create_workorder=True, can_edit_ticket=True)
 
-    for user, expected in ((wo_only, 403), (tkt_only, 403), (both, 200)):
+    for user, expected in ((wo_only, 403), (tkt_only, 403), (both, 302)):   # 302 = in-place convert done
         ticket = _ticket_for(user, client_obj)
         client.force_login(user)
-        resp = client.get(reverse('core:ticket_convert', args=[ticket.pk]))
+        resp = client.post(reverse('core:ticket_convert', args=[ticket.pk]), {})
         assert resp.status_code == expected, (
             f'{user.username} got {resp.status_code}, expected {expected}'
         )
@@ -13342,10 +13320,10 @@ def test_the_ui_still_offers_everything_to_a_role_that_may_use_it(client, client
     wb = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
 
     assert 'Convert to Work Order' in tb
-    assert 'dismissOpen = !dismissOpen' in tb
-    assert 'tk-timer-log-form' in tb
-    assert 'Apply Checklist' in wb
-    assert '+ Custom' in wb
+    assert 'id="dismiss-response"' in tb
+    assert 'data-mb-timer="ticket_timer_' in tb
+    assert 'Apply checklist' in wb
+    assert 'Custom line' in wb
     assert '/check/' in wb, 'the checklist dropdowns must be offered to a role that may use them'
 
 
@@ -13789,50 +13767,27 @@ def test_a_legacy_admin_is_offered_the_settings_it_can_open(client):
 
 
 @pytest.mark.django_db
-def test_recently_closed_shows_completed_work(client, client_obj):
-    """The dashboard panel must show finished jobs, which means 'completed'.
-
-    It filtered a hand-written ['closed', 'cancelled'] — a second definition of
-    "finished" written three lines below the constant that exists to be the only
-    one. Retiring the `closed` status left it naming a state nothing can hold, so
-    "Recently Closed" could never show a completed job again.
-
-    ⚠ This panel is on the TECHNICIAN dashboard, not the owner's — admins get a
-    separate _admin_dashboard() that never builds this key. I first reported it
-    as "the dashboard", which would have had Mike looking for a panel his own
-    account never renders.
-    """
+def test_board_bench_holds_only_open_work_in_triage_order(client, client_obj):
+    """Finished and cancelled work leaves the bench (WO_CLOSED_STATUSES is the one
+    definition of finished). Open work sorts in the triage order Mike stated:
+    urgent first, then business before residential, then oldest first."""
+    from datetime import timedelta
+    from django.utils import timezone
     tech = _role_tech('rc_tech')
-    done = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
-                                    client=client_obj, status='completed')
-    scrapped = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
-                                        client=client_obj, status='cancelled')
-    live = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
-                                    client=client_obj, status='in_progress')
+    biz = Client.objects.create(name='Biz Co', client_type='business')
+    for status in ('completed', 'cancelled'):
+        WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                 client=client_obj, status=status)
+    res_old = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                       client=client_obj, status='in_progress')
+    WorkOrder.objects.filter(pk=res_old.pk).update(created_at=timezone.now() - timedelta(days=3))
+    biz_new = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                       client=biz, status='new')
+    urgent = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
+                                      client=client_obj, status='new', priority='urgent')
     client.force_login(tech)
-    shown = {w.work_order_number for w in client.get(reverse('core:dashboard')).context['recently_closed']}
-    assert done.work_order_number in shown, 'a completed job never reaches Recently Closed'
-    assert scrapped.work_order_number in shown
-    assert live.work_order_number not in shown
-
-
-@pytest.mark.django_db
-def test_finished_work_leaves_the_my_work_sidebar(client, client_obj):
-    """Pre-existing, same class: the sidebar never excluded 'completed'.
-
-    It excluded 'closed' and 'cancelled' only — so a finished job stayed in My
-    Work indefinitely, while the dashboard's own open-WO query excluded exactly
-    those jobs correctly. Two views, two definitions, one of them wrong.
-    """
-    tech = _role_tech('sidebar_tech', can_edit_workorder=True)
-    done = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
-                                    client=client_obj, assigned_to=tech, status='completed')
-    live = WorkOrder.objects.create(work_order_number=WorkOrder.generate_work_order_number(),
-                                    client=client_obj, assigned_to=tech, status='in_progress')
-    client.force_login(tech)
-    body = client.get(reverse('core:sidebar_fragment')).content.decode()
-    assert live.work_order_number in body
-    assert done.work_order_number not in body, 'a completed job stayed in My Work'
+    shown = [w.work_order_number for w in client.get(reverse('core:dashboard')).context['work_orders']]
+    assert shown == [urgent.work_order_number, biz_new.work_order_number, res_old.work_order_number]
 
 
 @pytest.mark.django_db
@@ -14061,7 +14016,9 @@ def test_ticket_priority_renders_on_list_and_detail(client, client_obj, admin_us
     assert reverse('core:ticket_priority_update', args=[ticket.pk]).encode() in detail.content
     listing = client.get(reverse('core:ticket_list'))
     assert listing.status_code == 200
-    assert b'>Priority<' in listing.content and b'Urgent' in listing.content
+    # On the Tabler worklist priority is an ICON with the level as its title (color
+    # means status, never priority: design rules section 5), not a column.
+    assert b'tabler-alert-triangle' in listing.content and b'Urgent' in listing.content
 
 
 def test_t2_selections_unknown_line_warns_but_neutral_lines_do_not(caplog):
@@ -14205,3 +14162,636 @@ def test_check_sla_overdue_command_runs_auto_close(client_obj):
     t.refresh_from_db()
     assert t.status == 'closed'
     assert '[CLOSE]' in out.getvalue()
+
+
+# ── Tabler frame (tabler-rebuild batch 1) ────────────────────────────────────
+# The new chrome (core/base_tabler.html) and the vendored framework it loads.
+# These guard the vendoring contract, not the look: the files are the pinned
+# bytes, the icon sprite holds every icon a template asks for, and the frame
+# renders for a signed-in user with the rooms and toggles the design rules name.
+
+def _tabler_admin_client():
+    from django.test import Client as HttpClient
+    u = get_user_model().objects.create_superuser('tabler_admin', 'ta@example.com', 'x' * 16)
+    c = HttpClient()
+    c.force_login(u)
+    return c, u
+
+
+def _repo():
+    from pathlib import Path
+    from django.conf import settings
+    return Path(settings.BASE_DIR)
+
+
+def test_vendored_tabler_files_match_recorded_versions():
+    """static/vendor/VERSIONS is the contract: each listed file exists at the
+    versioned path it names. The recorded SHA-256 is of the upstream file BEFORE
+    the sourcemap comment was stripped, so the guard here is presence + version
+    directory, and that neither vendored file still references a .map
+    (ManifestStaticFilesStorage fails collectstatic on a missing referenced file)."""
+    repo = _repo()
+    versions = (repo / 'static' / 'vendor' / 'VERSIONS').read_text()
+    listed = re.findall(r'^(@tabler/\S+) (\S+) (\S+) sha256=([0-9a-f]{64})', versions, re.M)
+    assert len(listed) == 3, listed
+    css = repo / 'static' / 'vendor' / 'tabler' / '1.4.0' / 'tabler.min.css'
+    js = repo / 'static' / 'vendor' / 'tabler' / '1.4.0' / 'tabler.min.js'
+    assert css.stat().st_size > 400_000 and js.stat().st_size > 50_000
+    assert 'Tabler v1.4.0' in css.read_text()[:200]
+    assert 'Tabler v1.4.0' in js.read_text()[:200]
+    assert 'sourceMappingURL' not in css.read_text()
+    assert 'sourceMappingURL' not in js.read_text()
+    assert 'Bootstrap v5.3.7' in js.read_text()
+
+
+def test_icon_sprite_holds_every_icon_the_templates_use():
+    """Every {% ticon 'name' %} in any template names an icon that is (a) in
+    mb_tabler.ICONS and (b) present in the vendored sprite subset. A name that
+    fails either renders nothing on a box with no error, which is why this is
+    checked here instead of at render time."""
+    from core.templatetags.mb_tabler import ICONS, SPRITE_PATH
+    repo = _repo()
+    sprite = (repo / 'static' / SPRITE_PATH).read_text()
+    in_sprite = set(re.findall(r'<symbol id="tabler-([a-z0-9-]+)"', sprite))
+    used = set()
+    for tpl in repo.glob('core/templates/**/*.html'):
+        used |= set(re.findall(r"{%\s*ticon\s+'([a-z0-9-]+)'", tpl.read_text()))
+    assert used, 'no template uses ticon; the frame should'
+    assert used <= set(ICONS), used - set(ICONS)
+    assert set(ICONS) <= in_sprite, set(ICONS) - in_sprite
+
+
+def test_ticon_unknown_name_renders_nothing_and_warns(caplog):
+    from core.templatetags.mb_tabler import ticon
+    with caplog.at_level('WARNING', logger='core'):
+        assert ticon('no-such-icon') == ''
+    assert 'no-such-icon' in caplog.text
+    assert 'tabler-home' in ticon('home')
+
+
+def test_hex_rgb_filter():
+    from core.templatetags.mb_tabler import hex_rgb
+    assert hex_rgb('#2fb344') == '47, 179, 68'
+    assert hex_rgb('2FB344') == '47, 179, 68'
+    assert hex_rgb('') == '32, 107, 196'          # default Tabler primary
+    assert hex_rgb('not a color') == '32, 107, 196'
+
+
+@pytest.mark.django_db
+def test_tabler_frame_renders_chrome_for_signed_in_user():
+    """The Notifications page is the first page on the new frame. It must carry
+    the Tabler stylesheet + bundled JS, the pre-paint boot script, no Alpine, the
+    room attribute, the New button, every room heading, both toggles, and one
+    CSS variable per status from the shop's status table."""
+    c, _ = _tabler_admin_client()
+    r = c.get(reverse('core:notifications'))
+    assert r.status_code == 200
+    body = r.content.decode()
+    assert 'vendor/tabler/1.4.0/tabler.min' in body
+    assert 'js/mb-boot.js' in body and 'js/mb-chrome.js' in body
+    assert 'alpine' not in body.lower()
+    assert 'css/app.' not in body                          # Tailwind never loads on a Tabler page (hashed name on prod)
+    assert '<body data-room="work"' in body
+    for heading in ('Work', 'Desk', 'Register', 'Back Office'):
+        assert heading in body
+    assert 'data-mb-toggle="theme"' in body and 'data-mb-toggle="sidebar"' in body
+    assert 'dropdown-toggle' in body and '>New<' in body.replace('</span>', '<')  # the front door
+    assert '--mb-status-ticket-new:' in body and '--mb-status-workorder-new:' in body
+    assert 'No client is waiting on you' in body           # static presence: empty state shown
+    assert 'Nothing needs your attention' in body
+
+
+@pytest.mark.django_db
+def test_notification_count_tabler_style():
+    c, u = _tabler_admin_client()
+    r = c.get(reverse('core:notification_count') + '?style=tabler')
+    assert r.status_code == 200 and r.content.strip() == b''
+    from core.models import Notification
+    Notification.objects.create(recipient=u, text='hello')
+    r = c.get(reverse('core:notification_count') + '?style=tabler')
+    assert b'badge bg-red' in r.content and b'>1<' in r.content
+
+
+@pytest.mark.django_db
+def test_no_page_loads_the_tailwind_frame_any_more():
+    """Batch 5 put the last pages (Register, Back Office, Settings, Reports,
+    sign-in, two-factor) on the Tabler frame. The two frames never meet, and
+    after batch 5 the Tailwind one is not loaded anywhere."""
+    c, _ = _tabler_admin_client()
+    for name in ('settings', 'reports', 'pos_home', 'user_list'):
+        r = c.get(reverse('core:%s' % name))
+        assert r.status_code == 200, name
+        body = r.content.decode()
+        assert 'tabler.min' in body, name
+        assert 'css/app.' not in body, name
+    r = c.get(reverse('two_factor:profile'))
+    assert r.status_code == 200 and 'css/app.' not in r.content.decode()
+
+
+@pytest.mark.django_db
+def test_every_worklist_renders_on_the_tabler_frame():
+    """Batch 2: all fifteen list pages of the Worklist archetype share one skeleton
+    (worklist_base.html) and never load the Tailwind frame. Monthly Clients and
+    Contract Billing are excluded on purpose: they merge into one list with a
+    migration in a later batch and stay on the old frame until then."""
+    c, _ = _tabler_admin_client()
+    for name in ('ticket_list', 'work_order_list', 'client_list', 'device_list', 'estimate_list',
+                 'sale_list', 'prospect_list', 'contract_list', 'catalog_list', 'kb_list',
+                 'queue_list', 'mileage_list', 'user_list', 'role_list'):
+        r = c.get(reverse(f'core:{name}'))
+        assert r.status_code == 200, name
+        body = r.content.decode()
+        assert 'tabler.min' in body and 'css/app.' not in body, name
+        assert 'page-title' in body, name
+        assert 'data-mb-confirm' in body or 'btn-outline-danger' not in body, f'{name}: a destructive button without the confirm modal'
+
+
+@pytest.mark.django_db
+def test_work_record_is_one_page_for_ticket_and_work_order(client, client_obj, admin_user):
+    """Batch 3: /tickets/<pk>/ and /work-orders/<pk>/ render the same Work Record.
+    A ticket with no WO shows the work-order section present but empty with
+    convert-in-place; once converted, both routes show both phases."""
+    client.force_login(admin_user)
+    t = Ticket.objects.create(client=client_obj, subject='Record subject', description='D', created_by=admin_user)
+    tb = client.get(reverse('core:ticket_detail', args=[t.pk])).content.decode()
+    assert 'tabler.min' in tb and 'css/app.' not in tb
+    for section in ('>Customer<', '>Request<', 'Conversation', 'Work order', 'Timer', 'Attachments &amp; related'):
+        assert section in tb, section
+    assert 'No work order yet' in tb and 'Convert to Work Order' in tb
+    assert 'Owner / Device' in tb and 'Work Item' in tb and '>Print<' in tb and '>Email<' in tb   # the bar
+    assert 'id="status-control"' in tb and 'ticket_status_update' not in tb or 'name="status"' in tb
+
+    client.post(reverse('core:ticket_convert', args=[t.pk]), {})
+    t.refresh_from_db()
+    wo = t.work_order_created
+    assert wo is not None
+    tb = client.get(reverse('core:ticket_detail', args=[t.pk])).content.decode()
+    wb = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
+    for body in (tb, wb):
+        assert 'Record subject' in body and wo.work_order_number in body
+        assert 'Work performed' in body and 'Bench notes' in body and 'Settlement' in body
+        assert 'Message Bench Tech' in body and 'Message Ticket Tech' in body
+        assert 'No work order yet' not in body
+    assert 'alpine' not in tb.lower() and 'onclick=' not in tb and 'onsubmit=' not in tb
+
+
+@pytest.mark.django_db
+def test_work_record_thread_carries_status_events(client, client_obj, admin_user):
+    """Status changes appear IN the conversation as dated events (ruled Aug 18)."""
+    client.force_login(admin_user)
+    t = Ticket.objects.create(client=client_obj, subject='S', description='D', status='open')
+    client.post(reverse('core:ticket_status_update', args=[t.pk]), {'status': 'in_progress'})
+    body = client.get(reverse('core:ticket_detail', args=[t.pk])).content.decode()
+    assert 'Status open &rarr; in_progress' in body or 'Status open → in_progress' in body
+
+
+@pytest.mark.django_db
+def test_work_record_names_standing_as_client_or_customer(client, client_obj, admin_user):
+    """The Who section is headed Client when the owner holds an active Service
+    Agreement and Customer otherwise (Mike, Aug 21: the word carries standing)."""
+    from core.models import Contract
+    client.force_login(admin_user)
+    t = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    assert '>Customer<' in client.get(reverse('core:ticket_detail', args=[t.pk])).content.decode()
+    Contract.objects.create(client=client_obj, title='Managed', status='active')
+    assert '>Client<' in client.get(reverse('core:ticket_detail', args=[t.pk])).content.decode()
+
+
+@pytest.mark.django_db
+def test_client_hub_names_standing_and_sets_agreement_status_in_place(client, client_obj, admin_user):
+    """Batch 4: the hub is headed Customer until an active Service Agreement exists,
+    and an agreement's status is settable on the hub card (ruled Aug 20)."""
+    from core.models import Contract
+    client.force_login(admin_user)
+    body = client.get(reverse('core:client_detail', args=[client_obj.pk])).content.decode()
+    assert 'tabler.min' in body and '>Customer<' in body and 'No Service Agreement' in body
+    c = Contract.objects.create(client=client_obj, title='Managed', status='draft')
+    body = client.get(reverse('core:client_detail', args=[client_obj.pk])).content.decode()
+    assert '>Customer<' in body and reverse('core:contract_status_update', args=[c.pk]) in body
+    r = client.post(reverse('core:contract_status_update', args=[c.pk]), {'status': 'active'})
+    assert r.status_code == 302
+    c.refresh_from_db()
+    assert c.status == 'active'
+    assert '>Client<' in client.get(reverse('core:client_detail', args=[client_obj.pk])).content.decode()
+
+
+@pytest.mark.django_db
+def test_intake_panel_shows_standing_and_open_work(client, client_obj, admin_user):
+    """The front door resolves WHO and shows what is already open, so a duplicate
+    is visible before a second ticket is created."""
+    client.force_login(admin_user)
+    Ticket.objects.create(client=client_obj, subject='Already open', description='D', status='open')
+    r = client.get(reverse('core:intake_client_panel') + f'?client={client_obj.pk}')
+    body = r.content.decode()
+    assert r.status_code == 200 and 'Customer' in body and 'Already open' in body
+    assert 'Already open for this' in body
+    r = client.get(reverse('core:intake_client_panel'))
+    assert 'Choose who this is for' in r.content.decode()
+
+
+@pytest.mark.django_db
+def test_intake_and_hub_pages_render_on_the_tabler_frame(client, client_obj, admin_user):
+    from core.models import Device, Contract, Prospect
+    client.force_login(admin_user)
+    d = Device.objects.create(client=client_obj, name='Hub PC')
+    c = Contract.objects.create(client=client_obj, title='SA', status='active')
+    p = Prospect.objects.create(contact_first_name='Pat', client_type='residential')
+    wo = WorkOrder.objects.create(client=client_obj)
+    pages = [reverse('core:ticket_create'), reverse('core:work_order_create'), reverse('core:client_create'),
+             reverse('core:device_create'), reverse('core:prospect_create'), reverse('core:contract_create', args=[client_obj.pk]),
+             reverse('core:mileage_create'), reverse('core:wo_mileage_create', args=[wo.pk]),
+             reverse('core:client_edit', args=[client_obj.pk]), reverse('core:device_edit', args=[d.pk]),
+             reverse('core:device_detail', args=[d.pk]), reverse('core:contract_detail', args=[c.pk]),
+             reverse('core:prospect_detail', args=[p.pk]), reverse('core:work_order_edit', args=[wo.pk])]
+    for url in pages:
+        r = client.get(url)
+        body = r.content.decode()
+        assert r.status_code == 200, url
+        assert 'tabler.min' in body and 'css/app.' not in body and 'x-data' not in body, url
+
+
+@pytest.mark.django_db
+def test_new_customer_from_intake_returns_to_the_intake_with_them_selected(client, admin_user):
+    """The New button beside the owner select: create the customer, land back on
+    the form you came from with them chosen."""
+    client.force_login(admin_user)
+    nxt = reverse('core:ticket_create')
+    body = client.get(nxt).content.decode()
+    assert reverse('core:client_create') + '?next=' in body and '>New</a>' in body.replace('</svg> New', '>New')
+    r = client.post(reverse('core:client_create') + f'?next={nxt}', {
+        'name': 'Walk-up Wanda', 'client_type': 'residential', 'is_active': 'on', 'billing_day': '1', 'next': nxt})
+    assert r.status_code == 302
+    c = Client.objects.get(name='Walk-up Wanda')
+    assert r['Location'] == f'{nxt}?client={c.pk}'
+    # Off-site next is refused.
+    r = client.post(reverse('core:client_create'), {'name': 'Evil Ed', 'client_type': 'residential', 'is_active': 'on',
+                                                    'billing_day': '1', 'next': 'https://example.org/x'})
+    assert r['Location'].startswith('/clients/')
+
+
+@pytest.mark.django_db
+def test_new_device_can_take_in_a_new_customer(client, admin_user):
+    from core.models import Device
+    client.force_login(admin_user)
+    r = client.post(reverse('core:device_create'), {
+        'name': 'Drop-off Laptop', 'device_type': 'laptop', 'is_active': 'on',
+        'new_client_name': 'Fresh Face Co', 'new_client_type': 'business', 'new_client_phone': '555-0100', 'new_client_email': '',
+    })
+    assert r.status_code == 302
+    d = Device.objects.get(name='Drop-off Laptop')
+    assert d.client is not None and d.client.name == 'Fresh Face Co' and d.client.client_type == 'business'
+    # A typed name that already exists is refused rather than duplicated.
+    r = client.post(reverse('core:device_create'), {'name': 'Second', 'device_type': 'laptop', 'is_active': 'on', 'new_client_name': 'Fresh Face Co'})
+    assert r.status_code == 200 and b'already exists' in r.content
+    assert Client.objects.filter(name='Fresh Face Co').count() == 1
+
+
+# ── Batch 6: Relationship Desk, custom email templates and follow-ups ─────────
+from django.utils import timezone  # noqa: E402
+
+@pytest.mark.django_db
+def test_custom_email_templates_can_be_added_edited_and_deleted(client, admin_user):
+    """Mike, Aug 21 2026: "what if I want 5, or 8?" A template no longer has to
+    be a code event. Event templates stay locked to their events."""
+    from core.models import EmailTemplate
+    client.force_login(admin_user)
+    r = client.post(reverse('core:email_template_create'), {'name': 'Satisfaction follow-up', 'subject_template': 'How did we do, {{ customer_name }}?', 'body_template': 'Hi {{ customer_name }},\n\nAll good?'})
+    assert r.status_code == 302
+    t = EmailTemplate.objects.get(name='Satisfaction follow-up')
+    assert t.is_custom and t.trigger is None and t.label == 'Satisfaction follow-up'
+    body = client.get('/settings/?tab=email_templates').content.decode()
+    assert 'Your templates' in body and 'Satisfaction follow-up' in body
+    client.post(reverse('core:email_template_update', args=[t.pk]), {'name': 'Follow-up', 'subject_template': 's', 'body_template': 'b', 'is_active': '1'})
+    t.refresh_from_db(); assert t.name == 'Follow-up'
+    # A second custom template does not collide (trigger NULL is not unique-violating).
+    client.post(reverse('core:email_template_create'), {'name': 'Thank-you'})
+    assert EmailTemplate.objects.filter(trigger__isnull=True).count() == 2
+    client.post(reverse('core:email_template_delete', args=[t.pk]))
+    assert not EmailTemplate.objects.filter(pk=t.pk).exists()
+    ev, _ = EmailTemplate.objects.get_or_create(trigger='ticket_created', defaults={'subject_template': 's', 'body_template': 'b'})
+    client.post(reverse('core:email_template_delete', args=[ev.pk]))
+    assert EmailTemplate.objects.filter(pk=ev.pk).exists(), 'event templates cannot be deleted'
+
+
+@pytest.mark.django_db
+def test_customer_email_compose_renders_template_and_sends_edited_text(client, admin_user, monkeypatch):
+    from core.models import Client, Contact, EmailTemplate, EmailSendLog, SiteSettings, TicketReply, FollowUp
+    from core import email_utils
+    client.force_login(admin_user)
+    site = SiteSettings.get(); site.email_enabled = True; site.save()
+    c = Client.objects.create(name='Acme', client_type='business')
+    Contact.objects.create(client=c, first_name='Pat', last_name='Q', email='pat@example.com', is_primary=True)
+    t = EmailTemplate.objects.create(name='Thank-you', subject_template='Thanks, {{ customer_name }}', body_template='Hi {{ customer_name }}, from {{ site_name }}.')
+    ticket = Ticket.objects.create(client=c, subject='S', description='D')
+    fu = FollowUp.objects.create(client=c, ticket=ticket, kind='thank_you', due_on=timezone.localdate(), template=t, created_by=admin_user)
+    # GET: the template is rendered for this customer, editable.
+    r = client.get(reverse('core:customer_email') + f'?follow_up={fu.pk}')
+    assert r.status_code == 200
+    body = r.content.decode()
+    assert 'value="Thanks, Pat"' in body and 'Hi Pat, from' in body
+    # POST: the edited text goes, not a fresh render; the ticket gets an internal note; the follow-up is done.
+    sent = {}
+    def fake_smtp(site, subject, plain_body, html_body, logo_data, logo_mime, to_email, cc=None, bcc=None, label=''):
+        sent.update(subject=subject, body=plain_body, to=to_email); return 'sent', '', ''
+    monkeypatch.setattr(email_utils, '_smtp_send', fake_smtp)
+    r = client.post(reverse('core:customer_email'), {'follow_up': fu.pk, 'template': t.pk, 'contact': c.contacts.first().pk, 'subject': 'Thanks, Pat (edited)', 'body': 'Edited body.'})
+    assert r.status_code == 302
+    assert sent['to'] == 'pat@example.com' and sent['subject'] == 'Thanks, Pat (edited)' and sent['body'].startswith('Edited body.')
+    log = EmailSendLog.objects.get(ticket=ticket)
+    assert log.status == 'sent' and log.trigger.startswith('custom:')
+    assert TicketReply.objects.filter(ticket=ticket, reply_type='internal', content__startswith='Emailed pat@example.com').exists()
+    fu.refresh_from_db(); assert fu.done_at is not None and fu.done_by == admin_user
+
+
+@pytest.mark.django_db
+def test_customer_email_honors_suppression_and_does_not_mark_follow_up_done(client, admin_user):
+    from core.models import Client, EmailTemplate, EmailSendLog, SiteSettings, FollowUp
+    client.force_login(admin_user)
+    site = SiteSettings.get(); site.email_enabled = False; site.save()
+    c = Client.objects.create(name='Acme', client_type='business', email='a@example.com')
+    t = EmailTemplate.objects.create(name='T', subject_template='s', body_template='b')
+    fu = FollowUp.objects.create(client=c, kind='planned', due_on=timezone.localdate(), template=t)
+    r = client.post(reverse('core:customer_email'), {'follow_up': fu.pk, 'template': t.pk, 'custom_email': 'x@example.com', 'subject': 's', 'body': 'b'})
+    assert r.status_code == 200 and b'Not sent' in r.content
+    assert EmailSendLog.objects.get().status == 'suppressed'
+    fu.refresh_from_db(); assert fu.done_at is None
+
+
+@pytest.mark.django_db
+def test_follow_up_lifecycle_hub_board_list_done(client, admin_user):
+    from core.models import Client, FollowUp, Prospect
+    from datetime import timedelta
+    client.force_login(admin_user)
+    c = Client.objects.create(name='Acme', client_type='business')
+    today = timezone.localdate()
+    # Plan from the Client Hub (returns there).
+    r = client.post(reverse('core:follow_up_create'), {'client': c.pk, 'kind': 'satisfaction', 'due_on': today.isoformat(), 'note': 'Ask about the laptop', 'next': f'/clients/{c.pk}/#relationship'})
+    assert r.status_code == 302 and r['Location'].endswith('#relationship')
+    fu = FollowUp.objects.get(); assert fu.client == c and fu.created_by == admin_user and not fu.is_overdue
+    # Upcoming one for a prospect.
+    p = Prospect.objects.create(contact_first_name='Lee', contact_last_name='P', email='lee@example.com')
+    client.post(reverse('core:follow_up_create'), {'prospect': p.pk, 'kind': 'planned', 'due_on': (today + timedelta(days=3)).isoformat()})
+    assert FollowUp.objects.due().count() == 1 and FollowUp.objects.open().count() == 2
+    # Board region, hub panel, nav pulse, list segments.
+    body = client.get('/').content.decode()
+    assert 'Follow-ups due' in body and 'Ask about the laptop' in body
+    assert 'badge bg-purple ms-auto">1<' in body
+    hub = client.get(reverse('core:client_detail', args=[c.pk])).content.decode()
+    assert 'Satisfaction check' in hub and 'Plan it' in hub
+    assert 'Lee' in client.get(reverse('core:follow_up_list') + '?show=upcoming').content.decode()
+    assert 'Nothing planned ahead' not in client.get(reverse('core:follow_up_list') + '?show=upcoming').content.decode()
+    # Done, then it leaves the Board and lands under Done.
+    client.post(reverse('core:follow_up_done', args=[fu.pk]))
+    fu.refresh_from_db(); assert fu.done_at is not None
+    assert 'Ask about the laptop' not in client.get('/').content.decode()
+    assert 'Ask about the laptop' in client.get(reverse('core:follow_up_list') + '?show=done').content.decode()
+    # A follow-up without a customer or prospect is refused.
+    client.post(reverse('core:follow_up_create'), {'kind': 'other', 'due_on': today.isoformat()})
+    assert FollowUp.objects.count() == 2
+
+
+@pytest.mark.django_db
+def test_work_record_offers_email_customer_and_plan_follow_up(client, admin_user):
+    from core.models import Client, EmailTemplate
+    client.force_login(admin_user)
+    c = Client.objects.create(name='Acme', client_type='business')
+    wo = WorkOrder.objects.create(client=c)
+    body = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
+    assert 'Email customer (your templates)' in body and 'Plan a follow-up' in body
+    # With no custom template yet, the compose page says so and points at Settings.
+    r = client.get(reverse('core:customer_email') + f'?work_order={wo.pk}')
+    assert r.status_code == 200 and b'No email templates of your own yet' in r.content
+    EmailTemplate.objects.create(name='T', subject_template='{{ work_order.work_order_number }}', body_template='b')
+    r = client.get(reverse('core:customer_email') + f'?work_order={wo.pk}&template={EmailTemplate.objects.get(name="T").pk}')
+    assert wo.work_order_number.encode() in r.content
+
+
+@pytest.mark.django_db
+def test_room_colors_are_per_shop_and_reach_the_frame(client, admin_user):
+    from core.models import SiteSettings
+    client.force_login(admin_user)
+    r = client.post('/settings/', {'tab': 'colors', 'colors-color_room_register': '#112233', 'colors-color_room_desk': '', 'colors-color_room_office': '#445566', 'colors-color_accent': ''})
+    assert r.status_code == 302
+    s = SiteSettings.get(); assert s.color_room_register == '#112233' and s.color_room_office == '#445566'
+    body = client.get('/').content.decode()
+    assert '--mb-room-register: #112233;' in body and '--mb-room-desk: #ae3ec9;' in body and '--mb-room-office: #445566;' in body
+
+
+@pytest.mark.django_db
+def test_reports_charts_cover_work_orders_and_metrics(client, admin_user):
+    """Mike, Aug 21 2026: "Tickets have graphics, Work Orders don't. Same with
+    business metrics." Charts now come from one JSON blob per page, no inline
+    script, and every canvas on those two domains has a spec behind it."""
+    import json
+    from core.models import Client
+    client.force_login(admin_user)
+    c = Client.objects.create(name='Acme', client_type='business')
+    WorkOrder.objects.create(client=c); WorkOrder.objects.create(client=c, status='completed')
+    body = client.get(reverse('core:reports') + '?domain=workorders').content.decode()
+    for cid in ('chartWoStatus', 'chartWoClients', 'chartWoWeek'):
+        assert f'id="{cid}"' in body, cid
+    blob = json.loads(body.split('id="rpt-chart-data"')[1].split('</script>')[0].split('>', 1)[1])
+    assert blob['chartWoStatus']['data'] and sum(blob['chartWoStatus']['data']) == 2
+    assert blob['chartWoClients']['labels'] == ['Acme'] and blob['chartWoWeek']['data'] == [2]
+    body = client.get(reverse('core:reports') + '?domain=metrics').content.decode()
+    for cid in ('chartResolution', 'chartBacklog'):
+        assert f'id="{cid}"' in body, cid
+    assert '<script>' not in body.replace('<script src=', '').replace('<script type="application/json"', '')
+
+
+# ── Outside review, Aug 21 2026: conflicting Desk context must be refused ─────
+
+@pytest.fixture
+def desk_world(db, admin_user):
+    from core.models import Client, Contact, EmailTemplate, FollowUp, Prospect, SiteSettings
+    site = SiteSettings.get(); site.email_enabled = True; site.save()
+    a = Client.objects.create(name='Acme', client_type='business', email='acme@example.com')
+    b = Client.objects.create(name='Bolt', client_type='business', email='bolt@example.com')
+    ca = Contact.objects.create(client=a, first_name='Pat', last_name='A', email='pat@a.example.com', is_primary=True)
+    cb = Contact.objects.create(client=b, first_name='Sam', last_name='B', email='sam@b.example.com', is_primary=True)
+    t = EmailTemplate.objects.create(name='T', subject_template='{{ ticket.ticket_number }} for {{ client.name }}', body_template='b')
+    ticket_a = Ticket.objects.create(client=a, subject='S', description='D')
+    wo_a = WorkOrder.objects.create(client=a, ticket=ticket_a)
+    fu_b = FollowUp.objects.create(client=b, kind='planned', due_on=timezone.localdate(), template=t)
+    p = Prospect.objects.create(contact_first_name='Lee', contact_last_name='P', email='lee@example.com')
+    return dict(a=a, b=b, ca=ca, cb=cb, t=t, ticket_a=ticket_a, wo_a=wo_a, fu_b=fu_b, p=p)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('params, why', [
+    ({'ticket': 'ticket_a', 'client': 'b'}, 'ticket belongs to A, client says B'),
+    ({'work_order': 'wo_a', 'client': 'b'}, 'work order belongs to A, client says B'),
+    ({'follow_up': 'fu_b', 'ticket': 'ticket_a'}, 'follow-up is B, ticket is A'),
+    ({'follow_up': 'fu_b', 'client': 'a'}, 'follow-up is B, client says A'),
+    ({'ticket': 'ticket_a', 'prospect': 'p'}, 'a ticket has a customer, not a prospect'),
+    ({'client': 'a', 'prospect': 'p'}, 'one customer or one prospect'),
+])
+def test_customer_email_refuses_cross_wired_context(client, admin_user, desk_world, params, why):
+    """P1: ticket=A&client=B&follow_up=C must never produce a mixed send."""
+    from core.models import EmailSendLog, FollowUp
+    client.force_login(admin_user)
+    q = {k: desk_world[v].pk for k, v in params.items()}
+    q['template'] = desk_world['t'].pk
+    r = client.get(reverse('core:customer_email'), q)
+    assert r.status_code == 400, why
+    r = client.post(reverse('core:customer_email'), {**q, 'custom_email': 'x@example.com', 'subject': 's', 'body': 'b'})
+    assert r.status_code == 400, why
+    assert not EmailSendLog.objects.exists()
+    assert FollowUp.objects.get(pk=desk_world['fu_b'].pk).done_at is None
+
+
+@pytest.mark.django_db
+def test_customer_email_derives_customer_from_record_and_ignores_foreign_contact(client, admin_user, desk_world, monkeypatch):
+    from core import email_utils
+    from core.models import EmailSendLog
+    client.force_login(admin_user)
+    w = desk_world
+    # The work order alone decides the customer (A) and pulls its ticket in.
+    r = client.get(reverse('core:customer_email'), {'work_order': w['wo_a'].pk, 'template': w['t'].pk})
+    assert r.status_code == 200 and f'{w["ticket_a"].ticket_number} for Acme'.encode() in r.content
+    sent = {}
+    monkeypatch.setattr(email_utils, '_smtp_send', lambda *a, **k: (sent.update(to=a[6]) or ('sent', '', '')))
+    # A contact id from customer B is not A's contact: it falls back to A's address, never to B.
+    r = client.post(reverse('core:customer_email'), {'work_order': w['wo_a'].pk, 'template': w['t'].pk, 'contact': w['cb'].pk, 'subject': 's', 'body': 'b'})
+    assert r.status_code == 302 and sent['to'] == 'acme@example.com'
+    assert EmailSendLog.objects.get().ticket == w['ticket_a']
+
+
+@pytest.mark.django_db
+def test_custom_send_honors_contact_opt_out(client, admin_user, desk_world):
+    from core.models import EmailSendLog
+    client.force_login(admin_user)
+    w = desk_world
+    w['ca'].receives_email = False; w['ca'].save()
+    r = client.post(reverse('core:customer_email'), {'client': w['a'].pk, 'template': w['t'].pk, 'contact': w['ca'].pk, 'subject': 's', 'body': 'b'})
+    assert r.status_code == 200 and b'Not sent' in r.content
+    assert EmailSendLog.objects.get().reason == 'contact_flag'
+
+
+@pytest.mark.django_db
+def test_follow_up_needs_exactly_one_customer_or_prospect(client, admin_user, desk_world):
+    from django.db import IntegrityError, transaction
+    from core.models import FollowUp
+    client.force_login(admin_user)
+    w = desk_world
+    today = timezone.localdate().isoformat()
+    r = client.post(reverse('core:follow_up_create'), {'client': w['a'].pk, 'prospect': w['p'].pk, 'kind': 'planned', 'due_on': today})
+    assert r.status_code == 400
+    r = client.post(reverse('core:follow_up_create'), {'ticket': w['ticket_a'].pk, 'client': w['b'].pk, 'kind': 'planned', 'due_on': today})
+    assert r.status_code == 400
+    assert FollowUp.objects.count() == 1
+    with pytest.raises(IntegrityError), transaction.atomic():
+        FollowUp.objects.create(client=w['a'], prospect=w['p'], kind='planned', due_on=timezone.localdate())
+    with pytest.raises(IntegrityError), transaction.atomic():
+        FollowUp.objects.create(kind='planned', due_on=timezone.localdate())
+
+
+@pytest.mark.django_db
+def test_customer_email_renders_for_a_prospect(client, admin_user, desk_world):
+    """Round 2: a prospect has display_name, not name; the greeting must not
+    blow up and the screen must not report a false template error."""
+    client.force_login(admin_user)
+    w = desk_world
+    from core.models import EmailTemplate
+    t = EmailTemplate.objects.create(name='Hello', subject_template='Hello {{ customer_name }}', body_template='Hi {{ customer_name }} at {{ client.name }}')
+    r = client.get(reverse('core:customer_email'), {'prospect': w['p'].pk, 'template': t.pk})
+    assert r.status_code == 200
+    body = r.content.decode()
+    assert 'syntax error' not in body
+    assert 'value="Hello Lee P"' in body and 'Hi Lee P at Lee P' in body
+
+
+@pytest.mark.django_db
+def test_customer_email_sends_to_a_prospect_through_the_suppression_layers(client, admin_user, desk_world, monkeypatch):
+    """Round 3: the prospect path must reach the SMTP layer and be logged, and
+    the pattern and exact-address lists must still apply to a prospect."""
+    from core import email_utils
+    from core.models import EmailSendLog, SiteSettings, SuppressedAddress
+    client.force_login(admin_user)
+    w = desk_world
+    sent = {}
+    monkeypatch.setattr(email_utils, '_smtp_send', lambda *a, **k: (sent.update(to=a[6], subject=a[1]) or ('sent', '', '')))
+    r = client.post(reverse('core:customer_email'), {'prospect': w['p'].pk, 'template': w['t'].pk, 'subject': 'Hello Lee', 'body': 'b'})
+    assert r.status_code == 302 and sent == {'to': 'lee@example.com', 'subject': 'Hello Lee'}
+    log = EmailSendLog.objects.get(); assert log.status == 'sent' and log.ticket is None
+    SuppressedAddress.objects.create(email='lee@example.com')
+    r = client.post(reverse('core:customer_email'), {'prospect': w['p'].pk, 'template': w['t'].pk, 'subject': 's', 'body': 'b'})
+    assert r.status_code == 200 and b'Not sent' in r.content
+    assert EmailSendLog.objects.order_by('-pk').first().reason == 'exact_address'
+    site = SiteSettings.get(); site.email_suppression_patterns = '*@example.com'; site.save()
+    r = client.post(reverse('core:customer_email'), {'prospect': w['p'].pk, 'template': w['t'].pk, 'custom_email': 'other@example.com', 'subject': 's', 'body': 'b'})
+    assert r.status_code == 200 and EmailSendLog.objects.order_by('-pk').first().reason == 'pattern'
+
+
+# ── Reports PDF, made on the server (replaces html2pdf in the browser) ────────
+
+_PNG_1x1 = ('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk'
+            'YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
+
+
+@pytest.mark.django_db
+def test_reports_pdf_refuses_anything_that_is_not_a_real_png(client, admin_user):
+    import base64
+    client.force_login(admin_user)
+    url = reverse('core:reports_pdf')
+    base = {'domain': 'workorders', 'start_date': '2026-08-01', 'end_date': '2026-08-21', 'section': 'wostatus'}
+    assert client.get(url).status_code == 405
+    bad = [
+        ({'chart_chartWoStatus': 'data:text/html;base64,' + base64.b64encode(b'<script>').decode()}, 'wrong type'),
+        ({'chart_chartWoStatus': 'data:image/png;base64,' + base64.b64encode(b'GIF89a not png').decode()}, 'not a png'),
+        ({'chart_chartWoStatus': 'data:image/png;base64,@@@'}, 'bad base64'),
+        ({'chart_chartWoStatus': 'data:image/png;base64,' + base64.b64encode(b'\x89PNG\r\n\x1a\n' + b'\x00' * 40).decode()}, 'truncated png'),
+        ({'chart_somethingElse': _PNG_1x1}, 'unknown chart id'),
+        ({'chart_chartWoStatus': 'data:image/png;base64,' + 'A' * (3 * 1024 * 1024)}, 'oversize'),
+    ]
+    for extra, why in bad:
+        r = client.post(url, {**base, **extra})
+        assert r.status_code == 400, why
+    assert client.post(url, {**base, 'section': 'billing'}).status_code == 400   # section from another domain
+
+
+@pytest.mark.django_db
+def test_reports_pdf_needs_the_reports_permission(client, db):
+    from core.models import Role
+    role = Role.objects.create(name='Nothing')
+    User = get_user_model()
+    u = User.objects.create_user(username='nobody', password='x', role_obj=role)
+    client.force_login(u)
+    assert client.post(reverse('core:reports_pdf'), {'domain': 'tickets'}).status_code == 403
+
+
+@pytest.mark.django_db
+def test_reports_pdf_template_renders_the_chosen_section_with_the_sent_picture(client, admin_user):
+    """The PDF uses the same section includes as the screen; `sections` narrows
+    and `pdf` swaps the canvas for the browser's picture (or an honest note)."""
+    from django.template.loader import render_to_string
+    from core.models import Client, SiteSettings
+    c = Client.objects.create(name='Acme', client_type='business')
+    WorkOrder.objects.create(client=c)
+    req = client.get('/').wsgi_request
+    ctx = ReportsView_build(req, {'domain': 'workorders', 'start_date': '2026-08-01', 'end_date': '2026-12-31'})
+    ctx.update({'pdf': True, 'sections': ['wostatus'], 'chart_images': {'chartWoStatus': _PNG_1x1}, 'site': SiteSettings.get(), 'section_label': 'Work Orders by Status'})
+    html = render_to_string('core/reports_pdf.html', ctx)
+    assert 'id="section-wostatus"' in html and 'id="section-wobyclient"' not in html
+    assert '<img src="data:image/png;base64,' in html and '<canvas' not in html
+    ctx['chart_images'] = {}
+    html = render_to_string('core/reports_pdf.html', ctx)
+    assert 'Chart not included' in html
+    # The screen still gets its canvases.
+    client.force_login(admin_user)
+    page = client.get(reverse('core:reports') + '?domain=workorders').content.decode()
+    assert 'id="chartWoStatus"' in page and 'data-mb-pdf-url' in page and 'html2pdf' not in page
+
+
+def ReportsView_build(request, params):
+    from core.views import ReportsView
+    return ReportsView.build_context(request, params)
+
+
+@pdf_skip
+@pytest.mark.django_db
+def test_reports_pdf_downloads_a_real_pdf(client, admin_user):
+    client.force_login(admin_user)
+    r = client.post(reverse('core:reports_pdf'), {'domain': 'tickets', 'start_date': '2026-08-01', 'end_date': '2026-08-21', 'section': 'all', 'chart_chartVolume': _PNG_1x1})
+    assert r.status_code == 200 and r['Content-Type'] == 'application/pdf'
+    assert r.content.startswith(b'%PDF') and 'report-tickets-all-2026-08-01-to-2026-08-21.pdf' in r['Content-Disposition']

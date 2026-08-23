@@ -1,70 +1,56 @@
-{% extends "core/base.html" %}
-{% load mb_icons %}
+{% extends "core/worklist_base.html" %}
+{% load mb_tabler %}
 
 {% block title %}Products & Services - Murphy's Bench{% endblock %}
+{% block room %}office{% endblock %}
+{% block list_pretitle %}Back Office{% endblock %}
+{% block list_title %}Products &amp; Services{% endblock %}
+{% block list_count %}<span class="badge bg-blue-lt ms-2">{{ services_count|add:products_count }}</span>{% endblock %}
+{% block search_placeholder %}Name or category{% endblock %}
 
-{% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
-        <div class="flex items-center gap-4">
-            <h1 class="text-2xl font-bold text-gray-900 shrink-0">Products &amp; Services</h1>
-            <div class="flex-1"></div>
-            {% include "core/partials/header_bell.html" %}
-        </div>
-    </div>
-</div>
-{% include "core/partials/list_search_bar.html" with search_value=request.GET.search search_placeholder="Search name or category…" filters_template="core/partials/_catalog_filters.html" filters_active=show_inactive %}
+{% block list_actions %}
+{% if can_edit %}<a href="#add-item" class="btn btn-primary">{% ticon 'plus' %} Add Item</a>{% endif %}
 {% endblock %}
 
-{% block content %}
-<div class="max-w-5xl mx-auto space-y-6">
+{% block list_segments %}
+<a href="{% if show_inactive %}{% url_replace show_inactive='' %}{% else %}{% url_replace show_inactive='1' %}{% endif %}" class="btn btn-sm {% if show_inactive %}active{% endif %}">Show inactive</a>
+{% endblock %}
 
-    {% if can_edit %}
-    <!-- Add new item (admins only) -->
-    <div class="bg-white rounded-lg shadow p-6" x-data="{ addOpen: false }">
-        <button type="button" @click="addOpen = !addOpen" class="w-full flex items-center justify-between text-left">
-            <span class="text-base font-semibold text-gray-900">Add Item</span>
-            <svg class="w-4 h-4 text-gray-400 transition-transform" :class="addOpen && 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-            </svg>
-        </button>
-        <form x-show="addOpen" x-cloak method="post" action="{% url 'core:catalog_create' %}" class="grid grid-cols-1 sm:grid-cols-6 gap-3 items-end mt-4">
+{% block list_body %}
+{% include "core/partials/catalog_card.html" with title="Services" groups=services_by_category count=services_count empty_text="No services to show." %}
+{% include "core/partials/catalog_card.html" with title="Products" groups=products_by_category count=products_count empty_text="No products to show." %}
+{% endblock %}
+
+{% block list_after %}
+{% if can_edit %}
+<div class="card mt-3" id="add-item">
+    <div class="card-header"><h3 class="card-title">Add item</h3></div>
+    <div class="card-body">
+        <form method="post" action="{% url 'core:catalog_create' %}" class="row g-3 align-items-end">
             {% csrf_token %}
-            <div>
-                <label class="block text-xs font-medium text-gray-600 mb-1">Type</label>
-                <select name="item_type" class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
-                    {% for value, label in type_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
-                </select>
+            <div class="col-md-2">
+                <label class="form-label">Type</label>
+                <select name="item_type" class="form-select">{% for value, label in type_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
             </div>
-            <div class="sm:col-span-2">
-                <label class="block text-xs font-medium text-gray-600 mb-1">Name</label>
-                <input type="text" name="name" required placeholder="e.g. Virus Removal / 1TB SSD"
-                       class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+            <div class="col-md-4">
+                <label class="form-label required">Name</label>
+                <input type="text" name="name" required class="form-control" placeholder="e.g. Virus Removal / 1TB SSD">
             </div>
-            <div>
-                <label class="block text-xs font-medium text-gray-600 mb-1">Category</label>
-                <input type="text" name="category" required placeholder="e.g. Software"
-                       class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+            <div class="col-md-3">
+                <label class="form-label required">Category</label>
+                <input type="text" name="category" required class="form-control" placeholder="e.g. Software">
             </div>
-            <div>
-                <label class="block text-xs font-medium text-gray-600 mb-1">Price ($)</label>
-                <input type="number" name="default_price" step="0.01" min="0" placeholder="optional"
-                       class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+            <div class="col-md-2">
+                <label class="form-label">Price ($)</label>
+                <input type="number" name="default_price" step="0.01" min="0" class="form-control" placeholder="optional">
             </div>
-            <div>
-                <button type="submit" class="w-full px-4 py-1.5 bg-green-600 text-white rounded text-sm font-medium hover:bg-green-700">Add</button>
-            </div>
-            <div class="sm:col-span-6">
-                <label class="block text-xs font-medium text-gray-600 mb-1">Client-facing description <span class="text-gray-400">(optional — printed on documents; blank uses the name)</span></label>
-                <input type="text" name="print_description" placeholder="Client-facing text on reports/receipts…"
-                       class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+            <div class="col-md-1"><button type="submit" class="btn btn-primary w-100">Add</button></div>
+            <div class="col-12">
+                <label class="form-label">Client-facing description <span class="form-label-description">optional; printed on documents, blank uses the name</span></label>
+                <input type="text" name="print_description" class="form-control">
             </div>
         </form>
     </div>
-    {% endif %}
-
-    {% include "core/partials/catalog_card.html" with title="Services" groups=services_by_category count=services_count empty_text="No services to show." %}
-    {% include "core/partials/catalog_card.html" with title="Products" groups=products_by_category count=products_count empty_text="No products to show." %}
-
 </div>
+{% endif %}
 {% endblock %}

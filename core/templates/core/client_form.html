@@ -1,280 +1,119 @@
-{% extends "core/base.html" %}
-{% load mb_icons %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
 
 {% block title %}{{ title }} - Murphy's Bench{% endblock %}
+{% block room %}desk{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
-        <h1 class="text-2xl font-bold text-gray-900">{{ title }}</h1>
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col"><div class="page-pretitle">Desk</div><h2 class="page-title">{{ title }}</h2></div>
+            <div class="col-auto"><a href="{{ cancel_url }}" class="btn">Cancel</a></div>
+        </div>
     </div>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="max-w-3xl space-y-6">
+<div class="row justify-content-center"><div class="col-12 col-xl-9">
+<form method="post">
+    {% csrf_token %}
+    {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+    {% include "core/partials/form_errors.html" %}
+    {% if device_form.errors %}{% with form=device_form %}{% include "core/partials/form_errors.html" %}{% endwith %}{% endif %}
 
-    <form method="post" class="space-y-6">
-        {% csrf_token %}
-
-        {% if form.errors %}
-        <div class="bg-red-50 border border-red-200 rounded-md p-4">
-            <p class="text-sm font-medium text-red-800">Please fix the errors below:</p>
-            <ul class="mt-2 text-sm text-red-700 list-disc list-inside">
-                {% for field in form %}
-                    {% for error in field.errors %}
-                        <li>{{ field.label }}: {{ error }}</li>
-                    {% endfor %}
-                {% endfor %}
-            </ul>
-        </div>
-        {% endif %}
-
-        <!-- Client Info -->
-        <div class="bg-white rounded-lg shadow p-6"
-             x-data="{ clientType: '{{ form.client_type.value|default:'business' }}' }"
-             @change="if ($event.target.name === 'client_type') clientType = $event.target.value">
-            <h2 class="text-base font-semibold text-gray-900 mb-4"
-                x-text="clientType === 'residential' ? 'Client Info' : 'Company Info'"></h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">
-                        <span x-text="clientType === 'residential' ? 'Client Name' : 'Company Name'"></span>
-                        <span class="text-red-500">*</span>
-                    </label>
-                    {{ form.name }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Client Type</label>
-                    {{ form.client_type }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                    {{ form.email }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                    {{ form.phone }}
-                </div>
+    <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Who</h3></div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-8"><label class="form-label required">Name (person, or company for a business)</label>{{ form.name|tabler_input }}</div>
+                <div class="col-md-4"><label class="form-label">Type</label>{{ form.client_type|tabler_input }}<div class="form-hint">Business or residential sets the response SLA.</div></div>
+                <div class="col-md-6"><label class="form-label">Email</label>{{ form.email|tabler_input }}</div>
+                <div class="col-md-6"><label class="form-label">Phone</label>{{ form.phone|tabler_input }}</div>
+                <div class="col-md-8"><label class="form-label">Address</label>{{ form.address_line1|tabler_input }}</div>
+                <div class="col-md-4"><label class="form-label">Address line 2</label>{{ form.address_line2|tabler_input }}</div>
+                <div class="col-md-6"><label class="form-label">City</label>{{ form.address_city|tabler_input }}</div>
+                <div class="col-md-3"><label class="form-label">State</label>{{ form.address_state|tabler_input }}</div>
+                <div class="col-md-3"><label class="form-label">ZIP</label>{{ form.address_zip|tabler_input }}</div>
+                <div class="col-12"><label class="form-label">Notes</label>{{ form.notes|tabler_input }}</div>
+                <div class="col-12"><label class="form-check">{{ form.is_active|tabler_input }}<span class="form-check-label">Active</span></label><div class="form-hint">Inactive customers are hidden from the default list; history is kept.</div></div>
             </div>
         </div>
+    </div>
 
-        <!-- Address -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-base font-semibold text-gray-900 mb-4">Address</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Address Line 1</label>
-                    {{ form.address_line1 }}
-                </div>
-                <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Address Line 2 <span class="text-gray-400 font-normal">(optional)</span></label>
-                    {{ form.address_line2 }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">City</label>
-                    {{ form.address_city }}
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">State</label>
-                        {{ form.address_state }}
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">ZIP</label>
-                        {{ form.address_zip }}
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        {% if device_form %}
-        <!-- Device (optional) -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-base font-semibold text-gray-900 mb-1">Device <span class="text-gray-400 font-normal text-sm">(optional)</span></h2>
-            <p class="text-xs text-gray-500 mb-4">Fill in a device name to add it now. Leave blank to skip — you can add devices later from the client page.</p>
-
-            {% if device_form.errors %}
-            <div class="bg-red-50 border border-red-200 rounded-md p-4 mb-4">
-                <p class="text-sm font-medium text-red-800">Please fix the errors below:</p>
-                <ul class="mt-2 text-sm text-red-700 list-disc list-inside">
-                    {% for field in device_form %}
-                        {% for error in field.errors %}
-                            <li>{{ field.label }}: {{ error }}</li>
-                        {% endfor %}
-                    {% endfor %}
-                </ul>
-            </div>
-            {% endif %}
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Device Name</label>
-                    {{ device_form.name }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Default Repair Type</label>
-                    {{ device_form.repair_type }}
-                </div>
-                <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Device Type</label>
-                    <div x-data="{ deviceType: '{{ device_form.device_type.value|default:"laptop" }}' }">
-                        <input type="hidden" name="device-device_type" :value="deviceType">
-                        <div class="grid grid-cols-4 gap-2">
+    {% if device_form %}
+    <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">First device</h3><div class="card-actions"><button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#first-device">Add a device now</button></div></div>
+        <div class="collapse" id="first-device">
+            <div class="card-body">
+                <div class="text-secondary mb-2">Optional. Leave the name blank to skip; devices can be added from the hub later.</div>
+                <div class="row g-2">
+                    <div class="col-md-6"><label class="form-label">Device name</label>{{ device_form.name|tabler_input }}</div>
+                    <div class="col-md-6"><label class="form-label">Default repair type</label>{{ device_form.repair_type|tabler_input }}</div>
+                    <div class="col-12">
+                        <label class="form-label">Type</label>
+                        <div class="form-selectgroup">
                             {% for dt in device_types %}
-                            <button type="button" @click="deviceType = '{{ dt.slug }}'"
-                                :class="deviceType === '{{ dt.slug }}' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-500 hover:border-blue-300 hover:bg-blue-50'"
-                                class="flex flex-col items-center justify-center gap-1.5 p-3 border-2 rounded-lg text-xs font-medium transition-colors">
-                                {% icon dt.icon "7" %}
-                                <span>{{ dt.label }}</span>
-                            </button>
+                            <label class="form-selectgroup-item">
+                                <input type="radio" name="device-device_type" value="{{ dt.slug }}" class="form-selectgroup-input" {% if device_form.device_type.value|default:'laptop' == dt.slug %}checked{% endif %}>
+                                <span class="form-selectgroup-label">{% ticon dt.icon|device_icon 'icon-sm' %} {{ dt.label }}</span>
+                            </label>
                             {% endfor %}
                         </div>
                     </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Condition at Intake</label>
-                    {{ device_form.condition_at_intake }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Manufacturer</label>
-                    {{ device_form.manufacturer }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                    {{ device_form.model }}
-                </div>
-                <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Serial Number</label>
-                    {{ device_form.serial_number }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Operating System</label>
-                    {{ device_form.os }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">OS Version</label>
-                    {{ device_form.os_version }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Processor (CPU)</label>
-                    {{ device_form.cpu }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Memory (RAM)</label>
-                    {{ device_form.ram }}
-                </div>
-                <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Storage</label>
-                    {{ device_form.storage }}
+                    <div class="col-md-4"><label class="form-label">Condition at intake</label>{{ device_form.condition_at_intake|tabler_input }}</div>
+                    <div class="col-md-4"><label class="form-label">Manufacturer</label>{{ device_form.manufacturer|tabler_input }}</div>
+                    <div class="col-md-4"><label class="form-label">Model</label>{{ device_form.model|tabler_input }}</div>
+                    <div class="col-md-6"><label class="form-label">Serial</label>{{ device_form.serial_number|tabler_input }}</div>
+                    <div class="col-md-3"><label class="form-label">OS</label>{{ device_form.os|tabler_input }}</div>
+                    <div class="col-md-3"><label class="form-label">OS version</label>{{ device_form.os_version|tabler_input }}</div>
+                    <div class="col-md-4"><label class="form-label">CPU</label>{{ device_form.cpu|tabler_input }}</div>
+                    <div class="col-md-4"><label class="form-label">RAM</label>{{ device_form.ram|tabler_input }}</div>
+                    <div class="col-md-4"><label class="form-label">Storage</label>{{ device_form.storage|tabler_input }}</div>
                 </div>
             </div>
-        </div>
-        {% endif %}
-
-        <!-- Notes -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-base font-semibold text-gray-900 mb-4">Notes</h2>
-            {{ form.notes }}
-        </div>
-
-        <!-- Active Status -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-base font-semibold text-gray-900 mb-2">Status</h2>
-            <div class="flex items-start gap-3">
-                <div class="mt-0.5">{{ form.is_active }}</div>
-                <div>
-                    <label class="text-sm font-medium text-gray-700">Active client</label>
-                    <p class="text-xs text-gray-500 mt-0.5">Inactive clients are hidden from the default client list but their full history is preserved.</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Recurring Billing -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-base font-semibold text-gray-900 mb-2">Recurring Billing</h2>
-            <div class="flex items-start gap-3 mb-4">
-                <div class="mt-0.5">{{ form.is_managed }}</div>
-                <div>
-                    <label class="text-sm font-medium text-gray-700">Monthly client</label>
-                    <p class="text-xs text-gray-500 mt-0.5">Adds this client to the Monthly Clients list for recurring charges.</p>
-                </div>
-            </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Monthly Amount <span class="text-gray-400 font-normal">(optional)</span></label>
-                    {{ form.monthly_amount }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Billing Day <span class="text-gray-400 font-normal">(1–31)</span></label>
-                    {{ form.billing_day }}
-                    <p class="text-xs text-gray-500 mt-0.5">Day of the month this client is billed. A day past a short month's end bills on its last day (31 → Feb 28).</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Save / Cancel -->
-        <div class="flex gap-3">
-            <button type="submit"
-                    class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium">
-                Save Client
-            </button>
-            <a href="{{ cancel_url }}"
-               class="px-6 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">
-                Cancel
-            </a>
-        </div>
-
-    </form>
-
-    <!-- ── DANGER ZONE (edit only) ─────────────────────────────────── -->
-    {% if client %}
-    <div class="bg-white rounded-lg shadow border border-red-200 overflow-hidden"
-         x-data="{ open: false, confirmName: '' }">
-        <button type="button"
-                @click="open = !open"
-                class="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-red-50 transition-colors">
-            <span class="text-base font-semibold text-red-700">Danger Zone</span>
-            <svg class="w-4 h-4 text-red-400 transition-transform" :class="open && 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-            </svg>
-        </button>
-
-        <div x-show="open" x-cloak class="px-6 pb-6 border-t border-red-100">
-            <p class="text-sm text-gray-600 mt-4 mb-4">
-                Permanently deleting a client removes <strong>all</strong> associated contacts, devices, and records. This cannot be undone.
-            </p>
-
-            {% if wo_count > 0 %}
-                <div class="bg-amber-50 border border-amber-200 rounded-md p-4 mb-4">
-                    <p class="text-sm font-medium text-amber-800">
-                        Cannot delete — this client has {{ wo_count }} work order{{ wo_count|pluralize }}.
-                    </p>
-                    <p class="text-sm text-amber-700 mt-1">
-                        Use the <strong>Status</strong> section above to deactivate this client instead.
-                        Deactivating hides the client from the default view while preserving all history.
-                    </p>
-                </div>
-            {% else %}
-                <form method="post" action="{% url 'core:client_delete' client.pk %}">
-                    {% csrf_token %}
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                        Type <span class="font-mono bg-gray-100 px-1 rounded">{{ client.name }}</span> to confirm deletion
-                    </label>
-                    <input type="text" name="confirm_name" x-model="confirmName"
-                           placeholder="{{ client.name }}"
-                           class="w-full px-3 py-2 border border-red-300 rounded-md text-sm mb-3 focus:outline-none focus:ring-red-500 focus:border-red-500">
-                    <button type="submit"
-                            :disabled="confirmName !== '{{ client.name|escapejs }}'"
-                            :class="confirmName === '{{ client.name|escapejs }}' ? 'bg-red-600 hover:bg-red-700 cursor-pointer' : 'bg-red-200 cursor-not-allowed'"
-                            class="px-4 py-2 text-white text-sm font-medium rounded-md transition-colors">
-                        Permanently Delete Client
-                    </button>
-                </form>
-            {% endif %}
         </div>
     </div>
     {% endif %}
 
+    <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Legacy monthly billing</h3></div>
+        <div class="card-body">
+            <div class="text-secondary mb-2">These fields predate Service Agreements and retire when the Recurring Invoices merge lands. New recurring billing belongs on a Service Agreement.</div>
+            <div class="row g-3">
+                <div class="col-md-4"><label class="form-check">{{ form.is_managed|tabler_input }}<span class="form-check-label">Monthly client (legacy)</span></label></div>
+                <div class="col-md-4"><label class="form-label">Monthly amount</label>{{ form.monthly_amount|tabler_input }}</div>
+                <div class="col-md-4"><label class="form-label">Billing day (1 to 31)</label>{{ form.billing_day|tabler_input }}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary">{% if client %}Save{% else %}Add customer{% endif %}</button>
+        <a href="{{ cancel_url }}" class="btn">Cancel</a>
+    </div>
+</form>
+
+{% if client %}
+<div class="card mt-4 border-danger">
+    <div class="card-header"><h3 class="card-title text-danger">Delete this {% if client.is_managed %}client{% else %}customer{% endif %}</h3><div class="card-actions"><button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#danger">Show</button></div></div>
+    <div class="collapse" id="danger">
+        <div class="card-body">
+            <p>Permanently deleting removes every contact, device and record attached. This cannot be undone.</p>
+            {% if wo_count > 0 %}
+            <div class="alert alert-warning mb-0">Cannot delete: this customer has {{ wo_count }} work order{{ wo_count|pluralize }}. Untick Active above to hide them instead; history is kept.</div>
+            {% else %}
+            <form method="post" action="{% url 'core:client_delete' client.pk %}">
+                {% csrf_token %}
+                <label class="form-label">Type <span class="font-monospace">{{ client.name }}</span> to confirm</label>
+                <input type="text" name="confirm_name" class="form-control mb-2" data-mb-confirm-name="{{ client.name }}" data-mb-enables="#delete-client-btn" autocomplete="off">
+                <button type="submit" id="delete-client-btn" class="btn btn-danger" disabled>Permanently delete</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
 </div>
+{% endif %}
+</div></div>
 {% endblock %}

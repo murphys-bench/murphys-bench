@@ -1,0 +1,15 @@
+<div class="list-group-item">
+    <div class="d-flex align-items-center gap-2">
+        <div class="flex-fill">{{ rt.name }}{% if not rt.is_active %} <span class="badge bg-secondary-lt">inactive</span>{% endif %}</div>
+        <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#rt-edit-{{ rt.pk }}">Edit</button>
+        <form method="post" action="{% url 'core:rt_delete' rt.pk %}" data-mb-confirm="Delete {{ rt.name }}?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Delete</button></form>
+    </div>
+    <form method="post" action="{% url 'core:rt_update' rt.pk %}" class="collapse mt-2" id="rt-edit-{{ rt.pk }}">
+        {% csrf_token %}<input type="hidden" name="category_id" value="{{ cat_pk }}">
+        <div class="row g-2 align-items-center">
+            <div class="col-md-6"><input type="text" name="name" value="{{ rt.name }}" class="form-control" required></div>
+            <div class="col-md-3"><label class="form-check mb-0"><input type="checkbox" name="is_active" value="1" class="form-check-input" {% if rt.is_active %}checked{% endif %}><span class="form-check-label">Active</span></label></div>
+            <div class="col-md-3 d-grid"><button type="submit" class="btn btn-primary">Save</button></div>
+        </div>
+    </form>
+</div>

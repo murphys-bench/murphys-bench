@@ -1,125 +1,74 @@
-{% extends "core/base.html" %}
-{% load mb_icons %}
+{% extends "core/worklist_base.html" %}
+{% load mb_tabler %}
 
-{% block page_header %}
-<div class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-    <div>
-        <h1 class="text-xl font-semibold text-gray-900">User Management</h1>
-        <p class="text-sm text-gray-500 mt-0.5">{{ user_rows|length }} user{{ user_rows|length|pluralize }}</p>
-    </div>
-    <div class="flex items-center gap-3">
-        {% comment %}
-        Settings is admin-only, so a delegated user manager following this link got a
-        403 from the one page they were sent back to. They go to the dashboard instead.
-        {% endcomment %}
-        {% if is_admin %}
-        <a href="{% url 'core:settings' %}" class="text-sm text-gray-500 hover:text-gray-700">← Settings</a>
-        {% else %}
-        <a href="{% url 'core:dashboard' %}" class="text-sm text-gray-500 hover:text-gray-700">← Dashboard</a>
-        {% endif %}
-        {% if require_mfa %}
-            <span class="px-3 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full">MFA Enforced</span>
-        {% else %}
-            <span class="px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded-full">MFA Optional</span>
-        {% endif %}
-        <a href="{% url 'core:user_create' %}"
-           class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
-            + New User
-        </a>
-        {% if can_manage_roles %}
-        <a href="{% url 'core:role_list' %}"
-           class="px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-50">
-            Manage Roles
-        </a>
-        {% endif %}
-    </div>
-</div>
+{% block title %}Users - Murphy's Bench{% endblock %}
+{% block room %}office{% endblock %}
+{% block list_pretitle %}Back Office{% endblock %}
+{% block list_title %}Users{% endblock %}
+{% block list_count %}<span class="badge bg-blue-lt ms-2">{{ user_rows|length }}</span>{% if require_mfa %}<span class="badge bg-green-lt ms-1">MFA enforced</span>{% else %}<span class="badge bg-secondary-lt ms-1">MFA optional</span>{% endif %}{% endblock %}
+
+{% block list_actions %}
+{% if can_manage_roles %}<a href="{% url 'core:role_list' %}" class="btn">Roles</a>{% endif %}
+<a href="{% url 'core:user_create' %}" class="btn btn-primary">{% ticon 'plus' %} New User</a>
 {% endblock %}
 
-{% block content %}
-<div class="p-6">
+{% block list_search %}{% endblock %}
+{% block list_filters %}
+<span class="text-secondary small">Every login on this install. Admin can edit anyone; a delegated user manager can edit only people below their own rank.</span>
+{% endblock %}
 
-    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
-                <tr>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">User</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Role</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Status</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">MFA</th>
-                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wide">Actions</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-200">
-                {% for row in user_rows %}
-                <tr class="hover:bg-gray-50">
-                    <td class="px-6 py-4">
-                        <div class="text-sm font-medium text-gray-900">{{ row.user.get_full_name|default:row.user.username }}</div>
-                        <div class="text-xs text-gray-500">{{ row.user.email }}{% if row.user.phone %} · {{ row.user.phone }}{% endif %}</div>
-                    </td>
-                    <td class="px-6 py-4 text-sm text-gray-600">
-                        {% if row.user.role_obj %}{{ row.user.role_obj.name }}{% else %}{{ row.user.get_role_display }}{% endif %}
-                        {% if row.user.is_staff %}<span class="ml-1 px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 rounded">Admin</span>{% endif %}
-                    </td>
-                    <td class="px-6 py-4">
-                        {% if row.user.is_active %}
-                            <span class="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full">Active</span>
-                        {% else %}
-                            <span class="px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-500 rounded-full">Inactive</span>
-                        {% endif %}
-                    </td>
-                    <td class="px-6 py-4">
-                        {% if row.has_mfa %}
-                            <span class="flex items-center gap-1 text-xs text-green-700">
-                                <span class="text-green-500 inline-flex items-center gap-1">{% icon "check" 4 %} Enabled</span>
-                            </span>
-                        {% else %}
-                            <span class="text-xs text-gray-400">Not enrolled</span>
-                        {% endif %}
-                    </td>
-                    <td class="px-6 py-4 text-right">
-                        <div class="flex items-center justify-end gap-3">
-                            {% if row.may_act %}
-                            <a href="{% url 'core:user_edit' row.user.pk %}"
-                               class="text-xs text-blue-600 hover:text-blue-800 hover:underline">Edit</a>
-                            <a href="{% url 'core:user_set_password' row.user.pk %}"
-                               class="text-xs text-gray-500 hover:text-gray-700 hover:underline">Set Password</a>
-                            {% endif %}
-                            {% if row.has_mfa and row.user != request.user and can_reset_mfa and row.may_act %}
-                                <form method="post" action="{% url 'core:user_mfa_reset' row.user.pk %}"
-                                      onsubmit="return confirm('Reset MFA for {{ row.user.get_full_name|default:row.user.username }}? They will need to re-enroll on next login.')">
-                                    {% csrf_token %}
-                                    <button type="submit" class="text-xs text-red-500 hover:text-red-700 hover:underline">Reset MFA</button>
-                                </form>
-                            {% endif %}
-                            {% if row.user != request.user and row.may_act %}
-                                <form method="post" action="{% url 'core:user_delete' row.user.pk %}"
-                                      onsubmit="return confirm('Permanently delete {{ row.user.get_full_name|default:row.user.username }}? This cannot be undone.')">
-                                    {% csrf_token %}
-                                    <button type="submit" class="text-xs text-red-500 hover:text-red-700 hover:underline">Delete</button>
-                                </form>
-                            {% endif %}
-                        </div>
-                    </td>
-                </tr>
-                {% empty %}
-                <tr>
-                    <td colspan="5" class="px-6 py-8 text-center text-sm text-gray-400">No users found.</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    <div class="mt-4 text-xs text-gray-500">
-        MFA enrollment is managed from each user's
-        <a href="{% url 'two_factor:profile' %}" class="underline hover:text-gray-700">Account Security</a> page.
-        {% if is_admin %}
-        To enforce MFA for all users, enable "Require MFA" in
-        <a href="{% url 'core:settings' %}?tab=security" class="underline hover:text-gray-700">Settings → Security</a>.
-        {% else %}
-        Whether MFA is required for everyone is set in Settings, which an administrator manages.
-        {% endif %}
-    </div>
+{% block list_body %}
+<div class="table-responsive">
+<table class="table table-vcenter card-table">
+    <thead>
+        <tr>
+            <th>User</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>MFA</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in user_rows %}
+        <tr>
+            <td>
+                <div class="fw-medium">{{ row.user.get_full_name|default:row.user.username }}</div>
+                <div class="text-secondary small">{{ row.user.email }}{% if row.user.phone %} &middot; {{ row.user.phone }}{% endif %}</div>
+            </td>
+            <td>
+                {% if row.user.role_obj %}{{ row.user.role_obj.name }}{% else %}{{ row.user.get_role_display }}{% endif %}
+                {% if row.user.is_staff %}<span class="badge bg-purple-lt ms-1">Admin</span>{% endif %}
+            </td>
+            <td class="text-nowrap">{% if row.user.is_active %}<span class="status-dot me-1" style="--tblr-status-color: var(--tblr-green);"></span>Active{% else %}<span class="status-dot me-1" style="--tblr-status-color: var(--tblr-secondary);"></span>Inactive{% endif %}</td>
+            <td class="text-nowrap">{% if row.has_mfa %}<span class="text-green">{% ticon 'check' 'icon-sm' %} Enrolled</span>{% else %}<span class="text-secondary">Not enrolled</span>{% endif %}</td>
+            <td class="text-end text-nowrap">
+                {% if row.may_act %}
+                <a href="{% url 'core:user_edit' row.user.pk %}" class="btn btn-sm">Edit</a>
+                <a href="{% url 'core:user_set_password' row.user.pk %}" class="btn btn-sm">Set password</a>
+                {% endif %}
+                {% if row.has_mfa and row.user != request.user and can_reset_mfa and row.may_act %}
+                <form method="post" action="{% url 'core:user_mfa_reset' row.user.pk %}" class="d-inline" data-mb-confirm="Reset MFA for {{ row.user.get_full_name|default:row.user.username }}? They will need to re-enroll on next login.">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Reset MFA</button>
+                </form>
+                {% endif %}
+                {% if row.user != request.user and row.may_act %}
+                <form method="post" action="{% url 'core:user_delete' row.user.pk %}" class="d-inline" data-mb-confirm="Permanently delete {{ row.user.get_full_name|default:row.user.username }}? This cannot be undone.">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5"><div class="empty py-3"><p class="empty-title">No users</p></div></td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+<div class="card-footer text-secondary small">
+    MFA enrollment is managed from each user's <a href="{% url 'two_factor:profile' %}">Account Security</a> page.
+    {% if is_admin %}To require MFA for everyone, turn on "Require MFA" in <a href="{% url 'core:settings' %}?tab=security">Settings &rarr; Security</a>.{% else %}Whether MFA is required for everyone is set in Settings, which an administrator manages.{% endif %}
 </div>
 {% endblock %}

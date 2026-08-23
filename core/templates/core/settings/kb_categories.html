@@ -1,0 +1,17 @@
+{% load mb_tabler %}
+<div class="card">
+    <div class="card-header"><div><h3 class="card-title">KB categories</h3><div class="card-subtitle">Deleting a category leaves its articles uncategorised.</div></div></div>
+    <form method="post" action="{% url 'core:kb_category_create' %}" class="card-body border-bottom">{% csrf_token %}<div class="input-group"><input type="text" name="name" class="form-control" placeholder="New category name" required><button type="submit" class="btn btn-primary">Add category</button></div></form>
+    <div class="list-group list-group-flush">
+    {% for cat in kb_categories %}
+        <div class="list-group-item">
+            <div class="d-flex align-items-center gap-2">
+                <div class="flex-fill"><span class="fw-medium">{{ cat.name }}</span>{% if cat.description %} <span class="text-secondary">{{ cat.description }}</span>{% endif %} <span class="text-secondary small">({{ cat.kbarticle_set.count }} article{{ cat.kbarticle_set.count|pluralize }})</span></div>
+                <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#kbc-{{ cat.pk }}">Edit</button>
+                <form method="post" action="{% url 'core:kb_category_delete' cat.pk %}" data-mb-confirm="Delete the category {{ cat.name }}? Its articles become uncategorised.">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Delete</button></form>
+            </div>
+            <form method="post" action="{% url 'core:kb_category_update' cat.pk %}" class="collapse mt-2" id="kbc-{{ cat.pk }}">{% csrf_token %}<div class="row g-2"><div class="col-md-4"><input type="text" name="name" value="{{ cat.name }}" class="form-control" required></div><div class="col-md-6"><input type="text" name="description" value="{{ cat.description }}" class="form-control" placeholder="Description (optional)"></div><div class="col-md-2 d-grid"><button type="submit" class="btn btn-primary">Save</button></div></div></form>
+        </div>
+    {% empty %}<div class="list-group-item text-secondary">No categories yet. Add one above.</div>{% endfor %}
+    </div>
+</div>

@@ -1,0 +1,26 @@
+{% load mb_tabler %}
+<form method="post" action="{% url 'core:sla_defaults_save' %}" class="card mb-3">{% csrf_token %}
+    <div class="card-header"><div><h3 class="card-title">Client-type default SLA</h3><div class="card-subtitle">Every new ticket inherits a response clock from its client's type at creation. Blank leaves that type clock-less (manual picks on the ticket still work). An Unsorted ticket rides the Residential default until triaged onto a real client.</div></div></div>
+    <div class="card-body"><div class="row g-2 align-items-end"><div class="col-md-5"><label class="form-label">Default business SLA</label>{{ sla_defaults_form.default_business_sla|tabler_input }}</div><div class="col-md-5"><label class="form-label">Default residential SLA</label>{{ sla_defaults_form.default_residential_sla|tabler_input }}</div><div class="col-md-2 d-grid"><button type="submit" class="btn btn-primary">Save defaults</button></div></div></div>
+</form>
+<div class="card">
+    <div class="card-header"><div><h3 class="card-title">SLA plans</h3><div class="card-subtitle">Response deadlines for tickets. Grace is hours until a ticket counts as overdue.</div></div></div>
+    <table class="table card-table table-vcenter">
+        <thead><tr><th>Name</th><th>Grace</th><th>Active</th><th>Transient</th><th>Alerts</th><th></th></tr></thead>
+        <tbody>
+        {% for plan in sla_plans %}
+        <tr>
+            <td class="fw-medium">{{ plan.name }}
+                <form method="post" action="{% url 'core:sla_plan_update' plan.pk %}" class="collapse mt-2 fw-normal" id="sla-edit-{{ plan.pk }}">{% csrf_token %}<div class="row g-2 align-items-end"><div class="col-md-4"><label class="form-label">Name</label><input type="text" name="name" value="{{ plan.name }}" class="form-control" required></div><div class="col-md-2"><label class="form-label">Grace (h)</label><input type="number" name="grace_period_hours" value="{{ plan.grace_period_hours }}" min="1" class="form-control"></div><div class="col-md-4"><label class="form-check mb-1"><input type="checkbox" name="is_active" class="form-check-input" {% if plan.is_active %}checked{% endif %}><span class="form-check-label">Active</span></label><label class="form-check mb-1"><input type="checkbox" name="is_transient" class="form-check-input" {% if plan.is_transient %}checked{% endif %}><span class="form-check-label">Transient</span></label><label class="form-check mb-0"><input type="checkbox" name="disable_overdue_alerts" class="form-check-input" {% if plan.disable_overdue_alerts %}checked{% endif %}><span class="form-check-label">Disable alerts</span></label></div><div class="col-md-2 d-grid"><button type="submit" class="btn btn-primary">Save</button></div></div></form>
+            </td>
+            <td>{{ plan.grace_period_hours }}h</td>
+            <td>{% if plan.is_active %}{% ticon 'check' 'icon-sm text-green' %}{% endif %}</td>
+            <td>{% if plan.is_transient %}{% ticon 'check' 'icon-sm text-blue' %}{% endif %}</td>
+            <td>{% if plan.disable_overdue_alerts %}<span class="text-secondary">off</span>{% else %}{% ticon 'check' 'icon-sm text-green' %}{% endif %}</td>
+            <td class="text-end text-nowrap"><button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#sla-edit-{{ plan.pk }}">Edit</button> <form method="post" action="{% url 'core:sla_plan_delete' plan.pk %}" class="d-inline" data-mb-confirm="Delete the SLA plan {{ plan.name }}?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Delete</button></form></td>
+        </tr>
+        {% empty %}<tr><td colspan="6" class="text-secondary">No SLA plans yet.</td></tr>{% endfor %}
+        </tbody>
+    </table>
+    <form method="post" action="{% url 'core:sla_plan_create' %}" class="card-footer">{% csrf_token %}<div class="row g-2 align-items-end"><div class="col-md-4"><label class="form-label">Name</label><input type="text" name="name" class="form-control" placeholder="e.g. Standard 24h" required></div><div class="col-md-2"><label class="form-label">Grace (h)</label><input type="number" name="grace_period_hours" value="24" min="1" class="form-control"></div><div class="col-md-4"><label class="form-check mb-1"><input type="checkbox" name="is_active" class="form-check-input" checked><span class="form-check-label">Active</span></label><label class="form-check mb-1"><input type="checkbox" name="is_transient" class="form-check-input"><span class="form-check-label">Transient</span></label><label class="form-check mb-0"><input type="checkbox" name="disable_overdue_alerts" class="form-check-input"><span class="form-check-label">Disable alerts</span></label></div><div class="col-md-2 d-grid"><button type="submit" class="btn btn-primary">Add plan</button></div></div></form>
+</div>

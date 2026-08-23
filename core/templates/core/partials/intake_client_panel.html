@@ -1,0 +1,26 @@
+{% load mb_tabler %}
+{% comment %}HTMX: who this is, shown the moment a client is chosen at intake.{% endcomment %}
+{% if client %}
+<div class="card card-sm bg-secondary-lt mb-0">
+    <div class="card-body">
+        <div class="d-flex align-items-center gap-2">
+            <span class="fw-medium">{{ client.name }}</span>
+            <span class="badge {% if has_sa %}bg-green-lt{% else %}bg-secondary-lt{% endif %}">{% if has_sa %}Client{% else %}Customer{% endif %}</span>
+            <span class="badge {% if client.client_type == 'business' %}bg-azure-lt{% else %}bg-secondary-lt{% endif %}">{{ client.get_client_type_display }}</span>
+            <a href="{% url 'core:client_detail' client.pk %}" class="ms-auto small" target="_blank">Open hub</a>
+        </div>
+        {% if open_tickets or open_wos %}
+        <div class="mt-2 small">
+            <span class="text-orange fw-medium">{% ticon 'alert-triangle' 'icon-sm' %} Already open for this {% if has_sa %}client{% else %}customer{% endif %}:</span>
+            {% for t in open_tickets %}<div><a href="{% url 'core:ticket_detail' t.pk %}" target="_blank">{{ t.ticket_number }}</a> {{ t.subject|truncatechars:60 }} <span class="text-secondary">({{ t.status|status_word:'ticket' }}, {{ t.created_at|age_short }})</span></div>{% endfor %}
+            {% for w in open_wos %}<div><a href="{% url 'core:work_order_detail' w.pk %}" target="_blank">{{ w.work_order_number }}</a> {{ w.reported_problem|default:w.repair_type|default:""|truncatechars:60 }} <span class="text-secondary">({{ w.status|status_word:'workorder' }}, {{ w.created_at|age_short }})</span></div>{% endfor %}
+            <div class="text-secondary">If this is the same problem, reply on the open record instead of opening a second one.</div>
+        </div>
+        {% else %}
+        <div class="text-secondary small mt-1">Nothing open right now.</div>
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<div class="text-secondary small">Choose who this is for, or press New to add a customer.</div>
+{% endif %}

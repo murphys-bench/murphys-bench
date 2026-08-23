@@ -1,101 +1,39 @@
-{% comment %}Full checklist table — rendered on page load and after each check update.{% endcomment %}
+{% load mb_tabler %}
+{% comment %}Full checklist table, rendered on page load and after each check update.{% endcomment %}
 <div id="checklist-body">
     {% if items %}
-    <table class="w-full text-sm">
-        <thead>
-            <tr class="bg-gray-50 border-b border-gray-200">
-                <th class="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-3 py-2 w-1/2">Item</th>
-                <th class="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-3 py-2 w-1/4">Pre-Check</th>
-                <th class="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-3 py-2 w-1/4">Post-Check</th>
-            </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-100">
+    <table class="table table-sm table-vcenter">
+        <thead><tr><th>Item</th><th style="width: 9rem;">Pre-check</th><th style="width: 9rem;">Post-check</th></tr></thead>
+        <tbody>
             {% for item in items %}
-            <tr class="{% if item.pre_check == 'pass' and item.post_check == 'pass' %}bg-green-50{% elif item.pre_check == 'fail' or item.post_check == 'fail' %}bg-red-50{% endif %}">
-                <td class="px-3 py-2 text-gray-800">{{ item.description }}</td>
-                <td class="px-3 py-2">
+            <tr class="{% if item.pre_check == 'pass' and item.post_check == 'pass' %}table-success{% elif item.pre_check == 'fail' or item.post_check == 'fail' %}table-danger{% endif %}">
+                <td>{{ item.description }}</td>
+                {% for field, current in item.pre_check|checklist_pair:item.post_check %}
+                <td>
                     {% if can_edit_workorder %}
-                    <form method="post" action="{% url 'core:work_order_item_check' item.pk %}"
-                          hx-post="{% url 'core:work_order_item_check' item.pk %}"
-                          hx-target="#checklist-wrapper"
-                          hx-swap="innerHTML">
+                    <form method="post" action="{% url 'core:work_order_item_check' item.pk %}" hx-post="{% url 'core:work_order_item_check' item.pk %}" hx-target="#checklist-wrapper" hx-swap="innerHTML" hx-trigger="change">
                         {% csrf_token %}
-                        <input type="hidden" name="field" value="pre_check">
-                        <select name="value" onchange="this.form.requestSubmit()"
-                                class="text-sm rounded px-2 py-1 border focus:outline-none focus:ring-1 focus:ring-blue-500 w-full
-                                {% if item.pre_check == 'pass' %}bg-green-100 border-green-300 text-green-800
-                                {% elif item.pre_check == 'fail' %}bg-red-100 border-red-300 text-red-800
-                                {% elif item.pre_check == 'na' %}bg-gray-100 border-gray-300 text-gray-500
-                                {% else %}bg-white border-gray-200 text-gray-400{% endif %}">
-                            <option value="" {% if not item.pre_check %}selected{% endif %}>—</option>
-                            <option value="pass" {% if item.pre_check == 'pass' %}selected{% endif %}>✓ Pass</option>
-                            <option value="fail" {% if item.pre_check == 'fail' %}selected{% endif %}>✗ Fail</option>
-                            <option value="na" {% if item.pre_check == 'na' %}selected{% endif %}>N/A</option>
+                        <input type="hidden" name="field" value="{{ field }}">
+                        <select name="value" class="form-select form-select-sm">
+                            <option value="" {% if not current %}selected{% endif %}>-</option>
+                            <option value="pass" {% if current == 'pass' %}selected{% endif %}>Pass</option>
+                            <option value="fail" {% if current == 'fail' %}selected{% endif %}>Fail</option>
+                            <option value="na" {% if current == 'na' %}selected{% endif %}>N/A</option>
                         </select>
                     </form>
                     {% else %}
-                    {% comment %}
-                    Read-only for a role without Edit Work Orders: the select posts
-                    to work_order_item_check, which now refuses them, so offering it
-                    would be a control that always fails.
-                    {% endcomment %}
-                    <span class="text-sm px-2 py-1 inline-block rounded
-                        {% if item.pre_check == 'pass' %}bg-green-100 text-green-800
-                        {% elif item.pre_check == 'fail' %}bg-red-100 text-red-800
-                        {% elif item.pre_check == 'na' %}bg-gray-100 text-gray-500
-                        {% else %}text-gray-400{% endif %}">
-                        {% if item.pre_check == 'pass' %}✓ Pass{% elif item.pre_check == 'fail' %}✗ Fail{% elif item.pre_check == 'na' %}N/A{% else %}—{% endif %}
-                    </span>
+                    {% comment %}Read-only without Edit Work Orders: the action would refuse the post.{% endcomment %}
+                    {% if current == 'pass' %}Pass{% elif current == 'fail' %}Fail{% elif current == 'na' %}N/A{% else %}<span class="text-secondary">-</span>{% endif %}
                     {% endif %}
                 </td>
-                <td class="px-3 py-2">
-                    {% if can_edit_workorder %}
-                    <form method="post" action="{% url 'core:work_order_item_check' item.pk %}"
-                          hx-post="{% url 'core:work_order_item_check' item.pk %}"
-                          hx-target="#checklist-wrapper"
-                          hx-swap="innerHTML">
-                        {% csrf_token %}
-                        <input type="hidden" name="field" value="post_check">
-                        <select name="value" onchange="this.form.requestSubmit()"
-                                class="text-sm rounded px-2 py-1 border focus:outline-none focus:ring-1 focus:ring-blue-500 w-full
-                                {% if item.post_check == 'pass' %}bg-green-100 border-green-300 text-green-800
-                                {% elif item.post_check == 'fail' %}bg-red-100 border-red-300 text-red-800
-                                {% elif item.post_check == 'na' %}bg-gray-100 border-gray-300 text-gray-500
-                                {% else %}bg-white border-gray-200 text-gray-400{% endif %}">
-                            <option value="" {% if not item.post_check %}selected{% endif %}>—</option>
-                            <option value="pass" {% if item.post_check == 'pass' %}selected{% endif %}>✓ Pass</option>
-                            <option value="fail" {% if item.post_check == 'fail' %}selected{% endif %}>✗ Fail</option>
-                            <option value="na" {% if item.post_check == 'na' %}selected{% endif %}>N/A</option>
-                        </select>
-                    </form>
-                    {% else %}
-                    {% comment %}
-                    Read-only for a role without Edit Work Orders: the select posts
-                    to work_order_item_check, which now refuses them, so offering it
-                    would be a control that always fails.
-                    {% endcomment %}
-                    <span class="text-sm px-2 py-1 inline-block rounded
-                        {% if item.post_check == 'pass' %}bg-green-100 text-green-800
-                        {% elif item.post_check == 'fail' %}bg-red-100 text-red-800
-                        {% elif item.post_check == 'na' %}bg-gray-100 text-gray-500
-                        {% else %}text-gray-400{% endif %}">
-                        {% if item.post_check == 'pass' %}✓ Pass{% elif item.post_check == 'fail' %}✗ Fail{% elif item.post_check == 'na' %}N/A{% else %}—{% endif %}
-                    </span>
-                    {% endif %}
-                </td>
+                {% endfor %}
             </tr>
             {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <div class="px-3 py-3 text-sm text-gray-400">
-        {% if can_edit_workorder %}
-        <p>No checklist items yet. Click <strong>↺ Apply Checklist</strong> above to load items, or go to
-        <a href="{% url 'core:settings' %}#checklist" class="text-blue-500 hover:underline">Settings › Checklist Items</a>
-        to define items first.</p>
-        {% else %}
-        <p>No checklist items on this work order.</p>
-        {% endif %}
+    <div class="text-secondary">
+        {% if can_edit_workorder %}No checklist on this work order yet. Apply the checklist above, or define items in <a href="{% url 'core:settings' %}#checklist">Settings, Checklist Items</a>.{% else %}No checklist items on this work order.{% endif %}
     </div>
     {% endif %}
 </div>

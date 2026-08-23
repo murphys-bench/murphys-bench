@@ -1,50 +1,25 @@
 {% comment %}
 Customer card for a Sale. Client and Notes auto-save independently (Client on
-change, Notes on blur) via SaleQuickUpdateView — no Save button, no separate
-edit step. A locked (completed/void) sale shows a plain read-only summary.
+change, Notes on blur) via SaleQuickUpdateView; no Save button, no separate
+edit step. A locked (completed/void) sale shows a read-only summary. The
+view re-renders this partial with hx-swap outerHTML, so the id stays.
 {% endcomment %}
-{% load mb_icons %}
-<div class="bg-white rounded-lg shadow-md border-l-4 border-indigo-500 p-6" id="sale-customer-card">
-    <div class="flex items-center gap-3 mb-4">
-        <div class="shrink-0 w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600">
-            {% icon "user" 5 %}
-        </div>
-        <h2 class="text-base font-semibold text-gray-900">Customer</h2>
-    </div>
-
+{% load mb_tabler %}
+<div class="card" id="sale-customer-card">
+    <div class="card-header"><h3 class="card-title">{% ticon 'user' 'icon-sm' %} Customer{% if not sale.is_locked %} <span class="text-secondary fw-normal">(optional)</span>{% endif %}</h3></div>
+    <div class="card-body">
     {% if sale.is_locked %}
-        <dl class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div>
-                <dt class="text-gray-500">Customer</dt>
-                <dd class="text-gray-900">
-                    {% if sale.client %}
-                        <a href="{% url 'core:client_detail' sale.client_id %}" class="text-blue-600 hover:underline">{{ sale.client.name }}</a>
-                    {% else %}<span class="text-gray-400">Walk-in (anonymous)</span>{% endif %}
-                </dd>
-            </div>
-            <div><dt class="text-gray-500">Added</dt><dd class="text-gray-900">{{ sale.created_at|date:"M j, Y" }}</dd></div>
-        </dl>
-        {% if sale.notes %}
-        <div class="mt-4 pt-4 border-t border-gray-100">
-            <dt class="text-gray-500 text-sm mb-1">Notes</dt>
-            <dd class="text-sm text-gray-900 whitespace-pre-line">{{ sale.notes }}</dd>
+        <div class="row g-3">
+            <div class="col-md-6"><div class="subheader">Customer</div>{% if sale.client %}<a href="{% url 'core:client_detail' sale.client_id %}">{{ sale.client.name }}</a>{% else %}<span class="text-secondary">Walk-in (anonymous)</span>{% endif %}</div>
+            <div class="col-md-6"><div class="subheader">Added</div>{{ sale.created_at|date:"M j, Y" }}</div>
+            {% if sale.notes %}<div class="col-12"><div class="subheader">Notes</div><div style="white-space: pre-line;">{{ sale.notes }}</div></div>{% endif %}
         </div>
-        {% endif %}
     {% else %}
-        <p class="text-xs text-gray-400 mb-4">Leave Customer blank for an anonymous walk-in cash sale — it stays a Murphy's Bench-only record. Saves automatically.</p>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Client</label>
-                {{ sale_form.client }}
-            </div>
-            <div>
-                <dt class="text-gray-500 text-sm">Added</dt>
-                <dd class="text-gray-900 text-sm mt-1">{{ sale.created_at|date:"M j, Y" }}</dd>
-            </div>
-        </div>
-        <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-            {{ sale_form.notes }}
+        <div class="row g-3">
+            <div class="col-md-8"><label class="form-label">Customer</label>{{ sale_form.client|tabler_input }}<div class="form-hint">Leave blank for a walk-in cash sale; no customer record is made. Saves automatically.</div></div>
+            <div class="col-md-4"><div class="form-label">Added</div>{{ sale.created_at|date:"M j, Y" }}</div>
+            <div class="col-12"><label class="form-label">Notes</label>{{ sale_form.notes|tabler_input }}</div>
         </div>
     {% endif %}
+    </div>
 </div>

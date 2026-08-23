@@ -1,0 +1,113 @@
+{% load mb_tabler %}
+{# workorders report sections. Shared by the screen (reports.html) and the PDF (reports_pdf.html); `sections` limits what renders, `pdf` swaps canvases for the browser-supplied pictures. #}
+<!-- Work Orders by Status (ALL statuses, incl. closed — unlike Tickets'
+     by-status view, which excludes closed on purpose) -->
+{% if 'wostatus' in sections %}<div class="card mb-3" id="section-wostatus">
+    <div class="card-header"><h3 class="card-title">Work Orders by Status</h3></div><div class="card-body">
+    {% include "core/reports/_chart.html" with chart="chartWoStatus" height=200 %}
+    {% if wo_status_counts %}
+    <table class="table table-sm table-vcenter w-auto">
+        <thead><tr>
+            <th >Status</th>
+            <th class="text-end">Work Orders</th>
+        </tr></thead>
+        <tbody>
+        {% for row in wo_status_counts %}
+        <tr>
+            <td >{{ row.label }}</td>
+            <td class="text-end fw-medium">{{ row.count }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-secondary mb-0">No work orders created in this period.</p>
+    {% endif %}
+</div></div>{% endif %}
+
+<!-- Work Orders by Client -->
+{% if 'woweek' in sections %}<div class="card mb-3" id="section-woweek">
+    <div class="card-header"><h3 class="card-title">Work Orders Created per Week</h3></div><div class="card-body">
+    {% if wo_list %}{% include "core/reports/_chart.html" with chart="chartWoWeek" height=220 %}{% else %}<p class="text-secondary mb-0">No work orders created in this period.</p>{% endif %}
+</div></div>{% endif %}
+
+{% if 'wobyclient' in sections %}<div class="card mb-3" id="section-wobyclient">
+    <div class="card-header"><h3 class="card-title">Work Orders by Client</h3></div><div class="card-body">
+    {% include "core/reports/_chart.html" with chart="chartWoClients" height=220 %}
+    {% if wo_by_client %}
+    <table class="table table-sm table-vcenter w-auto">
+        <thead><tr>
+            <th >Client</th>
+            <th class="text-end">Work Orders</th>
+        </tr></thead>
+        <tbody>
+        {% for row in wo_by_client %}
+        <tr>
+            <td >{{ row.client__name|default:"Walk-in" }}</td>
+            <td class="text-end fw-medium">{{ row.count }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-secondary mb-0">No work orders created in this period.</p>
+    {% endif %}
+</div></div>{% endif %}
+
+<!-- Work Orders list — created in the selected date range, newest first -->
+{% if 'wolist' in sections %}<div class="card mb-3" id="section-wolist">
+    <div class="card-header"><h3 class="card-title">Work Orders</h3></div><div class="card-body">
+    {% if wo_list %}
+    <table class="table table-sm table-vcenter">
+        <thead>
+            <tr>
+                <th >WO #</th>
+                <th >Client</th>
+                <th >Status</th>
+                <th >Created</th>
+                <th class="d-print-none">Open</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for wo in wo_list %}
+            <tr>
+                <td >{{ wo.work_order_number }}</td>
+                <td >{% if wo.client %}{{ wo.client.name }}{% else %}Walk-in{% endif %}</td>
+                <td >{{ wo.get_status_display }}</td>
+                <td >{{ wo.created_at|date:"M j, Y" }}</td>
+                <td class="py-2 d-print-none">
+                    <a href="{% url 'core:work_order_detail' wo.pk %}" class="btn btn-sm">View</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-secondary mb-0">No work orders created in this period.</p>
+    {% endif %}
+</div></div>{% endif %}
+
+<!-- 8. Mileage by Tech and Month -->
+{% if 'mileage' in sections %}<div class="card mb-3" id="section-mileage">
+    <div class="card-header"><h3 class="card-title">8. Mileage by Technician &amp; Month</h3></div><div class="card-body">
+    {% if mileage_data %}
+    <table class="table table-sm table-vcenter w-auto">
+        <thead><tr>
+            <th >Technician</th>
+            <th >Month</th>
+            <th class="text-end">Miles</th>
+        </tr></thead>
+        <tbody>
+        {% for row in mileage_data %}
+        <tr>
+            <td >{{ row.technician__first_name }} {{ row.technician__last_name }}</td>
+            <td >{{ row.month|date:"M Y" }}</td>
+            <td class="text-end fw-medium">{{ row.miles|floatformat:1 }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-secondary mb-0">No mileage logged in this period.</p>
+    {% endif %}
+</div></div>{% endif %}

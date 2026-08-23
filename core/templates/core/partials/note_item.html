@@ -1,15 +1,11 @@
-<div class="border-l-4 pl-4
-    {% if note.note_type == 'internal' %}border-yellow-400 bg-yellow-50{% else %}border-blue-400 bg-blue-50{% endif %}
-    rounded-r py-2">
-    <div class="flex items-center justify-between mb-1">
-        <span class="text-xs font-semibold
-            {% if note.note_type == 'internal' %}text-yellow-700{% else %}text-blue-700{% endif %}">
-            {% load mb_icons %}{% if note.note_type == 'internal' %}<span class="inline-flex items-center gap-1">{% icon "lock-closed" 3 %} Internal</span>{% else %}<span class="inline-flex items-center gap-1">{% icon "user" 3 %} Customer Visible</span>{% endif %}
-        </span>
-        <span class="text-xs text-gray-400">
-            {{ note.created_by.get_full_name|default:"Unknown" }} — {{ note.created_at|date:"M d, Y g:i A" }}
-        </span>
+{% load mb_tabler %}
+<div class="card card-sm mb-stripe" style="--mb-stripe: {% if note.note_type == 'internal' %}var(--tblr-yellow){% else %}var(--tblr-blue){% endif %};">
+    <div class="card-body">
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <span class="fw-medium {% if note.note_type == 'internal' %}text-yellow{% else %}text-blue{% endif %}">{% if note.note_type == 'internal' %}{% ticon 'lock' 'icon-sm' %} Internal{% else %}{% ticon 'user' 'icon-sm' %} On the repair report{% endif %}</span>
+            <span class="text-secondary small ms-auto">{{ note.created_by.get_full_name|default:"Unknown" }} &middot; {{ note.created_at|date:"M j, Y g:i A" }}</span>
+        </div>
+        <div style="white-space: pre-wrap;">{{ note.content }}</div>
+        {% include "core/partials/attachment_list.html" with attachments=note.attachments.all %}
     </div>
-    <p class="text-sm text-gray-700">{{ note.content }}</p>
-    {% include "core/partials/attachment_list.html" with attachments=note.attachments.all %}
 </div>

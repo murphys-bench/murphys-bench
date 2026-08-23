@@ -19,7 +19,7 @@ DELETES (operational data):
 KEEPS (configuration + you):
   SiteSettings, Roles, Status definitions, Help Topics, SLA Plans, Repair Types
   & categories, Checklists & items, Canned Responses, Quick Labor items, Email
-  Templates & Signatures, Dashboard Tiles, Custom-field DEFINITIONS, KB
+  Templates & Signatures, Custom-field DEFINITIONS, KB
   articles/categories, Org Credentials (+ their access log), blocked/suppressed
   senders, Tech Skills, system queues, and all superuser accounts. Also the
   Products & Services catalog — a price list is configuration, so a shop resetting

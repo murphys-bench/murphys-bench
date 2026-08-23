@@ -1,0 +1,69 @@
+{% load mb_tabler %}
+{% with form=forms.colors %}
+<form method="post" enctype="multipart/form-data">
+    {% csrf_token %}<input type="hidden" name="tab" value="colors">
+    <div class="card mb-3">
+        <div class="card-header"><div><h3 class="card-title">Logos</h3><div class="card-subtitle">PNG or SVG. Blank shows the company name as text.</div></div></div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Sidebar logo</label>
+                    {% if settings.site_logo %}<div class="d-flex align-items-center gap-3 mb-2"><img src="{{ settings.site_logo.url }}" alt="Current logo" style="max-height:2.5rem;" class="border rounded p-1"><label class="form-check mb-0"><input type="checkbox" name="colors-site_logo-clear" class="form-check-input"><span class="form-check-label">Remove</span></label></div>{% endif %}
+                    <input type="file" name="colors-site_logo" accept="image/*" class="form-control">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Sign-in page logo</label>
+                    {% if settings.login_logo %}<div class="d-flex align-items-center gap-3 mb-2"><img src="{{ settings.login_logo.url }}" alt="Current login logo" style="max-height:4rem;" class="border rounded p-1"><label class="form-check mb-0"><input type="checkbox" name="colors-login_logo-clear" class="form-check-input"><span class="form-check-label">Remove</span></label></div>{% endif %}
+                    <input type="file" name="colors-login_logo" accept="image/*" class="form-control">
+                    <div class="form-hint">Room for a larger logo than the sidebar. Max 2000 by 2000 px.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="card mb-3">
+        <div class="card-header"><div><h3 class="card-title">Accent and rooms</h3><div class="card-subtitle">The accent colors primary buttons and links everywhere. Each room (Register, Desk, Back Office) shows it is a different place by its own color on the page header, the sidebar group, and its primary buttons; Work uses the accent.</div></div></div>
+        <div class="card-body">
+            <div class="row g-3">
+                {% with field=form.color_accent default="#206bc4" label="Accent (Work)" %}
+                <div class="col-md-6 col-xl-3" data-mb-color>
+                    <label class="form-label">{{ label }}</label>
+                    <div class="input-group"><input type="color" class="form-control form-control-color" value="{{ field.value|default:default }}"><input type="text" name="colors-color_accent" value="{{ field.value|default:'' }}" maxlength="7" placeholder="{{ default }}" class="form-control font-monospace"></div>
+                    <div class="mt-2"><span class="btn btn-sm text-white" data-mb-color-preview style="background:{{ field.value|default:default }}; border-color: transparent;">Save</span></div>
+                </div>
+                {% endwith %}
+                {% with field=form.color_room_register default="#2fb344" label="Register" %}
+                <div class="col-md-6 col-xl-3" data-mb-color>
+                    <label class="form-label">{{ label }}</label>
+                    <div class="input-group"><input type="color" class="form-control form-control-color" value="{{ field.value|default:default }}"><input type="text" name="colors-color_room_register" value="{{ field.value|default:'' }}" maxlength="7" placeholder="{{ default }}" class="form-control font-monospace"></div>
+                    <div class="mt-2"><span class="btn btn-sm text-white" data-mb-color-preview style="background:{{ field.value|default:default }}; border-color: transparent;">Mark paid</span></div>
+                </div>
+                {% endwith %}
+                {% with field=form.color_room_desk default="#ae3ec9" label="Desk" %}
+                <div class="col-md-6 col-xl-3" data-mb-color>
+                    <label class="form-label">{{ label }}</label>
+                    <div class="input-group"><input type="color" class="form-control form-control-color" value="{{ field.value|default:default }}"><input type="text" name="colors-color_room_desk" value="{{ field.value|default:'' }}" maxlength="7" placeholder="{{ default }}" class="form-control font-monospace"></div>
+                    <div class="mt-2"><span class="btn btn-sm text-white" data-mb-color-preview style="background:{{ field.value|default:default }}; border-color: transparent;">Plan it</span></div>
+                </div>
+                {% endwith %}
+                {% with field=form.color_room_office default="#6c7a91" label="Back Office" %}
+                <div class="col-md-6 col-xl-3" data-mb-color>
+                    <label class="form-label">{{ label }}</label>
+                    <div class="input-group"><input type="color" class="form-control form-control-color" value="{{ field.value|default:default }}"><input type="text" name="colors-color_room_office" value="{{ field.value|default:'' }}" maxlength="7" placeholder="{{ default }}" class="form-control font-monospace"></div>
+                    <div class="mt-2"><span class="btn btn-sm text-white" data-mb-color-preview style="background:{{ field.value|default:default }}; border-color: transparent;">Save settings</span></div>
+                </div>
+                {% endwith %}
+            </div>
+            <div class="form-hint mt-3">Blank a field to go back to the default shown as its placeholder.</div>
+        </div>
+        <div class="card-footer"><button type="submit" class="btn btn-primary">Save colors</button></div>
+    </div>
+</form>
+{% endwith %}
+<div class="card">
+    <div class="card-header"><h3 class="card-title">Also colored</h3></div>
+    <div class="card-body">
+        <div>Ticket and work order statuses: each status has its own color on the <a href="?tab=statuses">Statuses</a> tab.</div>
+        <div class="mt-1">Customer email header: on the <a href="?tab=email_templates">Email Templates</a> tab.</div>
+        <div class="mt-1 text-secondary">Dark mode is per person, at the bottom of the sidebar.</div>
+    </div>
+</div>

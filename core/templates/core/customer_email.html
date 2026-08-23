@@ -1,0 +1,49 @@
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
+
+{% block title %}Email {% if client %}{{ client.name }}{% else %}{{ prospect.display_name }}{% endif %} - Murphy's Bench{% endblock %}
+{% block room %}desk{% endblock %}
+
+{% block page_header %}
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col"><div class="page-pretitle">{% if work_order %}{{ work_order.work_order_number }}{% elif ticket %}{{ ticket.ticket_number }}{% else %}Desk{% endif %}</div><h2 class="page-title">Email {% if client %}{{ client.name }}{% else %}{{ prospect.display_name }}{% endif %}</h2>{% if follow_up %}<div class="text-secondary">Carrying out: {{ follow_up.get_kind_display }} due {{ follow_up.due_on|date:"M j" }}{% if follow_up.note %}, {{ follow_up.note }}{% endif %}</div>{% endif %}</div>
+            <div class="col-auto"><a href="{{ back_url }}" class="btn">Cancel</a></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center"><div class="col-12 col-xl-8">
+{% if not templates %}
+<div class="card"><div class="empty"><div class="empty-icon">{% ticon 'mail' %}</div><p class="empty-title">No email templates of your own yet</p><p class="empty-subtitle text-secondary">Add one under Settings, Email Templates (a thank-you, a satisfaction follow-up, anything you send by hand), then it appears here.</p><div class="empty-action"><a href="{% url 'core:settings' %}?tab=email_templates" class="btn btn-primary">Email Templates</a></div></div></div>
+{% else %}
+<form method="get" class="card mb-3">
+    {% if client %}<input type="hidden" name="client" value="{{ client.pk }}">{% endif %}{% if prospect %}<input type="hidden" name="prospect" value="{{ prospect.pk }}">{% endif %}
+    {% if ticket %}<input type="hidden" name="ticket" value="{{ ticket.pk }}">{% endif %}{% if work_order %}<input type="hidden" name="work_order" value="{{ work_order.pk }}">{% endif %}{% if follow_up %}<input type="hidden" name="follow_up" value="{{ follow_up.pk }}">{% endif %}
+    <div class="card-body"><div class="row g-2 align-items-end">
+        <div class="col-md-9"><label class="form-label">Template</label><select name="template" class="form-select">{% if not chosen %}<option value="">Choose one</option>{% endif %}{% for t in templates %}<option value="{{ t.pk }}" {% if chosen and chosen.pk == t.pk %}selected{% endif %}>{{ t.name }}</option>{% endfor %}</select></div>
+        <div class="col-md-3 d-grid"><button type="submit" class="btn">Load template</button></div>
+    </div></div>
+</form>
+{% if render_error %}<div class="alert alert-danger">{{ render_error }}</div>{% endif %}
+{% if chosen %}
+<form method="post" action="{% url 'core:customer_email' %}" class="card">
+    {% csrf_token %}
+    {% if client %}<input type="hidden" name="client" value="{{ client.pk }}">{% endif %}{% if prospect %}<input type="hidden" name="prospect" value="{{ prospect.pk }}">{% endif %}
+    {% if ticket %}<input type="hidden" name="ticket" value="{{ ticket.pk }}">{% endif %}{% if work_order %}<input type="hidden" name="work_order" value="{{ work_order.pk }}">{% endif %}{% if follow_up %}<input type="hidden" name="follow_up" value="{{ follow_up.pk }}">{% endif %}
+    <input type="hidden" name="template" value="{{ chosen.pk }}">
+    <div class="card-header"><h3 class="card-title">{{ chosen.name }}</h3><div class="card-subtitle">Filled in for this {% if client %}customer{% else %}prospect{% endif %}. Edit anything before it goes.</div></div>
+    <div class="card-body">
+        {% include "core/partials/email_recipient_fields.html" with no_contacts_note="There is no contact list for this recipient." %}
+        <div class="mb-3"><label class="form-label required">Subject</label><input type="text" name="subject" value="{{ subject }}" class="form-control" required></div>
+        <div class="mb-0"><label class="form-label required">Body</label><textarea name="body" rows="12" class="form-control" required>{{ body }}</textarea><div class="form-hint">The signature is added below the body on send.</div></div>
+    </div>
+    <div class="card-footer"><button type="submit" class="btn btn-primary">{% ticon 'send' 'icon-sm' %} Send</button>{% if follow_up %} <span class="text-secondary small ms-2">Sending marks the follow-up done.</span>{% endif %}</div>
+</form>
+{% endif %}
+{% endif %}
+</div></div>
+{% endblock %}

@@ -1,79 +1,39 @@
-{% extends "core/base.html" %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
 
-{% block title %}{% if entry %}Edit Mileage{% else %}Log Mileage{% endif %} — Murphy's Bench{% endblock %}
+{% block title %}{% if entry %}Edit mileage{% else %}Log mileage{% endif %} - Murphy's Bench{% endblock %}
 
 {% block page_header %}
-<div class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-    <h1 class="text-xl font-semibold text-gray-900">
-        {% if entry %}Edit Mileage Entry{% else %}Log Mileage{% endif %}
-    </h1>
-    <a href="{% url 'core:mileage_list' %}" class="text-sm text-gray-500 hover:text-gray-700">← Back to Mileage Log</a>
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col"><div class="page-pretitle">Mileage</div><h2 class="page-title">{% if entry %}Edit mileage entry{% else %}Log mileage{% endif %}</h2></div>
+            <div class="col-auto"><a href="{% url 'core:mileage_list' %}" class="btn">Cancel</a></div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="p-6 max-w-2xl">
-    <form method="post">
-        {% csrf_token %}
-        <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-            <div class="p-6 space-y-4">
-
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">
-                            Date <span class="text-red-500">*</span>
-                        </label>
-                        {{ form.trip_date }}
-                        {% for e in form.trip_date.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">
-                            Miles <span class="text-red-500">*</span>
-                        </label>
-                        {{ form.miles }}
-                        {% for e in form.miles.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">From</label>
-                        {{ form.from_location }}
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">To</label>
-                        {{ form.to_location }}
-                    </div>
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Purpose</label>
-                    {{ form.purpose }}
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Work Order</label>
-                    {{ form.work_order }}
-                    <p class="mt-1 text-xs text-gray-500">Optional — link this trip to a work order.</p>
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                    {{ form.notes }}
-                </div>
-
-            </div>
-            <div class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end gap-3">
-                <a href="{% url 'core:mileage_list' %}"
-                   class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
-                    Cancel
-                </a>
-                <button type="submit"
-                        class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">
-                    {% if entry %}Save Changes{% else %}Log Mileage{% endif %}
-                </button>
+<div class="row justify-content-center"><div class="col-12 col-xl-7">
+<form method="post">
+    {% csrf_token %}
+    {% include "core/partials/form_errors.html" %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-6"><label class="form-label required">Date</label>{{ form.trip_date|tabler_input }}</div>
+                <div class="col-md-6"><label class="form-label required">Miles</label>{{ form.miles|tabler_input }}</div>
+                <div class="col-md-6"><label class="form-label">From</label>{{ form.from_location|tabler_input }}</div>
+                <div class="col-md-6"><label class="form-label">To</label>{{ form.to_location|tabler_input }}</div>
+                <div class="col-md-6"><label class="form-label">Trip type</label>{{ form.trip_type|tabler_input }}</div>
+                <div class="col-md-6"><label class="form-label">Work order</label>{{ form.work_order|tabler_input }}<div class="form-hint">Optional.</div></div>
+                <div class="col-12"><label class="form-label">Purpose</label>{{ form.purpose|tabler_input }}</div>
+                <div class="col-12"><label class="form-label">Notes</label>{{ form.notes|tabler_input }}</div>
             </div>
         </div>
-    </form>
-</div>
+    </div>
+    <div class="d-flex gap-2"><button type="submit" class="btn btn-primary">{% if entry %}Save{% else %}Log mileage{% endif %}</button><a href="{% url 'core:mileage_list' %}" class="btn">Cancel</a></div>
+</form>
+</div></div>
 {% endblock %}

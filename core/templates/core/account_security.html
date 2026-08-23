@@ -1,5 +1,5 @@
-{% extends "core/base.html" %}
-{% load mb_icons %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
 
 {% comment %}
 An employee's own two-factor status. Deliberately separate from the two_factor
@@ -8,62 +8,49 @@ Disable 2FA button. Read-only: recovery after a lost authenticator is an admin
 reset, which leaves an MFAResetLog entry.
 {% endcomment %}
 
-{% block content %}
-<div class="page-title-bar">
-    <div>
-        <h1 class="text-2xl font-semibold">My Security</h1>
-        <p class="text-sm mt-0.5" style="opacity:0.75">Two-factor authentication for your account.</p>
-    </div>
-    {% include "core/partials/header_bell.html" %}
-</div>
+{% block title %}My Security - Murphy's Bench{% endblock %}
 
-<div class="p-6 max-w-2xl">
-    <div class="bg-white rounded-lg shadow border-l-4 {% if has_device %}border-green-500{% else %}border-yellow-500{% endif %} overflow-hidden">
-        <div class="px-6 py-5">
-            {% if has_device %}
-                <div class="flex items-start gap-3">
-                    <span class="text-green-600 mt-0.5">{% icon "lock-closed" 5 %}</span>
-                    <div>
-                        <p class="text-sm font-medium text-gray-900">Two-factor authentication is on</p>
-                        <p class="text-sm text-gray-500 mt-0.5">
-                            Your account is protected by an authenticator app.
-                        </p>
-                        <ul class="mt-2 text-sm text-gray-600 list-disc list-inside">
-                            {% for device in devices %}
-                            <li>{{ device.name|default:"Authenticator" }}</li>
-                            {% endfor %}
-                        </ul>
-                    </div>
-                </div>
-                <div class="mt-4 pt-4 border-t border-gray-100">
-                    <p class="text-sm text-gray-600">
-                        Lost or replaced your phone? Ask an administrator to reset your
-                        two-factor authentication. You will be prompted to set it up again
-                        the next time you sign in.
-                    </p>
-                </div>
-            {% else %}
-                <div class="flex items-start gap-3">
-                    <span class="text-yellow-600 mt-0.5">{% icon "exclamation-triangle" 5 %}</span>
-                    <div>
-                        <p class="text-sm font-medium text-gray-900">Two-factor authentication is not set up</p>
-                        <p class="text-sm text-gray-500 mt-0.5">
-                            {% if mfa_required %}
-                                It is required on this system, so you will be asked to set it
-                                up when you sign in.
-                            {% else %}
-                                Add an extra layer of security by requiring a code from your
-                                authenticator app when you sign in.
-                            {% endif %}
-                        </p>
-                    </div>
-                </div>
-                <a href="{% url 'two_factor:setup' %}"
-                   class="inline-block mt-4 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">
-                    Set up two-factor authentication
-                </a>
-            {% endif %}
+{% block page_header %}
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col"><div class="page-pretitle">Account</div><h2 class="page-title">My Security</h2><div class="text-secondary">Two-factor authentication for your account.</div></div>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center"><div class="col-12 col-lg-7">
+    <div class="card">
+        <div class="card-status-start {% if has_device %}bg-green{% else %}bg-yellow{% endif %}"></div>
+        <div class="card-body">
+        {% if has_device %}
+            <div class="d-flex gap-3">
+                <span class="text-green">{% ticon 'lock' %}</span>
+                <div>
+                    <div class="fw-medium">Two-factor authentication is on</div>
+                    <div class="text-secondary">Your account is protected by an authenticator app.</div>
+                    <ul class="mt-2 mb-0">{% for device in devices %}<li>{{ device.name|default:"Authenticator" }}</li>{% endfor %}</ul>
+                </div>
+            </div>
+        {% else %}
+            <div class="d-flex gap-3">
+                <span class="text-yellow">{% ticon 'alert-triangle' %}</span>
+                <div>
+                    <div class="fw-medium">Two-factor authentication is not set up</div>
+                    <div class="text-secondary">{% if mfa_required %}It is required on this system, so you will be asked to set it up when you sign in.{% else %}Add an extra layer of security by requiring a code from your authenticator app when you sign in.{% endif %}</div>
+                </div>
+            </div>
+        {% endif %}
+        </div>
+        <div class="card-footer">
+        {% if has_device %}
+            <span class="text-secondary">Lost or replaced your phone? Ask an administrator to reset your two-factor authentication. You will set it up again the next time you sign in.</span>
+        {% else %}
+            <a href="{% url 'two_factor:setup' %}" class="btn btn-primary">Set up two-factor authentication</a>
+        {% endif %}
+        </div>
+    </div>
+</div></div>
 {% endblock %}

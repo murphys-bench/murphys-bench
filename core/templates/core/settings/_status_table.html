@@ -1,0 +1,26 @@
+{% load mb_tabler %}
+<div class="card mb-3">
+    <div class="card-header"><h3 class="card-title">{{ heading }}</h3><div class="card-actions"><button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#status-add-{{ entity }}">{% ticon 'plus' 'icon-sm' %} Custom status</button></div></div>
+    <form method="post" action="{% url 'core:status_create' %}" class="collapse" id="status-add-{{ entity }}">{% csrf_token %}<input type="hidden" name="entity_type" value="{{ entity }}">
+        <div class="card-body border-top"><div class="row g-2 align-items-end">
+            <div class="col-md-4"><label class="form-label required">Label</label><input type="text" name="label" class="form-control" placeholder="e.g. Waiting on Parts" required></div>
+            <div class="col-md-4"><label class="form-label">Slug (auto)</label><input type="text" name="slug" class="form-control font-monospace" placeholder="waiting_on_parts"></div>
+            <div class="col-md-2"><label class="form-label">Color</label><input type="color" name="color" value="#E5E7EB" class="form-control form-control-color"></div>
+            <div class="col-md-2 d-grid"><button type="submit" class="btn btn-primary">Add status</button></div>
+        </div></div>
+    </form>
+    <table class="table card-table table-vcenter">
+        <thead><tr><th>Status</th><th>Slug</th><th></th></tr></thead>
+        <tbody>
+        {% for sd in rows %}
+        <tr>
+            <td><span class="status-dot me-1" style="--tblr-status-color: {{ sd.color }};"></span>{{ sd.label }}
+                <form method="post" action="{% url 'core:status_update' sd.pk %}" class="collapse mt-2" id="status-edit-{{ sd.pk }}">{% csrf_token %}<div class="row g-2"><div class="col-md-6"><input type="text" name="label" value="{{ sd.label }}" class="form-control" {% if sd.is_system %}readonly{% endif %}></div><div class="col-md-3"><input type="color" name="color" value="{{ sd.color }}" class="form-control form-control-color"></div><div class="col-md-3 d-grid"><button type="submit" class="btn btn-primary">Save</button></div></div></form>
+            </td>
+            <td class="font-monospace text-secondary small">{{ sd.slug }}{% if not sd.operator_selectable %}<div class="font-sans-serif" title="An action sets this status. It is not offered in the status dropdowns, but it still displays and can be filtered on.">set by an action, not by hand</div>{% endif %}</td>
+            <td class="text-end text-nowrap"><button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#status-edit-{{ sd.pk }}">{% if sd.is_system %}Edit color{% else %}Edit{% endif %}</button> {% if not sd.is_system %}<form method="post" action="{% url 'core:status_delete' sd.pk %}" class="d-inline" data-mb-confirm="Delete the status {{ sd.label }}?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Delete</button></form>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>

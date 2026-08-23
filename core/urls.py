@@ -15,7 +15,6 @@ urlpatterns = [
     path('tickets/<int:pk>/message-tech/', views.TechMessageView.as_view(source='ticket'), name='ticket_message_tech'),
     path('work-orders/', views.WorkOrderListView.as_view(), name='work_order_list'),
     path('work-orders/<int:pk>/', views.WorkOrderDetailView.as_view(), name='work_order_detail'),
-    path('work-orders/<int:pk>/details/', views.WorkOrderMetaView.as_view(), name='work_order_meta'),
     path('clients/', views.ClientListView.as_view(), name='client_list'),
     path('clients/<int:pk>/', views.ClientDetailView.as_view(), name='client_detail'),
     path('devices/', views.DeviceListView.as_view(), name='device_list'),
@@ -28,6 +27,7 @@ urlpatterns = [
     path('clients/<int:client_pk>/contracts/new/', views.ContractCreateView.as_view(), name='contract_create'),
     path('contracts/<int:pk>/', views.ContractDetailView.as_view(), name='contract_detail'),
     path('contracts/<int:pk>/edit/', views.ContractUpdateView.as_view(), name='contract_edit'),
+    path('contracts/<int:pk>/status/', views.ContractStatusUpdateView.as_view(), name='contract_status_update'),
     path('contracts/<int:pk>/delete/', views.ContractDeleteView.as_view(), name='contract_delete'),
     path('contracts/<int:contract_pk>/lines/log/<int:item_pk>/', views.ContractLineLogView.as_view(), name='contract_line_log'),
     path('contracts/<int:contract_pk>/lines/custom/', views.ContractCustomLogView.as_view(), name='contract_line_custom'),
@@ -62,6 +62,13 @@ urlpatterns = [
     path('prospects/<int:pk>/promote/', views.ProspectPromoteView.as_view(), name='prospect_promote'),
     path('prospects/<int:pk>/mark-lost/', views.ProspectMarkLostView.as_view(), name='prospect_mark_lost'),
     path('prospects/<int:pk>/delete/', views.ProspectDeleteView.as_view(), name='prospect_delete'),
+
+    path('reports/pdf/', views.ReportsPDFView.as_view(), name='reports_pdf'),
+    path('follow-ups/', views.FollowUpListView.as_view(), name='follow_up_list'),
+    path('follow-ups/new/', views.FollowUpCreateView.as_view(), name='follow_up_create'),
+    path('follow-ups/<int:pk>/done/', views.FollowUpDoneView.as_view(), name='follow_up_done'),
+    path('follow-ups/<int:pk>/delete/', views.FollowUpDeleteView.as_view(), name='follow_up_delete'),
+    path('email/customer/', views.CustomerEmailView.as_view(), name='customer_email'),
 
     path('estimates/', views.EstimateListView.as_view(), name='estimate_list'),
     path('estimates/new/', views.EstimateCreateView.as_view(), name='estimate_create'),
@@ -106,7 +113,6 @@ urlpatterns = [
     path('tickets/', views.TicketListView.as_view(), name='ticket_list'),
     path('tickets/new/', views.TicketCreateView.as_view(), name='ticket_create'),
     path('tickets/<int:pk>/', views.TicketDetailView.as_view(), name='ticket_detail'),
-    path('tickets/<int:pk>/details/', views.TicketMetaView.as_view(), name='ticket_meta'),
     path('tickets/<int:pk>/edit/', views.TicketUpdateView.as_view(), name='ticket_edit'),
     path('tickets/<int:pk>/replies/add/', views.TicketReplyCreateView.as_view(), name='ticket_reply_add'),
     path('tickets/<int:pk>/replies/<int:reply_pk>/resend/', views.TicketReplyResendView.as_view(), name='ticket_reply_resend'),
@@ -127,6 +133,7 @@ urlpatterns = [
     path('tickets/<int:pk>/priority/', views.TicketPriorityUpdateView.as_view(), name='ticket_priority_update'),
     path('tickets/<int:pk>/delete/', views.TicketDeleteView.as_view(), name='ticket_delete'),
     path('tickets/contacts-by-client/', views.TicketContactsByClientView.as_view(), name='ticket_contacts_by_client'),
+    path('intake/client-panel/', views.IntakeClientPanelView.as_view(), name='intake_client_panel'),
     path('kb/', views.KBListView.as_view(), name='kb_list'),
     path('kb/new/', views.KBArticleCreateView.as_view(), name='kb_create'),
     path('kb/<int:pk>/', views.KBDetailView.as_view(), name='kb_detail'),
@@ -138,7 +145,6 @@ urlpatterns = [
     path('queues/<int:pk>/edit/', views.QueueEditView.as_view(), name='queue_edit'),
     path('queues/<int:pk>/delete/', views.QueueDeleteView.as_view(), name='queue_delete'),
     # Sidebar fragment
-    path('sidebar/', views.SidebarFragmentView.as_view(), name='sidebar_fragment'),
     # Reports
     path('reports/', views.ReportsView.as_view(), name='reports'),
     path('reports/csv/<str:report>/', views.ReportsCSVView.as_view(), name='reports_csv'),
@@ -260,6 +266,8 @@ urlpatterns = [
 
     # Settings — Email Templates
     path('settings/email-templates/<int:pk>/edit/', views.EmailTemplateUpdateView.as_view(), name='email_template_update'),
+    path('settings/email-templates/new/', views.EmailTemplateCreateView.as_view(), name='email_template_create'),
+    path('settings/email-templates/<int:pk>/delete/', views.EmailTemplateDeleteView.as_view(), name='email_template_delete'),
     path('settings/email-branding/save/', views.EmailBrandingUpdateView.as_view(), name='email_branding_save'),
 
     # Settings — Email Signatures
@@ -291,9 +299,6 @@ urlpatterns = [
     # Settings — Tech Skills
     path('settings/tech-skills/new/', views.TechSkillCreateView.as_view(), name='tech_skill_create'),
     path('settings/tech-skills/<int:pk>/delete/', views.TechSkillDeleteView.as_view(), name='tech_skill_delete'),
-
-    # Settings — Dashboard Tiles
-    path('settings/dashboard-tiles/<int:pk>/edit/', views.DashboardTileUpdateView.as_view(), name='dashboard_tile_update'),
 
     # Settings — Custom Fields
     path('settings/custom-fields/new/', views.CustomFieldCreateView.as_view(), name='cf_create'),

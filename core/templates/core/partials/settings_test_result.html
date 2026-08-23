@@ -1,18 +1,10 @@
-{% load mb_icons %}
+{% load mb_tabler %}
 {% comment %}
 Result line for the Settings connection-test buttons (outbound email, inbound email).
-
-⚠ Everything here is auto-escaped by the template engine. These views used to build
+Everything here is auto-escaped by the template engine. These views used to build
 their result HTML with f-strings, which put a user-supplied address and a raw server
-exception straight into the page unescaped. Render through this partial instead of
-returning HttpResponse with interpolated markup, so escaping is not something a
-later edit can forget.
-
-Context: ok (bool), message (str). Never pass raw exception text as `message` —
-log the exception and pass an actionable summary.
+exception straight into the page unescaped. Render through this partial instead, so
+escaping is not something a later edit can forget.
+Context: ok (bool), message (str). Never pass raw exception text as `message`.
 {% endcomment %}
-{% if ok %}
-  <p class="text-green-600 text-sm mt-2">{% icon "check" 4 %} {{ message }}</p>
-{% else %}
-  <p class="text-red-600 text-sm mt-2">{% icon "x-mark" 4 %} {{ message }}</p>
-{% endif %}
+{% if ok %}<span class="text-green">{% ticon 'check' 'icon-sm' %} {{ message }}</span>{% else %}<span class="text-red">{% ticon 'x' 'icon-sm' %} {{ message }}</span>{% endif %}

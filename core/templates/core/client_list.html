@@ -1,116 +1,65 @@
-{% extends "core/base.html" %}
+{% extends "core/worklist_base.html" %}
+{% load mb_tabler %}
 
 {% block title %}Clients - Murphy's Bench{% endblock %}
+{% block room %}desk{% endblock %}
+{% block list_pretitle %}Desk{% endblock %}
+{% block list_title %}Clients{% endblock %}
+{% block list_count %}<span class="badge bg-blue-lt ms-2">{{ page_obj.paginator.count }}</span>{% endblock %}
+{% block search_placeholder %}Name, email or phone{% endblock %}
 
-{% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
-        <div class="flex items-center gap-4">
-            <h1 class="text-2xl font-bold text-gray-900 shrink-0">Clients</h1>
-            <div class="flex-1"></div>
-            {% include "core/partials/header_bell.html" %}
-            <a href="{% url 'core:client_create' %}"
-               class="px-4 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium shrink-0">
-                + New Client
-            </a>
-        </div>
-    </div>
-</div>
-{% include "core/partials/list_search_bar.html" with search_value=request.GET.search search_placeholder="Search by name, email, phone..." filters_template="core/partials/_client_filters.html" filters_active=active_type %}
+{% block list_actions %}
+<a href="{% url 'core:client_create' %}" class="btn btn-primary">{% ticon 'plus' %} New Client</a>
 {% endblock %}
 
-{% block content %}
+{% block list_segments %}
+<div class="btn-group" role="group" aria-label="Type">
+    <a href="{% url_replace type='' page='' %}" class="btn btn-sm {% if not active_type %}active{% endif %}">All</a>
+    <a href="{% url_replace type='business' page='' %}" class="btn btn-sm {% if active_type == 'business' %}active{% endif %}">Business</a>
+    <a href="{% url_replace type='residential' page='' %}" class="btn btn-sm {% if active_type == 'residential' %}active{% endif %}">Residential</a>
+</div>
+<a href="{% if show_inactive %}{% url_replace show_inactive='' page='' %}{% else %}{% url_replace show_inactive='1' page='' %}{% endif %}" class="btn btn-sm {% if show_inactive %}active{% endif %}">Show inactive</a>
+{% endblock %}
 
-    <!-- Clients Table -->
-    <div class="bg-white rounded-lg shadow overflow-hidden">
-        {% if clients %}
-            <div class="px-4 py-2 border-b border-gray-200 text-sm text-gray-500">
-                {{ paginator.count }} total
-            </div>
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Account</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Primary Contact</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Devices</th>
-                        <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">WOs</th>
-                        <th class="px-4 py-3"></th>
-                    </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
-                    {% for client in clients %}
-                        {% with primary=client.contacts.all|dictsort:"is_primary"|last %}
-                        <tr class="hover:bg-gray-50">
-                            <td class="px-4 py-3 whitespace-nowrap text-sm font-medium">
-                                <a href="{% url 'core:client_detail' client.pk %}" class="text-green-700 hover:underline">{{ client.name }}</a>
-                                {% if not client.is_active %}<span class="ml-1 text-xs text-gray-400">(inactive)</span>{% endif %}
-                            </td>
-                            <td class="px-4 py-3 whitespace-nowrap">
-                                {% if client.client_type == 'business' %}
-                                    <span class="px-2 py-1 text-xs font-semibold rounded bg-blue-100 text-blue-700">Business</span>
-                                {% else %}
-                                    <span class="px-2 py-1 text-xs font-semibold rounded bg-green-100 text-green-700">Residential</span>
-                                {% endif %}
-                            </td>
-                            <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
-                                {% with primary=client.contacts.filter %}
-                                {% endwith %}
-                                {% for c in client.contacts.all %}{% if c.is_primary %}{{ c.first_name }} {{ c.last_name }}{% endif %}{% empty %}—{% endfor %}
-                            </td>
-                            <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
-                                {{ client.phone|default:"—" }}
-                            </td>
-                            <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
-                                {{ client.email|default:"—" }}
-                            </td>
-                            <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700 text-center">
-                                {{ client.device_count }}
-                            </td>
-                            <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-700 text-center">
-                                {{ client.wo_count }}
-                            </td>
-                            <td class="px-4 py-3 whitespace-nowrap text-right">
-                                <div class="flex gap-2 justify-end">
-                                    <a href="{% url 'core:client_detail' client.pk %}"
-                                       class="px-3 py-1 border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50">View</a>
-                                    {% if can_create_workorder %}
-                                    <a href="{% url 'core:work_order_create' %}?client={{ client.pk }}"
-                                       class="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">+ WO</a>
-                                    {% endif %}
-                                </div>
-                            </td>
-                        </tr>
-                        {% endwith %}
-                    {% endfor %}
-                </tbody>
-            </table>
+{% block list_table %}
+<table class="table table-vcenter card-table">
+    <thead>
+        <tr>
+            <th>Client</th>
+            <th>Primary contact</th>
+            <th>Phone</th>
+            <th>Email</th>
+            <th class="text-center">Devices</th>
+            <th class="text-center">Work orders</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for client in clients %}
+        <tr>
+            <td>
+                <a href="{% url 'core:client_detail' client.pk %}" class="text-reset fw-medium">{{ client.name }}</a>
+                {% if client.client_type == 'business' %}<span class="badge bg-azure-lt ms-1">Business</span>
+                {% else %}<span class="badge bg-secondary-lt ms-1">Residential</span>{% endif %}
+                {% if not client.is_active %}<span class="badge bg-secondary-lt ms-1">Inactive</span>{% endif %}
+            </td>
+            <td>{% for c in client.contacts.all %}{% if c.is_primary %}{{ c.first_name }} {{ c.last_name }}{% endif %}{% empty %}<span class="text-secondary">None</span>{% endfor %}</td>
+            <td class="text-nowrap">{{ client.phone|default:"" }}</td>
+            <td class="text-truncate" style="max-width: 16rem;">{{ client.email|default:"" }}</td>
+            <td class="text-center">{{ client.device_count }}</td>
+            <td class="text-center">{{ client.wo_count }}</td>
+            <td class="text-end text-nowrap">
+                {% if can_create_workorder %}
+                <a href="{% url 'core:work_order_create' %}?client={{ client.pk }}" class="btn btn-sm">{% ticon 'plus' 'icon-sm' %} Work order</a>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
 
-            {% if is_paginated %}
-                <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200">
-                    <p class="text-sm text-gray-700">
-                        Page <span class="font-medium">{{ page_obj.number }}</span>
-                        of <span class="font-medium">{{ page_obj.paginator.num_pages }}</span>
-                    </p>
-                    <div class="flex gap-2">
-                        {% if page_obj.has_previous %}
-                            <a href="?page={{ page_obj.previous_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if active_type %}&type={{ active_type }}{% endif %}{% if show_inactive %}&show_inactive=1{% endif %}" class="px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300">Previous</a>
-                        {% endif %}
-                        {% if page_obj.has_next %}
-                            <a href="?page={{ page_obj.next_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if active_type %}&type={{ active_type }}{% endif %}{% if show_inactive %}&show_inactive=1{% endif %}" class="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Next</a>
-                        {% endif %}
-                    </div>
-                </div>
-            {% endif %}
-
-        {% else %}
-            <div class="px-6 py-16 text-center">
-                <p class="text-gray-400 text-lg mb-2">No clients found.</p>
-                <p class="text-gray-400 text-sm">Try clearing your filters or <a href="{% url 'core:client_create' %}" class="text-blue-600 hover:underline">add a new client</a>.</p>
-            </div>
-        {% endif %}
-    </div>
-
+{% block list_empty %}
+<p class="empty-title">No clients match</p>
+<p class="empty-subtitle text-secondary">Clear the search or filters, or <a href="{% url 'core:client_create' %}">add a client</a>.</p>
 {% endblock %}

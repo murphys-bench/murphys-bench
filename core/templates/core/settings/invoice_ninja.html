@@ -1,0 +1,12 @@
+{% load mb_tabler %}
+<form method="post" class="card">
+    {% csrf_token %}<input type="hidden" name="tab" value="invoice_ninja">
+    <div class="card-header"><div><h3 class="card-title">Invoice Ninja</h3><div class="card-subtitle">Pushes a finished work order's priced lines to Invoice Ninja as a <strong>draft</strong> invoice. MB captures and totals prices; Invoice Ninja stays the billing authority. One direction, nothing flows back.</div></div></div>
+    <div class="card-body">
+        <label class="form-check form-switch mb-3">{{ forms.invoice_ninja.invoice_ninja_enabled|tabler_input }}<span class="form-check-label">Enable "Send to Invoice Ninja" on work orders</span></label>
+        <div class="mb-3"><label class="form-label">API base URL</label>{{ forms.invoice_ninja.invoice_ninja_url|tabler_input }}<div class="form-hint">Cloud: <code>https://invoicing.co</code>. Self-hosted: your server URL.</div></div>
+        <div class="mb-3"><label class="form-label">API token</label>{{ forms.invoice_ninja.invoice_ninja_token|tabler_input }}<div class="form-hint">IN: Settings, Account Management, Integrations, API Tokens. Stored encrypted.</div></div>
+    </div>
+    <div class="card-footer"><button type="submit" class="btn btn-primary">Save Invoice Ninja settings</button></div>
+</form>
+<form method="post" action="{% url 'core:invoice_ninja_test' %}" class="mt-3 d-flex align-items-center gap-2">{% csrf_token %}<button type="submit" class="btn">Test connection</button><span class="text-secondary small">Save first, then test. Makes one read-only API call.</span></form>

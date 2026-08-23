@@ -1,101 +1,48 @@
 {% comment %}
-Sale line-item editor — custom entry + catalog buttons + logged entries.
-Extracted from sale_detail.html (Slice 1 of the light POS) so the exact same
-UI is shared by the Sale detail page and the POS sale-settle screen. Expects
-`sale`, `catalog_by_category`, and `entries` in context.
+Sale line-item editor: custom entry + catalog buttons + logged entries. Shared
+by the Sale page and the Register's sale-settle screen. Expects `sale`,
+`catalog_by_category`, and `entries` in context.
 {% endcomment %}
-{% load mb_icons %}
-<div class="bg-white rounded-lg shadow-md border-l-4 border-amber-500 p-6"
-     x-data="{ logOpen: false, customOpen: false }">
-    <div class="flex items-center justify-between mb-3">
-        <div class="flex items-center gap-3">
-            <div class="shrink-0 w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center text-amber-600">
-                {% icon "tag" 5 %}
-            </div>
-            <h2 class="text-lg font-semibold text-gray-900">Line Items</h2>
-        </div>
+{% load mb_tabler %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">{% ticon 'tag' 'icon-sm' %} Line items</h3>
         {% if not sale.is_locked %}
-        <div class="flex gap-2">
-            <button type="button" @click="customOpen = !customOpen; if(customOpen) logOpen = false"
-                    class="text-xs px-2 py-1 rounded border"
-                    :class="customOpen ? 'bg-blue-600 text-white border-blue-600' : 'text-blue-600 border-blue-300 hover:bg-blue-50'">
-                + Custom
-            </button>
-            {% if catalog_by_category %}
-            <button type="button" @click="logOpen = !logOpen; if(logOpen) customOpen = false"
-                    class="text-xs px-2 py-1 rounded border"
-                    :class="logOpen ? 'bg-gray-700 text-white border-gray-700' : 'text-gray-600 border-gray-300 hover:bg-gray-50'">
-                + Catalog
-            </button>
-            {% endif %}
+        <div class="card-actions btn-list">
+            <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#sale-custom">{% ticon 'plus' 'icon-sm' %} Custom line</button>
+            {% if catalog_by_category %}<button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#sale-catalog">{% ticon 'tag' 'icon-sm' %} From catalog</button>{% endif %}
         </div>
         {% endif %}
     </div>
-
-    <!-- Custom entry form -->
-    <div x-show="customOpen" x-cloak class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-100">
-        <form method="post" action="{% url 'core:sale_custom_log' sale.pk %}"
-              hx-post="{% url 'core:sale_custom_log' sale.pk %}"
-              hx-target="#sale-line-items-section"
-              hx-swap="innerHTML"
-              hx-on:htmx:after-request="if(event.detail.successful){this.reset(); customOpen = false;}"
-              class="space-y-2">
-            {% csrf_token %}
-            <div class="flex gap-2">
-                <select name="kind"
-                        class="text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                    <option value="part">Part</option>
-                    <option value="labor">Labor</option>
-                </select>
-                <input type="text" name="custom_label" placeholder="What's being sold…"
-                       class="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                       required>
-            </div>
-            <textarea name="notes" rows="2" placeholder="Details (optional)"
-                      class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"></textarea>
-            <div class="flex gap-2">
-                <label class="flex-1">
-                    <span class="block text-xs text-gray-400 mb-0.5">Qty</span>
-                    <input type="number" name="quantity" value="1" min="0" step="0.01"
-                           class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                </label>
-                <label class="flex-1">
-                    <span class="block text-xs text-gray-400 mb-0.5">Unit price ($)</span>
-                    <input type="number" name="unit_price" min="0" step="0.01" placeholder="optional"
-                           class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                </label>
-            </div>
-            <button type="submit"
-                    class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Log</button>
-        </form>
-    </div>
-
-    <!-- Catalog (Products & Services) buttons -->
-    <div x-show="logOpen" x-cloak class="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
-        {% for category, items in catalog_by_category.items %}
-        <div class="mb-3 last:mb-0">
-            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">{{ category }}</p>
-            <div class="flex flex-wrap gap-1.5">
-                {% for item in items %}
-                <form method="post"
-                      action="{% url 'core:sale_labor_log' sale.pk item.pk %}"
-                      hx-post="{% url 'core:sale_labor_log' sale.pk item.pk %}"
-                      hx-target="#sale-line-items-section"
-                      hx-swap="innerHTML"
-                      class="inline">
-                    {% csrf_token %}
-                    <button type="submit"
-                            class="px-2.5 py-1 text-xs bg-white text-gray-700 rounded border border-gray-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 transition-colors">
-                        {{ item.name }}
-                    </button>
-                </form>
-                {% endfor %}
+    {% if not sale.is_locked %}
+    <form class="collapse border-bottom" id="sale-custom" method="post" action="{% url 'core:sale_custom_log' sale.pk %}" hx-post="{% url 'core:sale_custom_log' sale.pk %}" hx-target="#sale-line-items-section" hx-swap="innerHTML" data-mb-reset-after="#sale-custom">
+        {% csrf_token %}
+        <div class="card-body">
+            <div class="row g-2">
+                <div class="col-md-3"><label class="form-label">Kind</label><select name="kind" class="form-select"><option value="part">Part</option><option value="labor">Labor</option></select></div>
+                <div class="col-md-9"><label class="form-label required">What is being sold</label><input type="text" name="custom_label" class="form-control" required></div>
+                <div class="col-12"><label class="form-label">Details</label><textarea name="notes" rows="2" class="form-control" placeholder="Optional"></textarea></div>
+                <div class="col-md-4"><label class="form-label">Qty</label><input type="number" name="quantity" value="1" min="0" step="0.01" class="form-control"></div>
+                <div class="col-md-4"><label class="form-label">Unit price ($)</label><input type="number" name="unit_price" min="0" step="0.01" class="form-control" placeholder="optional"></div>
+                <div class="col-md-4 d-flex align-items-end"><button type="submit" class="btn btn-primary">Add line</button></div>
             </div>
         </div>
-        {% endfor %}
+    </form>
+    <div class="collapse border-bottom" id="sale-catalog">
+        <div class="card-body">
+            {% for category, items in catalog_by_category.items %}
+            <div class="mb-2">
+                <div class="subheader">{{ category }}</div>
+                <div class="btn-list">
+                    {% for item in items %}
+                    <form method="post" action="{% url 'core:sale_labor_log' sale.pk item.pk %}" hx-post="{% url 'core:sale_labor_log' sale.pk item.pk %}" hx-target="#sale-line-items-section" hx-swap="innerHTML" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-sm">{{ item.name }}</button></form>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
     </div>
-
-    <!-- Logged entries -->
+    {% endif %}
     <div id="sale-line-items-section">
         {% include "core/partials/sale_line_items.html" with entries=entries sale=sale %}
     </div>

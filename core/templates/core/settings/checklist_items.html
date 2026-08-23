@@ -1,0 +1,34 @@
+{% load mb_tabler %}
+<div class="card">
+    <div class="card-header"><div><h3 class="card-title">Checklist items</h3><div class="card-subtitle">A flat bank of tasks. Scope an item to device types, or leave it unscoped for every work order that gets a checklist.</div></div></div>
+    <form method="post" action="{% url 'core:cli_create' %}" class="card-body border-bottom">{% csrf_token %}
+        <div class="row g-2 align-items-end">
+            <div class="col-md-5"><label class="form-label">Item</label><input type="text" name="name" class="form-control" placeholder="e.g. Check for malware" required></div>
+            <div class="col-md-5"><label class="form-label">Device types <span class="text-secondary">(none = all)</span></label><div>{% for key, label in cli_device_types %}<label class="form-check form-check-inline"><input type="checkbox" name="device_types" value="{{ key }}" class="form-check-input"><span class="form-check-label">{{ label }}</span></label>{% endfor %}</div></div>
+            <div class="col-md-2 d-grid"><button type="submit" class="btn btn-primary">Add item</button></div>
+        </div>
+    </form>
+    {% if cli_items %}
+    <table class="table card-table table-vcenter">
+        <thead><tr><th>Item</th><th>Device types</th><th>Active</th><th></th></tr></thead>
+        <tbody>
+        {% for item in cli_items %}
+        <tr>
+            <td class="fw-medium">{{ item.name }}
+                <form method="post" action="{% url 'core:cli_update' item.pk %}" class="collapse mt-2 fw-normal" id="cli-edit-{{ item.pk }}">{% csrf_token %}
+                    <div class="row g-2">
+                        <div class="col-12"><input type="text" name="name" value="{{ item.name }}" class="form-control" required></div>
+                        <div class="col-12">{% for key, label in cli_device_types %}<label class="form-check form-check-inline"><input type="checkbox" name="device_types" value="{{ key }}" class="form-check-input" {% if key in item.device_types %}checked{% endif %}><span class="form-check-label">{{ label }}</span></label>{% endfor %}</div>
+                        <div class="col-12 d-flex align-items-center gap-3"><label class="form-check mb-0"><input type="checkbox" name="is_active" value="1" class="form-check-input" {% if item.is_active %}checked{% endif %}><span class="form-check-label">Active</span></label><button type="submit" class="btn btn-sm btn-primary">Save</button></div>
+                    </div>
+                </form>
+            </td>
+            <td>{% for dt in item.device_types %}<span class="badge bg-blue-lt me-1">{{ dt }}</span>{% empty %}<span class="text-secondary">All devices</span>{% endfor %}</td>
+            <td><span class="status-dot {% if item.is_active %}status-dot-animated bg-green{% else %}bg-secondary{% endif %}"></span></td>
+            <td class="text-end text-nowrap"><button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#cli-edit-{{ item.pk }}">Edit</button> <form method="post" action="{% url 'core:cli_delete' item.pk %}" class="d-inline" data-mb-confirm="Delete the checklist item {{ item.name }}?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}<div class="card-body text-secondary">No checklist items yet. Add one above.</div>{% endif %}
+</div>

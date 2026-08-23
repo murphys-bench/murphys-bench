@@ -1,44 +1,16 @@
 {% comment %}
-Restore status fragment (Settings → Maintenance → Restore).
-
-⚠ The app is STOPPED partway through a restore, so this poll will fail for a few
-seconds mid-run and the browser will show a network error. That is expected. The
-status is written to a file by the out-of-band one-shot, so it survives the
-restart and the panel resumes on its own once gunicorn is back.
+Restore status fragment (Settings, Maintenance, Restore). The app is STOPPED
+partway through a restore, so this poll fails for a few seconds mid-run and the
+browser shows a network error. Expected. The status is written to a file by the
+out-of-band one-shot, so it survives the restart and the panel resumes once
+gunicorn is back.
 {% endcomment %}
-<div id="restore-status"
-     {% if restore_running %}
-     hx-get="{% url 'core:restore_status' %}"
-     hx-trigger="every 3s"
-     hx-swap="outerHTML"
-     {% endif %}>
-
-  {% if restore_running %}
-    <div class="flex items-center gap-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-4">
-      <svg class="animate-spin h-5 w-5 text-amber-600" viewBox="0 0 24 24" fill="none">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-      </svg>
-      <span>
-        Restore in progress{% if restore_status.message %} — {{ restore_status.message }}{% endif %}.
-        Murphy's Bench stops and restarts during this, so this page may briefly fail to load.
-        It picks up again on its own.
-      </span>
-    </div>
-  {% elif restore_status.state == 'succeeded' %}
-    <div class="text-sm text-green-800 bg-green-50 border border-green-200 rounded-md p-4">
-      ✓ Restore succeeded{% if restore_status.at %} ({{ restore_status.at|slice:":19" }} UTC){% endif %}.
-      {% if restore_status.message %}{{ restore_status.message }}.{% endif %}
-      Check that your data looks right, then delete the pre-restore copy under <code>backups/</code>.
-    </div>
-  {% elif restore_status.state == 'failed' %}
-    <div class="text-sm text-red-800 bg-red-50 border border-red-200 rounded-md p-4">
-      ✗ Restore <strong>failed</strong>{% if restore_status.at %} ({{ restore_status.at|slice:":19" }} UTC){% endif %}.
-      {% if restore_status.message %}{{ restore_status.message }}{% endif %}
-      <div class="mt-2">
-        Your data before the attempt was copied to <code>backups/pre-restore-&lt;timestamp&gt;/</code>
-        first, so nothing is lost. Recovering from that copy is a command-line step.
-      </div>
-    </div>
-  {% endif %}
+<div id="restore-status" {% if restore_running %}hx-get="{% url 'core:restore_status' %}" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+    {% if restore_running %}
+    <div class="alert alert-warning d-flex align-items-center gap-2"><span class="spinner-border spinner-border-sm"></span><span>Restore in progress{% if restore_status.message %}: {{ restore_status.message }}{% endif %}. Murphy's Bench stops and restarts during this, so this page may briefly fail to load. It picks up again on its own.</span></div>
+    {% elif restore_status.state == 'succeeded' %}
+    <div class="alert alert-success">Restore succeeded{% if restore_status.at %} ({{ restore_status.at|slice:":19" }} UTC){% endif %}. {% if restore_status.message %}{{ restore_status.message }}.{% endif %} Check that your data looks right, then delete the pre-restore copy under <code>backups/</code>.</div>
+    {% elif restore_status.state == 'failed' %}
+    <div class="alert alert-danger">Restore <strong>failed</strong>{% if restore_status.at %} ({{ restore_status.at|slice:":19" }} UTC){% endif %}. {% if restore_status.message %}{{ restore_status.message }}{% endif %}<div class="mt-2">Your data before the attempt was copied to <code>backups/pre-restore-&lt;timestamp&gt;/</code> first, so nothing is lost. Recovering from that copy is a command-line step.</div></div>
+    {% endif %}
 </div>

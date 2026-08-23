@@ -1,0 +1,4 @@
+{% load mb_tabler %}
+{% include "core/settings/_status_table.html" with heading="Ticket statuses" entity="ticket" rows=ticket_statuses %}
+{% include "core/settings/_status_table.html" with heading="Work order statuses" entity="workorder" rows=wo_statuses %}
+<div class="alert alert-info">System statuses (core workflow states) can change color but cannot be renamed or deleted. Custom statuses are fully editable.</div>

@@ -1,156 +1,80 @@
-{% extends "core/base.html" %}
-{% load mb_icons %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
 
 {% block title %}{{ title }} - Murphy's Bench{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
-        {% if back_client %}
-        <a href="{% url 'core:client_detail' back_client.pk %}" class="text-gray-400 hover:text-gray-600 text-sm">← {{ back_client.name }}</a>
-        {% endif %}
-        <h1 class="text-2xl font-bold text-gray-900">{{ title }}</h1>
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col"><div class="page-pretitle">Device{% if back_client %} &middot; <a href="{% url 'core:client_detail' back_client.pk %}">{{ back_client.name }}</a>{% endif %}</div><h2 class="page-title">{{ title }}</h2></div>
+            <div class="col-auto"><a href="{{ cancel_url }}" class="btn">Cancel</a></div>
+        </div>
     </div>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="max-w-3xl">
-    <form method="post" class="space-y-6">
-        {% csrf_token %}
-        {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
-
-        {% if form.errors %}
-        <div class="bg-red-50 border border-red-200 rounded-md p-4">
-            <p class="text-sm font-medium text-red-800">Please fix the errors below:</p>
-            <ul class="mt-2 text-sm text-red-700 list-disc list-inside">
-                {% for field in form %}
-                    {% for error in field.errors %}
-                        <li>{{ field.label }}: {{ error }}</li>
-                    {% endfor %}
-                {% endfor %}
-            </ul>
-        </div>
-        {% endif %}
-
-        <!-- Device Info -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-base font-semibold text-gray-900 mb-4">Device Info</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Client <span class="text-gray-400 font-normal">(optional — blank for a walk-in device)</span></label>
-                    {{ form.client }}
+<div class="row justify-content-center"><div class="col-12 col-xl-9">
+<form method="post">
+    {% csrf_token %}
+    {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+    {% include "core/partials/form_errors.html" %}
+    <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Owner and machine</h3></div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Owner</label>
+                    <div class="input-group">{{ form.client|tabler_input }}<button type="button" class="btn" data-bs-toggle="collapse" data-bs-target="#new-owner">{% ticon 'plus' 'icon-sm' %} New</button></div>
+                    <div class="form-hint">Blank for a walk-in device. Every device has a real owner or none; never a placeholder.</div>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Whose device is this?</label>
-                    {{ form.assigned_contact }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Device Name <span class="text-red-500">*</span></label>
-                    {{ form.name }}
-                </div>
-                <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Device Type <span class="text-red-500">*</span></label>
-                    <div x-data="{ deviceType: '{{ form.device_type.value|default:"laptop" }}' }">
-                        <input type="hidden" name="device_type" :value="deviceType">
-                        <div class="grid grid-cols-4 gap-2">
-                            {% for dt in device_types %}
-                            <button type="button" @click="deviceType = '{{ dt.slug }}'"
-                                :class="deviceType === '{{ dt.slug }}' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-500 hover:border-blue-300 hover:bg-blue-50'"
-                                class="flex flex-col items-center justify-center gap-1.5 p-3 border-2 rounded-lg text-xs font-medium transition-colors">
-                                {% icon dt.icon "7" %}
-                                <span>{{ dt.label }}</span>
-                            </button>
-                            {% endfor %}
+                <div class="col-12 collapse" id="new-owner">
+                    <div class="card card-sm bg-secondary-lt"><div class="card-body">
+                        <div class="fw-medium mb-2">New customer</div>
+                        <div class="row g-2">
+                            <div class="col-md-5"><label class="form-label">Name (person, or company)</label><input type="text" name="new_client_name" class="form-control" autocomplete="off"></div>
+                            <div class="col-md-3"><label class="form-label">Type</label><select name="new_client_type" class="form-select"><option value="residential">Residential</option><option value="business">Business</option></select></div>
+                            <div class="col-md-2"><label class="form-label">Phone</label><input type="text" name="new_client_phone" class="form-control"></div>
+                            <div class="col-md-2"><label class="form-label">Email</label><input type="email" name="new_client_email" class="form-control"></div>
                         </div>
+                        <div class="form-hint">Used only when no owner is chosen above. The customer is created with the device and can be filled in later from their hub.</div>
+                    </div></div>
+                </div>
+                <div class="col-md-6"><label class="form-label">Whose device (contact)</label>{{ form.assigned_contact|tabler_input }}</div>
+                <div class="col-md-6"><label class="form-label required">Device name</label>{{ form.name|tabler_input }}</div>
+                <div class="col-md-6"><label class="form-label">Default repair type</label>{{ form.repair_type|tabler_input }}</div>
+                <div class="col-12">
+                    <label class="form-label required">Type</label>
+                    <div class="form-selectgroup">
+                        {% for dt in device_types %}
+                        <label class="form-selectgroup-item">
+                            <input type="radio" name="device_type" value="{{ dt.slug }}" class="form-selectgroup-input" {% if form.device_type.value|default:'laptop' == dt.slug %}checked{% endif %}>
+                            <span class="form-selectgroup-label">{% ticon dt.icon|device_icon 'icon-sm' %} {{ dt.label }}</span>
+                        </label>
+                        {% endfor %}
                     </div>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Default Repair Type</label>
-                    {{ form.repair_type }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Condition at Intake</label>
-                    {{ form.condition_at_intake }}
-                </div>
+                <div class="col-md-4"><label class="form-label">Condition at intake</label>{{ form.condition_at_intake|tabler_input }}</div>
+                <div class="col-md-4"><label class="form-label">Manufacturer</label>{{ form.manufacturer|tabler_input }}</div>
+                <div class="col-md-4"><label class="form-label">Model</label>{{ form.model|tabler_input }}</div>
+                <div class="col-md-6"><label class="form-label">Serial number</label>{{ form.serial_number|tabler_input }}</div>
+                <div class="col-md-3"><label class="form-label">Operating system</label>{{ form.os|tabler_input }}</div>
+                <div class="col-md-3"><label class="form-label">OS version</label>{{ form.os_version|tabler_input }}</div>
+                <div class="col-md-4"><label class="form-label">CPU</label>{{ form.cpu|tabler_input }}</div>
+                <div class="col-md-4"><label class="form-label">RAM</label>{{ form.ram|tabler_input }}</div>
+                <div class="col-md-4"><label class="form-label">Storage</label>{{ form.storage|tabler_input }}</div>
+                <div class="col-md-6"><label class="form-label">Covered by Service Agreement</label>{{ form.contract|tabler_input }}<div class="form-hint">Only the owner's agreements are offered.</div></div>
+                <div class="col-md-6"><label class="form-label">Notes</label>{{ form.notes|tabler_input }}</div>
+                <div class="col-12"><label class="form-check">{{ form.is_active|tabler_input }}<span class="form-check-label">Active device</span></label></div>
             </div>
         </div>
-
-        <!-- Hardware Details -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-base font-semibold text-gray-900 mb-4">Hardware Details</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Manufacturer</label>
-                    {{ form.manufacturer }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                    {{ form.model }}
-                </div>
-                <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Serial Number</label>
-                    {{ form.serial_number }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Operating System</label>
-                    {{ form.os }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">OS Version</label>
-                    {{ form.os_version }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Processor (CPU)</label>
-                    {{ form.cpu }}
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Memory (RAM)</label>
-                    {{ form.ram }}
-                </div>
-                <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Storage</label>
-                    {{ form.storage }}
-                </div>
-            </div>
-        </div>
-
-        <!-- Notes & Status -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-base font-semibold text-gray-900 mb-4">Notes & Status</h2>
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Covered by Contract</label>
-                    {{ form.contract }}
-                    <p class="text-xs text-gray-400 mt-1">Which recurring contract covers this machine, if any. Only the device's client's contracts are offered.</p>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                    {{ form.notes }}
-                </div>
-                <div class="flex items-center gap-2">
-                    {{ form.is_active }}
-                    <label class="text-sm font-medium text-gray-700">Active device</label>
-                </div>
-            </div>
-        </div>
-
-        <!-- Buttons -->
-        <div class="flex flex-wrap gap-3">
-            <button type="submit"
-                    class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium">
-                Save Device
-            </button>
-            <button type="submit" name="save_and_create_wo" value="1"
-                    class="px-6 py-2 bg-green-700 text-white rounded-md hover:bg-green-800 font-medium">
-                Save &amp; Create Work Order →
-            </button>
-            <a href="{{ cancel_url }}"
-               class="px-6 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium">
-                Cancel
-            </a>
-        </div>
-
-    </form>
-</div>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-primary">Save device</button>
+        <button type="submit" name="save_and_create_wo" value="1" class="btn btn-success">Save and open a work order</button>
+        <a href="{{ cancel_url }}" class="btn">Cancel</a>
+    </div>
+</form>
+</div></div>
 {% endblock %}

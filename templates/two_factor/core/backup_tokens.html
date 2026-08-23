@@ -1,75 +1,18 @@
 {% extends "two_factor/_base_focus.html" %}
-{% load i18n %}
-
-{% block title %}Backup Tokens — Murphy's Bench{% endblock %}
-
+{% load i18n mb_tabler %}
+{% block title %}Backup tokens - Murphy's Bench{% endblock %}
 {% block content %}
-    <h2 class="text-xl font-semibold text-gray-900 mb-2">Backup Tokens</h2>
-    <p class="text-sm text-gray-600 mb-4">
-        Backup tokens can be used to sign in if you lose access to your authenticator app.
-        Each token can only be used once. Store these somewhere safe.
-    </p>
-
-    {% if device.token_set.count %}
-        <div class="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-lg" id="token-list">
-            <div class="grid grid-cols-2 gap-2">
-                {% for token in device.token_set.all %}
-                    <code class="text-sm font-mono text-gray-800 bg-white border border-gray-200 rounded px-2 py-1 text-center">
-                        {{ token.token }}
-                    </code>
-                {% endfor %}
-            </div>
-        </div>
-        <div class="flex items-center justify-between mb-4">
-            <p class="text-xs text-gray-500">
-                You have {{ device.token_set.count }} backup token{{ device.token_set.count|pluralize }} remaining.
-                Generating new tokens will invalidate these.
-            </p>
-            <button onclick="printTokens()" type="button"
-                    class="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 flex items-center gap-1">
-                🖨 Print
-            </button>
-        </div>
-        <style>
-            @media print {
-                body * { visibility: hidden; }
-                #print-area, #print-area * { visibility: visible; }
-                #print-area { position: fixed; top: 0; left: 0; width: 100%; padding: 2rem; }
-            }
-        </style>
-        <div id="print-area" style="display:none">
-            <h2 style="font-size:1.1rem;font-weight:bold;margin-bottom:0.5rem">Murphy's Bench — Backup Tokens</h2>
-            <p style="font-size:0.8rem;color:#555;margin-bottom:1rem">Each token can only be used once. Keep this page somewhere safe.</p>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;font-family:monospace">
-                {% for token in device.token_set.all %}
-                    <div style="border:1px solid #ccc;border-radius:4px;padding:0.4rem 0.6rem;text-align:center">{{ token.token }}</div>
-                {% endfor %}
-            </div>
-        </div>
-        <script>
-            function printTokens() {
-                document.getElementById('print-area').style.display = 'block';
-                window.print();
-                document.getElementById('print-area').style.display = 'none';
-            }
-        </script>
-    {% else %}
-        <div class="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <p class="text-sm text-yellow-800">You have no backup tokens. Generate some in case you lose access to your authenticator.</p>
-        </div>
-    {% endif %}
-
-    <form method="post">
-        {% csrf_token %}
-        {{ form.as_p }}
-        <div class="flex items-center justify-between mt-4">
-            <a href="{% url 'two_factor:profile' %}" class="text-sm text-gray-500 hover:text-gray-700">
-                ← Back to Account Security
-            </a>
-            <button class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
-                    type="submit">
-                Generate New Tokens
-            </button>
-        </div>
-    </form>
+<h2 class="h2 mb-2">Backup tokens</h2>
+<p class="text-secondary">Backup tokens sign you in if you lose access to your authenticator app. Each one works once. Store them somewhere safe.</p>
+{% if device.token_set.count %}
+<div class="row g-2 mb-3" id="token-list">{% for token in device.token_set.all %}<div class="col-6"><code class="d-block text-center border rounded py-1">{{ token.token }}</code></div>{% endfor %}</div>
+<div class="d-flex align-items-center gap-2 mb-3"><span class="text-secondary small flex-fill">{{ device.token_set.count }} backup token{{ device.token_set.count|pluralize }} remaining. Generating new tokens invalidates these.</span><button type="button" class="btn btn-sm d-print-none" data-mb-print-page>{% ticon 'printer' 'icon-sm' %} Print</button></div>
+{% else %}
+<div class="alert alert-warning">You have no backup tokens. Generate some in case you lose access to your authenticator.</div>
+{% endif %}
+<form method="post" class="d-print-none">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <div class="form-footer d-flex align-items-center"><a href="{% url 'two_factor:profile' %}" class="btn">Back</a><button type="submit" class="btn btn-primary ms-auto">Generate new tokens</button></div>
+</form>
 {% endblock %}

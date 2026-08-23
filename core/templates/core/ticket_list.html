@@ -1,135 +1,104 @@
-{% extends "core/base.html" %}
-{% load mb_icons %}
+{% extends "core/worklist_base.html" %}
+{% load mb_tabler %}
 
 {% block title %}Tickets - Murphy's Bench{% endblock %}
+{% block list_title %}Tickets{% endblock %}
+{% block list_count %}<span class="badge bg-blue-lt ms-2">{{ page_obj.paginator.count }}</span>{% endblock %}
+{% block search_placeholder %}Ticket #, subject or client{% endblock %}
 
-{% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
-        <div class="flex items-center gap-4">
-            <h1 class="text-2xl font-bold text-gray-900 shrink-0">Tickets</h1>
-            <div class="flex-1"></div>
-            {% include "core/partials/header_bell.html" %}
-            {% if can_create_ticket %}
-            <a href="{% url 'core:ticket_create' %}"
-               class="px-4 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium shrink-0">
-                + New Ticket
-            </a>
-            {% endif %}
-        </div>
-    </div>
-</div>
-{% include "core/partials/list_search_bar.html" with search_value=request.GET.search search_placeholder="Ticket # or subject or client" filters_template="core/partials/_ticket_filters.html" filters_active=request.GET.status %}
+{% block list_actions %}
+{% if can_create_ticket %}
+<a href="{% url 'core:ticket_create' %}" class="btn btn-primary">{% ticon 'plus' %} New Ticket</a>
+{% endif %}
 {% endblock %}
 
-{% block content %}
+{% block list_segments %}
+{% if not triage_filter and not needs_response_filter %}
+<div class="btn-group" role="group" aria-label="Active or closed">
+    <a href="{% url_replace tab='active' page='' %}" class="btn btn-sm {% if current_tab == 'active' %}active{% endif %}">Active <span class="badge ms-1 {% if current_tab == 'active' %}bg-primary text-primary-fg{% else %}bg-secondary-lt{% endif %}">{{ active_count }}</span></a>
+    <a href="{% url_replace tab='closed' page='' %}" class="btn btn-sm {% if current_tab == 'closed' %}active{% endif %}">Closed <span class="badge ms-1 {% if current_tab == 'closed' %}bg-primary text-primary-fg{% else %}bg-secondary-lt{% endif %}">{{ closed_count }}</span></a>
+</div>
+{% endif %}
+{% comment %}SLA pressure and attention chips: first-class filters, ruled in the inventory.{% endcomment %}
+<div class="btn-group" role="group" aria-label="Attention">
+    <a href="{% url 'core:ticket_list' %}?overdue=1" class="btn btn-sm {% if request.GET.overdue %}active{% endif %}">{% ticon 'clock' 'icon-sm' %} Past SLA</a>
+    <a href="{% url 'core:ticket_list' %}?needs_response=1" class="btn btn-sm {% if needs_response_filter %}active{% endif %}">{% ticon 'mail' 'icon-sm' %} Awaiting reply</a>
+    <a href="{% url 'core:ticket_list' %}?triage=1" class="btn btn-sm {% if triage_filter %}active{% endif %}">Unsorted</a>
+</div>
+{% endblock %}
 
-    <!-- Tabs -->
-    {% if triage_filter %}
-    <div class="flex items-center justify-between mb-4 px-1">
-        <span class="text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md px-3 py-1.5">Unsorted / Unverified — onboard the client (Edit ticket) or reject</span>
-        <a href="{% url 'core:ticket_list' %}" class="text-sm text-gray-500 hover:text-gray-700">← Back to all tickets</a>
-    </div>
-    {% elif not needs_response_filter %}
-    <div class="flex border-b border-gray-200 mb-4 bg-white rounded-t-lg shadow px-4">
-        <a href="?tab=active{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}"
-           class="px-4 py-3 text-sm font-medium border-b-2 -mb-px {% if current_tab == 'active' %}border-blue-600 text-blue-600{% else %}border-transparent text-gray-500 hover:text-gray-700{% endif %}">
-            Active
-            <span class="ml-1.5 px-2 py-0.5 rounded-full text-xs {% if current_tab == 'active' %}bg-blue-100 text-blue-700{% else %}bg-gray-100 text-gray-600{% endif %}">{{ active_count }}</span>
-        </a>
-        <a href="?tab=closed{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}"
-           class="px-4 py-3 text-sm font-medium border-b-2 -mb-px {% if current_tab == 'closed' %}border-blue-600 text-blue-600{% else %}border-transparent text-gray-500 hover:text-gray-700{% endif %}">
-            Closed
-            <span class="ml-1.5 px-2 py-0.5 rounded-full text-xs {% if current_tab == 'closed' %}bg-blue-100 text-blue-700{% else %}bg-gray-100 text-gray-600{% endif %}">{{ closed_count }}</span>
-        </a>
-    </div>
-    {% else %}
-    <div class="flex items-center justify-between mb-4 px-1">
-        <span class="text-sm font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5">Showing tickets awaiting response</span>
-        <a href="{% url 'core:ticket_list' %}" class="text-sm text-gray-500 hover:text-gray-700">← Back to all tickets</a>
-    </div>
-    {% endif %}
+{% block list_filters %}
+<select name="status" class="form-select form-select-sm" style="width: auto;" aria-label="Status">
+    <option value="">All statuses</option>
+    {% for value, label in status_choices %}
+    <option value="{{ value }}" {% if request.GET.status == value %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+</select>
+{% if is_admin %}
+<select name="assigned_to" class="form-select form-select-sm" style="width: auto;" aria-label="Technician">
+    <option value="">All technicians</option>
+    {% for u in all_users %}
+    <option value="{{ u.pk }}" {% if request.GET.assigned_to == u.pk|stringformat:"s" %}selected{% endif %}>{{ u.get_full_name|default:u.username }}</option>
+    {% endfor %}
+</select>
+{% endif %}
+{% if request.GET.status or request.GET.assigned_to or request.GET.overdue or request.GET.age or triage_filter or needs_response_filter %}
+<a href="{% url 'core:ticket_list' %}" class="btn btn-sm btn-ghost-secondary">Clear</a>
+{% endif %}
+{% endblock %}
 
-    <!-- Tickets Table -->
-    <div class="bg-white rounded-lg shadow overflow-hidden">
-        {% if tickets %}
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ticket #</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Priority</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
-                    </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
-                    {% for ticket in tickets %}
-                        <tr class="hover:bg-gray-50 cursor-pointer {% if ticket.needs_response %}bg-amber-50{% endif %}" onclick="window.location='{% url 'core:ticket_detail' ticket.pk %}'">
-                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">
-                                <div class="flex items-center gap-1.5">
-                                    {% if ticket.needs_response %}<span class="inline-block w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" title="Awaiting response"></span>{% endif %}
-                                    {% if ticket.wo_complete %}<span class="inline-block w-2 h-2 rounded-full bg-green-500 flex-shrink-0" title="Work complete — ready to close"></span>{% endif %}
-                                    <a href="{% url 'core:ticket_detail' ticket.pk %}" class="{% if ticket.needs_response %}font-bold{% endif %}">{{ ticket.ticket_number }}</a>
-                                </div>
-                            </td>
-                            <td class="px-6 py-4 text-sm {% if ticket.needs_response %}font-semibold text-gray-900{% else %}text-gray-900{% endif %} max-w-xs">
-                                <div class="truncate">
-                                    {% if ticket.assigned_to_id == request.user.id and ticket.assignment_unseen %}<span class="inline-flex items-center px-1.5 py-0.5 mr-1 rounded text-[11px] font-semibold bg-blue-100 text-blue-700 align-middle">New to you</span>{% endif %}{% if ticket.escalation_pending %}<span class="inline-flex items-center px-1.5 py-0.5 mr-1 rounded text-[11px] font-semibold bg-amber-100 text-amber-700 align-middle">Escalated &rarr; L{{ ticket.escalation_level }}</span>{% endif %}{{ ticket.subject }}
-                                </div>
-                                {% if ticket.is_overdue %}
-                                    {% if ticket.overdue_is_acknowledged %}
-                                        <span class="text-xs text-yellow-600 font-medium inline-flex items-center gap-1">{% icon "exclamation-triangle" 4 %} Overdue (acked)</span>
-                                    {% else %}
-                                        <span class="text-xs text-red-600 font-semibold">🔴 Overdue</span>
-                                    {% endif %}
-                                {% endif %}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                {{ ticket.client.name }}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                {{ ticket.get_source_display }}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                {{ ticket.get_priority_display }}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap">
-                                {% status_badge ticket.status 'ticket' %}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                {{ ticket.created_at|date:"M d, Y" }}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+{% block list_notice %}
+{% if triage_filter %}
+<div class="card-body py-2 border-bottom text-indigo">Unsorted / Unverified: onboard the client (Edit ticket) or reject the sender.</div>
+{% endif %}
+{% endblock %}
 
-            {% if is_paginated %}
-                <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200">
-                    <p class="text-sm text-gray-700">
-                        Page <span class="font-medium">{{ page_obj.number }}</span>
-                        of <span class="font-medium">{{ page_obj.paginator.num_pages }}</span>
-                    </p>
-                    <div class="flex gap-2">
-                        {% if page_obj.has_previous %}
-                            <a href="?page={{ page_obj.previous_page_number }}{% if request.GET.tab %}&tab={{ request.GET.tab }}{% endif %}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}" class="px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300">Previous</a>
-                        {% endif %}
-                        {% if page_obj.has_next %}
-                            <a href="?page={{ page_obj.next_page_number }}{% if request.GET.tab %}&tab={{ request.GET.tab }}{% endif %}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}" class="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Next</a>
-                        {% endif %}
-                    </div>
+{% block list_table %}
+<table class="table table-vcenter card-table">
+    <thead>
+        <tr>
+            <th>Who</th>
+            <th>Ticket</th>
+            <th>Status</th>
+            <th>Tech</th>
+            <th class="text-end">Age</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for ticket in tickets %}
+        <tr class="mb-stripe" style="--mb-stripe: var(--mb-status-ticket-{{ ticket.status }}, var(--tblr-secondary));">
+            <td class="text-truncate" style="max-width: 16rem;">
+                <a href="{% url 'core:ticket_detail' ticket.pk %}" class="text-reset fw-medium">{{ ticket.client.name }}</a>
+                {% if ticket.client.is_unsorted %}<span class="badge bg-indigo-lt ms-1">Needs triage</span>
+                {% elif ticket.client.client_type == 'business' %}<span class="badge bg-azure-lt ms-1">Business</span>
+                {% else %}<span class="badge bg-secondary-lt ms-1">Residential</span>{% endif %}
+            </td>
+            <td class="text-truncate" style="max-width: 28rem;">
+                <a href="{% url 'core:ticket_detail' ticket.pk %}" class="text-reset d-block text-truncate {% if ticket.needs_response %}fw-bold{% endif %}">
+                    {% if ticket.priority == 'urgent' or ticket.priority == 'high' %}<span class="text-orange small fw-medium">{% ticon 'alert-triangle' 'icon-sm' %} {{ ticket.get_priority_display }}</span>{% endif %}
+                    {{ ticket.subject }}
+                </a>
+                <div class="text-secondary small">
+                    {{ ticket.ticket_number }} &middot; {{ ticket.get_source_display }}
+                    {% if ticket.assigned_to_id == request.user.id and ticket.assignment_unseen %}<span class="badge bg-blue-lt">New to you</span>{% endif %}
+                    {% if ticket.escalation_pending %}<span class="badge bg-orange-lt">Escalated &rarr; L{{ ticket.escalation_level }}</span>{% endif %}
+                    {% if ticket.is_overdue %}<span class="text-red">{% ticon 'clock' 'icon-sm' %} {% if ticket.overdue_is_acknowledged %}Overdue (acked){% else %}Overdue{% endif %}</span>{% endif %}
+                    {% if ticket.needs_response %}<span class="text-green">{% ticon 'mail' 'icon-sm' %} Awaiting reply</span>{% endif %}
+                    {% if ticket.wo_complete %}<span class="text-green">{% ticon 'check' 'icon-sm' %} Work complete</span>{% endif %}
                 </div>
-            {% endif %}
+            </td>
+            <td class="text-nowrap">
+                <span class="status-dot me-1" style="--tblr-status-color: var(--mb-status-ticket-{{ ticket.status }}, var(--tblr-secondary));"></span>{{ ticket.status|status_word:'ticket' }}
+            </td>
+            <td class="text-nowrap">{% if ticket.assigned_to %}{{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}{% else %}<span class="text-secondary">Unclaimed</span>{% endif %}</td>
+            <td class="text-end text-nowrap text-secondary" title="{{ ticket.created_at|date:'M j, Y g:i A' }}">{{ ticket.created_at|age_short }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
 
-        {% else %}
-            <div class="px-6 py-16 text-center">
-                <p class="text-gray-400 text-lg mb-2">No tickets found.</p>
-                <p class="text-gray-400 text-sm">Try clearing your filters{% if can_create_ticket %} or <a href="{% url 'core:ticket_create' %}" class="text-blue-600 hover:underline">create a new ticket</a>{% endif %}.</p>
-            </div>
-        {% endif %}
-    </div>
-
+{% block list_empty %}
+<p class="empty-title">No tickets match</p>
+<p class="empty-subtitle text-secondary">Clear the search or filters{% if can_create_ticket %}, or <a href="{% url 'core:ticket_create' %}">create a ticket</a>{% endif %}.</p>
 {% endblock %}

@@ -1,110 +1,79 @@
-{% extends "core/base.html" %}
-{% load mb_icons %}
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
 
 {% block title %}Register - Murphy's Bench{% endblock %}
+{% block room %}register{% endblock %}
 
 {% block page_header %}
-<div class="bg-white shadow page-title-bar">
-    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-4">
-        <h1 class="text-2xl font-bold text-gray-900">Register</h1>
-        {% include "core/partials/header_bell.html" %}
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col"><div class="page-pretitle">Register</div><h2 class="page-title">Register</h2></div>
+            <div class="col-auto">
+                <form method="post" action="{% url 'core:pos_sale_start' %}">{% csrf_token %}<button type="submit" class="btn btn-primary">{% ticon 'plus' %} New counter sale</button></form>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="max-w-3xl mx-auto space-y-6">
-
-    <!-- Start a new counter sale -->
-    <div class="bg-white rounded-lg shadow-md border-l-4 border-green-500 p-6 flex items-center justify-between gap-6">
-        <div class="flex items-center gap-4 min-w-0">
-            <div class="shrink-0 w-12 h-12 rounded-full bg-green-100 flex items-center justify-center text-green-600">
-                {% icon "cash" 6 %}
+<div class="row row-cards">
+    <div class="col-12 col-lg-7">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">{% ticon 'tool' 'icon-sm' %} Settle a finished work order</h3>
+                <div class="card-actions">
+                    <form method="get" action="{% url 'core:pos_home' %}" class="input-group input-group-flat">
+                        <input type="text" name="q" value="{{ query }}" class="form-control" placeholder="WO number or customer name" autofocus>
+                        <button type="submit" class="btn">Search</button>
+                    </form>
+                </div>
             </div>
-            <div class="min-w-0">
-                <h2 class="text-base font-semibold text-gray-900">New counter sale</h2>
-                <p class="text-sm text-gray-500">Walk-in retail or product sale — not tied to a work order.</p>
-            </div>
-        </div>
-        <form method="post" action="{% url 'core:pos_sale_start' %}" class="shrink-0">
-            {% csrf_token %}
-            <button type="submit" class="px-5 py-2.5 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium shadow-sm">
-                Start New Sale
-            </button>
-        </form>
-    </div>
-
-    <!-- Pull a closed work order -->
-    <div class="bg-white rounded-lg shadow-md border-l-4 border-blue-500 p-6">
-        <div class="flex items-center gap-4 mb-4">
-            <div class="shrink-0 w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
-                {% icon "printer" 6 %}
-            </div>
-            <div class="min-w-0">
-                <h2 class="text-base font-semibold text-gray-900">Settle a closed work order</h2>
-                <p class="text-sm text-gray-500">Find a work order by number or customer name. Only completed work orders appear here.</p>
-            </div>
-        </div>
-        <form method="get" action="{% url 'core:pos_home' %}" class="flex items-center gap-2">
-            <input type="text" name="q" value="{{ query }}" placeholder="WO number or customer name…"
-                   class="flex-1 min-w-0 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" autofocus>
-            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shrink-0">Search</button>
-        </form>
-
-        <div class="mt-4">
-            {% if browsing and results %}
-            <p class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Recently completed</p>
-            {% endif %}
             {% if results %}
-            <div class="divide-y divide-gray-100 border-t border-gray-100 max-h-96 overflow-y-auto">
+            <div class="card-body py-2 text-secondary small">{% if browsing %}Recently completed. {% endif %}Only completed work orders appear here.</div>
+            <div class="list-group list-group-flush">
                 {% for wo in results %}
-                <div class="flex items-center justify-between py-3">
-                    <div>
-                        <div class="text-sm font-medium text-gray-900">{{ wo.work_order_number }}</div>
-                        <div class="text-xs text-gray-500">{% if wo.client %}{{ wo.client.name }}{% else %}Walk-in{% endif %} · ${{ wo.line_items_total|floatformat:2 }}</div>
+                <div class="list-group-item d-flex align-items-center gap-3">
+                    <div class="flex-fill">
+                        <div class="fw-medium">{{ wo.work_order_number }}</div>
+                        <div class="text-secondary small">{% if wo.client %}{{ wo.client.name }}{% else %}Walk-in{% endif %} &middot; ${{ wo.line_items_total|floatformat:2 }}</div>
                     </div>
                     {% if wo.invoice.billing_status == 'paid' %}
-                        <a href="{% url 'core:pos_wo_receipt' wo.pk %}" class="text-sm text-gray-500 hover:text-gray-700">Paid — View Receipt</a>
+                        <a href="{% url 'core:pos_wo_receipt' wo.pk %}" class="btn btn-sm">Paid, view receipt</a>
                     {% else %}
-                        <a href="{% url 'core:pos_wo_settle' wo.pk %}" class="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 font-medium">Settle</a>
+                        <a href="{% url 'core:pos_wo_settle' wo.pk %}" class="btn btn-sm btn-success">Settle</a>
                     {% endif %}
                 </div>
                 {% endfor %}
             </div>
             {% elif query %}
-            <p class="text-sm text-gray-400 mt-3">No closed work orders match "{{ query }}".</p>
+            <div class="empty"><div class="empty-icon">{% ticon 'filter' %}</div><p class="empty-title">No closed work orders match "{{ query }}"</p><p class="empty-subtitle text-secondary">Only completed work orders can be settled here.</p></div>
             {% else %}
-            <p class="text-sm text-gray-400 mt-3">No completed work orders waiting to be settled.</p>
+            <div class="empty"><div class="empty-icon">{% ticon 'check' %}</div><p class="empty-title">Nothing waiting to be settled</p><p class="empty-subtitle text-secondary">Completed work orders show up here until they are paid.</p></div>
             {% endif %}
         </div>
     </div>
-
-    <!-- Recent counter sales -->
-    <div class="bg-white rounded-lg shadow-md border-l-4 border-purple-500 p-6">
-        <div class="flex items-center gap-4 mb-4">
-            <div class="shrink-0 w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center text-purple-600">
-                {% icon "list" 6 %}
-            </div>
-            <div class="min-w-0">
-                <h2 class="text-base font-semibold text-gray-900">Recent sales</h2>
-                <p class="text-sm text-gray-500">Completed counter sales — for full history, see Reports.</p>
-            </div>
-        </div>
-        {% if recent_sales %}
-        <div class="divide-y divide-gray-100 border-t border-gray-100 max-h-96 overflow-y-auto">
-            {% for sale in recent_sales %}
-            <div class="flex items-center justify-between py-3">
-                <div>
-                    <div class="text-sm font-medium text-gray-900">{{ sale.sale_number }}</div>
-                    <div class="text-xs text-gray-500">{{ sale.display_name }} · ${{ sale.amount|default:"0.00"|floatformat:2 }}</div>
+    <div class="col-12 col-lg-5">
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">{% ticon 'history' 'icon-sm' %} Recent counter sales</h3></div>
+            {% if recent_sales %}
+            <div class="list-group list-group-flush">
+                {% for sale in recent_sales %}
+                <div class="list-group-item d-flex align-items-center gap-3">
+                    <div class="flex-fill">
+                        <div class="fw-medium"><a href="{% url 'core:sale_detail' sale.pk %}">{{ sale.sale_number }}</a></div>
+                        <div class="text-secondary small">{{ sale.display_name }} &middot; ${{ sale.amount|default:"0.00"|floatformat:2 }}</div>
+                    </div>
+                    <a href="{% url 'core:sale_receipt_print' sale.pk %}" target="_blank" class="btn btn-sm">Receipt</a>
                 </div>
-                <a href="{% url 'core:sale_receipt_print' sale.pk %}" target="_blank" class="text-sm text-gray-500 hover:text-gray-700">View Receipt</a>
+                {% endfor %}
             </div>
-            {% endfor %}
+            <div class="card-footer text-secondary small">For full history, see Reports.</div>
+            {% else %}
+            <div class="empty"><div class="empty-icon">{% ticon 'cash-register' %}</div><p class="empty-title">No completed sales yet</p><p class="empty-subtitle text-secondary">Counter sales you settle here will be listed.</p></div>
+            {% endif %}
         </div>
-        {% else %}
-        <p class="text-sm text-gray-400 mt-3">No completed sales yet.</p>
-        {% endif %}
     </div>
 </div>
 {% endblock %}

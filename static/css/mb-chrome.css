@@ -1,0 +1,59 @@
+/* MB on Tabler: the few rules the framework does not provide.
+ * Kept deliberately short. If a page needs something that is not here and not
+ * in Tabler, the answer is a rule in mb-docs/MB-ON-TABLER-DESIGN-RULES.md
+ * first, then a line here; never a one-off on the page. */
+
+/* ── Sidebar collapse to icons ───────────────────────────────────────────── */
+@media (min-width: 992px) {
+    html[data-sidebar-collapsed="true"] .navbar-vertical.navbar-expand-lg { width: 4rem; }
+    html[data-sidebar-collapsed="true"] .navbar-vertical.navbar-expand-lg ~ .page { padding-left: 4rem; }
+    html[data-sidebar-collapsed="true"] .navbar-vertical .nav-link-title,
+    html[data-sidebar-collapsed="true"] .navbar-vertical .mb-when-expanded,
+    html[data-sidebar-collapsed="true"] .navbar-vertical .navbar-brand { display: none; }
+    html[data-sidebar-collapsed="true"] .navbar-vertical .nav-link { justify-content: center; padding-left: 0; padding-right: 0; }
+    html[data-sidebar-collapsed="true"] .navbar-vertical .nav-link-icon { margin-right: 0; }
+    html[data-sidebar-collapsed="true"] .mb-when-collapsed { display: inline-flex; }
+}
+.mb-when-collapsed { display: none; }
+.navbar-vertical .navbar-brand img { max-height: 5rem; width: auto; }
+
+/* ── Status carried by color ─────────────────────────────────────────────── */
+/* Left stripe on a card, row, or record header. Set --mb-stripe on the element. */
+.mb-stripe { box-shadow: inset 4px 0 0 var(--mb-stripe, var(--tblr-secondary)); }
+/* Dot + word: use Tabler's .status-dot with --tblr-status-color set to the status var. */
+
+/* ── Rooms ───────────────────────────────────────────────────────────────── */
+/* One attribute on <body> says which room a screen is in. The room colors are
+ * CSS variables emitted by base_tabler.html (shop-adjustable in a later batch). */
+body[data-room="register"] { --mb-room: var(--mb-room-register); }
+body[data-room="desk"]     { --mb-room: var(--mb-room-desk); }
+body[data-room="office"]   { --mb-room: var(--mb-room-office); }
+body[data-room="work"]     { --mb-room: var(--tblr-primary); }
+.page-header { box-shadow: inset 0 3px 0 var(--mb-room, transparent); padding-top: calc(var(--tblr-page-padding-y, 1rem) + 3px); }
+.navbar-vertical .mb-room-heading {
+    font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; font-weight: 700;
+    color: #fff; opacity: 1; border-top: 1px solid rgba(255,255,255,.12); margin-top: .25rem; padding-top: .6rem;
+    background: none; border-left: 0; border-right: 0; border-bottom: 0; text-align: left; cursor: pointer;
+}
+.navbar-vertical .mb-room-heading:hover { color: #fff; }
+.navbar-vertical .mb-room-chevron { transition: transform .15s ease; }
+.navbar-vertical .mb-room-heading[aria-expanded="false"] .mb-room-chevron { transform: rotate(-90deg); }
+.navbar-vertical .mb-room-group > .navbar-nav { padding-left: 0; }
+@media (min-width: 992px) {
+    /* Collapsed-to-icons sidebar: groups stay open so the icons remain reachable. */
+    html[data-sidebar-collapsed="true"] .navbar-vertical .mb-room-group > .navbar-nav { display: block !important; height: auto !important; }
+    html[data-sidebar-collapsed="true"] .navbar-vertical .mb-room-heading { padding-top: .25rem; }
+}
+
+/* ── Dark mode legibility ────────────────────────────────────────────────── */
+/* Tabler's secondary text is tuned for light; on the dark surfaces it fades
+ * into the card. Mike, Aug 21: "should stand out from background easily." */
+[data-bs-theme="dark"] .text-secondary,
+[data-bs-theme="dark"] .subheader,
+[data-bs-theme="dark"] .page-pretitle,
+[data-bs-theme="dark"] .empty-subtitle,
+[data-bs-theme="dark"] .card-footer,
+[data-bs-theme="dark"] .form-label-description { color: #b6c0cf !important; }
+[data-bs-theme="dark"] .page-title, [data-bs-theme="dark"] .card-title, [data-bs-theme="dark"] .empty-title { color: #f1f5f9; }
+[data-bs-theme="dark"] .badge.bg-secondary-lt { color: #d5dbe5; }
+[data-bs-theme="dark"] .list-group-item-action { color: #e2e8f0; }
