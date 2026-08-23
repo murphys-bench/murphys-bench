@@ -8,7 +8,7 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
-## Unreleased (v0.14.0)
+## v0.14.0 — 2026-08-23
 
 The new look: every screen rebuilt on Tabler. Rooms, the Board, one Work Record, the Relationship Desk.
 
