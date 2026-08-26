@@ -62,6 +62,7 @@
             <th>Status</th>
             <th>Tech</th>
             <th class="text-end">Age</th>
+            <th class="text-end">Follow-up</th>
         </tr>
     </thead>
     <tbody>
@@ -92,6 +93,7 @@
             </td>
             <td class="text-nowrap">{% if ticket.assigned_to %}{{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}{% else %}<span class="text-secondary">Unclaimed</span>{% endif %}</td>
             <td class="text-end text-nowrap text-secondary" title="{{ ticket.created_at|date:'M j, Y g:i A' }}">{{ ticket.created_at|age_short }}</td>
+            <td class="text-end text-nowrap">{% quick_send_buttons ticket=ticket compact=True %}</td>
         </tr>
         {% endfor %}
     </tbody>

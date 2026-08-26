@@ -209,3 +209,66 @@ def get_item(mapping, key):
         return mapping.get(key)
     except AttributeError:
         return None
+
+
+# ── One-click follow-up buttons ──────────────────────────────────────────────
+
+
+def _quick_send_templates(context):
+    """The active quick-send templates, fetched once per request (list rows
+    call this per row)."""
+    request = context.get('request')
+    cached = getattr(request, '_mb_quick_send_templates', None) if request else None
+    if cached is None:
+        from core.models import EmailTemplate
+        cached = list(EmailTemplate.objects.filter(
+            trigger__isnull=True, is_active=True, quick_send=True).order_by('name'))
+        if request is not None:
+            request._mb_quick_send_templates = cached
+    return cached
+
+
+@register.inclusion_tag('core/partials/quick_send_buttons.html', takes_context=True)
+def quick_send_buttons(context, ticket=None, work_order=None, compact=False):
+    """One button per quick-send template on a finished ticket/work order:
+    click sends it to the customer and records the follow-up. A template
+    already sent for this record renders as an inert sent-state instead, so a
+    stray second click cannot double-email anyone."""
+    templates = _quick_send_templates(context)
+    record = work_order or ticket
+    client = getattr(record, 'client', None) if record else None
+    # The status gate reads the same constants the POST handler enforces —
+    # this is only the UI half of the rule, never the rule itself.
+    from core.models import Ticket, WorkOrder
+    eligible = bool(templates) and client is not None and not client.is_unsorted
+    if eligible:
+        if work_order is not None:
+            eligible = work_order.status in WorkOrder.FOLLOW_UP_STATUSES
+        else:
+            eligible = ticket.status in Ticket.CLOSED_AT_STATUSES
+    sent_ids, pending_ids = set(), set()
+    if eligible:
+        # follow_ups is prefetched on the list pages; one small query elsewhere.
+        # A linked ticket + work order is one work item, so the work-order side
+        # also reads the ticket's rows (a ticket-side send blocks the WO button
+        # and vice versa — mirroring the claim constraint). Only via_quick_send
+        # rows count: a legacy planning row marked done never sent anything.
+        rows = list(record.follow_ups.all())
+        if work_order is not None and work_order.ticket_id:
+            rows += list(work_order.ticket.follow_ups.all())
+        for fu in rows:
+            if not fu.template_id or not fu.via_quick_send:
+                continue
+            # done_at unset = the claim exists but the outcome is unknown (a
+            # send died mid-flight). Truthfully "uncertain", never "sent".
+            (sent_ids if fu.done_at is not None else pending_ids).add(fu.template_id)
+        pending_ids -= sent_ids
+    request = context.get('request')
+    return {
+        'eligible': eligible, 'templates': templates,
+        'sent_ids': sent_ids, 'pending_ids': pending_ids,
+        'ticket': ticket if work_order is None else None, 'work_order': work_order,
+        'compact': compact,
+        'next': request.get_full_path() if request else '',
+        'csrf_token': context.get('csrf_token'),
+    }

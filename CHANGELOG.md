@@ -8,6 +8,22 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Added
+
+- The shop is emailed when work arrives: the assigned tech on hand-off and on customer replies. New-ticket emails are opt-in on Settings, Outbound Email, going to a recipient list there (blank means every admin).
+- One-click follow-up: mark one of your own email templates "One-click send" and finished tickets and work orders show a single button that emails the customer and records the follow-up.
+
+### Changed
+
+- Follow-up planning is gone entirely: no Desk list, no plan form, no Board region. A follow-up is the one-click send, recorded in the customer's Relationship history.
+- One email per template per record is enforced by the database, and removing an entry from the history (admin only) hides it without forgetting the send, so the button can never email a customer twice.
+
+### Fixed
+
+- The template variables table described `{{ site_name }}` as "Murphy's Bench"; it renders your Company Name.
+
 ## v0.14.0 — 2026-08-23
 
 The new look: every screen rebuilt on Tabler. Rooms, the Board, one Work Record, the Relationship Desk.

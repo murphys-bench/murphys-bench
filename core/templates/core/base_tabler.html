@@ -147,13 +147,6 @@
                                 </a>
                             </li>
                             {% endif %}
-                            <li class="nav-item {% if u and 'follow_up' in u %}active{% endif %}">
-                                <a class="nav-link" href="{% url 'core:follow_up_list' %}" title="Follow-ups">
-                                    <span class="nav-link-icon">{% ticon 'heart-handshake' %}</span>
-                                    <span class="nav-link-title">Follow-ups</span>
-                                    {% if follow_ups_due %}<span class="badge bg-purple ms-auto">{{ follow_ups_due }}</span>{% endif %}
-                                </a>
-                            </li>
                             {% if is_admin %}
                             <li class="nav-item {% if u and 'contract' in u %}active{% endif %}">
                                 <a class="nav-link" href="{% url 'core:contract_list' %}" title="Contracts">

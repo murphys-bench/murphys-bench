@@ -57,6 +57,7 @@
             <th>Tech</th>
             <th class="text-end">Money</th>
             <th class="text-end">Age</th>
+            <th class="text-end">Follow-up</th>
         </tr>
     </thead>
     <tbody>
@@ -85,6 +86,7 @@
                 {% if wo.invoice and wo.invoice.billing_status != 'uninvoiced' %}<div class="text-secondary small">{{ wo.invoice.get_billing_status_display }}</div>{% endif %}
             </td>
             <td class="text-end text-nowrap text-secondary" title="{{ wo.created_at|date:'M j, Y' }}">{{ wo.created_at|age_short }}</td>
+            <td class="text-end text-nowrap">{% quick_send_buttons work_order=wo compact=True %}</td>
         </tr>
         {% endfor %}
     </tbody>

@@ -704,6 +704,7 @@ class OutboundEmailSettingsForm(forms.ModelForm):
             'email_enabled', 'email_host', 'email_port', 'email_use_tls',
             'email_username', 'email_password', 'email_from', 'email_sales_from',
             'email_suppression_patterns',
+            'notify_new_ticket', 'notify_new_ticket_users',
         ]
         widgets = {
             'email_enabled': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
@@ -715,7 +716,19 @@ class OutboundEmailSettingsForm(forms.ModelForm):
             'email_from': forms.EmailInput(attrs={'class': _SS_INPUT, 'placeholder': 'support@yourdomain.com'}),
             'email_sales_from': forms.EmailInput(attrs={'class': _SS_INPUT, 'placeholder': 'sales@yourdomain.com'}),
             'email_suppression_patterns': forms.Textarea(attrs={'class': _SS_INPUT, 'rows': 5}),
+            'notify_new_ticket': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
+            'notify_new_ticket_users': forms.CheckboxSelectMultiple(attrs={'class': 'form-check-input'}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .models import User
+        field = self.fields['notify_new_ticket_users']
+        # No email address, no checkbox: a recipient who can never receive the
+        # notification would silently satisfy the list while nobody is told.
+        field.queryset = (User.objects.filter(is_active=True).exclude(email='')
+                          .order_by('first_name', 'username'))
+        field.label_from_instance = lambda u: f'{u.get_full_name() or u.username} ({u.email})'
 
 
 class InboundEmailSettingsForm(forms.ModelForm):

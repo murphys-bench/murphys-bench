@@ -88,11 +88,11 @@ status control sits with the reply.
                         <div class="dropdown-menu">
                             {% if work_order %}<a class="dropdown-item" href="{% url 'core:work_order_email_report' work_order.pk %}">Email repair report</a>{% endif %}
                             {% if ticket and ticket.status != 'closed' and can_reply_customer %}<a class="dropdown-item" href="#reply-form">Reply to client</a>{% endif %}
-                            {% if client and not client.is_unsorted %}<a class="dropdown-item" href="{% url 'core:customer_email' %}?{% if work_order %}work_order={{ work_order.pk }}{% else %}ticket={{ ticket.pk }}{% endif %}">Email customer (your templates)</a>
-                            <a class="dropdown-item" href="{% url 'core:client_detail' client.pk %}#relationship">Plan a follow-up</a>{% endif %}
+                            {% if client and not client.is_unsorted %}<a class="dropdown-item" href="{% url 'core:customer_email' %}?{% if work_order %}work_order={{ work_order.pk }}{% else %}ticket={{ ticket.pk }}{% endif %}">Email customer (your templates)</a>{% endif %}
                             {% if not work_order and not ticket %}<span class="dropdown-item text-secondary">Nothing to send</span>{% endif %}
                         </div>
                     </div>
+                    {% quick_send_buttons ticket=ticket work_order=work_order %}
                     <a class="btn" href="#status-control" title="Status is changed next to the reply">
                         {% if work_order %}<span class="status-dot me-1" style="--tblr-status-color: var(--mb-status-workorder-{{ work_order.status }}, var(--tblr-secondary));"></span>{{ work_order.status|status_word:'workorder' }}{% else %}<span class="status-dot me-1" style="--tblr-status-color: var(--mb-status-ticket-{{ ticket.status }}, var(--tblr-secondary));"></span>{{ ticket.status|status_word:'ticket' }}{% endif %}
                     </a>

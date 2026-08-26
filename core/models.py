@@ -1125,6 +1125,11 @@ class WorkOrder(models.Model):
         ('cancelled', 'Cancelled'),
     ]
 
+    # Finished work that deserves client follow-up. A cancelled job never gets
+    # a thank-you. Read by the one-click send button AND its POST handler —
+    # the gate must be the same in both places.
+    FOLLOW_UP_STATUSES = ('completed',)
+
     PRIORITY_CHOICES = [
         ('low', 'Low'),
         ('normal', 'Normal'),
@@ -2359,6 +2364,20 @@ class SiteSettings(models.Model):
                   'and a later reply starts a new ticket linked to the old one.',
     )
 
+    # Internal notification email — who the SHOP hears from when work arrives.
+    # Assigned-tech notifications (a ticket handed to you; a customer reply on
+    # your ticket) are always on when outbound email is; only the new-ticket
+    # audience is configurable, because who catches brand-new work is shop
+    # policy (solo owner today, a rotation or dispatcher at a bigger shop).
+    notify_new_ticket = models.BooleanField(
+        default=False,
+        help_text='Email the recipients below when a new ticket arrives.',
+    )
+    notify_new_ticket_users = models.ManyToManyField(
+        'User', blank=True, related_name='+',
+        help_text='Who is emailed about new tickets (and replies on unassigned tickets). Blank = every admin.',
+    )
+
     # MFA enforcement
     require_mfa = models.BooleanField(
         default=False,
@@ -2730,6 +2749,9 @@ class EmailTemplate(models.Model):
         help_text='Leave blank to use the default signature.',
     )
     is_active = models.BooleanField(default=True)
+    # Custom templates only: offer this as a one-click send button on finished
+    # tickets and work orders (the PCRT-style follow-up).
+    quick_send = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -2759,10 +2781,11 @@ class FollowUpQuerySet(models.QuerySet):
 
 
 class FollowUp(models.Model):
-    """A planned touch with a customer or prospect: a thank-you, a satisfaction
-    check, a promised call-back. The Relationship Desk's unit of work. Lives on
-    the Board while due, on the Follow-ups list always, and is done when the
-    person says so (or when its email goes out)."""
+    """The record of a follow-up email sent to a customer — created done by the
+    one-click send button on a finished ticket or work order, shown in the
+    customer's Relationship history (Mike, Aug 25 2026: one button, one email,
+    one history record; the planned-touch worklist this model started as is
+    gone). due_on/kind remain from that era and on old rows."""
 
     KIND_CHOICES = [
         ('thank_you', 'Thank-you'),
@@ -2784,6 +2807,15 @@ class FollowUp(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     done_at = models.DateTimeField(null=True, blank=True)
     done_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='follow_ups_done')
+    # True on rows written by the one-click send. The row is created BEFORE the
+    # email goes out (a claim), so the unique constraints below make "one email
+    # per template per record" a database fact, not a check-then-act hope — and
+    # a crash after SMTP but before done_at still leaves the claim blocking a
+    # second send.
+    via_quick_send = models.BooleanField(default=False)
+    # Soft-hide from the Relationship history. Hiding never deletes the claim,
+    # so tidying history can never re-arm the send button.
+    hidden_at = models.DateTimeField(null=True, blank=True)
 
     objects = FollowUpQuerySet.as_manager()
 
@@ -2796,6 +2828,22 @@ class FollowUp(models.Model):
                 name='follow_up_exactly_one_of_client_or_prospect',
                 condition=(models.Q(client__isnull=False, prospect__isnull=True)
                            | models.Q(client__isnull=True, prospect__isnull=False)),
+            ),
+            # One quick-send per template per record, enforced by the DB.
+            models.UniqueConstraint(
+                fields=['template', 'work_order'],
+                condition=models.Q(via_quick_send=True, work_order__isnull=False),
+                name='one_quick_send_per_template_per_work_order',
+            ),
+            # No work_order__isnull condition here, deliberately: a claim made
+            # from the work-order side carries the linked ticket, and a linked
+            # ticket + work order is ONE work item (the Work Record principle).
+            # This key is what stops a WO send and a ticket send from double-
+            # emailing the same customer about the same job.
+            models.UniqueConstraint(
+                fields=['template', 'ticket'],
+                condition=models.Q(via_quick_send=True, ticket__isnull=False),
+                name='one_quick_send_per_template_per_ticket',
             ),
         ]
 

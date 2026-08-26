@@ -149,39 +149,6 @@ where money exists, and the card itself is the one action (open it).
         </div>
     </div>
 
-    {# ── Follow-ups ───────────────────────────────────────────────────── #}
-    <div class="col-12 col-xl-6">
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">Follow-ups due</h3>
-                <span class="badge bg-purple-lt ms-2">{{ follow_up_total }}</span>
-                <div class="card-actions"><a href="{% url 'core:follow_up_list' %}" class="btn btn-sm">All follow-ups</a></div>
-            </div>
-            {% if follow_ups %}
-            <div class="list-group list-group-flush">
-                {% for f in follow_ups %}
-                <a href="{% if f.client %}{% url 'core:client_detail' f.client.pk %}{% else %}{% url 'core:prospect_detail' f.prospect.pk %}{% endif %}#relationship" class="list-group-item list-group-item-action mb-stripe" style="--mb-stripe: var(--mb-room-desk, var(--tblr-purple));">
-                    <div class="row align-items-center g-2">
-                        <div class="col text-truncate">
-                            <div class="text-truncate"><span class="fw-medium">{{ f.who_name }}</span>{% if f.prospect %} <span class="badge bg-secondary-lt ms-1">Prospect</span>{% endif %}</div>
-                            <div class="text-secondary small text-truncate">{{ f.get_kind_display }}{% if f.note %} &middot; {{ f.note|truncatechars:60 }}{% endif %}{% if f.record %} &middot; {% if f.work_order %}{{ f.work_order.work_order_number }}{% else %}{{ f.ticket.ticket_number }}{% endif %}{% endif %}</div>
-                        </div>
-                        <div class="col-auto text-end small {% if f.is_overdue %}text-red fw-medium{% else %}text-secondary{% endif %}">{{ f.due_on|date:"M j" }}{% if f.is_overdue %}, overdue{% endif %}</div>
-                    </div>
-                </a>
-                {% endfor %}
-            </div>
-            {% else %}
-            <div class="card-body">
-                <div class="empty py-3">
-                    <p class="empty-title">No follow-ups due</p>
-                    <p class="empty-subtitle text-secondary">Thank-yous, satisfaction checks and planned touches land here on the day they are due. Plan one from a customer's Relationship panel.</p>
-                </div>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-
     {# ── Unsorted ─────────────────────────────────────────────────────── #}
     <div class="col-12 col-xl-6">
         <div class="card">
