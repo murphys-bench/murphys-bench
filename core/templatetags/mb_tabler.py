@@ -246,16 +246,27 @@ def quick_send_buttons(context, ticket=None, work_order=None, compact=False):
             eligible = work_order.status in WorkOrder.FOLLOW_UP_STATUSES
         else:
             eligible = ticket.status in Ticket.CLOSED_AT_STATUSES
-    sent_ids = set()
+    sent_ids, pending_ids = set(), set()
     if eligible:
         # follow_ups is prefetched on the list pages; one small query elsewhere.
-        # A quick-send CLAIM counts as sent even before done_at lands (a crash
-        # mid-send must not re-arm the button); legacy completed rows count too.
-        sent_ids = {fu.template_id for fu in record.follow_ups.all()
-                    if fu.template_id and (fu.via_quick_send or fu.done_at is not None)}
+        # A linked ticket + work order is one work item, so the work-order side
+        # also reads the ticket's rows (a ticket-side send blocks the WO button
+        # and vice versa — mirroring the claim constraint). Only via_quick_send
+        # rows count: a legacy planning row marked done never sent anything.
+        rows = list(record.follow_ups.all())
+        if work_order is not None and work_order.ticket_id:
+            rows += list(work_order.ticket.follow_ups.all())
+        for fu in rows:
+            if not fu.template_id or not fu.via_quick_send:
+                continue
+            # done_at unset = the claim exists but the outcome is unknown (a
+            # send died mid-flight). Truthfully "uncertain", never "sent".
+            (sent_ids if fu.done_at is not None else pending_ids).add(fu.template_id)
+        pending_ids -= sent_ids
     request = context.get('request')
     return {
-        'eligible': eligible, 'templates': templates, 'sent_ids': sent_ids,
+        'eligible': eligible, 'templates': templates,
+        'sent_ids': sent_ids, 'pending_ids': pending_ids,
         'ticket': ticket if work_order is None else None, 'work_order': work_order,
         'compact': compact,
         'next': request.get_full_path() if request else '',

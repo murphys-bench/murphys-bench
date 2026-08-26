@@ -736,8 +736,10 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
                 Q(client__name__icontains=search)
             )
 
-        # follow_ups feeds the one-click send buttons' sent-state per row.
-        return queryset.select_related('invoice').prefetch_related('follow_ups').order_by('-created_at')
+        # follow_ups (own + the linked ticket's) feeds the one-click send
+        # buttons' sent-state per row — a linked pair is one work item.
+        return (queryset.select_related('invoice', 'ticket')
+                .prefetch_related('follow_ups', 'ticket__follow_ups').order_by('-created_at'))
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -9250,12 +9252,25 @@ class QuickFollowUpSendView(LoginRequiredMixin, View):
 
         # Claim BEFORE sending. The partial unique constraints on FollowUp make
         # this atomic: of two concurrent clicks, exactly one insert survives and
-        # the loser never reaches SMTP. Any completed legacy row for this
-        # template+record blocks too (it was a real send).
-        legacy = FollowUp.objects.filter(template=template, done_at__isnull=False, via_quick_send=False)
-        legacy = legacy.filter(work_order=work_order) if work_order else legacy.filter(ticket=ticket, work_order__isnull=True)
-        if legacy.exists():
-            messages.info(request, f'"{template.name}" was already sent for this record.')
+        # the loser never reaches SMTP. A linked ticket + work order is one work
+        # item, so a claim from either side blocks the other (the ticket key
+        # binds both). Only via_quick_send rows count: a legacy planning row
+        # marked done never sent anything.
+        prior = FollowUp.objects.filter(template=template, via_quick_send=True)
+        if work_order is not None:
+            cond = Q(work_order=work_order)
+            if ticket is not None:
+                cond = cond | Q(ticket=ticket)
+            prior = prior.filter(cond)
+        else:
+            prior = prior.filter(ticket=ticket)
+        blocking = prior.first()
+        if blocking is not None:
+            if blocking.done_at is not None:
+                messages.info(request, f'"{template.name}" was already sent for this record.')
+            else:
+                messages.warning(request, f'A send of "{template.name}" for this record did not finish cleanly; '
+                                          f'its outcome is uncertain. Check the email log before anything is resent.')
             return redirect(next_url)
         try:
             with transaction.atomic():
@@ -9269,8 +9284,19 @@ class QuickFollowUpSendView(LoginRequiredMixin, View):
             messages.info(request, f'"{template.name}" was already sent for this record.')
             return redirect(next_url)
 
-        log = send_custom_email(template, to_email=to_email, client=client, contact=contact,
-                                ticket=ticket, work_order=work_order, user=request.user)
+        try:
+            log = send_custom_email(template, to_email=to_email, client=client, contact=contact,
+                                    ticket=ticket, work_order=work_order, user=request.user)
+        except Exception:
+            # Unexpected failure somewhere in the email path: SMTP may or may
+            # not have happened. Keep the claim (a possible send must stay
+            # spent), log loudly, and say exactly that — never "sent".
+            logger.exception('One-click send of template %s for %s ended in an unexpected error; '
+                             'outcome unknown, claim kept.', template.pk,
+                             work_order.work_order_number if work_order else ticket.ticket_number)
+            messages.error(request, f'The send of "{template.name}" did not complete cleanly; its outcome is '
+                                    f'uncertain and the button is locked. Check the email log.')
+            return redirect(next_url)
         if log.status != 'sent':
             # Nothing went out — release the claim so a retry is possible.
             fu.delete()
@@ -9278,9 +9304,6 @@ class QuickFollowUpSendView(LoginRequiredMixin, View):
             messages.error(request, f'Could not send "{template.name}" to {to_email}: {reason}.')
             return redirect(next_url)
 
-        # A crash between the send above and this write leaves the claim in
-        # place with done_at unset: the button stays spent, which is the right
-        # failure for a "one email" invariant.
         fu.done_at = timezone.now()
         fu.done_by = request.user
         fu.save(update_fields=['done_at', 'done_by'])

@@ -1,6 +1,8 @@
 {% load mb_tabler %}{% if eligible %}{% for tmpl in templates %}
 {% if tmpl.pk in sent_ids %}
 <span class="badge bg-green-lt {% if not compact %}p-2{% endif %}" title="Already sent for this record">{{ tmpl.name }} sent</span>
+{% elif tmpl.pk in pending_ids %}
+<span class="badge bg-yellow-lt {% if not compact %}p-2{% endif %}" title="A send did not finish cleanly; its outcome is uncertain. Check the email log.">{{ tmpl.name }}: send uncertain</span>
 {% else %}
 <form method="post" action="{% url 'core:follow_up_quick_send' %}" class="d-inline">
     <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">

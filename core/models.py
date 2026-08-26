@@ -2370,7 +2370,7 @@ class SiteSettings(models.Model):
     # audience is configurable, because who catches brand-new work is shop
     # policy (solo owner today, a rotation or dispatcher at a bigger shop).
     notify_new_ticket = models.BooleanField(
-        default=True,
+        default=False,
         help_text='Email the recipients below when a new ticket arrives.',
     )
     notify_new_ticket_users = models.ManyToManyField(
@@ -2835,9 +2835,14 @@ class FollowUp(models.Model):
                 condition=models.Q(via_quick_send=True, work_order__isnull=False),
                 name='one_quick_send_per_template_per_work_order',
             ),
+            # No work_order__isnull condition here, deliberately: a claim made
+            # from the work-order side carries the linked ticket, and a linked
+            # ticket + work order is ONE work item (the Work Record principle).
+            # This key is what stops a WO send and a ticket send from double-
+            # emailing the same customer about the same job.
             models.UniqueConstraint(
                 fields=['template', 'ticket'],
-                condition=models.Q(via_quick_send=True, ticket__isnull=False, work_order__isnull=True),
+                condition=models.Q(via_quick_send=True, ticket__isnull=False),
                 name='one_quick_send_per_template_per_ticket',
             ),
         ]

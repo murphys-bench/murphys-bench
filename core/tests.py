@@ -14817,7 +14817,7 @@ def _email_on(**extra):
 @pytest.mark.django_db
 def test_new_ticket_notifies_recipients_but_never_the_creator(client, client_obj, admin_user, _catch_internal_mail):
     from core.models import SiteSettings
-    _email_on()
+    _email_on(notify_new_ticket=True)
     admin_user.email = 'mike@example.com'; admin_user.save()
     other = User.objects.create_user(username='owner', password='x', is_staff=True, email='owner@example.com')
     client.force_login(admin_user)
@@ -14987,7 +14987,7 @@ def test_inbound_email_fires_internal_notifications(monkeypatch, admin_user, _ca
     when work arrives."""
     from core.management.commands.fetch_inbound_email import Command
     from django.core.management import call_command
-    site = _email_on()
+    site = _email_on(notify_new_ticket=True)
     site.inbound_email_enabled = True
     site.inbound_protocol = 'pop3'
     site.inbound_host = 'mail.example'
@@ -15094,11 +15094,12 @@ def test_hiding_history_is_admin_only(client, admin_user, _quick_template, _fini
 
 
 @pytest.mark.django_db
-def test_quick_send_claims_before_smtp_and_a_crash_leaves_it_spent(client, admin_user, _quick_template, _finished_world, monkeypatch):
-    """Review finding 3: the claim is written before SMTP. A crash mid-send
-    leaves the claim standing, so the button stays spent — the right failure
-    for a one-email invariant."""
-    from core.models import FollowUp
+def test_quick_send_claims_before_smtp_and_a_crash_is_uncertain_not_sent(client, admin_user, _quick_template, _finished_world, monkeypatch):
+    """Round 1: the claim is written before SMTP, so a crash mid-send leaves
+    the button spent. Round 2: that crash must not 500 the workflow, and the
+    spent button must say "uncertain", never "sent" — the email may or may not
+    have gone out and nothing should pretend to know."""
+    from core.models import FollowUp, EmailSendLog
     from core import email_utils
     c = _finished_world
     ticket = Ticket.objects.create(client=c, subject='S', description='D', status='resolved')
@@ -15106,13 +15107,17 @@ def test_quick_send_claims_before_smtp_and_a_crash_leaves_it_spent(client, admin
     def boom(*a, **k):
         raise RuntimeError('crashed mid-send')
     monkeypatch.setattr(email_utils, 'send_custom_email', boom)
-    with pytest.raises(RuntimeError):
-        client.post(reverse('core:follow_up_quick_send'), {'template': _quick_template.pk, 'ticket': ticket.pk})
+    r = client.post(reverse('core:follow_up_quick_send'), {'template': _quick_template.pk, 'ticket': ticket.pk})
+    assert r.status_code == 302  # never a 500 for an email-path failure
     fu = FollowUp.objects.get()
     assert fu.via_quick_send is True and fu.done_at is None
-    # The button reads the claim as sent.
+    # The button is locked with the truthful state, and a re-POST sends nothing.
     page = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
-    assert 'Thank You Note sent' in page and 'follow-ups/quick-send' not in page
+    assert 'send uncertain' in page and 'Thank You Note sent' not in page and 'follow-ups/quick-send' not in page
+    monkeypatch.undo()
+    before = EmailSendLog.objects.count()
+    client.post(reverse('core:follow_up_quick_send'), {'template': _quick_template.pk, 'ticket': ticket.pk})
+    assert FollowUp.objects.count() == 1 and EmailSendLog.objects.count() == before
 
 
 @pytest.mark.django_db
@@ -15123,7 +15128,7 @@ def test_new_ticket_recipients_configured_but_undeliverable_warns_and_sends_noth
     import logging
     from core.models import SiteSettings
     from core.email_utils import notify_new_ticket
-    _email_on()
+    _email_on(notify_new_ticket=True)
     admin_user.email = 'mike@example.com'; admin_user.save()
     ghost = User.objects.create_user(username='ghost', password='x', email='')
     SiteSettings.get().notify_new_ticket_users.set([ghost])
@@ -15161,8 +15166,9 @@ def test_assignment_to_unreachable_tech_leaves_a_no_address_log(client_obj, admi
 @pytest.mark.django_db
 def test_create_and_assign_sends_one_email_not_two(client, client_obj, admin_user, _catch_internal_mail):
     """Review Q3: a tech in the new-ticket audience who is also the assignee
-    gets only the assignment email for that one event."""
-    _email_on()
+    gets only the assignment email for that one event. notify_new_ticket is ON
+    here so the exclusion is what this proves, not the master toggle."""
+    _email_on(notify_new_ticket=True)
     admin_user.email = 'mike@example.com'; admin_user.save()
     tech = User.objects.create_user(username='tech', password='x', is_staff=True, email='tech@example.com')
     client.force_login(admin_user)
@@ -15177,7 +15183,7 @@ def test_create_and_assign_sends_one_email_not_two(client, client_obj, admin_use
 def test_one_failing_recipient_does_not_starve_the_rest(client_obj, admin_user, monkeypatch):
     """Review finding 6: recipient #1 blowing up must not stop recipient #2."""
     from core import email_utils
-    _email_on()
+    _email_on(notify_new_ticket=True)
     admin_user.email = 'mike@example.com'; admin_user.save()
     User.objects.create_user(username='second', password='x', is_staff=True, email='second@example.com')
     attempted = []
@@ -15189,3 +15195,82 @@ def test_one_failing_recipient_does_not_starve_the_rest(client_obj, admin_user, 
     ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
     email_utils.notify_new_ticket(ticket)
     assert len(attempted) == 2
+
+
+# ── Review round 2 (Aug 26 2026) ─────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_linked_ticket_and_work_order_are_one_work_item_for_quick_send(client, admin_user, _quick_template, _finished_world, _catch_internal_mail):
+    """Round 2 finding 1: a WO send used to mark the linked ticket's UI as sent
+    while the backend still accepted a ticket POST — UI and database disagreed.
+    Now the claim's ticket key binds both sides: one work item, one send."""
+    from core.models import FollowUp, EmailSendLog
+    c = _finished_world
+    ticket = Ticket.objects.create(client=c, subject='S', description='D', status='resolved')
+    wo = WorkOrder.objects.create(client=c, ticket=ticket, status='completed')
+    client.force_login(admin_user)
+    # Send from the work-order side.
+    client.post(reverse('core:follow_up_quick_send'), {'template': _quick_template.pk, 'work_order': wo.pk})
+    assert FollowUp.objects.count() == 1
+    sends = EmailSendLog.objects.count()
+    # Both pages show sent…
+    assert 'Thank You Note sent' in client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    assert 'Thank You Note sent' in client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
+    # …and a direct POST against the ticket sends nothing (the backend agrees).
+    client.post(reverse('core:follow_up_quick_send'), {'template': _quick_template.pk, 'ticket': ticket.pk})
+    assert FollowUp.objects.count() == 1 and EmailSendLog.objects.count() == sends
+
+
+@pytest.mark.django_db
+def test_ticket_side_send_blocks_the_work_order_side_too(client, admin_user, _quick_template, _finished_world, _catch_internal_mail):
+    from core.models import FollowUp, EmailSendLog
+    c = _finished_world
+    ticket = Ticket.objects.create(client=c, subject='S', description='D', status='resolved')
+    wo = WorkOrder.objects.create(client=c, ticket=ticket, status='completed')
+    client.force_login(admin_user)
+    client.post(reverse('core:follow_up_quick_send'), {'template': _quick_template.pk, 'ticket': ticket.pk})
+    assert FollowUp.objects.count() == 1
+    sends = EmailSendLog.objects.count()
+    assert 'Thank You Note sent' in client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
+    client.post(reverse('core:follow_up_quick_send'), {'template': _quick_template.pk, 'work_order': wo.pk})
+    assert FollowUp.objects.count() == 1 and EmailSendLog.objects.count() == sends
+
+
+@pytest.mark.django_db
+def test_legacy_completed_planning_row_neither_blocks_nor_shows_sent(client, admin_user, _quick_template, _finished_world, _catch_internal_mail):
+    """Round 2 finding 3: the old FollowUpDoneView marked planning rows done
+    WITHOUT sending email, so a legacy done row proves nothing about a send.
+    It must not block the button or render as sent."""
+    from core.models import FollowUp, EmailSendLog
+    c = _finished_world
+    ticket = Ticket.objects.create(client=c, subject='S', description='D', status='resolved')
+    FollowUp.objects.create(client=c, ticket=ticket, kind='planned', due_on=timezone.localdate(),
+                            template=_quick_template, done_at=timezone.now(), via_quick_send=False)
+    client.force_login(admin_user)
+    page = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    assert 'follow-ups/quick-send' in page and 'Thank You Note sent' not in page
+    client.post(reverse('core:follow_up_quick_send'), {'template': _quick_template.pk, 'ticket': ticket.pk})
+    assert EmailSendLog.objects.filter(status='sent').count() == 1
+    assert FollowUp.objects.filter(via_quick_send=True, done_at__isnull=False).count() == 1
+
+
+@pytest.mark.django_db
+def test_new_ticket_notifications_ship_off(client, client_obj, admin_user, _catch_internal_mail):
+    """Mike's ruling (Aug 26 2026): notifications are opt-in. A fresh install
+    (and an upgraded one, via the 0116 data step) emails nobody about new
+    tickets until the shop turns it on."""
+    site = _email_on()  # enables outbound email, does NOT touch notify_new_ticket
+    assert site.notify_new_ticket is False
+    admin_user.email = 'mike@example.com'; admin_user.save()
+    # A second admin who WOULD be notified if the default were on.
+    User.objects.create_user(username='owner', password='x', is_staff=True, email='owner@example.com')
+    client.force_login(admin_user)
+    client.post(reverse('core:ticket_create'), {
+        'client': client_obj.pk, 'subject': 'S', 'description': 'd',
+        'source': 'phone', 'priority': 'normal', 'status': 'new'})
+    assert [s for t, s in _catch_internal_mail if 'New ticket' in s] == []
+    # Assignment/reply notifications ride the outbound master switch as before.
+    tech = User.objects.create_user(username='tech', password='x', email='tech@example.com')
+    t2 = Ticket.objects.create(client=client_obj, subject='S2', description='D')
+    client.post(reverse('core:ticket_assign', args=[t2.pk]), {'assigned_to': str(tech.pk)})
+    assert [t for t, s in _catch_internal_mail if 'Assigned to you' in s] == ['tech@example.com']
