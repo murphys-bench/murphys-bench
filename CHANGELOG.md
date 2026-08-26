@@ -18,6 +18,7 @@ the Unreleased entries move under that version and prod gets a single update.
 ### Changed
 
 - Follow-up planning is gone entirely: no Desk list, no plan form, no Board region. A follow-up is the one-click send, recorded in the customer's Relationship history.
+- One email per template per record is enforced by the database, and removing an entry from the history (admin only) hides it without forgetting the send, so the button can never email a customer twice.
 
 ### Fixed
 
