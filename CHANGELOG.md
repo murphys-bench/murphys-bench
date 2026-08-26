@@ -12,7 +12,7 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ### Added
 
-- The shop is emailed when work arrives: the assigned tech on hand-off and on customer replies; new tickets go to a recipient list on Settings, Outbound Email (blank means every admin).
+- The shop is emailed when work arrives: the assigned tech on hand-off and on customer replies. New-ticket emails are opt-in on Settings, Outbound Email, going to a recipient list there (blank means every admin).
 - One-click follow-up: mark one of your own email templates "One-click send" and finished tickets and work orders show a single button that emails the customer and records the follow-up.
 
 ### Changed
