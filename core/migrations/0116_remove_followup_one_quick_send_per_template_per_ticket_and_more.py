@@ -3,6 +3,29 @@
 from django.db import migrations, models
 
 
+def _collapse_cross_side_claims(apps, schema_editor):
+    """Round-3 review finding (P2): the 0114-era code accepted a quick send
+    from BOTH sides of a linked ticket/work-order pair, and 0115's marker
+    de-duplicated the two sides under different keys — so a database can hold
+    two via_quick_send claims for the same (template, ticket). The wider
+    ticket-key constraint added below would fail to build on that data.
+
+    Both rows were real sends, so history keeps both: the EARLIEST row keeps
+    the claim (via_quick_send=True), later ones are demoted to plain completed
+    rows — still listed in the Relationship history, no longer claim-holders.
+    """
+    FollowUp = apps.get_model('core', 'FollowUp')
+    keep = {}
+    for fu in (FollowUp.objects.filter(via_quick_send=True, ticket__isnull=False)
+               .order_by('created_at', 'pk')):
+        key = (fu.template_id, fu.ticket_id)
+        if key in keep:
+            fu.via_quick_send = False
+            fu.save(update_fields=['via_quick_send'])
+        else:
+            keep[key] = fu.pk
+
+
 def _notifications_ship_off(apps, schema_editor):
     """Mike's ruling (Aug 26 2026): new-ticket notifications are opt-in. An
     install that took 0114 before this migration got True; upgrades must not
@@ -28,6 +51,7 @@ class Migration(migrations.Migration):
             field=models.BooleanField(default=False, help_text='Email the recipients below when a new ticket arrives.'),
         ),
         migrations.RunPython(_notifications_ship_off, migrations.RunPython.noop),
+        migrations.RunPython(_collapse_cross_side_claims, migrations.RunPython.noop),
         migrations.AddConstraint(
             model_name='followup',
             constraint=models.UniqueConstraint(condition=models.Q(('ticket__isnull', False), ('via_quick_send', True)), fields=('template', 'ticket'), name='one_quick_send_per_template_per_ticket'),

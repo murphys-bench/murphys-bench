@@ -15274,3 +15274,44 @@ def test_new_ticket_notifications_ship_off(client, client_obj, admin_user, _catc
     t2 = Ticket.objects.create(client=client_obj, subject='S2', description='D')
     client.post(reverse('core:ticket_assign', args=[t2.pk]), {'assigned_to': str(tech.pk)})
     assert [t for t, s in _catch_internal_mail if 'Assigned to you' in s] == ['tech@example.com']
+
+
+@pytest.mark.django_db(transaction=True)
+def test_migration_0116_collapses_cross_side_claims_before_widening_the_ticket_key(admin_user):
+    """Round 3 review finding (P2): a database upgraded through the 0114-era
+    code can hold a ticket-side claim AND a linked WO-side claim for the same
+    (template, ticket); building 0116's wider unique index on that data fails.
+    The collapse step must keep one claim (the earliest), demote the rest to
+    plain history, and let the index build."""
+    from django.db import connection
+    from core.models import Client, FollowUp, EmailTemplate
+    import importlib
+    mig = importlib.import_module(
+        'core.migrations.0116_remove_followup_one_quick_send_per_template_per_ticket_and_more')
+    from django.apps import apps as real_apps
+
+    constraint = next(c for c in FollowUp._meta.constraints
+                      if c.name == 'one_quick_send_per_template_per_ticket')
+    c = Client.objects.create(name='Acme', client_type='business')
+    t = EmailTemplate.objects.create(name='T', subject_template='s', body_template='b', quick_send=True)
+    ticket = Ticket.objects.create(client=c, subject='S', description='D', status='resolved')
+    wo = WorkOrder.objects.create(client=c, ticket=ticket, status='completed')
+
+    with connection.schema_editor() as editor:
+        editor.remove_constraint(FollowUp, constraint)
+    try:
+        # The 0114-era shape: both sides sent, both marked by 0115.
+        first = FollowUp.objects.create(client=c, ticket=ticket, kind='other', due_on=timezone.localdate(),
+                                        template=t, done_at=timezone.now(), via_quick_send=True)
+        second = FollowUp.objects.create(client=c, ticket=ticket, work_order=wo, kind='other',
+                                         due_on=timezone.localdate(), template=t,
+                                         done_at=timezone.now(), via_quick_send=True)
+        mig._collapse_cross_side_claims(real_apps, None)
+    finally:
+        # Re-adding the wider index IS the reviewer's reproduced failure; after
+        # the collapse it must succeed.
+        with connection.schema_editor() as editor:
+            editor.add_constraint(FollowUp, constraint)
+    first.refresh_from_db(); second.refresh_from_db()
+    assert first.via_quick_send is True, 'the earliest send keeps the claim'
+    assert second.via_quick_send is False and second.done_at is not None, 'later send stays as history'
