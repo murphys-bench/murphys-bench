@@ -17,7 +17,7 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ### Changed
 
-- The Desk Follow-ups list is gone. A follow-up lives on its customer and record, and on the Board while due; planning one from a client or prospect is unchanged.
+- Follow-up planning is gone entirely: no Desk list, no plan form, no Board region. A follow-up is the one-click send, recorded in the customer's Relationship history.
 
 ### Fixed
 

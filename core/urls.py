@@ -64,8 +64,6 @@ urlpatterns = [
     path('prospects/<int:pk>/delete/', views.ProspectDeleteView.as_view(), name='prospect_delete'),
 
     path('reports/pdf/', views.ReportsPDFView.as_view(), name='reports_pdf'),
-    path('follow-ups/new/', views.FollowUpCreateView.as_view(), name='follow_up_create'),
-    path('follow-ups/<int:pk>/done/', views.FollowUpDoneView.as_view(), name='follow_up_done'),
     path('follow-ups/<int:pk>/delete/', views.FollowUpDeleteView.as_view(), name='follow_up_delete'),
     path('follow-ups/quick-send/', views.QuickFollowUpSendView.as_view(), name='follow_up_quick_send'),
     path('email/customer/', views.CustomerEmailView.as_view(), name='customer_email'),

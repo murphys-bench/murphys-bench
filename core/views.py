@@ -668,8 +668,6 @@ class BoardView(LoginRequiredMixin, View):
             'work_orders': wos,
             'wo_total': open_wos.count(),
             'unsorted': list(unsorted[:self.REGION_CAP]),
-            'follow_ups': list(FollowUp.objects.due().select_related('client', 'prospect', 'ticket', 'work_order')[:self.REGION_CAP]),
-            'follow_up_total': FollowUp.objects.due().count(),
             'unsorted_total': unsorted.count(),
             'region_cap': self.REGION_CAP,
         }
@@ -1162,10 +1160,10 @@ class ClientDetailView(LoginRequiredMixin, DetailView):
         # Standing is the word: Client (active Service Agreement) or Customer.
         context['has_sa'] = self.object.is_managed or self.object.contracts.filter(status='active').exists()
         from .models import FollowUp
-        context['follow_ups'] = list(FollowUp.objects.filter(client=self.object).open().select_related('template', 'ticket', 'work_order'))
-        context['done_follow_ups'] = list(FollowUp.objects.filter(client=self.object, done_at__isnull=False).order_by('-done_at')[:5])
+        # Follow-ups are records of sent one-click emails — history, not a worklist.
+        context['done_follow_ups'] = list(FollowUp.objects.filter(client=self.object, done_at__isnull=False)
+                                          .select_related('template', 'ticket', 'work_order').order_by('-done_at')[:10])
         context['custom_templates'] = EmailTemplate.objects.filter(trigger__isnull=True, is_active=True)
-        context['follow_up_kinds'] = FollowUp.KIND_CHOICES
         context['open_tickets'] = (_scope_tickets_for(Ticket.objects.filter(client=self.object), self.request.user)
                                    .exclude(status__in=TICKET_CLOSED_STATUSES).order_by('-created_at'))
         context['open_wos'] = (_scope_assignable_for(WorkOrder.objects.filter(client=self.object), self.request.user)
@@ -1965,10 +1963,9 @@ class ProspectDetailView(ProspectAccessMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        ctx['follow_ups'] = list(FollowUp.objects.filter(prospect=self.object).open().select_related('template'))
-        ctx['done_follow_ups'] = list(FollowUp.objects.filter(prospect=self.object, done_at__isnull=False).order_by('-done_at')[:5])
+        ctx['done_follow_ups'] = list(FollowUp.objects.filter(prospect=self.object, done_at__isnull=False)
+                                      .select_related('template').order_by('-done_at')[:10])
         ctx['custom_templates'] = EmailTemplate.objects.filter(trigger__isnull=True, is_active=True)
-        ctx['follow_up_kinds'] = FollowUp.KIND_CHOICES
         return ctx
 
 
@@ -9113,16 +9110,15 @@ class _ConflictingContext(Exception):
 
 
 def _resolve_desk_context(request):
-    """Work out WHO a follow-up or email is about from the ids in the request,
-    and refuse any combination that does not describe one customer.
+    """Work out WHO an email is about from the ids in the request, and refuse
+    any combination that does not describe one customer.
 
-    Precedence: the follow-up, then the work order, then the ticket, decide the
-    customer; an explicit client/prospect id must agree with them, so a request
-    can never send customer B an email filled with customer A's ticket, or mark
-    an unrelated follow-up done. Returns a dict with follow_up, work_order,
-    ticket, client, prospect; raises _ConflictingContext on any mismatch.
+    The work order, then the ticket, decide the customer; an explicit
+    client/prospect id must agree with them, so a request can never send
+    customer B an email filled with customer A's ticket. Returns a dict with
+    work_order, ticket, client, prospect; raises _ConflictingContext on any
+    mismatch.
     """
-    from .models import FollowUp
     src = request.POST if request.method == 'POST' else request.GET
 
     def _get(model, key):
@@ -9134,23 +9130,10 @@ def _resolve_desk_context(request):
         except (TypeError, ValueError):
             raise _ConflictingContext(f'bad {key}')
 
-    follow_up = _get(FollowUp, 'follow_up')
     work_order = _get(WorkOrder, 'work_order')
     ticket = _get(Ticket, 'ticket')
     client = _get(Client, 'client')
     prospect = _get(Prospect, 'prospect')
-
-    if follow_up is not None:
-        for name, given, own in (('work_order', work_order, follow_up.work_order),
-                                 ('ticket', ticket, follow_up.ticket),
-                                 ('client', client, follow_up.client),
-                                 ('prospect', prospect, follow_up.prospect)):
-            if given is not None and own is not None and given.pk != own.pk:
-                raise _ConflictingContext(f'{name} does not belong to this follow-up')
-            if given is not None and own is None:
-                raise _ConflictingContext(f'{name} is not part of this follow-up')
-        work_order, ticket = follow_up.work_order, follow_up.ticket
-        client, prospect = follow_up.client, follow_up.prospect
 
     if work_order is not None and ticket is not None and work_order.ticket_id and work_order.ticket_id != ticket.pk:
         raise _ConflictingContext('ticket and work order do not match')
@@ -9174,58 +9157,7 @@ def _resolve_desk_context(request):
 
     if client is not None and prospect is not None:
         raise _ConflictingContext('one customer or one prospect, not both')
-    return {'follow_up': follow_up, 'work_order': work_order, 'ticket': ticket, 'client': client, 'prospect': prospect}
-
-
-class FollowUpCreateView(LoginRequiredMixin, View):
-    """POST from a Client Hub, Prospect page or Work Record. Returns to where
-    it came from (`next`), else the customer's page. A follow-up lives on the
-    record it belongs to (and on the Board while due) — there is deliberately
-    no global follow-ups list."""
-
-    def post(self, request):
-        from .models import FollowUp
-        from datetime import date
-        try:
-            who = _resolve_desk_context(request)
-        except _ConflictingContext as exc:
-            return HttpResponseBadRequest(f'Cannot plan that follow-up: {exc}.')
-        client, prospect, ticket, work_order = who['client'], who['prospect'], who['ticket'], who['work_order']
-        who_url = (reverse('core:client_detail', args=[client.pk]) if client
-                   else reverse('core:prospect_detail', args=[prospect.pk]) if prospect
-                   else reverse('core:dashboard'))
-        if not client and not prospect:
-            messages.error(request, 'A follow-up needs a customer or a prospect.')
-            return redirect(request.POST.get('next') or who_url)
-        try:
-            due_on = date.fromisoformat(request.POST.get('due_on', ''))
-        except ValueError:
-            messages.error(request, 'Pick a date for the follow-up.')
-            return redirect(request.POST.get('next') or who_url)
-        kind = request.POST.get('kind') or 'planned'
-        if kind not in dict(FollowUp.KIND_CHOICES):
-            kind = 'other'
-        tmpl_id = request.POST.get('template') or None
-        fu = FollowUp.objects.create(
-            client=client, prospect=prospect, ticket=ticket, work_order=work_order,
-            kind=kind, note=(request.POST.get('note') or '').strip(), due_on=due_on,
-            template_id=int(tmpl_id) if tmpl_id else None, created_by=request.user,
-        )
-        messages.success(request, f'{fu.get_kind_display()} planned for {fu.who_name} on {due_on:%b %-d}.')
-        return redirect(request.POST.get('next') or who_url)
-
-
-class FollowUpDoneView(LoginRequiredMixin, View):
-    def post(self, request, pk):
-        from .models import FollowUp
-        from django.utils import timezone
-        fu = get_object_or_404(FollowUp, pk=pk)
-        if fu.done_at is None:
-            fu.done_at = timezone.now(); fu.done_by = request.user; fu.save(update_fields=['done_at', 'done_by'])
-        messages.success(request, f'{fu.get_kind_display()} for {fu.who_name} marked done.')
-        who_url = (reverse('core:client_detail', args=[fu.client_id]) if fu.client_id
-                   else reverse('core:prospect_detail', args=[fu.prospect_id]))
-        return redirect(request.POST.get('next') or who_url)
+    return {'work_order': work_order, 'ticket': ticket, 'client': client, 'prospect': prospect}
 
 
 class FollowUpDeleteView(LoginRequiredMixin, View):
@@ -9315,22 +9247,22 @@ class QuickFollowUpSendView(LoginRequiredMixin, View):
 
 class CustomerEmailView(LoginRequiredMixin, View):
     """Compose and send one of the shop's own (custom) email templates to a
-    customer, from a Work Record, a Client Hub, or a follow-up. GET shows the
-    rendered template (editable); POST sends the edited text. Nothing goes out
-    without a person reading it first."""
+    customer, from a Work Record or a Client Hub. GET shows the rendered
+    template (editable); POST sends the edited text. Nothing goes out without
+    a person reading it first."""
     template_name = 'core/customer_email.html'
 
     def _context(self, request):
         from .email_utils import email_context, render_email_template
         src = request.POST if request.method == 'POST' else request.GET
         who = _resolve_desk_context(request)  # raises _ConflictingContext; get/post turn it into a 400
-        follow_up, client, prospect = who['follow_up'], who['client'], who['prospect']
+        client, prospect = who['client'], who['prospect']
         ticket, work_order = who['ticket'], who['work_order']
         if not client and not prospect:
             raise Http404('No customer to email.')
         templates = list(EmailTemplate.objects.filter(trigger__isnull=True, is_active=True).select_related('signature'))
         chosen = None
-        tid = src.get('template') or (follow_up.template_id if follow_up and follow_up.template_id else None)
+        tid = src.get('template')
         if tid:
             chosen = next((t for t in templates if str(t.pk) == str(tid)), None)
         contacts = list(client.contacts.filter(is_active=True)) if client else []
@@ -9348,7 +9280,7 @@ class CustomerEmailView(LoginRequiredMixin, View):
                 render_error = 'This template has a syntax error; fix it in Settings, Email Templates.'
         return {
             'client': client, 'prospect': prospect, 'ticket': ticket, 'work_order': work_order,
-            'follow_up': follow_up, 'templates': templates, 'chosen': chosen,
+            'templates': templates, 'chosen': chosen,
             'contacts': contacts, 'default_contact': default_contact, 'default_email': default_email,
             'subject': subject, 'body': body, 'render_error': render_error,
             'back_url': (reverse('core:work_order_detail', args=[work_order.pk]) if work_order
@@ -9367,7 +9299,6 @@ class CustomerEmailView(LoginRequiredMixin, View):
     def post(self, request):
         from .email_utils import send_custom_email
         from .models import TicketReply
-        from django.utils import timezone
         try:
             ctx = self._context(request)
         except _ConflictingContext as exc:
@@ -9400,9 +9331,6 @@ class CustomerEmailView(LoginRequiredMixin, View):
             if ctx['ticket'] is not None:
                 TicketReply.objects.create(ticket=ctx['ticket'], reply_type='internal', created_by=request.user,
                                            content=f'Emailed {to_email}: {subject}')
-            if ctx['follow_up'] is not None and ctx['follow_up'].done_at is None:
-                fu = ctx['follow_up']; fu.done_at = timezone.now(); fu.done_by = request.user
-                fu.save(update_fields=['done_at', 'done_by'])
             return redirect(ctx['back_url'])
         reason = dict(log.REASON_CHOICES).get(log.reason, log.reason)
         messages.error(request, f'Not sent: {reason}. {log.detail}'.strip())

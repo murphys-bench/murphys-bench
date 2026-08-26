@@ -1383,8 +1383,11 @@ def test_board_renders_admin_money_tiles_and_unsorted_region(client, admin_user)
     body = resp.content.decode()
     assert 'Ready to bill' in body and 'Outstanding' in body
     assert 'Unsorted inbound' in body and 'unsorted' in body
-    for region in ('Tickets', 'Bench', 'Follow-ups', 'Unsorted inbound'):
+    # Follow-ups region removed Aug 25 2026 — follow-ups are history on the
+    # customer, not a Board worklist.
+    for region in ('Tickets', 'Bench', 'Unsorted inbound'):
         assert region in body
+    assert 'Follow-ups due' not in body
 
 
 @pytest.mark.django_db
@@ -14475,7 +14478,7 @@ def test_custom_email_templates_can_be_added_edited_and_deleted(client, admin_us
 
 @pytest.mark.django_db
 def test_customer_email_compose_renders_template_and_sends_edited_text(client, admin_user, monkeypatch):
-    from core.models import Client, Contact, EmailTemplate, EmailSendLog, SiteSettings, TicketReply, FollowUp
+    from core.models import Client, Contact, EmailTemplate, EmailSendLog, SiteSettings, TicketReply
     from core import email_utils
     client.force_login(admin_user)
     site = SiteSettings.get(); site.email_enabled = True; site.save()
@@ -14483,78 +14486,67 @@ def test_customer_email_compose_renders_template_and_sends_edited_text(client, a
     Contact.objects.create(client=c, first_name='Pat', last_name='Q', email='pat@example.com', is_primary=True)
     t = EmailTemplate.objects.create(name='Thank-you', subject_template='Thanks, {{ customer_name }}', body_template='Hi {{ customer_name }}, from {{ site_name }}.')
     ticket = Ticket.objects.create(client=c, subject='S', description='D')
-    fu = FollowUp.objects.create(client=c, ticket=ticket, kind='thank_you', due_on=timezone.localdate(), template=t, created_by=admin_user)
     # GET: the template is rendered for this customer, editable.
-    r = client.get(reverse('core:customer_email') + f'?follow_up={fu.pk}')
+    r = client.get(reverse('core:customer_email') + f'?ticket={ticket.pk}&template={t.pk}')
     assert r.status_code == 200
     body = r.content.decode()
     assert 'value="Thanks, Pat"' in body and 'Hi Pat, from' in body
-    # POST: the edited text goes, not a fresh render; the ticket gets an internal note; the follow-up is done.
+    # POST: the edited text goes, not a fresh render; the ticket gets an internal note.
     sent = {}
     def fake_smtp(site, subject, plain_body, html_body, logo_data, logo_mime, to_email, cc=None, bcc=None, label=''):
         sent.update(subject=subject, body=plain_body, to=to_email); return 'sent', '', ''
     monkeypatch.setattr(email_utils, '_smtp_send', fake_smtp)
-    r = client.post(reverse('core:customer_email'), {'follow_up': fu.pk, 'template': t.pk, 'contact': c.contacts.first().pk, 'subject': 'Thanks, Pat (edited)', 'body': 'Edited body.'})
+    r = client.post(reverse('core:customer_email'), {'ticket': ticket.pk, 'template': t.pk, 'contact': c.contacts.first().pk, 'subject': 'Thanks, Pat (edited)', 'body': 'Edited body.'})
     assert r.status_code == 302
     assert sent['to'] == 'pat@example.com' and sent['subject'] == 'Thanks, Pat (edited)' and sent['body'].startswith('Edited body.')
     log = EmailSendLog.objects.get(ticket=ticket)
     assert log.status == 'sent' and log.trigger.startswith('custom:')
     assert TicketReply.objects.filter(ticket=ticket, reply_type='internal', content__startswith='Emailed pat@example.com').exists()
-    fu.refresh_from_db(); assert fu.done_at is not None and fu.done_by == admin_user
 
 
 @pytest.mark.django_db
-def test_customer_email_honors_suppression_and_does_not_mark_follow_up_done(client, admin_user):
-    from core.models import Client, EmailTemplate, EmailSendLog, SiteSettings, FollowUp
+def test_customer_email_honors_suppression(client, admin_user):
+    from core.models import Client, EmailTemplate, EmailSendLog, SiteSettings
     client.force_login(admin_user)
     site = SiteSettings.get(); site.email_enabled = False; site.save()
     c = Client.objects.create(name='Acme', client_type='business', email='a@example.com')
     t = EmailTemplate.objects.create(name='T', subject_template='s', body_template='b')
-    fu = FollowUp.objects.create(client=c, kind='planned', due_on=timezone.localdate(), template=t)
-    r = client.post(reverse('core:customer_email'), {'follow_up': fu.pk, 'template': t.pk, 'custom_email': 'x@example.com', 'subject': 's', 'body': 'b'})
+    r = client.post(reverse('core:customer_email'), {'client': c.pk, 'template': t.pk, 'custom_email': 'x@example.com', 'subject': 's', 'body': 'b'})
     assert r.status_code == 200 and b'Not sent' in r.content
     assert EmailSendLog.objects.get().status == 'suppressed'
-    fu.refresh_from_db(); assert fu.done_at is None
 
 
 @pytest.mark.django_db
-def test_follow_up_lifecycle_hub_board_list_done(client, admin_user):
-    # A follow-up lives on the customer it belongs to (and the Board while due).
-    # The old global Follow-ups list is gone by design — a pile attached to
-    # nothing (Mike, Aug 25 2026); this test asserts the URL stays dead.
-    from core.models import Client, FollowUp, Prospect
-    from datetime import timedelta
+def test_follow_up_planning_is_gone_and_history_lives_on_the_customer(client, admin_user):
+    # Mike, Aug 25 2026: one button, one email, one history record. No planning
+    # form, no due worklist, no Board region, no global list.
+    from core.models import Client as ClientModel, Contact, EmailTemplate, FollowUp
+    from core import email_utils
     from django.urls import NoReverseMatch
     client.force_login(admin_user)
-    c = Client.objects.create(name='Acme', client_type='business')
-    today = timezone.localdate()
-    # Plan from the Client Hub (returns there).
-    r = client.post(reverse('core:follow_up_create'), {'client': c.pk, 'kind': 'satisfaction', 'due_on': today.isoformat(), 'note': 'Ask about the laptop', 'next': f'/clients/{c.pk}/#relationship'})
-    assert r.status_code == 302 and r['Location'].endswith('#relationship')
-    fu = FollowUp.objects.get(); assert fu.client == c and fu.created_by == admin_user and not fu.is_overdue
-    # Upcoming one for a prospect.
-    p = Prospect.objects.create(contact_first_name='Lee', contact_last_name='P', email='lee@example.com')
-    client.post(reverse('core:follow_up_create'), {'prospect': p.pk, 'kind': 'planned', 'due_on': (today + timedelta(days=3)).isoformat()})
-    assert FollowUp.objects.due().count() == 1 and FollowUp.objects.open().count() == 2
-    # Board region and hub panel.
-    body = client.get('/').content.decode()
-    assert 'Follow-ups due' in body and 'Ask about the laptop' in body
+    site = SiteSettings.get(); site.email_enabled = True; site.save()
+    c = ClientModel.objects.create(name='Acme', client_type='business')
+    Contact.objects.create(client=c, first_name='Pat', last_name='L', email='pat@example.com', is_primary=True)
+    t = EmailTemplate.objects.create(name='Thank You Note', subject_template='s', body_template='b',
+                                     is_active=True, quick_send=True)
+    ticket = Ticket.objects.create(client=c, subject='S', description='D', status='resolved')
+    import unittest.mock as mock
+    with mock.patch.object(email_utils, '_smtp_send', return_value=('sent', '', '')):
+        client.post(reverse('core:follow_up_quick_send'), {'template': t.pk, 'ticket': ticket.pk})
+    fu = FollowUp.objects.get(); assert fu.done_at is not None
+    # The record shows in the customer's Relationship history.
     hub = client.get(reverse('core:client_detail', args=[c.pk])).content.decode()
-    assert 'Satisfaction check' in hub and 'Plan it' in hub
-    # The upcoming prospect touch shows on the prospect's own page.
-    assert 'Planned touch' in client.get(reverse('core:prospect_detail', args=[p.pk])).content.decode()
-    # Done, then it leaves the Board but stays in the customer's history.
-    client.post(reverse('core:follow_up_done', args=[fu.pk]))
-    fu.refresh_from_db(); assert fu.done_at is not None
-    assert 'Ask about the laptop' not in client.get('/').content.decode()
-    assert 'Satisfaction check' in client.get(reverse('core:client_detail', args=[c.pk])).content.decode()
-    # The global list stays retired: no URL name, no route.
-    with pytest.raises(NoReverseMatch):
-        reverse('core:follow_up_list')
+    assert 'Thank You Note' in hub and 'sent' in hub
+    # No planning surfaces anywhere: routes gone, Board region gone.
+    for name in ('follow_up_list', 'follow_up_create', 'follow_up_done'):
+        with pytest.raises(NoReverseMatch):
+            reverse(f'core:{name}')
     assert client.get('/follow-ups/').status_code == 404
-    # A follow-up without a customer or prospect is refused.
-    client.post(reverse('core:follow_up_create'), {'kind': 'other', 'due_on': today.isoformat()})
-    assert FollowUp.objects.count() == 2
+    assert 'Follow-ups due' not in client.get('/').content.decode()
+    assert 'Plan a follow-up' not in client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    # Deleting the history record from the hub works.
+    client.post(reverse('core:follow_up_delete', args=[fu.pk]))
+    assert FollowUp.objects.count() == 0
 
 
 @pytest.mark.django_db
@@ -14564,7 +14556,8 @@ def test_work_record_offers_email_customer_and_plan_follow_up(client, admin_user
     c = Client.objects.create(name='Acme', client_type='business')
     wo = WorkOrder.objects.create(client=c)
     body = client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
-    assert 'Email customer (your templates)' in body and 'Plan a follow-up' in body
+    assert 'Email customer (your templates)' in body
+    assert 'Plan a follow-up' not in body  # one-click send replaced planning (Aug 25 2026)
     # With no custom template yet, the compose page says so and points at Settings.
     r = client.get(reverse('core:customer_email') + f'?work_order={wo.pk}')
     assert r.status_code == 200 and b'No email templates of your own yet' in r.content
@@ -14628,14 +14621,12 @@ def desk_world(db, admin_user):
 @pytest.mark.parametrize('params, why', [
     ({'ticket': 'ticket_a', 'client': 'b'}, 'ticket belongs to A, client says B'),
     ({'work_order': 'wo_a', 'client': 'b'}, 'work order belongs to A, client says B'),
-    ({'follow_up': 'fu_b', 'ticket': 'ticket_a'}, 'follow-up is B, ticket is A'),
-    ({'follow_up': 'fu_b', 'client': 'a'}, 'follow-up is B, client says A'),
     ({'ticket': 'ticket_a', 'prospect': 'p'}, 'a ticket has a customer, not a prospect'),
     ({'client': 'a', 'prospect': 'p'}, 'one customer or one prospect'),
 ])
 def test_customer_email_refuses_cross_wired_context(client, admin_user, desk_world, params, why):
-    """P1: ticket=A&client=B&follow_up=C must never produce a mixed send."""
-    from core.models import EmailSendLog, FollowUp
+    """P1: ticket=A&client=B must never produce a mixed send."""
+    from core.models import EmailSendLog
     client.force_login(admin_user)
     q = {k: desk_world[v].pk for k, v in params.items()}
     q['template'] = desk_world['t'].pk
@@ -14644,7 +14635,6 @@ def test_customer_email_refuses_cross_wired_context(client, admin_user, desk_wor
     r = client.post(reverse('core:customer_email'), {**q, 'custom_email': 'x@example.com', 'subject': 's', 'body': 'b'})
     assert r.status_code == 400, why
     assert not EmailSendLog.objects.exists()
-    assert FollowUp.objects.get(pk=desk_world['fu_b'].pk).done_at is None
 
 
 @pytest.mark.django_db
@@ -14677,16 +14667,10 @@ def test_custom_send_honors_contact_opt_out(client, admin_user, desk_world):
 
 @pytest.mark.django_db
 def test_follow_up_needs_exactly_one_customer_or_prospect(client, admin_user, desk_world):
+    # The planning routes are gone; the DB constraint is the guard that remains.
     from django.db import IntegrityError, transaction
     from core.models import FollowUp
-    client.force_login(admin_user)
     w = desk_world
-    today = timezone.localdate().isoformat()
-    r = client.post(reverse('core:follow_up_create'), {'client': w['a'].pk, 'prospect': w['p'].pk, 'kind': 'planned', 'due_on': today})
-    assert r.status_code == 400
-    r = client.post(reverse('core:follow_up_create'), {'ticket': w['ticket_a'].pk, 'client': w['b'].pk, 'kind': 'planned', 'due_on': today})
-    assert r.status_code == 400
-    assert FollowUp.objects.count() == 1
     with pytest.raises(IntegrityError), transaction.atomic():
         FollowUp.objects.create(client=w['a'], prospect=w['p'], kind='planned', due_on=timezone.localdate())
     with pytest.raises(IntegrityError), transaction.atomic():

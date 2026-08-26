@@ -2776,10 +2776,11 @@ class FollowUpQuerySet(models.QuerySet):
 
 
 class FollowUp(models.Model):
-    """A planned touch with a customer or prospect: a thank-you, a satisfaction
-    check, a promised call-back. The Relationship Desk's unit of work. Lives on
-    the Board while due, on the Follow-ups list always, and is done when the
-    person says so (or when its email goes out)."""
+    """The record of a follow-up email sent to a customer — created done by the
+    one-click send button on a finished ticket or work order, shown in the
+    customer's Relationship history (Mike, Aug 25 2026: one button, one email,
+    one history record; the planned-touch worklist this model started as is
+    gone). due_on/kind remain from that era and on old rows."""
 
     KIND_CHOICES = [
         ('thank_you', 'Thank-you'),
