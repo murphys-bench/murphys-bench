@@ -14992,3 +14992,37 @@ def test_quick_send_flag_is_editable_from_settings_and_custom_only(client, admin
     client.post(reverse('core:email_template_update', args=[ev.pk]), {
         'subject_template': 's', 'body_template': 'b', 'is_active': '1', 'quick_send': '1'})
     ev.refresh_from_db(); assert ev.quick_send is False
+
+
+@pytest.mark.django_db
+def test_inbound_email_fires_internal_notifications(monkeypatch, admin_user, _catch_internal_mail):
+    """A new emailed ticket tells the new-ticket audience; a customer reply on
+    an assigned ticket tells that tech. The whole point: Mike is not in the app
+    when work arrives."""
+    from core.management.commands.fetch_inbound_email import Command
+    from django.core.management import call_command
+    site = _email_on()
+    site.inbound_email_enabled = True
+    site.inbound_protocol = 'pop3'
+    site.inbound_host = 'mail.example'
+    site.inbound_username = 'support@example'
+    site.save()
+    admin_user.email = 'mike@example.com'; admin_user.save()
+
+    monkeypatch.setattr(Command, '_fetch_pop3',
+                        lambda self, s, d, v: [_raw_new_email(message_id='<n1@davis.example>')])
+    call_command('fetch_inbound_email', verbosity=0)
+    assert [(t, s) for t, s in _catch_internal_mail if 'New ticket' in s] \
+        == [('mike@example.com', f"[{Ticket.objects.latest('id').ticket_number}] New ticket: My computer won't boot")]
+
+    # Assign it, then a reply lands: only the tech is told.
+    tech = User.objects.create_user(username='tech', password='x', email='tech@example.com')
+    ticket = Ticket.objects.latest('id')
+    ticket.assigned_to = tech
+    ticket.save(update_fields=['assigned_to'])
+    _catch_internal_mail.clear()
+    monkeypatch.setattr(Command, '_fetch_pop3',
+                        lambda self, s, d, v: [_raw_reply_email(ticket.ticket_number)])
+    call_command('fetch_inbound_email', verbosity=0)
+    replies = [(t, s) for t, s in _catch_internal_mail if 'Customer reply' in s]
+    assert replies == [('tech@example.com', f'[{ticket.ticket_number}] Customer reply: {ticket.subject}')]
