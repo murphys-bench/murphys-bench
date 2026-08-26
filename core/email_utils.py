@@ -473,3 +473,133 @@ def send_document_email(to_email, subject, cover_body, *, from_email=None,
         detail = _error_detail(exc)
 
     return _log(status, reason, detail)
+
+
+# ---------------------------------------------------------------------------
+# Internal notification email — the SHOP hearing about work, not the client.
+# These deliberately skip the client suppression layers (recipients are staff)
+# but honor the outbound master switch, and they never raise: a notification
+# that cannot send must not break ticket intake or assignment.
+# ---------------------------------------------------------------------------
+
+def notification_admins():
+    """Users who catch shop-level notifications when nothing narrower applies:
+    staff, or anyone whose role can manage settings. Shared with the in-app
+    tech-message fallback in views."""
+    from django.db.models import Q
+    from .models import User
+    return list(User.objects.filter(
+        Q(is_staff=True) | Q(role_obj__can_manage_settings=True)
+    ).distinct())
+
+
+def _new_ticket_recipients(site, exclude_user=None):
+    """Who hears about a brand-new ticket (and about replies on unassigned
+    tickets): the configured list, else every admin. The acting user is
+    excluded — nobody needs an email about the ticket they just made."""
+    users = list(site.notify_new_ticket_users.all()) or notification_admins()
+    return [u for u in users
+            if u.email and u.is_active and (exclude_user is None or u.pk != exclude_user.pk)]
+
+
+def send_internal_email(site, subject, body, to_email, ticket=None, trigger='internal'):
+    """One plain internal email to a staff address. Logged like every other
+    send; no branding, no signature — this is a shop pager, not client mail."""
+    from .models import EmailSendLog
+    from django.utils.html import escape
+    if not site.email_enabled:
+        return EmailSendLog.objects.create(
+            ticket=ticket, to_email=to_email or '', trigger=trigger,
+            status='suppressed', reason='email_disabled')
+    if not to_email:
+        return EmailSendLog.objects.create(
+            ticket=ticket, to_email='', trigger=trigger,
+            status='suppressed', reason='no_address')
+    html_body = '<p>' + escape(body).replace('\n', '<br>') + '</p>'
+    status, reason, detail = _smtp_send(site, subject, body, html_body,
+                                        None, None, to_email, label=trigger)
+    return EmailSendLog.objects.create(
+        ticket=ticket, to_email=to_email, trigger=trigger,
+        status=status, reason=reason, detail=detail)
+
+
+def _ticket_summary(ticket):
+    who = ticket.client.name if ticket.client_id else 'Walk-in'
+    if ticket.contact and (ticket.contact.first_name or ticket.contact.last_name):
+        who = f'{ticket.contact.first_name} {ticket.contact.last_name}'.strip() + f' ({ticket.client.name})'
+    return who
+
+
+def notify_new_ticket(ticket, actor=None):
+    """Email the new-ticket recipients that a ticket arrived. Never raises."""
+    try:
+        from .models import SiteSettings
+        site = SiteSettings.get()
+        if not site.notify_new_ticket:
+            return
+        subject = f'[{ticket.ticket_number}] New ticket: {ticket.subject}'
+        body = (f'A new ticket has arrived.\n\n'
+                f'Ticket:  {ticket.ticket_number}\n'
+                f'From:    {_ticket_summary(ticket)}\n'
+                f'Subject: {ticket.subject}\n\n'
+                f'{(ticket.description or "")[:500]}')
+        for user in _new_ticket_recipients(site, exclude_user=actor):
+            send_internal_email(site, subject, body, user.email,
+                                ticket=ticket, trigger='notify:new_ticket')
+    except Exception:
+        logger.exception('New-ticket notification failed for %s.',
+                         getattr(ticket, 'ticket_number', '?'))
+
+
+def notify_ticket_reply(ticket, snippet=''):
+    """Email the assigned tech that a customer replied; an unassigned ticket's
+    reply goes to the new-ticket recipients instead. Never raises."""
+    try:
+        from .models import SiteSettings
+        site = SiteSettings.get()
+        if not snippet:
+            latest = ticket.replies.filter(
+                reply_type='customer_visible', created_by__isnull=True,
+            ).order_by('-created_at').first()
+            snippet = latest.content if latest else ''
+        subject = f'[{ticket.ticket_number}] Customer reply: {ticket.subject}'
+        body = (f'The customer replied on a ticket.\n\n'
+                f'Ticket:  {ticket.ticket_number}\n'
+                f'From:    {_ticket_summary(ticket)}\n'
+                f'Subject: {ticket.subject}\n\n'
+                f'{(snippet or "")[:500]}')
+        tech = ticket.assigned_to
+        if tech is not None and tech.email and tech.is_active:
+            send_internal_email(site, subject, body, tech.email,
+                                ticket=ticket, trigger='notify:reply')
+        else:
+            for user in _new_ticket_recipients(site):
+                send_internal_email(site, subject, body, user.email,
+                                    ticket=ticket, trigger='notify:reply')
+    except Exception:
+        logger.exception('Reply notification failed for %s.',
+                         getattr(ticket, 'ticket_number', '?'))
+
+
+def notify_ticket_assigned(ticket, actor=None):
+    """Email the assigned tech that a ticket was handed to them. Silent when
+    they assigned it to themselves. Never raises."""
+    try:
+        from .models import SiteSettings
+        tech = ticket.assigned_to
+        if tech is None or (actor is not None and tech.pk == actor.pk):
+            return
+        if not tech.email or not tech.is_active:
+            return
+        site = SiteSettings.get()
+        by = (actor.get_full_name() or actor.username) if actor else 'Murphy\'s Bench'
+        subject = f'[{ticket.ticket_number}] Assigned to you: {ticket.subject}'
+        body = (f'{by} assigned a ticket to you.\n\n'
+                f'Ticket:  {ticket.ticket_number}\n'
+                f'From:    {_ticket_summary(ticket)}\n'
+                f'Subject: {ticket.subject}')
+        send_internal_email(site, subject, body, tech.email,
+                            ticket=ticket, trigger='notify:assigned')
+    except Exception:
+        logger.exception('Assignment notification failed for %s.',
+                         getattr(ticket, 'ticket_number', '?'))

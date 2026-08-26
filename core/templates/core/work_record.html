@@ -93,6 +93,7 @@ status control sits with the reply.
                             {% if not work_order and not ticket %}<span class="dropdown-item text-secondary">Nothing to send</span>{% endif %}
                         </div>
                     </div>
+                    {% quick_send_buttons ticket=ticket work_order=work_order %}
                     <a class="btn" href="#status-control" title="Status is changed next to the reply">
                         {% if work_order %}<span class="status-dot me-1" style="--tblr-status-color: var(--mb-status-workorder-{{ work_order.status }}, var(--tblr-secondary));"></span>{{ work_order.status|status_word:'workorder' }}{% else %}<span class="status-dot me-1" style="--tblr-status-color: var(--mb-status-ticket-{{ ticket.status }}, var(--tblr-secondary));"></span>{{ ticket.status|status_word:'ticket' }}{% endif %}
                     </a>

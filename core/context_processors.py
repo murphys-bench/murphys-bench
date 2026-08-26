@@ -91,13 +91,3 @@ def site_settings(request):
         context[name] = bool(helper(user))
     return context
 
-
-def desk_counts(request):
-    """Count-by-status pulse for the Desk nav: follow-ups due today or past."""
-    if not getattr(request, 'user', None) or not request.user.is_authenticated:
-        return {}
-    try:
-        from .models import FollowUp
-        return {'follow_ups_due': FollowUp.objects.due().count()}
-    except Exception:
-        return {}

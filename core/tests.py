@@ -14519,8 +14519,12 @@ def test_customer_email_honors_suppression_and_does_not_mark_follow_up_done(clie
 
 @pytest.mark.django_db
 def test_follow_up_lifecycle_hub_board_list_done(client, admin_user):
+    # A follow-up lives on the customer it belongs to (and the Board while due).
+    # The old global Follow-ups list is gone by design — a pile attached to
+    # nothing (Mike, Aug 25 2026); this test asserts the URL stays dead.
     from core.models import Client, FollowUp, Prospect
     from datetime import timedelta
+    from django.urls import NoReverseMatch
     client.force_login(admin_user)
     c = Client.objects.create(name='Acme', client_type='business')
     today = timezone.localdate()
@@ -14532,19 +14536,22 @@ def test_follow_up_lifecycle_hub_board_list_done(client, admin_user):
     p = Prospect.objects.create(contact_first_name='Lee', contact_last_name='P', email='lee@example.com')
     client.post(reverse('core:follow_up_create'), {'prospect': p.pk, 'kind': 'planned', 'due_on': (today + timedelta(days=3)).isoformat()})
     assert FollowUp.objects.due().count() == 1 and FollowUp.objects.open().count() == 2
-    # Board region, hub panel, nav pulse, list segments.
+    # Board region and hub panel.
     body = client.get('/').content.decode()
     assert 'Follow-ups due' in body and 'Ask about the laptop' in body
-    assert 'badge bg-purple ms-auto">1<' in body
     hub = client.get(reverse('core:client_detail', args=[c.pk])).content.decode()
     assert 'Satisfaction check' in hub and 'Plan it' in hub
-    assert 'Lee' in client.get(reverse('core:follow_up_list') + '?show=upcoming').content.decode()
-    assert 'Nothing planned ahead' not in client.get(reverse('core:follow_up_list') + '?show=upcoming').content.decode()
-    # Done, then it leaves the Board and lands under Done.
+    # The upcoming prospect touch shows on the prospect's own page.
+    assert 'Planned touch' in client.get(reverse('core:prospect_detail', args=[p.pk])).content.decode()
+    # Done, then it leaves the Board but stays in the customer's history.
     client.post(reverse('core:follow_up_done', args=[fu.pk]))
     fu.refresh_from_db(); assert fu.done_at is not None
     assert 'Ask about the laptop' not in client.get('/').content.decode()
-    assert 'Ask about the laptop' in client.get(reverse('core:follow_up_list') + '?show=done').content.decode()
+    assert 'Satisfaction check' in client.get(reverse('core:client_detail', args=[c.pk])).content.decode()
+    # The global list stays retired: no URL name, no route.
+    with pytest.raises(NoReverseMatch):
+        reverse('core:follow_up_list')
+    assert client.get('/follow-ups/').status_code == 404
     # A follow-up without a customer or prospect is refused.
     client.post(reverse('core:follow_up_create'), {'kind': 'other', 'due_on': today.isoformat()})
     assert FollowUp.objects.count() == 2
@@ -14795,3 +14802,193 @@ def test_reports_pdf_downloads_a_real_pdf(client, admin_user):
     r = client.post(reverse('core:reports_pdf'), {'domain': 'tickets', 'start_date': '2026-08-01', 'end_date': '2026-08-21', 'section': 'all', 'chart_chartVolume': _PNG_1x1})
     assert r.status_code == 200 and r['Content-Type'] == 'application/pdf'
     assert r.content.startswith(b'%PDF') and 'report-tickets-all-2026-08-01-to-2026-08-21.pdf' in r['Content-Disposition']
+
+
+# ── Internal notification email (Aug 25 2026): the shop hears about work ─────
+
+@pytest.fixture
+def _catch_internal_mail(monkeypatch):
+    """Capture every _smtp_send as (to, subject); pretend it sent."""
+    from core import email_utils
+    sent = []
+    monkeypatch.setattr(
+        email_utils, '_smtp_send',
+        lambda site, subject, plain, html, logo, mime, to_email, **kw: (
+            sent.append((to_email, subject)) or ('sent', '', '')))
+    return sent
+
+
+def _email_on(**extra):
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    site.email_enabled = True
+    for k, v in extra.items():
+        setattr(site, k, v)
+    site.save()
+    return site
+
+
+@pytest.mark.django_db
+def test_new_ticket_notifies_recipients_but_never_the_creator(client, client_obj, admin_user, _catch_internal_mail):
+    from core.models import SiteSettings
+    _email_on()
+    admin_user.email = 'mike@example.com'; admin_user.save()
+    other = User.objects.create_user(username='owner', password='x', is_staff=True, email='owner@example.com')
+    client.force_login(admin_user)
+    r = client.post(reverse('core:ticket_create'), {
+        'client': client_obj.pk, 'subject': 'Printer down', 'description': 'd',
+        'source': 'phone', 'priority': 'normal', 'status': 'new'})
+    assert r.status_code == 302
+    # Both are admins; the creator is excluded, the other admin is told.
+    tos = [t for t, s in _catch_internal_mail if 'New ticket' in s]
+    assert tos == ['owner@example.com']
+    # An explicit recipient list narrows it; the master toggle silences it.
+    site = SiteSettings.get(); site.notify_new_ticket_users.set([admin_user])
+    _catch_internal_mail.clear()
+    client.post(reverse('core:ticket_create'), {
+        'client': client_obj.pk, 'subject': 'Second', 'description': 'd',
+        'source': 'phone', 'priority': 'normal', 'status': 'new'})
+    assert [t for t, s in _catch_internal_mail if 'New ticket' in s] == []  # creator is the only recipient
+    _email_on(notify_new_ticket=False)
+    site.notify_new_ticket_users.set([other])
+    _catch_internal_mail.clear()
+    client.post(reverse('core:ticket_create'), {
+        'client': client_obj.pk, 'subject': 'Third', 'description': 'd',
+        'source': 'phone', 'priority': 'normal', 'status': 'new'})
+    assert [t for t, s in _catch_internal_mail if 'New ticket' in s] == []
+
+
+@pytest.mark.django_db
+def test_assignment_emails_the_tech_but_not_a_self_claim(client, client_obj, admin_user, _catch_internal_mail):
+    _email_on()
+    tech = User.objects.create_user(username='tech', password='x', email='tech@example.com')
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    client.force_login(admin_user)
+    # Handing it to the tech notifies the tech.
+    client.post(reverse('core:ticket_assign', args=[ticket.pk]), {'assigned_to': str(tech.pk)})
+    assert [(t, 'Assigned to you' in s) for t, s in _catch_internal_mail] == [('tech@example.com', True)]
+    # A self-claim tells nobody.
+    _catch_internal_mail.clear()
+    ticket2 = Ticket.objects.create(client=client_obj, subject='S2', description='D')
+    client.post(reverse('core:ticket_assign', args=[ticket2.pk]), {'claim': '1'})
+    assert _catch_internal_mail == []
+    # The ticket edit form is the same act one door over — same email.
+    _catch_internal_mail.clear()
+    ticket3 = Ticket.objects.create(client=client_obj, subject='S3', description='D')
+    client.post(reverse('core:ticket_edit', args=[ticket3.pk]), {
+        'client': client_obj.pk, 'subject': 'S3', 'description': 'D',
+        'source': 'phone', 'priority': 'normal', 'status': 'new', 'assigned_to': str(tech.pk)})
+    assert [t for t, s in _catch_internal_mail if 'Assigned to you' in s] == ['tech@example.com']
+
+
+@pytest.mark.django_db
+def test_customer_reply_notification_routes_to_the_assigned_tech_else_the_new_ticket_list(client_obj, admin_user, _catch_internal_mail):
+    from core.email_utils import notify_ticket_reply
+    from core.models import TicketReply
+    _email_on()
+    admin_user.email = 'mike@example.com'; admin_user.save()
+    tech = User.objects.create_user(username='tech', password='x', email='tech@example.com')
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D', assigned_to=tech)
+    TicketReply.objects.create(ticket=ticket, reply_type='customer_visible', content='It broke again', created_by=None)
+    notify_ticket_reply(ticket)
+    assert _catch_internal_mail == [('tech@example.com', f'[{ticket.ticket_number}] Customer reply: S')]
+    # Unassigned: falls to the new-ticket audience (admins by default).
+    _catch_internal_mail.clear()
+    orphan = Ticket.objects.create(client=client_obj, subject='O', description='D')
+    notify_ticket_reply(orphan)
+    assert [t for t, s in _catch_internal_mail] == ['mike@example.com']
+
+
+@pytest.mark.django_db
+def test_notification_failure_never_breaks_the_caller(client_obj, admin_user, monkeypatch):
+    # The helpers promise to never raise — a mail problem must not break intake.
+    from core import email_utils
+    _email_on()
+    admin_user.email = 'mike@example.com'; admin_user.save()
+    def boom(*a, **k):
+        raise RuntimeError('smtp exploded')
+    monkeypatch.setattr(email_utils, 'send_internal_email', boom)
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    email_utils.notify_new_ticket(ticket)
+    email_utils.notify_ticket_reply(ticket)
+    ticket.assigned_to = admin_user
+    email_utils.notify_ticket_assigned(ticket)
+
+
+# ── One-click follow-up (Aug 25 2026): PCRT's single button, records itself ──
+
+@pytest.fixture
+def _quick_template(db):
+    from core.models import EmailTemplate
+    return EmailTemplate.objects.create(
+        name='Thank You Note', subject_template='Thanks from {{ site_name }}',
+        body_template='Hi {{ customer_name }}, thank you.', is_active=True, quick_send=True)
+
+
+@pytest.mark.django_db
+def test_quick_send_emails_the_customer_and_records_a_done_follow_up(client, admin_user, _quick_template, _catch_internal_mail):
+    from core.models import Client, Contact, FollowUp, TicketReply, EmailSendLog
+    _email_on()
+    c = Client.objects.create(name='Acme', client_type='business')
+    Contact.objects.create(client=c, first_name='Pat', last_name='L', email='pat@example.com', is_primary=True)
+    ticket = Ticket.objects.create(client=c, subject='S', description='D', status='resolved')
+    client.force_login(admin_user)
+    r = client.post(reverse('core:follow_up_quick_send'), {'template': _quick_template.pk, 'ticket': ticket.pk})
+    assert r.status_code == 302
+    assert ('pat@example.com', 'Thanks from Murphy\'s Bench') in _catch_internal_mail
+    fu = FollowUp.objects.get()
+    assert fu.client == c and fu.ticket == ticket and fu.done_at is not None and fu.template == _quick_template
+    assert TicketReply.objects.filter(ticket=ticket, reply_type='internal', content__contains='pat@example.com').exists()
+    # A second click is refused — no second email, no second record.
+    before = EmailSendLog.objects.count()
+    client.post(reverse('core:follow_up_quick_send'), {'template': _quick_template.pk, 'ticket': ticket.pk})
+    assert FollowUp.objects.count() == 1 and EmailSendLog.objects.count() == before
+    # The record page now renders the sent-state instead of the button.
+    page = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    assert 'Thank You Note sent' in page
+
+
+@pytest.mark.django_db
+def test_quick_send_failure_records_no_follow_up(client, admin_user, _quick_template):
+    # email disabled → suppressed → no follow-up row pretending it went out.
+    from core.models import Client, Contact, FollowUp
+    c = Client.objects.create(name='Acme', client_type='business')
+    Contact.objects.create(client=c, first_name='Pat', last_name='L', email='pat@example.com', is_primary=True)
+    ticket = Ticket.objects.create(client=c, subject='S', description='D', status='resolved')
+    client.force_login(admin_user)
+    client.post(reverse('core:follow_up_quick_send'), {'template': _quick_template.pk, 'ticket': ticket.pk})
+    assert FollowUp.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_quick_send_button_shows_only_on_finished_records(client, admin_user, _quick_template):
+    from core.models import Client
+    _email_on()
+    c = Client.objects.create(name='Acme', client_type='business', email='a@example.com')
+    open_t = Ticket.objects.create(client=c, subject='Open one', description='D', status='open')
+    done_t = Ticket.objects.create(client=c, subject='Done one', description='D', status='resolved')
+    wo = WorkOrder.objects.create(client=c, status='completed')
+    client.force_login(admin_user)
+    assert 'follow-ups/quick-send' not in client.get(reverse('core:ticket_detail', args=[open_t.pk])).content.decode()
+    assert 'follow-ups/quick-send' in client.get(reverse('core:ticket_detail', args=[done_t.pk])).content.decode()
+    assert 'follow-ups/quick-send' in client.get(reverse('core:work_order_detail', args=[wo.pk])).content.decode()
+    # And on the list rows.
+    rows = client.get(reverse('core:ticket_list') + '?tab=closed').content.decode()
+    assert 'follow-ups/quick-send' in rows
+    wo_rows = client.get(reverse('core:work_order_list') + '?tab=closed').content.decode()
+    assert 'follow-ups/quick-send' in wo_rows
+
+
+@pytest.mark.django_db
+def test_quick_send_flag_is_editable_from_settings_and_custom_only(client, admin_user, _quick_template):
+    from core.models import EmailTemplate
+    client.force_login(admin_user)
+    # Unticking it in the settings form clears it.
+    client.post(reverse('core:email_template_update', args=[_quick_template.pk]), {
+        'name': 'Thank You Note', 'subject_template': 's', 'body_template': 'b', 'is_active': '1'})
+    _quick_template.refresh_from_db(); assert _quick_template.quick_send is False
+    # An event template never takes the flag.
+    ev, _ = EmailTemplate.objects.get_or_create(trigger='ticket_resolved', defaults={'subject_template': 's', 'body_template': 'b'})
+    client.post(reverse('core:email_template_update', args=[ev.pk]), {
+        'subject_template': 's', 'body_template': 'b', 'is_active': '1', 'quick_send': '1'})
+    ev.refresh_from_db(); assert ev.quick_send is False

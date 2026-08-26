@@ -2359,6 +2359,20 @@ class SiteSettings(models.Model):
                   'and a later reply starts a new ticket linked to the old one.',
     )
 
+    # Internal notification email — who the SHOP hears from when work arrives.
+    # Assigned-tech notifications (a ticket handed to you; a customer reply on
+    # your ticket) are always on when outbound email is; only the new-ticket
+    # audience is configurable, because who catches brand-new work is shop
+    # policy (solo owner today, a rotation or dispatcher at a bigger shop).
+    notify_new_ticket = models.BooleanField(
+        default=True,
+        help_text='Email the recipients below when a new ticket arrives.',
+    )
+    notify_new_ticket_users = models.ManyToManyField(
+        'User', blank=True, related_name='+',
+        help_text='Who is emailed about new tickets (and replies on unassigned tickets). Blank = every admin.',
+    )
+
     # MFA enforcement
     require_mfa = models.BooleanField(
         default=False,
@@ -2730,6 +2744,9 @@ class EmailTemplate(models.Model):
         help_text='Leave blank to use the default signature.',
     )
     is_active = models.BooleanField(default=True)
+    # Custom templates only: offer this as a one-click send button on finished
+    # tickets and work orders (the PCRT-style follow-up).
+    quick_send = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -155,7 +155,6 @@ where money exists, and the card itself is the one action (open it).
             <div class="card-header">
                 <h3 class="card-title">Follow-ups due</h3>
                 <span class="badge bg-purple-lt ms-2">{{ follow_up_total }}</span>
-                <div class="card-actions"><a href="{% url 'core:follow_up_list' %}" class="btn btn-sm">All follow-ups</a></div>
             </div>
             {% if follow_ups %}
             <div class="list-group list-group-flush">

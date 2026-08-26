@@ -13,6 +13,14 @@
             <div class="col-md-6"><label class="form-label">From address</label>{{ forms.outbound.email_from|tabler_input }}<div class="form-hint">Shown to clients in the From field.</div></div>
             <div class="col-md-6"><label class="form-label">Sales from address</label>{{ forms.outbound.email_sales_from|tabler_input }}<div class="form-hint">Used when emailing quotes. Blank uses the From address.</div></div>
             <div class="col-12"><label class="form-label">Suppression patterns</label>{{ forms.outbound.email_suppression_patterns|tabler_input }}<div class="form-hint">One fnmatch pattern per line. Matching senders never receive automated replies (for example <code>noreply@*</code>).</div></div>
+            <div class="col-12">
+                <div class="hr-text">Internal notifications</div>
+                <label class="form-check form-switch">{{ forms.outbound.notify_new_ticket|tabler_input }}<span class="form-check-label">Email when a new ticket arrives</span></label>
+                <div class="form-hint mb-2">Goes to the people checked below; nobody checked means every admin. A tech is always emailed when a ticket is assigned to them or a customer replies on their ticket (replies on unclaimed tickets go to this list too).</div>
+                {% for cb in forms.outbound.notify_new_ticket_users %}
+                <label class="form-check">{{ cb.tag }}<span class="form-check-label">{{ cb.choice_label }}</span></label>
+                {% endfor %}
+            </div>
         </div>
     </div>
     <div class="card-footer"><button type="submit" class="btn btn-primary">Save outbound email</button></div>

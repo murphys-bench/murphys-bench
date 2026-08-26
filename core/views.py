@@ -738,7 +738,8 @@ class WorkOrderListView(LoginRequiredMixin, ListView):
                 Q(client__name__icontains=search)
             )
 
-        return queryset.select_related('invoice').order_by('-created_at')
+        # follow_ups feeds the one-click send buttons' sent-state per row.
+        return queryset.select_related('invoice').prefetch_related('follow_ups').order_by('-created_at')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -1433,10 +1434,10 @@ class WorkOrderNoteCreateView(LoginRequiredMixin, View):
 
 def _notification_admins():
     """Users who should catch a tech message when no specific counterpart is
-    assigned: staff or anyone whose role can manage settings."""
-    return list(User.objects.filter(
-        Q(is_staff=True) | Q(role_obj__can_manage_settings=True)
-    ).distinct())
+    assigned: staff or anyone whose role can manage settings. One definition,
+    shared with the internal email notifications."""
+    from .email_utils import notification_admins
+    return notification_admins()
 
 
 class TechMessageView(LoginRequiredMixin, View):
@@ -3683,7 +3684,8 @@ class TicketListView(LoginRequiredMixin, ListView):
     paginate_by = 25
 
     def get_queryset(self):
-        queryset = Ticket.objects.select_related('client', 'device', 'created_by', 'assigned_to')
+        # follow_ups feeds the one-click send buttons' sent-state per row.
+        queryset = Ticket.objects.select_related('client', 'device', 'created_by', 'assigned_to').prefetch_related('follow_ups')
         queryset = _scope_tickets_for(queryset, self.request.user)
 
         triage = self.request.GET.get('triage')
@@ -3888,8 +3890,10 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
         _save_attachments(self.request, self.object)
         fields = _get_custom_fields_for_ticket(self.object)
         _save_custom_field_values(self.request, self.object, fields)
-        from .email_utils import send_ticket_email
+        from .email_utils import send_ticket_email, notify_new_ticket, notify_ticket_assigned
         send_ticket_email('ticket_created', self.object)
+        notify_new_ticket(self.object, actor=self.request.user)
+        notify_ticket_assigned(self.object, actor=self.request.user)
         return response
 
     def get_success_url(self):
@@ -3934,9 +3938,9 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
         # equal to the new status — status-changed emails from this edit form
         # never fired. Fixed here alongside the Slice 4 closed_at stamping that
         # needs the real old status too.)
-        old_client_id, old_client_was_unsorted, old_status = Ticket.objects.filter(
+        old_client_id, old_client_was_unsorted, old_status, old_assigned_to_id = Ticket.objects.filter(
             pk=self.object.pk
-        ).values_list('client_id', 'client__is_unsorted', 'status').first()
+        ).values_list('client_id', 'client__is_unsorted', 'status', 'assigned_to_id').first()
         # This form can also close a ticket, which is a separate grant from editing
         # one, so a role that may edit but not close is refused rather than quietly
         # let in through the side door. ⚠ The comparison uses `old_status` from the
@@ -3978,11 +3982,13 @@ class TicketUpdateView(LoginRequiredMixin, UpdateView):
         if self.object.status in ('resolved', 'closed') and self.object.wo_complete:
             self.object.wo_complete = False
             self.object.save(update_fields=['wo_complete'])
-        from .email_utils import send_ticket_email
+        from .email_utils import send_ticket_email, notify_ticket_assigned
         if self.object.status != old_status:
             send_ticket_email('status_changed', self.object, {'old_status': old_status})
             if self.object.status == 'resolved':
                 send_ticket_email('ticket_resolved', self.object)
+        if self.object.assigned_to_id and self.object.assigned_to_id != old_assigned_to_id:
+            notify_ticket_assigned(self.object, actor=self.request.user)
         return response
 
     def get_success_url(self):
@@ -4359,6 +4365,9 @@ class TicketAssignView(LoginRequiredMixin, View):
                 ticket.assigned_to_id = None
                 ticket.assignment_unseen = False
         ticket.save(update_fields=['assigned_to', 'assignment_unseen', 'updated_at'])
+        if ticket.assignment_unseen:
+            from .email_utils import notify_ticket_assigned
+            notify_ticket_assigned(ticket, actor=request.user)
         # If they transferred it away and can no longer see it, send them to the list.
         if not _is_admin(request.user) and not _scope_tickets_for(
             Ticket.objects.filter(pk=pk), request.user
@@ -8493,6 +8502,8 @@ class EmailTemplateUpdateView(SettingsAdminMixin, View):
         tmpl = get_object_or_404(EmailTemplate, pk=pk)
         if tmpl.is_custom and (request.POST.get('name') or '').strip():
             tmpl.name = request.POST.get('name').strip()
+        if tmpl.is_custom:
+            tmpl.quick_send = request.POST.get('quick_send') == '1'
         tmpl.subject_template = request.POST.get('subject_template', tmpl.subject_template).strip()
         tmpl.body_template = request.POST.get('body_template', tmpl.body_template).strip()
         tmpl.is_active = request.POST.get('is_active') == '1'
@@ -9166,37 +9177,11 @@ def _resolve_desk_context(request):
     return {'follow_up': follow_up, 'work_order': work_order, 'ticket': ticket, 'client': client, 'prospect': prospect}
 
 
-class FollowUpListView(LoginRequiredMixin, View):
-    """Worklist of planned touches. Segments: Due (today or past), Upcoming, Done."""
-    template_name = 'core/follow_up_list.html'
-
-    def get(self, request):
-        from .models import FollowUp
-        from django.utils import timezone
-        seg = request.GET.get('show', 'due')
-        qs = FollowUp.objects.select_related('client', 'prospect', 'ticket', 'work_order', 'template', 'created_by')
-        today = timezone.localdate()
-        if seg == 'upcoming':
-            qs = qs.open().filter(due_on__gt=today)
-        elif seg == 'done':
-            qs = qs.filter(done_at__isnull=False).order_by('-done_at')
-        elif seg == 'all':
-            qs = qs.open()
-        else:
-            seg = 'due'
-            qs = qs.due()
-        return render(request, self.template_name, {
-            'follow_ups': list(qs[:200]), 'segment': seg, 'today': today,
-            'due_count': FollowUp.objects.due().count(),
-            'upcoming_count': FollowUp.objects.open().filter(due_on__gt=today).count(),
-            'kinds': FollowUp.KIND_CHOICES,
-            'custom_templates': EmailTemplate.objects.filter(trigger__isnull=True, is_active=True),
-        })
-
-
 class FollowUpCreateView(LoginRequiredMixin, View):
-    """POST from a Client Hub, Prospect page, Work Record or the list. Returns
-    to where it came from (`next`), else the Follow-ups list."""
+    """POST from a Client Hub, Prospect page or Work Record. Returns to where
+    it came from (`next`), else the customer's page. A follow-up lives on the
+    record it belongs to (and on the Board while due) — there is deliberately
+    no global follow-ups list."""
 
     def post(self, request):
         from .models import FollowUp
@@ -9206,14 +9191,17 @@ class FollowUpCreateView(LoginRequiredMixin, View):
         except _ConflictingContext as exc:
             return HttpResponseBadRequest(f'Cannot plan that follow-up: {exc}.')
         client, prospect, ticket, work_order = who['client'], who['prospect'], who['ticket'], who['work_order']
+        who_url = (reverse('core:client_detail', args=[client.pk]) if client
+                   else reverse('core:prospect_detail', args=[prospect.pk]) if prospect
+                   else reverse('core:dashboard'))
         if not client and not prospect:
             messages.error(request, 'A follow-up needs a customer or a prospect.')
-            return redirect(request.POST.get('next') or 'core:follow_up_list')
+            return redirect(request.POST.get('next') or who_url)
         try:
             due_on = date.fromisoformat(request.POST.get('due_on', ''))
         except ValueError:
             messages.error(request, 'Pick a date for the follow-up.')
-            return redirect(request.POST.get('next') or 'core:follow_up_list')
+            return redirect(request.POST.get('next') or who_url)
         kind = request.POST.get('kind') or 'planned'
         if kind not in dict(FollowUp.KIND_CHOICES):
             kind = 'other'
@@ -9224,7 +9212,7 @@ class FollowUpCreateView(LoginRequiredMixin, View):
             template_id=int(tmpl_id) if tmpl_id else None, created_by=request.user,
         )
         messages.success(request, f'{fu.get_kind_display()} planned for {fu.who_name} on {due_on:%b %-d}.')
-        return redirect(request.POST.get('next') or 'core:follow_up_list')
+        return redirect(request.POST.get('next') or who_url)
 
 
 class FollowUpDoneView(LoginRequiredMixin, View):
@@ -9235,16 +9223,94 @@ class FollowUpDoneView(LoginRequiredMixin, View):
         if fu.done_at is None:
             fu.done_at = timezone.now(); fu.done_by = request.user; fu.save(update_fields=['done_at', 'done_by'])
         messages.success(request, f'{fu.get_kind_display()} for {fu.who_name} marked done.')
-        return redirect(request.POST.get('next') or 'core:follow_up_list')
+        who_url = (reverse('core:client_detail', args=[fu.client_id]) if fu.client_id
+                   else reverse('core:prospect_detail', args=[fu.prospect_id]))
+        return redirect(request.POST.get('next') or who_url)
 
 
 class FollowUpDeleteView(LoginRequiredMixin, View):
     def post(self, request, pk):
         from .models import FollowUp
         fu = get_object_or_404(FollowUp, pk=pk)
+        who_url = (reverse('core:client_detail', args=[fu.client_id]) if fu.client_id
+                   else reverse('core:prospect_detail', args=[fu.prospect_id]))
         fu.delete()
         messages.success(request, 'Follow-up removed.')
-        return redirect(request.POST.get('next') or 'core:follow_up_list')
+        return redirect(request.POST.get('next') or who_url)
+
+
+class QuickFollowUpSendView(LoginRequiredMixin, View):
+    """The PCRT-style one-click follow-up: a single button on a finished ticket
+    or work order that sends a chosen template to the customer and records the
+    follow-up as done against that record. No form, no navigation — the
+    sent-state on the button is what guards against a second click."""
+
+    def post(self, request):
+        from .models import FollowUp, TicketReply
+        from .email_utils import send_custom_email
+        from django.utils import timezone
+
+        template = EmailTemplate.objects.filter(
+            pk=request.POST.get('template'), trigger__isnull=True,
+            is_active=True, quick_send=True,
+        ).first()
+        if template is None:
+            messages.error(request, 'That template is not set up for one-click send.')
+            return redirect(request.POST.get('next') or 'core:dashboard')
+
+        ticket = work_order = None
+        if request.POST.get('work_order'):
+            work_order = get_object_or_404(
+                _scope_assignable_for(WorkOrder.objects.all(), request.user),
+                pk=request.POST.get('work_order'))
+            ticket = work_order.ticket  # may be None; carries the note into the thread
+            client = work_order.client
+            back = reverse('core:work_order_detail', args=[work_order.pk])
+        elif request.POST.get('ticket'):
+            ticket = _get_scoped_ticket_or_404(request, request.POST.get('ticket'))
+            client = ticket.client
+            back = reverse('core:ticket_detail', args=[ticket.pk])
+        else:
+            return HttpResponseBadRequest('A ticket or work order is required.')
+        next_url = request.POST.get('next') or back
+
+        if client is None or client.is_unsorted:
+            messages.error(request, 'This record has no customer to email.')
+            return redirect(next_url)
+
+        already = FollowUp.objects.filter(template=template, done_at__isnull=False)
+        already = already.filter(work_order=work_order) if work_order else already.filter(ticket=ticket)
+        if already.exists():
+            messages.info(request, f'"{template.name}" was already sent for this record.')
+            return redirect(next_url)
+
+        contacts = list(client.contacts.filter(is_active=True))
+        contact = (next((c for c in contacts if c.is_primary and c.email), None)
+                   or next((c for c in contacts if c.email), None))
+        to_email = (contact.email if contact else '') or client.email
+        if not to_email:
+            messages.error(request, f'{client.name} has no email address on file.')
+            return redirect(next_url)
+
+        log = send_custom_email(template, to_email=to_email, client=client, contact=contact,
+                                ticket=ticket, work_order=work_order, user=request.user)
+        if log.status != 'sent':
+            reason = log.reason or 'send failed'
+            messages.error(request, f'Could not send "{template.name}" to {to_email}: {reason}.')
+            return redirect(next_url)
+
+        now = timezone.now()
+        FollowUp.objects.create(
+            client=client, ticket=ticket, work_order=work_order,
+            kind='other', note=f'Sent "{template.name}"',
+            due_on=timezone.localdate(), template=template,
+            created_by=request.user, done_at=now, done_by=request.user,
+        )
+        if ticket is not None:
+            TicketReply.objects.create(ticket=ticket, reply_type='internal', created_by=request.user,
+                                       content=f'Emailed {to_email}: {template.name}')
+        messages.success(request, f'Sent "{template.name}" to {to_email}.')
+        return redirect(next_url)
 
 
 class CustomerEmailView(LoginRequiredMixin, View):
@@ -9357,6 +9423,7 @@ class EmailTemplateCreateView(SettingsAdminMixin, View):
             subject_template=(request.POST.get('subject_template') or '').strip() or '{{ site_name }}: a note about your recent service',
             body_template=(request.POST.get('body_template') or '').strip() or 'Hi {{ customer_name }},\n\n\n\nThank you,\n{{ tech_name }}',
             signature_id=int(sig_id) if sig_id else None, is_active=True,
+            quick_send=request.POST.get('quick_send') == '1',
         )
         messages.success(request, f'Email template "{name}" added.')
         return redirect(f"{reverse('core:settings')}?tab=email_templates")

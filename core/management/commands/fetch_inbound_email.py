@@ -628,6 +628,15 @@ class Command(BaseCommand):
                 status, detail, ticket = 'error', f'Unhandled error: {exc}', None
             counts[status] = counts.get(status, 0) + 1
 
+            # Tell the shop. The notify helpers never raise, so a mail problem
+            # cannot break intake — the ticket/reply above is already saved.
+            if ticket is not None:
+                from core.email_utils import notify_new_ticket, notify_ticket_reply
+                if status in ('new_ticket', 'new_ticket_linked'):
+                    notify_new_ticket(ticket)
+                elif status in ('reply', 'reply_flagged'):
+                    notify_ticket_reply(ticket)
+
             try:
                 if claim is not None:
                     claim.status = status

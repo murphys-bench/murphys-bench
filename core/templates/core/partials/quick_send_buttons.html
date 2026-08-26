@@ -1,0 +1,13 @@
+{% load mb_tabler %}{% if eligible %}{% for tmpl in templates %}
+{% if tmpl.pk in sent_ids %}
+<span class="badge bg-green-lt {% if not compact %}p-2{% endif %}" title="Already sent for this record">{{ tmpl.name }} sent</span>
+{% else %}
+<form method="post" action="{% url 'core:follow_up_quick_send' %}" class="d-inline">
+    <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+    <input type="hidden" name="template" value="{{ tmpl.pk }}">
+    {% if work_order %}<input type="hidden" name="work_order" value="{{ work_order.pk }}">{% else %}<input type="hidden" name="ticket" value="{{ ticket.pk }}">{% endif %}
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit" class="btn {% if compact %}btn-sm{% endif %}" title="Send this email to the customer now">{% ticon 'send' 'icon-sm' %} {{ tmpl.name }}</button>
+</form>
+{% endif %}
+{% endfor %}{% endif %}
