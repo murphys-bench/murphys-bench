@@ -14544,9 +14544,11 @@ def test_follow_up_planning_is_gone_and_history_lives_on_the_customer(client, ad
     assert client.get('/follow-ups/').status_code == 404
     assert 'Follow-ups due' not in client.get('/').content.decode()
     assert 'Plan a follow-up' not in client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
-    # Deleting the history record from the hub works.
+    # Hiding the history record from the hub removes it from the page but
+    # keeps the row — the send happened, and the button must stay sent.
     client.post(reverse('core:follow_up_delete', args=[fu.pk]))
-    assert FollowUp.objects.count() == 0
+    fu.refresh_from_db(); assert fu.hidden_at is not None
+    assert 'Thank You Note' not in client.get(reverse('core:client_detail', args=[c.pk])).content.decode()
 
 
 @pytest.mark.django_db
@@ -15010,3 +15012,180 @@ def test_inbound_email_fires_internal_notifications(monkeypatch, admin_user, _ca
     call_command('fetch_inbound_email', verbosity=0)
     replies = [(t, s) for t, s in _catch_internal_mail if 'Customer reply' in s]
     assert replies == [('tech@example.com', f'[{ticket.ticket_number}] Customer reply: {ticket.subject}')]
+
+
+# ── Review round 1 (Aug 26 2026): the server enforces what the UI implies ────
+
+@pytest.fixture
+def _finished_world(db, admin_user):
+    from core.models import Client, Contact
+    _email_on()
+    c = Client.objects.create(name='Acme', client_type='business')
+    Contact.objects.create(client=c, first_name='Pat', last_name='L', email='pat@example.com', is_primary=True)
+    return c
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('kind, status', [
+    ('ticket', 'open'), ('ticket', 'in_progress'), ('ticket', 'new'),
+    ('work_order', 'in_progress'), ('work_order', 'new'), ('work_order', 'cancelled'),
+])
+def test_quick_send_post_refuses_unfinished_records(client, admin_user, _quick_template, _finished_world, _catch_internal_mail, kind, status):
+    """Review finding 1: the finished-record gate was UI-only. A direct POST
+    against an open record must send nothing and record nothing."""
+    from core.models import FollowUp, EmailSendLog
+    c = _finished_world
+    if kind == 'ticket':
+        rec = Ticket.objects.create(client=c, subject='S', description='D', status=status)
+        payload = {'template': _quick_template.pk, 'ticket': rec.pk}
+    else:
+        rec = WorkOrder.objects.create(client=c, status=status)
+        payload = {'template': _quick_template.pk, 'work_order': rec.pk}
+    client.force_login(admin_user)
+    r = client.post(reverse('core:follow_up_quick_send'), payload)
+    assert r.status_code == 302
+    assert _catch_internal_mail == [] and FollowUp.objects.count() == 0 and EmailSendLog.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_quick_send_post_refuses_contradictory_record_ids(client, admin_user, _quick_template, _finished_world):
+    from core.models import FollowUp
+    c = _finished_world
+    t = Ticket.objects.create(client=c, subject='S', description='D', status='resolved')
+    wo = WorkOrder.objects.create(client=c, status='completed')
+    client.force_login(admin_user)
+    r = client.post(reverse('core:follow_up_quick_send'), {'template': _quick_template.pk, 'ticket': t.pk, 'work_order': wo.pk})
+    assert r.status_code == 400 and FollowUp.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_hiding_history_never_rearms_the_send_button(client, admin_user, _quick_template, _finished_world, _catch_internal_mail):
+    """Review finding 2: deleting the history row used to erase the
+    duplicate-send fact. Hiding must keep the claim and the sent-state."""
+    from core.models import FollowUp, EmailSendLog
+    c = _finished_world
+    ticket = Ticket.objects.create(client=c, subject='S', description='D', status='resolved')
+    client.force_login(admin_user)
+    client.post(reverse('core:follow_up_quick_send'), {'template': _quick_template.pk, 'ticket': ticket.pk})
+    fu = FollowUp.objects.get(); assert fu.done_at is not None
+    sends = EmailSendLog.objects.count()
+    # Admin hides it from the Relationship history…
+    client.post(reverse('core:follow_up_delete', args=[fu.pk]))
+    fu.refresh_from_db(); assert fu.hidden_at is not None
+    # …the record page still shows sent, and a re-POST still sends nothing.
+    page = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    assert 'Thank You Note sent' in page
+    client.post(reverse('core:follow_up_quick_send'), {'template': _quick_template.pk, 'ticket': ticket.pk})
+    assert FollowUp.objects.count() == 1 and EmailSendLog.objects.count() == sends
+
+
+@pytest.mark.django_db
+def test_hiding_history_is_admin_only(client, admin_user, _quick_template, _finished_world):
+    from core.models import FollowUp
+    c = _finished_world
+    ticket = Ticket.objects.create(client=c, subject='S', description='D', status='resolved')
+    fu = FollowUp.objects.create(client=c, ticket=ticket, kind='other', due_on=timezone.localdate(),
+                                 template=_quick_template, done_at=timezone.now(), via_quick_send=True)
+    tech = User.objects.create_user(username='tech', password='x')
+    client.force_login(tech)
+    r = client.post(reverse('core:follow_up_delete', args=[fu.pk]))
+    assert r.status_code == 403
+    fu.refresh_from_db(); assert fu.hidden_at is None
+
+
+@pytest.mark.django_db
+def test_quick_send_claims_before_smtp_and_a_crash_leaves_it_spent(client, admin_user, _quick_template, _finished_world, monkeypatch):
+    """Review finding 3: the claim is written before SMTP. A crash mid-send
+    leaves the claim standing, so the button stays spent — the right failure
+    for a one-email invariant."""
+    from core.models import FollowUp
+    from core import email_utils
+    c = _finished_world
+    ticket = Ticket.objects.create(client=c, subject='S', description='D', status='resolved')
+    client.force_login(admin_user)
+    def boom(*a, **k):
+        raise RuntimeError('crashed mid-send')
+    monkeypatch.setattr(email_utils, 'send_custom_email', boom)
+    with pytest.raises(RuntimeError):
+        client.post(reverse('core:follow_up_quick_send'), {'template': _quick_template.pk, 'ticket': ticket.pk})
+    fu = FollowUp.objects.get()
+    assert fu.via_quick_send is True and fu.done_at is None
+    # The button reads the claim as sent.
+    page = client.get(reverse('core:ticket_detail', args=[ticket.pk])).content.decode()
+    assert 'Thank You Note sent' in page and 'follow-ups/quick-send' not in page
+
+
+@pytest.mark.django_db
+def test_new_ticket_recipients_configured_but_undeliverable_warns_and_sends_nothing(client_obj, admin_user, _catch_internal_mail, caplog):
+    """Review finding 5: a configured list whose members have no email must not
+    silently fall back to admins (the operator narrowed the audience) — but it
+    must be LOUD about the fact that nobody is being told."""
+    import logging
+    from core.models import SiteSettings
+    from core.email_utils import notify_new_ticket
+    _email_on()
+    admin_user.email = 'mike@example.com'; admin_user.save()
+    ghost = User.objects.create_user(username='ghost', password='x', email='')
+    SiteSettings.get().notify_new_ticket_users.set([ghost])
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    with caplog.at_level(logging.WARNING):
+        notify_new_ticket(ticket)
+    assert _catch_internal_mail == []
+    assert any('no recipient is deliverable' in r.message for r in caplog.records)
+
+
+@pytest.mark.django_db
+def test_recipient_picker_offers_only_users_with_an_email(admin_user):
+    from core.forms import OutboundEmailSettingsForm
+    from core.models import SiteSettings
+    admin_user.email = 'mike@example.com'; admin_user.save()
+    User.objects.create_user(username='ghost', password='x', email='')
+    form = OutboundEmailSettingsForm(instance=SiteSettings.get(), prefix='outbound')
+    offered = {u.username for u in form.fields['notify_new_ticket_users'].queryset}
+    assert 'admin' in offered and 'ghost' not in offered
+
+
+@pytest.mark.django_db
+def test_assignment_to_unreachable_tech_leaves_a_no_address_log(client_obj, admin_user, _catch_internal_mail):
+    from core.models import EmailSendLog
+    from core.email_utils import notify_ticket_assigned
+    _email_on()
+    tech = User.objects.create_user(username='tech', password='x', email='')
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D', assigned_to=tech)
+    notify_ticket_assigned(ticket, actor=admin_user)
+    assert _catch_internal_mail == []
+    log = EmailSendLog.objects.get(trigger='notify:assigned')
+    assert log.status == 'suppressed' and log.reason == 'no_address'
+
+
+@pytest.mark.django_db
+def test_create_and_assign_sends_one_email_not_two(client, client_obj, admin_user, _catch_internal_mail):
+    """Review Q3: a tech in the new-ticket audience who is also the assignee
+    gets only the assignment email for that one event."""
+    _email_on()
+    admin_user.email = 'mike@example.com'; admin_user.save()
+    tech = User.objects.create_user(username='tech', password='x', is_staff=True, email='tech@example.com')
+    client.force_login(admin_user)
+    client.post(reverse('core:ticket_create'), {
+        'client': client_obj.pk, 'subject': 'S', 'description': 'd',
+        'source': 'phone', 'priority': 'normal', 'status': 'new', 'assigned_to': str(tech.pk)})
+    to_tech = [s for t, s in _catch_internal_mail if t == 'tech@example.com']
+    assert to_tech == [f"[{Ticket.objects.get().ticket_number}] Assigned to you: S"]
+
+
+@pytest.mark.django_db
+def test_one_failing_recipient_does_not_starve_the_rest(client_obj, admin_user, monkeypatch):
+    """Review finding 6: recipient #1 blowing up must not stop recipient #2."""
+    from core import email_utils
+    _email_on()
+    admin_user.email = 'mike@example.com'; admin_user.save()
+    User.objects.create_user(username='second', password='x', is_staff=True, email='second@example.com')
+    attempted = []
+    def flaky(site, subject, body, to_email, **kw):
+        attempted.append(to_email)
+        if len(attempted) == 1:
+            raise RuntimeError('first recipient exploded')
+    monkeypatch.setattr(email_utils, 'send_internal_email', flaky)
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    email_utils.notify_new_ticket(ticket)
+    assert len(attempted) == 2

@@ -493,13 +493,23 @@ def notification_admins():
     ).distinct())
 
 
-def _new_ticket_recipients(site, exclude_user=None):
+def _new_ticket_recipients(site, exclude=()):
     """Who hears about a brand-new ticket (and about replies on unassigned
-    tickets): the configured list, else every admin. The acting user is
-    excluded — nobody needs an email about the ticket they just made."""
-    users = list(site.notify_new_ticket_users.all()) or notification_admins()
-    return [u for u in users
-            if u.email and u.is_active and (exclude_user is None or u.pk != exclude_user.pk)]
+    tickets): the configured list, else every admin. Users in `exclude` are
+    dropped — nobody needs an email about the ticket they just made or were
+    just assigned. A configured list that resolves to nobody deliverable is a
+    misconfiguration and is logged loudly; it deliberately does NOT fall back
+    to admins, which would widen the audience the operator narrowed."""
+    configured = list(site.notify_new_ticket_users.all())
+    users = configured or notification_admins()
+    deliverable = [u for u in users if u.email and u.is_active]
+    if configured and not deliverable:
+        logger.warning(
+            'New-ticket notifications are configured but no recipient is deliverable '
+            '(no email address, or inactive). Nobody is being told about new tickets — '
+            'fix the list under Settings, Outbound Email.')
+    exclude_pks = {u.pk for u in exclude if u is not None}
+    return [u for u in deliverable if u.pk not in exclude_pks]
 
 
 def send_internal_email(site, subject, body, to_email, ticket=None, trigger='internal'):
@@ -543,9 +553,16 @@ def notify_new_ticket(ticket, actor=None):
                 f'From:    {_ticket_summary(ticket)}\n'
                 f'Subject: {ticket.subject}\n\n'
                 f'{(ticket.description or "")[:500]}')
-        for user in _new_ticket_recipients(site, exclude_user=actor):
-            send_internal_email(site, subject, body, user.email,
-                                ticket=ticket, trigger='notify:new_ticket')
+        # The assigned tech gets the more specific "assigned to you" email for
+        # the same event — one email per person per event, not two.
+        for user in _new_ticket_recipients(site, exclude=(actor, ticket.assigned_to)):
+            try:
+                send_internal_email(site, subject, body, user.email,
+                                    ticket=ticket, trigger='notify:new_ticket')
+            except Exception:
+                # One bad recipient must not starve the rest of the list.
+                logger.exception('New-ticket notification to %s failed for %s.',
+                                 user.email, ticket.ticket_number)
     except Exception:
         logger.exception('New-ticket notification failed for %s.',
                          getattr(ticket, 'ticket_number', '?'))
@@ -572,10 +589,19 @@ def notify_ticket_reply(ticket, snippet=''):
         if tech is not None and tech.email and tech.is_active:
             send_internal_email(site, subject, body, tech.email,
                                 ticket=ticket, trigger='notify:reply')
+        elif tech is not None:
+            # Assigned, but unreachable: leave the audit trail a no_address row
+            # instead of silence (review finding).
+            send_internal_email(site, subject, body, '',
+                                ticket=ticket, trigger='notify:reply')
         else:
             for user in _new_ticket_recipients(site):
-                send_internal_email(site, subject, body, user.email,
-                                    ticket=ticket, trigger='notify:reply')
+                try:
+                    send_internal_email(site, subject, body, user.email,
+                                        ticket=ticket, trigger='notify:reply')
+                except Exception:
+                    logger.exception('Reply notification to %s failed for %s.',
+                                     user.email, ticket.ticket_number)
     except Exception:
         logger.exception('Reply notification failed for %s.',
                          getattr(ticket, 'ticket_number', '?'))
@@ -589,9 +615,12 @@ def notify_ticket_assigned(ticket, actor=None):
         tech = ticket.assigned_to
         if tech is None or (actor is not None and tech.pk == actor.pk):
             return
-        if not tech.email or not tech.is_active:
-            return
         site = SiteSettings.get()
+        if not tech.email or not tech.is_active:
+            # Log a no_address row rather than vanishing (review finding).
+            send_internal_email(site, f'[{ticket.ticket_number}] Assigned to you: {ticket.subject}',
+                                '', '', ticket=ticket, trigger='notify:assigned')
+            return
         by = (actor.get_full_name() or actor.username) if actor else 'Murphy\'s Bench'
         subject = f'[{ticket.ticket_number}] Assigned to you: {ticket.subject}'
         body = (f'{by} assigned a ticket to you.\n\n'

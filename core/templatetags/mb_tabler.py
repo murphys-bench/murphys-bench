@@ -213,10 +213,6 @@ def get_item(mapping, key):
 
 # ── One-click follow-up buttons ──────────────────────────────────────────────
 
-# Statuses whose work is finished — the moment a follow-up makes sense.
-_QUICK_SEND_TICKET_STATUSES = ('resolved', 'closed')
-_QUICK_SEND_WO_STATUSES = ('completed', 'closed')
-
 
 def _quick_send_templates(context):
     """The active quick-send templates, fetched once per request (list rows
@@ -241,17 +237,22 @@ def quick_send_buttons(context, ticket=None, work_order=None, compact=False):
     templates = _quick_send_templates(context)
     record = work_order or ticket
     client = getattr(record, 'client', None) if record else None
+    # The status gate reads the same constants the POST handler enforces —
+    # this is only the UI half of the rule, never the rule itself.
+    from core.models import Ticket, WorkOrder
     eligible = bool(templates) and client is not None and not client.is_unsorted
     if eligible:
         if work_order is not None:
-            eligible = work_order.status in _QUICK_SEND_WO_STATUSES
+            eligible = work_order.status in WorkOrder.FOLLOW_UP_STATUSES
         else:
-            eligible = ticket.status in _QUICK_SEND_TICKET_STATUSES
+            eligible = ticket.status in Ticket.CLOSED_AT_STATUSES
     sent_ids = set()
     if eligible:
         # follow_ups is prefetched on the list pages; one small query elsewhere.
+        # A quick-send CLAIM counts as sent even before done_at lands (a crash
+        # mid-send must not re-arm the button); legacy completed rows count too.
         sent_ids = {fu.template_id for fu in record.follow_ups.all()
-                    if fu.done_at is not None and fu.template_id}
+                    if fu.template_id and (fu.via_quick_send or fu.done_at is not None)}
     request = context.get('request')
     return {
         'eligible': eligible, 'templates': templates, 'sent_ids': sent_ids,

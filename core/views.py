@@ -1161,7 +1161,8 @@ class ClientDetailView(LoginRequiredMixin, DetailView):
         context['has_sa'] = self.object.is_managed or self.object.contracts.filter(status='active').exists()
         from .models import FollowUp
         # Follow-ups are records of sent one-click emails — history, not a worklist.
-        context['done_follow_ups'] = list(FollowUp.objects.filter(client=self.object, done_at__isnull=False)
+        context['done_follow_ups'] = list(FollowUp.objects.filter(client=self.object, done_at__isnull=False,
+                                                                  hidden_at__isnull=True)
                                           .select_related('template', 'ticket', 'work_order').order_by('-done_at')[:10])
         context['custom_templates'] = EmailTemplate.objects.filter(trigger__isnull=True, is_active=True)
         context['open_tickets'] = (_scope_tickets_for(Ticket.objects.filter(client=self.object), self.request.user)
@@ -1963,7 +1964,8 @@ class ProspectDetailView(ProspectAccessMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        ctx['done_follow_ups'] = list(FollowUp.objects.filter(prospect=self.object, done_at__isnull=False)
+        ctx['done_follow_ups'] = list(FollowUp.objects.filter(prospect=self.object, done_at__isnull=False,
+                                                              hidden_at__isnull=True)
                                       .select_related('template').order_by('-done_at')[:10])
         ctx['custom_templates'] = EmailTemplate.objects.filter(trigger__isnull=True, is_active=True)
         return ctx
@@ -9161,13 +9163,24 @@ def _resolve_desk_context(request):
 
 
 class FollowUpDeleteView(LoginRequiredMixin, View):
+    """Hide a follow-up from the Relationship history. Admin only (history
+    curation is a back-office act), and a SOFT hide on purpose: the row is the
+    proof an email went out and the claim the duplicate-send guard reads, so
+    tidying the list must never re-arm the send button (review finding,
+    Aug 26 2026 — a hard delete did exactly that)."""
+
     def post(self, request, pk):
         from .models import FollowUp
+        from django.utils import timezone
+        if not _is_admin(request.user):
+            return HttpResponse('Forbidden', status=403)
         fu = get_object_or_404(FollowUp, pk=pk)
         who_url = (reverse('core:client_detail', args=[fu.client_id]) if fu.client_id
                    else reverse('core:prospect_detail', args=[fu.prospect_id]))
-        fu.delete()
-        messages.success(request, 'Follow-up removed.')
+        if fu.hidden_at is None:
+            fu.hidden_at = timezone.now()
+            fu.save(update_fields=['hidden_at'])
+        messages.success(request, 'Removed from the history. The record of the send is kept, so the one-click button stays sent.')
         return redirect(request.POST.get('next') or who_url)
 
 
@@ -9180,6 +9193,7 @@ class QuickFollowUpSendView(LoginRequiredMixin, View):
     def post(self, request):
         from .models import FollowUp, TicketReply
         from .email_utils import send_custom_email
+        from django.db import IntegrityError, transaction
         from django.utils import timezone
 
         template = EmailTemplate.objects.filter(
@@ -9189,6 +9203,11 @@ class QuickFollowUpSendView(LoginRequiredMixin, View):
         if template is None:
             messages.error(request, 'That template is not set up for one-click send.')
             return redirect(request.POST.get('next') or 'core:dashboard')
+
+        # Exactly one record id. Contradictory input is refused, not resolved —
+        # the button only ever posts one.
+        if request.POST.get('work_order') and request.POST.get('ticket'):
+            return HttpResponseBadRequest('One record: a ticket or a work order, not both.')
 
         ticket = work_order = None
         if request.POST.get('work_order'):
@@ -9206,14 +9225,19 @@ class QuickFollowUpSendView(LoginRequiredMixin, View):
             return HttpResponseBadRequest('A ticket or work order is required.')
         next_url = request.POST.get('next') or back
 
-        if client is None or client.is_unsorted:
-            messages.error(request, 'This record has no customer to email.')
+        # The finished-record gate, server-side. The button's own eligibility
+        # check hides it in the UI; THIS is what stops a direct POST from
+        # emailing a customer about work that is not done (review finding).
+        if work_order is not None:
+            if work_order.status not in WorkOrder.FOLLOW_UP_STATUSES:
+                messages.error(request, 'Follow-ups send from finished work only.')
+                return redirect(next_url)
+        elif ticket.status not in Ticket.CLOSED_AT_STATUSES:
+            messages.error(request, 'Follow-ups send from finished work only.')
             return redirect(next_url)
 
-        already = FollowUp.objects.filter(template=template, done_at__isnull=False)
-        already = already.filter(work_order=work_order) if work_order else already.filter(ticket=ticket)
-        if already.exists():
-            messages.info(request, f'"{template.name}" was already sent for this record.')
+        if client is None or client.is_unsorted:
+            messages.error(request, 'This record has no customer to email.')
             return redirect(next_url)
 
         contacts = list(client.contacts.filter(is_active=True))
@@ -9224,20 +9248,42 @@ class QuickFollowUpSendView(LoginRequiredMixin, View):
             messages.error(request, f'{client.name} has no email address on file.')
             return redirect(next_url)
 
+        # Claim BEFORE sending. The partial unique constraints on FollowUp make
+        # this atomic: of two concurrent clicks, exactly one insert survives and
+        # the loser never reaches SMTP. Any completed legacy row for this
+        # template+record blocks too (it was a real send).
+        legacy = FollowUp.objects.filter(template=template, done_at__isnull=False, via_quick_send=False)
+        legacy = legacy.filter(work_order=work_order) if work_order else legacy.filter(ticket=ticket, work_order__isnull=True)
+        if legacy.exists():
+            messages.info(request, f'"{template.name}" was already sent for this record.')
+            return redirect(next_url)
+        try:
+            with transaction.atomic():
+                fu = FollowUp.objects.create(
+                    client=client, ticket=ticket, work_order=work_order,
+                    kind='other', note=f'Sent "{template.name}"',
+                    due_on=timezone.localdate(), template=template,
+                    created_by=request.user, via_quick_send=True,
+                )
+        except IntegrityError:
+            messages.info(request, f'"{template.name}" was already sent for this record.')
+            return redirect(next_url)
+
         log = send_custom_email(template, to_email=to_email, client=client, contact=contact,
                                 ticket=ticket, work_order=work_order, user=request.user)
         if log.status != 'sent':
+            # Nothing went out — release the claim so a retry is possible.
+            fu.delete()
             reason = log.reason or 'send failed'
             messages.error(request, f'Could not send "{template.name}" to {to_email}: {reason}.')
             return redirect(next_url)
 
-        now = timezone.now()
-        FollowUp.objects.create(
-            client=client, ticket=ticket, work_order=work_order,
-            kind='other', note=f'Sent "{template.name}"',
-            due_on=timezone.localdate(), template=template,
-            created_by=request.user, done_at=now, done_by=request.user,
-        )
+        # A crash between the send above and this write leaves the claim in
+        # place with done_at unset: the button stays spent, which is the right
+        # failure for a "one email" invariant.
+        fu.done_at = timezone.now()
+        fu.done_by = request.user
+        fu.save(update_fields=['done_at', 'done_by'])
         if ticket is not None:
             TicketReply.objects.create(ticket=ticket, reply_type='internal', created_by=request.user,
                                        content=f'Emailed {to_email}: {template.name}')

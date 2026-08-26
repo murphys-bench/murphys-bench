@@ -724,9 +724,11 @@ class OutboundEmailSettingsForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         from .models import User
         field = self.fields['notify_new_ticket_users']
-        field.queryset = User.objects.filter(is_active=True).order_by('first_name', 'username')
-        field.label_from_instance = lambda u: (
-            (u.get_full_name() or u.username) + (f' — {u.email}' if u.email else ' — no email on file'))
+        # No email address, no checkbox: a recipient who can never receive the
+        # notification would silently satisfy the list while nobody is told.
+        field.queryset = (User.objects.filter(is_active=True).exclude(email='')
+                          .order_by('first_name', 'username'))
+        field.label_from_instance = lambda u: f'{u.get_full_name() or u.username} ({u.email})'
 
 
 class InboundEmailSettingsForm(forms.ModelForm):

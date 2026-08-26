@@ -21,7 +21,7 @@ panel is the history, not a worklist (Mike, Aug 25 2026). Expects who_kind
                 <div>{% if fu.template %}<span class="fw-medium">{{ fu.template.name }}</span>{% else %}<span class="fw-medium">{{ fu.get_kind_display }}</span>{% endif %} <span class="text-secondary">sent {{ fu.done_at|date:"M j, Y" }}</span></div>
                 {% if fu.record %}<div class="text-secondary small">{% if fu.work_order %}<a href="{% url 'core:work_order_detail' fu.work_order.pk %}">{{ fu.work_order.work_order_number }}</a>{% else %}<a href="{% url 'core:ticket_detail' fu.ticket.pk %}">{{ fu.ticket.ticket_number }}</a>{% endif %}</div>{% endif %}
             </div>
-            <form method="post" action="{% url 'core:follow_up_delete' fu.pk %}" data-mb-confirm="Remove this record of a sent follow-up?">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}#relationship"><button type="submit" class="btn btn-sm btn-ghost-danger btn-icon" title="Remove">{% ticon 'trash' 'icon-sm' %}</button></form>
+            {% if is_admin %}<form method="post" action="{% url 'core:follow_up_delete' fu.pk %}" data-mb-confirm="Hide this entry from the history? The record of the send is kept and the one-click button stays sent.">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}#relationship"><button type="submit" class="btn btn-sm btn-ghost-danger btn-icon" title="Hide from history">{% ticon 'trash' 'icon-sm' %}</button></form>{% endif %}
         </div>
         {% endfor %}
     </div>

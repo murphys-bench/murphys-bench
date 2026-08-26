@@ -1125,6 +1125,11 @@ class WorkOrder(models.Model):
         ('cancelled', 'Cancelled'),
     ]
 
+    # Finished work that deserves client follow-up. A cancelled job never gets
+    # a thank-you. Read by the one-click send button AND its POST handler —
+    # the gate must be the same in both places.
+    FOLLOW_UP_STATUSES = ('completed',)
+
     PRIORITY_CHOICES = [
         ('low', 'Low'),
         ('normal', 'Normal'),
@@ -2802,6 +2807,15 @@ class FollowUp(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     done_at = models.DateTimeField(null=True, blank=True)
     done_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='follow_ups_done')
+    # True on rows written by the one-click send. The row is created BEFORE the
+    # email goes out (a claim), so the unique constraints below make "one email
+    # per template per record" a database fact, not a check-then-act hope — and
+    # a crash after SMTP but before done_at still leaves the claim blocking a
+    # second send.
+    via_quick_send = models.BooleanField(default=False)
+    # Soft-hide from the Relationship history. Hiding never deletes the claim,
+    # so tidying history can never re-arm the send button.
+    hidden_at = models.DateTimeField(null=True, blank=True)
 
     objects = FollowUpQuerySet.as_manager()
 
@@ -2814,6 +2828,17 @@ class FollowUp(models.Model):
                 name='follow_up_exactly_one_of_client_or_prospect',
                 condition=(models.Q(client__isnull=False, prospect__isnull=True)
                            | models.Q(client__isnull=True, prospect__isnull=False)),
+            ),
+            # One quick-send per template per record, enforced by the DB.
+            models.UniqueConstraint(
+                fields=['template', 'work_order'],
+                condition=models.Q(via_quick_send=True, work_order__isnull=False),
+                name='one_quick_send_per_template_per_work_order',
+            ),
+            models.UniqueConstraint(
+                fields=['template', 'ticket'],
+                condition=models.Q(via_quick_send=True, ticket__isnull=False, work_order__isnull=True),
+                name='one_quick_send_per_template_per_ticket',
             ),
         ]
 
