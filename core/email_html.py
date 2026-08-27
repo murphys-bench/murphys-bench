@@ -36,20 +36,60 @@ ALLOWED_PROTOCOLS = ['http', 'https', 'mailto']
 _TEMPLATE_TOKEN = re.compile(r'({{.*?}}|{%.*?%})', re.S)
 
 # The template constructs a body may use. Anything else — {% autoescape %},
-# {% debug %}, {% include %}, {% load %}, a |safe filter — is neutralized to
-# visible literal text, because each of those can turn variable content into
-# live markup or leak state. The escaping guarantee must hold against a
-# careless (or compromised) settings account, not just a careful one.
-# (Review round 1 finding: {{ reply.content|safe }} bypassed escaping.)
+# {% debug %}, {% include %}, a |safe or |safeseq filter, |json_script — is
+# neutralized to visible literal text, because each of those can turn
+# variable content into live markup or leak state. The escaping guarantee
+# must hold against a careless (or compromised) settings account, not just a
+# careful one. Review history that shaped this: round 1 found {{ x|safe }};
+# a blacklist of that one filter was the fix-the-instance mistake, and round
+# 2 rebuilt live markup with {{ x|safeseq|join:"" }} — so variable filters
+# are now a POSITIVE allowlist of text-only built-ins, resolved through
+# Django's own parser (a regex over the token can be fooled by quoting; the
+# parser cannot), and block tags carry no filters at all, because a
+# |safeseq inside an allowed {% for %} leaks raw characters one at a time.
 _SAFE_BLOCK_TAGS = {'if', 'elif', 'else', 'endif', 'for', 'empty', 'endfor',
                     'comment', 'endcomment', 'now', 'templatetag'}
-_UNSAFE_FILTER = re.compile(r'\|\s*safe\b')
+
+#: Text-only built-in filters a variable may use. Everything else, including
+#: anything registered by an app, is refused — default closed.
+ALLOWED_VAR_FILTERS = {
+    'date', 'time', 'timesince', 'timeuntil',
+    'default', 'default_if_none', 'yesno', 'pluralize',
+    'upper', 'lower', 'title', 'capfirst',
+    'truncatechars', 'truncatewords', 'wordcount', 'length',
+    'floatformat', 'add', 'cut', 'first', 'last', 'join',
+    'linebreaksbr',
+}
+
+
+def _variable_token_allowed(token):
+    """True when every filter on a {{ … }} token is an allowed text-only
+    built-in, decided by compiling the token with Django itself and comparing
+    the resolved filter FUNCTIONS against the allowlist."""
+    from django.template import Template, TemplateSyntaxError
+    from django.template.defaultfilters import register as _builtin
+    allowed_funcs = {_builtin.filters[name] for name in ALLOWED_VAR_FILTERS
+                     if name in _builtin.filters}
+    try:
+        nodelist = Template(token).nodelist
+    except TemplateSyntaxError:
+        return False
+    if len(nodelist) != 1 or not hasattr(nodelist[0], 'filter_expression'):
+        return False
+    return all(func in allowed_funcs
+               for func, _args in nodelist[0].filter_expression.filters)
 
 
 def _token_allowed(token):
     if token.startswith('{{'):
-        return not _UNSAFE_FILTER.search(token)
+        return _variable_token_allowed(token)
     inner = token[2:-2].strip()
+    if '|' in inner:
+        # No filters in block tags: {% for c in x|safeseq %} would hand each
+        # raw character to an innocent {{ c }}. A legitimate quoted pipe in
+        # an argument is rare enough that neutralizing it (visibly) is the
+        # right trade.
+        return False
     name = inner.split(None, 1)[0] if inner else ''
     return name in _SAFE_BLOCK_TAGS
 
@@ -71,14 +111,14 @@ def sanitize(html):
     import bleach
     tokens = []
 
+    neutralized_any = False
+
     def _stash(m):
+        nonlocal neutralized_any
         token = m.group(0)
         if not _token_allowed(token):
-            # Visible literal text that the template engine can never parse:
-            # HTML-escaping alone is not enough, because a token like
-            # {{ x|safe }} contains nothing escape() rewrites and would still
-            # be live template syntax. The braces themselves become entities.
-            return escape(token).replace('{', '&#123;').replace('}', '&#125;')
+            neutralized_any = True
+            return _neutralize(token)
         tokens.append(token)
         return f'MBTOKEN{len(tokens) - 1}NEKOTBM'
 
@@ -92,7 +132,27 @@ def sanitize(html):
     )
     for i, token in enumerate(tokens):
         cleaned = cleaned.replace(f'MBTOKEN{i}NEKOTBM', token)
+    if neutralized_any:
+        # A refused block tag can leave its partner dangling — an {% endfor %}
+        # whose {% for %} was neutralized no longer compiles. When anything
+        # was refused, prove the remainder still compiles; if not, neutralize
+        # every block tag (variables stand alone, block structure does not).
+        # An ordinary author typo with nothing refused is untouched and still
+        # fails loud at render, exactly as before.
+        from django.template import Template, TemplateSyntaxError
+        try:
+            Template(cleaned)
+        except TemplateSyntaxError:
+            cleaned = re.sub(r'{%.*?%}', lambda m: _neutralize(m.group(0)),
+                             cleaned, flags=re.S)
     return cleaned
+
+
+def _neutralize(token):
+    """Visible literal text the template engine can never parse. HTML-escaping
+    alone is not enough — {{ x|safe }} contains nothing escape() rewrites and
+    would still be live syntax — so the braces themselves become entities."""
+    return escape(token).replace('{', '&#123;').replace('}', '&#125;')
 
 
 def text_to_html(text):

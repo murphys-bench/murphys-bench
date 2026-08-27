@@ -4558,6 +4558,34 @@ def test_safe_filter_and_autoescape_off_cannot_bypass_escaping(monkeypatch, clie
 
 
 @pytest.mark.django_db
+def test_filter_allowlist_blocks_safeseq_and_every_html_producing_filter():
+    """R2 finding: |safe was a blacklist of one; |safeseq|join:"" rebuilt live
+    markup from escaped-per-item pieces, and a |safeseq inside an allowed
+    {% for %} does the same character by character. Variable filters are now a
+    positive allowlist of text-only built-ins, and block tags may carry no
+    filters at all; ordinary filters keep working."""
+    from types import SimpleNamespace
+    from datetime import datetime
+    from core.email_html import render_body
+    evil = '<img src=x onerror=alert(1)>'
+    ctx = {'reply': SimpleNamespace(content=evil),
+           'ticket': SimpleNamespace(created_at=datetime(2026, 8, 26))}
+    body = ('<div>{{ reply.content|safeseq|join:"" }}<br>'
+            '{% for c in reply.content|safeseq %}{{ c }}{% endfor %}<br>'
+            '{{ reply.content|json_script:"x" }}<br>'
+            'Kept: {{ reply.content|upper }} on {{ ticket.created_at|date:"M j" }}</div>')
+    html = render_body(body, ctx)
+    assert '<img' not in html
+    assert '<script' not in html
+    # The allowed filters still work: escaped-uppercased customer text and a
+    # formatted date prove the allowlist is not a blanket ban.
+    assert '&lt;IMG SRC=X ONERROR=ALERT(1)&gt;' in html
+    assert 'on Aug 26' in html
+    # The refused tokens are visible literal text, so the author sees them.
+    assert 'safeseq' in html
+
+
+@pytest.mark.django_db
 def test_sales_only_state_never_becomes_the_global_default_sender():
     """R1 finding 2: an install whose only address is the old sales one (the
     email_from-blank, email_sales_from-set shape) must not start sending
