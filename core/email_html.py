@@ -50,6 +50,11 @@ _TEMPLATE_TOKEN = re.compile(r'({{.*?}}|{%.*?%})', re.S)
 _SAFE_BLOCK_TAGS = {'if', 'elif', 'else', 'endif', 'for', 'empty', 'endfor',
                     'comment', 'endcomment', 'now', 'templatetag'}
 
+# What a literal filter argument may not carry: markup characters, or an
+# entity-shaped sequence (&lt; / &#60;) that decoding could turn back into
+# markup. A bare & is ordinary text ("R&D") and allowed.
+_UNSAFE_LITERAL_ARG = re.compile(r'[<>]|&#?\w+;')
+
 #: Text-only built-in filters a variable may use. Everything else, including
 #: anything registered by an app, is refused — default closed.
 ALLOWED_VAR_FILTERS = {
@@ -84,7 +89,11 @@ def _variable_token_allowed(token):
         if func not in allowed_funcs:
             return False
         for is_variable, value in args:
-            if not is_variable and any(ch in str(value) for ch in '<>&'):
+            # < and > are markup; an entity-shaped sequence could rebuild
+            # markup through decoding. A bare ampersand ("R&D") is ordinary
+            # copy and stays allowed — the post-render bleach pass in
+            # render_body is the security boundary (review round 4 note).
+            if not is_variable and _UNSAFE_LITERAL_ARG.search(str(value)):
                 return False
     return True
 

@@ -4597,12 +4597,20 @@ def test_literal_filter_arguments_cannot_smuggle_markup():
     evil_arg = '<img src=x onerror=1>'
     html = render_body(f'<div>{{{{ missing|default:"{evil_arg}" }}}}</div>', {})
     assert '<img' not in html
+    # The refusal is visible to the author, not a silent drop (R4 note).
+    assert 'missing|default' in html
     html = render_body(f'<div>{{{{ vals|join:"{evil_arg}" }}}}</div>', {'vals': ['a', 'b']})
     assert '<img' not in html
-    # Ordinary literal arguments keep working.
-    html = render_body('<div>{{ missing|default:"n/a" }} on {{ when|date:"M j" }}</div>',
+    # Ordinary literal arguments keep working — a bare ampersand included
+    # (R4 P3: "R&D" is real fallback copy; only < > and entity-shaped
+    # sequences are refused, the post-render clean being the boundary).
+    html = render_body('<div>{{ missing|default:"R&D" }} on {{ when|date:"M j" }}</div>',
                        {'when': __import__('datetime').datetime(2026, 8, 26)})
-    assert 'n/a' in html and 'on Aug 26' in html
+    assert 'R&amp;D' in html and 'on Aug 26' in html
+    # An entity-shaped argument is still refused — it could reconstruct
+    # markup through entity decoding.
+    html = render_body('<div>{{ missing|default:"&lt;b&gt;" }}</div>', {})
+    assert '<b>' not in html
 
 
 @pytest.mark.django_db
