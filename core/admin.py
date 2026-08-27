@@ -338,7 +338,8 @@ class SiteSettingsAdmin(admin.ModelAdmin):
             'description': 'Appears on repair reports and the nav bar.',
         }),
         ('Outbound Email', {
-            'fields': ('email_enabled', 'email_from', 'email_host', 'email_port', 'email_use_tls', 'email_username', 'email_password'),
+            'fields': ('email_enabled', 'email_host', 'email_port', 'email_use_tls', 'email_username', 'email_password'),
+            'description': 'From addresses live in Sending Addresses (Settings > Outbound Email in the app).',
         }),
         ('Email Suppression Patterns', {
             'fields': ('email_suppression_patterns',),

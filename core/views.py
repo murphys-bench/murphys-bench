@@ -35,7 +35,7 @@ from .models import (
     CannedResponseCategory, CannedResponse, Invoice,
     OrgCredential, CredentialAccessLog,
     DeviceCredentialAccessLog,
-    EmailTemplate, EmailSignature,
+    EmailTemplate, EmailSignature, SendingAddress,
     StatusDefinition,
     SuppressedAddress,
     BlockedSender,
@@ -2410,7 +2410,6 @@ class EstimateQuoteEmailView(EstimateAccessMixin, View):
             return redirect('core:estimate_detail', pk=pk)
 
         company = site.company_name or "Murphy's Bench"
-        sales_from = site.email_sales_from or site.email_from or None
         scope_snippet = f' — {estimate.scope[:60]}' if estimate.scope else ''
         cover = (
             f"Hello,\n\nPlease find attached your quote {estimate.estimate_number}{scope_snippet}.\n\n"
@@ -2420,8 +2419,7 @@ class EstimateQuoteEmailView(EstimateAccessMixin, View):
             to_email,
             subject=f"{company}: Quote {estimate.estimate_number}",
             cover_body=cover,
-            from_email=sales_from,
-            reply_to=sales_from,
+            kind='quotes',
             attachments=[(f'Quote-{estimate.estimate_number}.pdf', pdf_bytes, 'application/pdf')],
             client=estimate.client,
             contact=contact,
@@ -6416,7 +6414,6 @@ class SaleReceiptEmailView(SaleAccessMixin, View):
             return redirect('core:sale_detail', pk=pk)
 
         company = site.company_name or "Murphy's Bench"
-        sales_from = site.email_sales_from or site.email_from or None
         cover = (
             f"Hello,\n\nThank you for your business. Please find attached your receipt "
             f"{sale.sale_number} for ${sale.amount or 0}.\n\n{company}"
@@ -6425,8 +6422,7 @@ class SaleReceiptEmailView(SaleAccessMixin, View):
             to_email,
             subject=f"{company}: Receipt {sale.sale_number}",
             cover_body=cover,
-            from_email=sales_from,
-            reply_to=sales_from,
+            kind='receipts',
             attachments=[(f'Receipt-{sale.sale_number}.pdf', pdf_bytes, 'application/pdf')],
             client=sale.client,
             contact=contact,
@@ -7034,6 +7030,7 @@ class WorkOrderReportEmailView(LoginRequiredMixin, View):
             to_email,
             subject=f"{company}: Repair Report {wo.work_order_number}",
             cover_body=cover,
+            kind='reports',
             attachments=[(f'Repair-Report-{wo.work_order_number}.pdf', pdf_bytes, 'application/pdf')],
             client=wo.client,
             contact=contact,
@@ -7305,7 +7302,8 @@ class EmailTestOutboundView(SettingsAdminMixin, View):
         own = (getattr(request.user, 'email', '') or '').strip()
         if own:
             return own
-        return (s.email_from or s.email_username or '').strip() or None
+        default = SendingAddress.get_default()
+        return ((default.email if default else '') or s.email_username or '').strip() or None
 
     def post(self, request):
         import smtplib, ssl
@@ -7324,7 +7322,8 @@ class EmailTestOutboundView(SettingsAdminMixin, View):
         try:
             msg = MIMEText("This is a test email from Murphy's Bench. Your outbound email is working correctly.")
             msg['Subject'] = "Murphy's Bench — Outbound Email Test"
-            msg['From'] = s.email_from or s.email_username
+            default = SendingAddress.get_default()
+            msg['From'] = (default.from_header if default else '') or s.email_username
             msg['To'] = to_addr
             ctx = ssl.create_default_context()
             # Port 465 = implicit SSL (SMTP_SSL); port 587 = STARTTLS
@@ -7684,6 +7683,8 @@ class SettingsView(SettingsAdminMixin, View):
             ctx.update(_kb_categories_context())
         if active_tab == 'outbound':
             ctx['suppressed_addresses'] = SuppressedAddress.objects.all()
+            ctx['sending_addresses'] = SendingAddress.objects.all()
+            ctx['default_sending_address'] = SendingAddress.get_default()
         if active_tab == 'inbound':
             ctx['blocked_senders'] = BlockedSender.objects.all()
         if active_tab == 'sla_plans':
@@ -7750,6 +7751,17 @@ class SettingsView(SettingsAdminMixin, View):
                         f'config until this is fixed and settings are saved again.',
                     )
                 return redirect(f"{request.path}?tab=maintenance")
+            if tab == 'outbound' and not SendingAddress.objects.exists():
+                # First save with an empty address list: seed the default from
+                # the company email so outgoing mail always has a real,
+                # editable From — never a hardcoded one.
+                seed = (SiteSettings.get().company_email or '').strip()
+                if seed:
+                    SendingAddress.objects.create(
+                        display_name=SiteSettings.get().company_name or '',
+                        email=seed, is_default=True)
+                    messages.info(request, f'Added {seed} as the default sending address '
+                                           f'(from Company Info). Edit it below.')
             messages.success(request, 'Settings saved.')
             return redirect(f"{request.path}?tab={tab}")
 
@@ -7775,6 +7787,12 @@ class SettingsView(SettingsAdminMixin, View):
             ctx.update(_checklist_items_context())
         if tab == 'display':
             ctx.update(_display_context())
+        if tab == 'outbound':
+            # Same extras the GET renders, so an invalid save doesn't blank the
+            # address and suppression cards.
+            ctx['suppressed_addresses'] = SuppressedAddress.objects.all()
+            ctx['sending_addresses'] = SendingAddress.objects.all()
+            ctx['default_sending_address'] = SendingAddress.get_default()
         if active_tab == 'maintenance':
             ctx.update(_maintenance_context())
         return render(request, 'core/settings.html', ctx)
@@ -8560,6 +8578,48 @@ class EmailSignatureDeleteView(SettingsAdminMixin, View):
         sig.delete()
         messages.success(request, f'Signature "{name}" deleted.')
         return redirect(_sig_redirect())
+
+
+def _outbound_redirect():
+    return f"{reverse('core:settings')}?tab=outbound"
+
+
+class SendingAddressSaveView(SettingsAdminMixin, View):
+    """Settings: create (no pk) or update (pk) one sending address."""
+
+    def post(self, request, pk=None):
+        from .forms import SendingAddressForm
+        instance = get_object_or_404(SendingAddress, pk=pk) if pk else None
+        form = SendingAddressForm(request.POST, instance=instance)
+        if form.is_valid():
+            addr = form.save()
+            messages.success(request, f'Sending address {addr.email} saved.')
+        else:
+            errs = '; '.join(f'{field}: {errors[0]}' for field, errors in form.errors.items())
+            messages.error(request, f'Sending address not saved. {errs}')
+        return redirect(_outbound_redirect())
+
+
+class SendingAddressDeleteView(SettingsAdminMixin, View):
+    def post(self, request, pk):
+        addr = get_object_or_404(SendingAddress, pk=pk)
+        if addr.is_default and SendingAddress.objects.exclude(pk=pk).exists():
+            messages.error(request, f'{addr.email} is the default sending address. '
+                                    f'Make another address the default first.')
+            return redirect(_outbound_redirect())
+        email = addr.email
+        addr.delete()
+        messages.success(request, f'Sending address {email} deleted.')
+        return redirect(_outbound_redirect())
+
+
+class SendingAddressMakeDefaultView(SettingsAdminMixin, View):
+    def post(self, request, pk):
+        addr = get_object_or_404(SendingAddress, pk=pk)
+        addr.is_default = True
+        addr.save()
+        messages.success(request, f'{addr.email} is now the default sending address.')
+        return redirect(_outbound_redirect())
 
 
 class EmailBrandingUpdateView(SettingsAdminMixin, View):

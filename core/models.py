@@ -2320,8 +2320,28 @@ class SiteSettings(models.Model):
     email_use_tls = models.BooleanField(default=True)
     email_username = models.CharField(max_length=255, blank=True)
     email_password = EncryptedCharField(max_length=255, blank=True)
-    email_from = models.EmailField(blank=True, help_text='From address shown to clients. e.g. support@yourdomain.com')
-    email_sales_from = models.EmailField(blank=True, help_text='From address for quotes/estimates. Blank = use the support From address above.')
+    # From addresses live in SendingAddress rows (Settings > Outbound Email);
+    # each kind of outgoing email uses its from_* pick below, else the default
+    # row. The old email_from / email_sales_from fields became the seeded rows
+    # in migration 0117.
+    from_ticket_events = models.ForeignKey(
+        'SendingAddress', on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+        help_text='Ticket event emails: auto-responder, replies, status changes, resolved.')
+    from_customer_emails = models.ForeignKey(
+        'SendingAddress', on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+        help_text='Emails a person sends by hand from a work record or customer, and one-click follow-ups.')
+    from_quotes = models.ForeignKey(
+        'SendingAddress', on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+        help_text='Quote emails from estimates.')
+    from_receipts = models.ForeignKey(
+        'SendingAddress', on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+        help_text='Receipt emails from sales.')
+    from_reports = models.ForeignKey(
+        'SendingAddress', on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+        help_text='Repair report emails from work orders.')
+    from_internal = models.ForeignKey(
+        'SendingAddress', on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+        help_text='Internal shop notifications to techs and admins.')
 
     # Auto-responder suppression patterns (newline-separated fnmatch patterns)
     email_suppression_patterns = models.TextField(
@@ -2694,6 +2714,66 @@ class CannedResponse(models.Model):
 
     def __str__(self):
         return self.label
+
+
+class SendingAddress(models.Model):
+    """An identity outgoing email is sent as: "Shamrock Sales <sales@…>".
+
+    The list lives in Settings > Outbound Email; each kind of outgoing mail
+    (ticket events, hand-sent customer email, quotes, receipts, reports,
+    internal notifications) points at one of these via the SiteSettings
+    from_* fields, defaulting to the row marked default. Rows normally ride
+    the shop's main outbound SMTP server; the optional login fields exist for
+    mail hosts that refuse a From address that does not match the
+    authenticated account — anything left blank falls back to the main
+    server's setting, field by field.
+    """
+
+    display_name = models.CharField(
+        max_length=100, blank=True,
+        help_text='Shown before the address, e.g. "Shamrock Sales". Blank = address only.')
+    email = models.EmailField()
+    is_default = models.BooleanField(
+        default=False,
+        help_text='Used by every kind of outgoing email that has no address of its own.')
+    smtp_host = models.CharField(max_length=255, blank=True, default='')
+    smtp_port = models.IntegerField(null=True, blank=True)
+    smtp_use_tls = models.BooleanField(default=True)
+    smtp_username = models.CharField(max_length=255, blank=True, default='')
+    smtp_password = EncryptedCharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sending_addresses'
+        ordering = ['-is_default', 'email']
+        verbose_name_plural = 'Sending addresses'
+
+    def __str__(self):
+        return self.from_header
+
+    @property
+    def from_header(self):
+        if self.display_name:
+            return f'{self.display_name} <{self.email}>'
+        return self.email
+
+    @property
+    def has_own_login(self):
+        return bool(self.smtp_host or self.smtp_username)
+
+    @classmethod
+    def get_default(cls):
+        return cls.objects.filter(is_default=True).first() or cls.objects.first()
+
+    def save(self, *args, **kwargs):
+        # Single default, same pattern as EmailSignature; the first row ever
+        # created becomes the default so the list never has zero defaults.
+        if self.is_default:
+            SendingAddress.objects.exclude(pk=self.pk).update(is_default=False)
+        elif not SendingAddress.objects.exclude(pk=self.pk).filter(is_default=True).exists():
+            self.is_default = True
+        super().save(*args, **kwargs)
 
 
 class EmailSignature(models.Model):

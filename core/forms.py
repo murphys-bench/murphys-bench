@@ -1,7 +1,7 @@
 from django import forms
 from django.core.files.uploadedfile import UploadedFile
 from django.urls import reverse
-from .models import WorkOrder, Client, Contact, ContactPhone, Device, Ticket, RepairType, HelpTopic, SLAPlan, KBCategory, KBArticle, Mileage, SiteSettings, Prospect, Estimate, DeviceType, Contract
+from .models import WorkOrder, Client, Contact, ContactPhone, Device, Ticket, RepairType, HelpTopic, SLAPlan, KBCategory, KBArticle, Mileage, SiteSettings, Prospect, Estimate, DeviceType, Contract, SendingAddress
 
 
 MAX_LOGO_DIMENSION = 2000  # px on either side — generous; we display-fit anything under this
@@ -698,13 +698,28 @@ class CompanySettingsForm(forms.ModelForm):
 
 
 class OutboundEmailSettingsForm(forms.ModelForm):
+    # Kind → SiteSettings field. One picker per kind of outgoing email on the
+    # Outbound Email tab; blank means the default sending address.
+    FROM_KIND_FIELDS = [
+        ('from_ticket_events', 'Ticket event emails',
+         'Auto-responder, replies, status changes, resolved.'),
+        ('from_customer_emails', 'Hand-sent customer emails',
+         'Templates sent from a work record or customer, and one-click follow-ups.'),
+        ('from_quotes', 'Quotes', 'Quote emails from estimates.'),
+        ('from_receipts', 'Receipts', 'Receipt emails from sales.'),
+        ('from_reports', 'Repair reports', 'Report emails from work orders.'),
+        ('from_internal', 'Internal notifications', 'Shop notifications to techs and admins.'),
+    ]
+
     class Meta:
         model = SiteSettings
         fields = [
             'email_enabled', 'email_host', 'email_port', 'email_use_tls',
-            'email_username', 'email_password', 'email_from', 'email_sales_from',
+            'email_username', 'email_password',
             'email_suppression_patterns',
             'notify_new_ticket', 'notify_new_ticket_users',
+            'from_ticket_events', 'from_customer_emails', 'from_quotes',
+            'from_receipts', 'from_reports', 'from_internal',
         ]
         widgets = {
             'email_enabled': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
@@ -713,8 +728,6 @@ class OutboundEmailSettingsForm(forms.ModelForm):
             'email_use_tls': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
             'email_username': forms.TextInput(attrs={'class': _SS_INPUT}),
             'email_password': forms.PasswordInput(attrs={'class': _SS_INPUT}, render_value=True),
-            'email_from': forms.EmailInput(attrs={'class': _SS_INPUT, 'placeholder': 'support@yourdomain.com'}),
-            'email_sales_from': forms.EmailInput(attrs={'class': _SS_INPUT, 'placeholder': 'sales@yourdomain.com'}),
             'email_suppression_patterns': forms.Textarea(attrs={'class': _SS_INPUT, 'rows': 5}),
             'notify_new_ticket': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
             'notify_new_ticket_users': forms.CheckboxSelectMultiple(attrs={'class': 'form-check-input'}),
@@ -722,13 +735,46 @@ class OutboundEmailSettingsForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        from .models import User
+        from .models import User, SendingAddress
         field = self.fields['notify_new_ticket_users']
         # No email address, no checkbox: a recipient who can never receive the
         # notification would silently satisfy the list while nobody is told.
         field.queryset = (User.objects.filter(is_active=True).exclude(email='')
                           .order_by('first_name', 'username'))
         field.label_from_instance = lambda u: f'{u.get_full_name() or u.username} ({u.email})'
+        default = SendingAddress.get_default()
+        default_label = f'Default ({default.email})' if default else 'Default sending address'
+        for name, _, _ in self.FROM_KIND_FIELDS:
+            f = self.fields[name]
+            f.queryset = SendingAddress.objects.all()
+            f.empty_label = default_label
+            f.widget.attrs['class'] = 'form-select'
+            f.label_from_instance = lambda a: a.from_header
+
+    def from_kind_fields(self):
+        """(bound field, label, hint) per kind, for the Outbound Email tab."""
+        return [(self[name], label, hint) for name, label, hint in self.FROM_KIND_FIELDS]
+
+
+class SendingAddressForm(forms.ModelForm):
+    """One sending address row (Settings > Outbound Email). The optional login
+    fields are for mail hosts that refuse a From that does not match the
+    authenticated account; blank rides the main outbound server."""
+
+    class Meta:
+        model = SendingAddress
+        fields = ['display_name', 'email', 'is_default',
+                  'smtp_host', 'smtp_port', 'smtp_use_tls', 'smtp_username', 'smtp_password']
+        widgets = {
+            'display_name': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'Shamrock Sales'}),
+            'email': forms.EmailInput(attrs={'class': _SS_INPUT, 'placeholder': 'sales@yourdomain.com'}),
+            'is_default': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
+            'smtp_host': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'Blank = main SMTP host'}),
+            'smtp_port': forms.NumberInput(attrs={'class': _SS_INPUT, 'placeholder': 'Blank = main port'}),
+            'smtp_use_tls': forms.CheckboxInput(attrs={'class': _SS_CHECK}),
+            'smtp_username': forms.TextInput(attrs={'class': _SS_INPUT, 'placeholder': 'Blank = main username'}),
+            'smtp_password': forms.PasswordInput(attrs={'class': _SS_INPUT}, render_value=True),
+        }
 
 
 class InboundEmailSettingsForm(forms.ModelForm):

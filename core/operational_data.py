@@ -144,6 +144,7 @@ NON_OPERATIONAL = {
     'core.CannedResponseCategory': 'configuration',
     'core.EmailTemplate': 'configuration',
     'core.EmailSignature': 'configuration',
+    'core.SendingAddress': 'configuration',
     'core.CustomField': 'a field DEFINITION is configuration; its VALUES are wiped',
     'core.KBArticle': 'configuration',
     'core.KBCategory': 'configuration',

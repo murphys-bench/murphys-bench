@@ -75,6 +75,59 @@ def _email_logo_field(site):
     return getattr(site, 'email_logo', None) or site.company_logo
 
 
+# The kinds of outgoing email, each with its own default sending address on
+# Settings > Outbound Email (SiteSettings.from_<kind>). Blank = the default
+# SendingAddress row.
+EMAIL_KINDS = ('ticket_events', 'customer_emails', 'quotes', 'receipts',
+               'reports', 'internal')
+
+
+def sending_address_for(site, kind):
+    """The SendingAddress this kind of outgoing email sends as: the kind's own
+    pick, else the default row, else None (an install with no addresses yet;
+    the connection helper then falls back to the company email)."""
+    from .models import SendingAddress
+    if kind not in EMAIL_KINDS:
+        raise ValueError(f'Unknown email kind {kind!r}')
+    return getattr(site, f'from_{kind}', None) or SendingAddress.get_default()
+
+
+def _connection_and_from(site, sender):
+    """The SMTP connection and From header for one send.
+
+    `sender` is a SendingAddress or None. A sender's own login fields override
+    the main outbound server field by field; anything blank rides the main
+    server, and smtp_use_tls only applies when the sender brings its own host.
+    With no sender at all the From falls back to the company email, then the
+    SMTP username, then DEFAULT_FROM_EMAIL — never a hardcoded address."""
+    from django.core.mail import get_connection
+    from django.conf import settings as django_settings
+
+    s_host = sender.smtp_host if sender else ''
+    s_port = sender.smtp_port if sender else None
+    s_user = sender.smtp_username if sender else ''
+    s_pass = sender.smtp_password if sender else ''
+    host = s_host or site.email_host or django_settings.EMAIL_HOST
+    port = s_port or site.email_port or django_settings.EMAIL_PORT
+    username = s_user or site.email_username or django_settings.EMAIL_HOST_USER
+    password = s_pass or site.email_password or django_settings.EMAIL_HOST_PASSWORD
+    use_tls = sender.smtp_use_tls if s_host else site.email_use_tls
+    use_ssl = port == 465
+    connection = get_connection(
+        backend='django.core.mail.backends.smtp.EmailBackend',
+        host=host, port=port, username=username, password=password,
+        use_tls=use_tls and not use_ssl, use_ssl=use_ssl,
+        fail_silently=True,
+    )
+    if sender is not None:
+        from_email = sender.from_header
+    else:
+        from_email = ((site.company_email or '').strip()
+                      or (site.email_username or '').strip()
+                      or django_settings.DEFAULT_FROM_EMAIL)
+    return connection, from_email
+
+
 def _suppression_reason(to_email, client, site):
     """Return (reason, detail) if this address must NOT be emailed, else ('', '').
 
@@ -166,24 +219,13 @@ def _greeting_name(client, contact):
     return client.name
 
 
-def _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type, to_email, cc=None, bcc=None, label=''):
-    """Send one branded message through the shop's SMTP settings. Returns
+def _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type, to_email, cc=None, bcc=None, label='', sender=None):
+    """Send one branded message through the shop's SMTP settings, as `sender`
+    (a SendingAddress, or None for the fallback From). Returns
     (status, reason, detail) for the send log; never raises."""
-    from django.core.mail import EmailMultiAlternatives, get_connection
-    from django.conf import settings as django_settings
+    from django.core.mail import EmailMultiAlternatives
 
-    use_ssl = site.email_port == 465
-    connection = get_connection(
-        backend='django.core.mail.backends.smtp.EmailBackend',
-        host=site.email_host or django_settings.EMAIL_HOST,
-        port=site.email_port or django_settings.EMAIL_PORT,
-        username=site.email_username or django_settings.EMAIL_HOST_USER,
-        password=site.email_password or django_settings.EMAIL_HOST_PASSWORD,
-        use_tls=site.email_use_tls and not use_ssl,
-        use_ssl=use_ssl,
-        fail_silently=True,
-    )
-    from_email = site.email_from or django_settings.DEFAULT_FROM_EMAIL
+    connection, from_email = _connection_and_from(site, sender)
     try:
         msg = EmailMultiAlternatives(
             subject=subject.strip(),
@@ -288,7 +330,8 @@ def send_custom_email(template, *, to_email, client, contact=None, ticket=None,
     html_body, logo_data, logo_mime_type = _build_html_email(body, signature_body, subject, ticket, site)
     plain_body = f"{body}\n\n--\n{signature_body}" if signature_body else body
     status, reason, detail = _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type,
-                                        to_email, cc=cc, label=trigger)
+                                        to_email, cc=cc, label=trigger,
+                                        sender=sending_address_for(site, 'customer_emails'))
     return _log(status, reason, detail)
 
 
@@ -379,7 +422,8 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
         plain_body = f"{body}\n\n--\n{signature_body}"
 
     status, reason, detail = _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type,
-                                        to_email, cc=cc, bcc=bcc, label=f'trigger {trigger}')
+                                        to_email, cc=cc, bcc=bcc, label=f'trigger {trigger}',
+                                        sender=sending_address_for(site, 'ticket_events'))
 
     EmailSendLog.objects.create(
         ticket=ticket, to_email=to_email, trigger=trigger,
@@ -387,12 +431,13 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
     )
 
 
-def send_document_email(to_email, subject, cover_body, *, from_email=None,
-                        reply_to=None, attachments=None, client=None,
+def send_document_email(to_email, subject, cover_body, *, kind,
+                        attachments=None, client=None,
                         contact=None, cc=None, trigger='document',
                         related_ticket=None):
-    """Send an MB-generated document (repair report, quote) as a short HTML cover
-    email with PDF attachment(s).
+    """Send an MB-generated document (repair report, quote, receipt) as a
+    short HTML cover email with PDF attachment(s), sent as the kind's sending
+    address (Settings > Outbound Email).
 
     Honors every suppression layer and always writes an EmailSendLog row (ticket
     optional — these aren't ticket-triggered). Fail-loud: SMTP errors are logged
@@ -401,8 +446,7 @@ def send_document_email(to_email, subject, cover_body, *, from_email=None,
     attachments: list of (filename, content_bytes, mimetype).
     """
     from .models import SiteSettings, EmailSendLog, EmailSignature
-    from django.core.mail import EmailMultiAlternatives, get_connection
-    from django.conf import settings as django_settings
+    from django.core.mail import EmailMultiAlternatives
 
     site = SiteSettings.get()
 
@@ -436,28 +480,15 @@ def send_document_email(to_email, subject, cover_body, *, from_email=None,
     if signature_body:
         plain_body = f"{cover_body}\n\n--\n{signature_body}"
 
-    use_ssl = site.email_port == 465
-    connection = get_connection(
-        backend='django.core.mail.backends.smtp.EmailBackend',
-        host=site.email_host or django_settings.EMAIL_HOST,
-        port=site.email_port or django_settings.EMAIL_PORT,
-        username=site.email_username or django_settings.EMAIL_HOST_USER,
-        password=site.email_password or django_settings.EMAIL_HOST_PASSWORD,
-        use_tls=site.email_use_tls and not use_ssl,
-        use_ssl=use_ssl,
-        fail_silently=True,
-    )
-
-    sender = from_email or site.email_from or django_settings.DEFAULT_FROM_EMAIL
+    connection, from_email = _connection_and_from(site, sending_address_for(site, kind))
 
     try:
         msg = EmailMultiAlternatives(
             subject=subject,
             body=plain_body,
-            from_email=sender,
+            from_email=from_email,
             to=[to_email],
             cc=[e for e in (cc or []) if e and e != to_email],
-            reply_to=[reply_to] if reply_to else None,
             connection=connection,
         )
         msg.attach_alternative(html_body, 'text/html')
@@ -527,7 +558,8 @@ def send_internal_email(site, subject, body, to_email, ticket=None, trigger='int
             status='suppressed', reason='no_address')
     html_body = '<p>' + escape(body).replace('\n', '<br>') + '</p>'
     status, reason, detail = _smtp_send(site, subject, body, html_body,
-                                        None, None, to_email, label=trigger)
+                                        None, None, to_email, label=trigger,
+                                        sender=sending_address_for(site, 'internal'))
     return EmailSendLog.objects.create(
         ticket=ticket, to_email=to_email, trigger=trigger,
         status=status, reason=reason, detail=detail)

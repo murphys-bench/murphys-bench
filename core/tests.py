@@ -3537,11 +3537,12 @@ pdf_skip = pytest.mark.skipif(not _weasyprint_ok(),
 
 
 def _enable_email():
-    from core.models import SiteSettings
+    from core.models import SiteSettings, SendingAddress
     site = SiteSettings.get()
     site.email_enabled = True
-    site.email_from = 'support@example.com'
     site.save()
+    SendingAddress.objects.get_or_create(email='support@example.com',
+                                         defaults={'is_default': True})
     return site
 
 
@@ -3564,7 +3565,7 @@ def test_send_document_email_sends_and_logs(monkeypatch, client_obj):
 
     log = send_document_email(
         'wayne@davis.example', subject='Your Report',
-        cover_body='Here is your report.',
+        cover_body='Here is your report.', kind='reports',
         attachments=[('Repair-Report-WO-1.pdf', b'%PDF-fake', 'application/pdf')],
         client=client_obj, trigger='wo_report',
     )
@@ -3586,7 +3587,7 @@ def test_send_document_email_honors_client_suppression(client_obj):
     client_obj.save()
 
     log = send_document_email(
-        'x@example.com', subject='S', cover_body='B',
+        'x@example.com', subject='S', cover_body='B', kind='reports',
         attachments=[('a.pdf', b'%PDF', 'application/pdf')],
         client=client_obj, trigger='wo_report',
     )
@@ -3599,7 +3600,7 @@ def test_send_document_email_no_address_is_logged(client_obj):
     from core.email_utils import send_document_email
     _enable_email()
     log = send_document_email(
-        '', subject='S', cover_body='B', client=client_obj, trigger='wo_report',
+        '', subject='S', cover_body='B', kind='reports', client=client_obj, trigger='wo_report',
     )
     assert log.status == 'suppressed'
     assert log.reason == 'no_address'
@@ -3613,7 +3614,7 @@ def test_send_document_email_respects_contact_optout(client_obj):
     c = Contact.objects.create(client=client_obj, first_name='No', last_name='Mail',
                                email='no@example.com', receives_email=False)
     log = send_document_email(
-        'no@example.com', subject='S', cover_body='B',
+        'no@example.com', subject='S', cover_body='B', kind='reports',
         attachments=[('a.pdf', b'%PDF', 'application/pdf')],
         client=client_obj, contact=c, trigger='wo_report',
     )
@@ -4134,11 +4135,13 @@ def test_estimate_custom_log_creates_line_item_on_estimate(client, admin_user, c
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
-def test_quote_email_uses_sales_from_when_set(client_obj):
+def test_quote_email_uses_quotes_sending_address_when_set(client_obj):
     from django.core.mail import EmailMultiAlternatives
     from core.email_utils import send_document_email
+    from core.models import SendingAddress
     site = _enable_email()
-    site.email_sales_from = 'sales@example.com'
+    sales = SendingAddress.objects.create(display_name='Shamrock Sales', email='sales@example.com')
+    site.from_quotes = sales
     site.save()
 
     captured = {}
@@ -4150,23 +4153,21 @@ def test_quote_email_uses_sales_from_when_set(client_obj):
     import unittest.mock
     with unittest.mock.patch.object(EmailMultiAlternatives, 'send', fake_send):
         log = send_document_email(
-            'x@example.com', subject='Quote', cover_body='B',
-            from_email=site.email_sales_from,
+            'x@example.com', subject='Quote', cover_body='B', kind='quotes',
             attachments=[('a.pdf', b'%PDF', 'application/pdf')],
             client=client_obj, trigger='estimate_quote',
         )
     assert log.status == 'sent'
-    assert captured['from'] == 'sales@example.com'
+    assert captured['from'] == 'Shamrock Sales <sales@example.com>'
 
 
 @pytest.mark.django_db
-def test_quote_email_falls_back_to_support_from_when_sales_blank(client_obj):
+def test_quote_email_falls_back_to_default_sending_address(client_obj):
     from django.core.mail import EmailMultiAlternatives
     from core.email_utils import send_document_email
     site = _enable_email()
-    assert not site.email_sales_from
+    assert site.from_quotes is None
 
-    sales_from = site.email_sales_from or site.email_from or None
     captured = {}
 
     def fake_send(self, fail_silently=False):
@@ -4176,13 +4177,151 @@ def test_quote_email_falls_back_to_support_from_when_sales_blank(client_obj):
     import unittest.mock
     with unittest.mock.patch.object(EmailMultiAlternatives, 'send', fake_send):
         log = send_document_email(
-            'x@example.com', subject='Quote', cover_body='B',
-            from_email=sales_from,
+            'x@example.com', subject='Quote', cover_body='B', kind='quotes',
             attachments=[('a.pdf', b'%PDF', 'application/pdf')],
             client=client_obj, trigger='estimate_quote',
         )
     assert log.status == 'sent'
-    assert captured['from'] == site.email_from
+    assert captured['from'] == 'support@example.com'
+
+
+# ---------------------------------------------------------------------------
+# Sending addresses (mig 0117) — per-kind From resolution
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_sending_address_kind_resolution_uses_pick_else_default():
+    from core.email_utils import sending_address_for, EMAIL_KINDS
+    from core.models import SiteSettings, SendingAddress
+    site = SiteSettings.get()
+    default = SendingAddress.objects.create(email='support@example.com', is_default=True)
+    sales = SendingAddress.objects.create(email='sales@example.com')
+    site.from_quotes = sales
+    site.save()
+    site = SiteSettings.get()
+    assert sending_address_for(site, 'quotes') == sales
+    for kind in EMAIL_KINDS:
+        if kind != 'quotes':
+            assert sending_address_for(site, kind) == default, kind
+    with pytest.raises(ValueError):
+        sending_address_for(site, 'no_such_kind')
+
+
+@pytest.mark.django_db
+def test_first_sending_address_becomes_default_and_single_default_holds():
+    from core.models import SendingAddress
+    a = SendingAddress.objects.create(email='a@example.com')
+    a.refresh_from_db()
+    assert a.is_default, 'the first row ever created must become the default'
+    b = SendingAddress.objects.create(email='b@example.com', is_default=True)
+    a.refresh_from_db()
+    assert b.is_default and not a.is_default
+
+
+@pytest.mark.django_db
+def test_sending_address_own_login_overrides_connection_field_by_field():
+    from core.email_utils import _connection_and_from
+    from core.models import SiteSettings, SendingAddress
+    site = SiteSettings.get()
+    site.email_host = 'mail.main.example'
+    site.email_port = 587
+    site.email_username = 'mainuser'
+    site.email_password = 'mainpass'
+    site.save()
+    sender = SendingAddress.objects.create(
+        display_name='Sales', email='sales@example.com',
+        smtp_host='mail.other.example', smtp_username='salesuser', smtp_password='salespass')
+    conn, from_email = _connection_and_from(SiteSettings.get(), sender)
+    assert from_email == 'Sales <sales@example.com>'
+    assert conn.host == 'mail.other.example'
+    assert conn.username == 'salesuser'
+    assert conn.password == 'salespass'
+    assert conn.port == 587, 'blank port must ride the main server setting'
+    # And a row with no login of its own rides the main server entirely.
+    plain = SendingAddress.objects.create(email='billing@example.com')
+    conn2, from2 = _connection_and_from(SiteSettings.get(), plain)
+    assert (conn2.host, conn2.username, conn2.password) == ('mail.main.example', 'mainuser', 'mainpass')
+    assert from2 == 'billing@example.com'
+
+
+@pytest.mark.django_db
+def test_connection_from_falls_back_to_company_email_never_hardcoded():
+    from core.email_utils import _connection_and_from
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    site.company_email = 'shop@example.com'
+    site.save()
+    _, from_email = _connection_and_from(SiteSettings.get(), None)
+    assert from_email == 'shop@example.com'
+
+
+@pytest.mark.django_db
+def test_ticket_event_email_sends_as_ticket_events_pick(monkeypatch, client_obj):
+    from django.core.mail import EmailMultiAlternatives
+    from core.models import SendingAddress, EmailTemplate, Contact, Ticket
+    from core.email_utils import send_ticket_email
+    site = _enable_email()
+    desk = SendingAddress.objects.create(display_name='SCS Support', email='desk@example.com')
+    site.from_ticket_events = desk
+    site.save()
+    EmailTemplate.objects.update_or_create(
+        trigger='ticket_created',
+        defaults={'subject_template': 'Hi', 'body_template': 'Body', 'is_active': True})
+    contact = Contact.objects.create(client=client_obj, first_name='Wayne', last_name='D',
+                                     email='wayne@example.com', is_primary=True)
+    ticket = Ticket.objects.create(client=client_obj, contact=contact, subject='S', description='D')
+
+    captured = {}
+
+    def fake_send(self, fail_silently=False):
+        captured['from'] = self.from_email
+        return 1
+
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', fake_send)
+    send_ticket_email('ticket_created', ticket)
+    assert captured['from'] == 'SCS Support <desk@example.com>'
+
+
+@pytest.mark.django_db
+def test_sending_address_delete_guard_and_make_default(client, admin_user):
+    from core.models import SendingAddress
+    client.force_login(admin_user)
+    a = SendingAddress.objects.create(email='a@example.com', is_default=True)
+    b = SendingAddress.objects.create(email='b@example.com')
+    # The default cannot be deleted while another row exists.
+    client.post(f'/settings/sending-addresses/{a.pk}/delete/')
+    assert SendingAddress.objects.filter(pk=a.pk).exists()
+    # Make b the default, then a deletes fine.
+    client.post(f'/settings/sending-addresses/{b.pk}/make-default/')
+    b.refresh_from_db()
+    assert b.is_default
+    client.post(f'/settings/sending-addresses/{a.pk}/delete/')
+    assert not SendingAddress.objects.filter(pk=a.pk).exists()
+
+
+@pytest.mark.django_db
+def test_sending_address_add_rejects_garbage_email(client, admin_user):
+    from core.models import SendingAddress
+    client.force_login(admin_user)
+    client.post('/settings/sending-addresses/add/', {'email': 'not-an-address'})
+    assert SendingAddress.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_outbound_save_seeds_default_address_from_company_email(client, admin_user):
+    from core.models import SiteSettings, SendingAddress
+    site = SiteSettings.get()
+    site.company_email = 'shop@example.com'
+    site.save()
+    client.force_login(admin_user)
+    resp = client.post('/settings/', {
+        'tab': 'outbound',
+        'outbound-email_port': '587',
+        'outbound-email_suppression_patterns': 'noreply@*',
+    })
+    assert resp.status_code == 302
+    row = SendingAddress.objects.get()
+    assert row.email == 'shop@example.com' and row.is_default
 
 
 @pdf_skip
@@ -9475,7 +9614,6 @@ def test_failed_send_records_why_not_just_that_it_failed(client, admin_user, cli
     site = SiteSettings.get()
     site.email_enabled = True
     site.email_host = 'mail.example.com'
-    site.email_from = 'shop@example.com'
     site.save()
     EmailTemplate.objects.update_or_create(
         trigger='ticket_created',
@@ -14493,7 +14631,7 @@ def test_customer_email_compose_renders_template_and_sends_edited_text(client, a
     assert 'value="Thanks, Pat"' in body and 'Hi Pat, from' in body
     # POST: the edited text goes, not a fresh render; the ticket gets an internal note.
     sent = {}
-    def fake_smtp(site, subject, plain_body, html_body, logo_data, logo_mime, to_email, cc=None, bcc=None, label=''):
+    def fake_smtp(site, subject, plain_body, html_body, logo_data, logo_mime, to_email, cc=None, bcc=None, label='', sender=None):
         sent.update(subject=subject, body=plain_body, to=to_email); return 'sent', '', ''
     monkeypatch.setattr(email_utils, '_smtp_send', fake_smtp)
     r = client.post(reverse('core:customer_email'), {'ticket': ticket.pk, 'template': t.pk, 'contact': c.contacts.first().pk, 'subject': 'Thanks, Pat (edited)', 'body': 'Edited body.'})
