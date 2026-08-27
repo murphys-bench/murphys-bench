@@ -271,6 +271,7 @@ urlpatterns = [
     path('settings/email-templates/new/', views.EmailTemplateCreateView.as_view(), name='email_template_create'),
     path('settings/email-templates/<int:pk>/delete/', views.EmailTemplateDeleteView.as_view(), name='email_template_delete'),
     path('settings/email-templates/<int:pk>/test-send/', views.EmailTemplateTestSendView.as_view(), name='email_template_test_send'),
+    path('settings/email-templates/attachments/<int:pk>/delete/', views.EmailTemplateAttachmentDeleteView.as_view(), name='email_template_attachment_delete'),
     path('settings/email-branding/save/', views.EmailBrandingUpdateView.as_view(), name='email_branding_save'),
 
     # Settings — Email Signatures

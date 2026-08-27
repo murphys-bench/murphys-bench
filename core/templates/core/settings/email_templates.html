@@ -36,7 +36,7 @@
         <div class="card-footer"><button type="submit" class="btn btn-primary">Add template</button></div>
     </form>
     {% for tmpl in custom_templates %}
-    <form method="post" action="{% url 'core:email_template_update' tmpl.pk %}" class="border-top">{% csrf_token %}
+    <form method="post" action="{% url 'core:email_template_update' tmpl.pk %}" class="border-top" enctype="multipart/form-data">{% csrf_token %}
         <div class="card-body">
             <div class="row g-2">
                 <div class="col-md-8"><label class="form-label">Name</label><input type="text" name="name" value="{{ tmpl.name }}" class="form-control" required></div>
@@ -45,27 +45,39 @@
                 <div class="col-12"><label class="form-label">Body</label>{% include "core/partials/email_editor.html" with name="body_template" value=tmpl.body_template editor_id=tmpl.pk|stringformat:"s"|add:"-tmpl-body" %}</div>
                 <div class="col-12"><label class="form-label">Signature</label><select name="signature" class="form-select" style="max-width: 20rem;"><option value="">Use the default signature</option>{% for sig in email_signatures %}<option value="{{ sig.pk }}" {% if tmpl.signature_id == sig.pk %}selected{% endif %}>{{ sig.name }}</option>{% endfor %}</select></div>
                 <div class="col-12"><label class="form-check form-switch"><input type="checkbox" name="quick_send" value="1" class="form-check-input" {% if tmpl.quick_send %}checked{% endif %}><span class="form-check-label">One-click send</span></label><div class="form-hint">Shows this template as a single send button on finished tickets and work orders.</div></div>
+                <div class="col-12"><label class="form-label">Standing attachments</label>
+                    {% if tmpl.standing_attachments %}<div class="mb-2">{% for att in tmpl.standing_attachments %}<span class="badge bg-secondary-lt me-1">{{ att.original_filename }} ({{ att.size_display }}) <button type="submit" form="tmpl-att-del-{{ att.pk }}" class="btn-close ms-1" aria-label="Remove"></button></span>{% endfor %}</div>{% endif %}
+                    <input type="file" name="attachments" class="form-control" multiple>
+                    <div class="form-hint">Ride along on every email made from this template. Files upload when you Save.</div>
+                </div>
             </div>
         </div>
         <div class="card-footer d-flex align-items-center gap-2"><button type="submit" class="btn btn-primary">Save</button><button type="submit" form="tmpl-test-{{ tmpl.pk }}" class="btn">Send me a test</button><button type="submit" formaction="{% url 'core:email_template_delete' tmpl.pk %}" class="btn btn-outline-danger" data-mb-confirm="Delete the template {{ tmpl.name }}?">Delete</button><span class="ms-auto text-secondary small">Updated {{ tmpl.updated_at|date:"M j, Y g:i A" }}</span></div>
     </form>
     <form id="tmpl-test-{{ tmpl.pk }}" method="post" action="{% url 'core:email_template_test_send' tmpl.pk %}">{% csrf_token %}</form>
+    {% for att in tmpl.standing_attachments %}<form id="tmpl-att-del-{{ att.pk }}" method="post" action="{% url 'core:email_template_attachment_delete' att.pk %}" data-mb-confirm="Remove {{ att.original_filename }} from this template?">{% csrf_token %}</form>{% endfor %}
     {% empty %}
     <div class="card-body border-top text-secondary">None yet. The four event templates below are sent by Murphy's Bench itself; add your own here for the emails you send by hand.</div>
     {% endfor %}
 </div>
 <div class="subheader mb-2">Event templates, sent automatically</div>
 {% for tmpl in email_templates %}
-<form method="post" action="{% url 'core:email_template_update' tmpl.pk %}" class="card mb-3">{% csrf_token %}
+<form method="post" action="{% url 'core:email_template_update' tmpl.pk %}" class="card mb-3" enctype="multipart/form-data">{% csrf_token %}
     <div class="card-header"><h3 class="card-title">{{ tmpl.get_trigger_display }}</h3><div class="card-actions"><label class="form-check form-switch mb-0"><input type="checkbox" name="is_active" value="1" class="form-check-input" {% if tmpl.is_active %}checked{% endif %}><span class="form-check-label">Active</span></label></div></div>
     <div class="card-body">
         <div class="mb-3"><label class="form-label">Subject</label><input type="text" name="subject_template" value="{{ tmpl.subject_template }}" class="form-control font-monospace"></div>
         <div class="mb-3"><label class="form-label">Body</label>{% include "core/partials/email_editor.html" with name="body_template" value=tmpl.body_template editor_id=tmpl.pk|stringformat:"s"|add:"-tmpl-body" %}</div>
-        <div class="mb-0"><label class="form-label">Signature</label><select name="signature" class="form-select" style="max-width: 20rem;"><option value="">Use the default signature</option>{% for sig in email_signatures %}<option value="{{ sig.pk }}" {% if tmpl.signature_id == sig.pk %}selected{% endif %}>{{ sig.name }}{% if sig.is_default %} (default){% endif %}</option>{% endfor %}</select></div>
+        <div class="mb-3"><label class="form-label">Signature</label><select name="signature" class="form-select" style="max-width: 20rem;"><option value="">Use the default signature</option>{% for sig in email_signatures %}<option value="{{ sig.pk }}" {% if tmpl.signature_id == sig.pk %}selected{% endif %}>{{ sig.name }}{% if sig.is_default %} (default){% endif %}</option>{% endfor %}</select></div>
+        <div class="mb-0"><label class="form-label">Standing attachments</label>
+            {% if tmpl.standing_attachments %}<div class="mb-2">{% for att in tmpl.standing_attachments %}<span class="badge bg-secondary-lt me-1">{{ att.original_filename }} ({{ att.size_display }}) <button type="submit" form="tmpl-att-del-{{ att.pk }}" class="btn-close ms-1" aria-label="Remove"></button></span>{% endfor %}</div>{% endif %}
+            <input type="file" name="attachments" class="form-control" multiple>
+            <div class="form-hint">Ride along on every email this event sends. Files upload when you Save.</div>
+        </div>
     </div>
     <div class="card-footer d-flex align-items-center gap-2"><button type="submit" class="btn btn-primary">Save template</button><button type="submit" form="tmpl-test-{{ tmpl.pk }}" class="btn">Send me a test</button><span class="ms-auto text-secondary small">Updated {{ tmpl.updated_at|date:"M j, Y g:i A" }}</span></div>
 </form>
 <form id="tmpl-test-{{ tmpl.pk }}" method="post" action="{% url 'core:email_template_test_send' tmpl.pk %}">{% csrf_token %}</form>
+{% for att in tmpl.standing_attachments %}<form id="tmpl-att-del-{{ att.pk }}" method="post" action="{% url 'core:email_template_attachment_delete' att.pk %}" data-mb-confirm="Remove {{ att.original_filename }} from this template?">{% csrf_token %}</form>{% endfor %}
 {% endfor %}
 <div class="card">
     <div class="card-header"><div><h3 class="card-title">Email signatures</h3><div class="card-subtitle">Appended below the body. The default is used by any template with no signature set.</div></div><div class="card-actions"><button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#sig-new">{% ticon 'plus' 'icon-sm' %} Signature</button></div></div>

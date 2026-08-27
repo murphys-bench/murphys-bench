@@ -4509,6 +4509,146 @@ def test_compose_post_body_is_sanitized_before_send(monkeypatch, client, admin_u
     assert 'Fine text' in captured['html']
 
 
+# ---------------------------------------------------------------------------
+# Email attachments — standing on a template, one-off from the compose page
+# ---------------------------------------------------------------------------
+
+def _attach_pdf_to_template(tmpl, name='terms.pdf'):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from django.contrib.contenttypes.models import ContentType
+    from core.models import Attachment
+    return Attachment.objects.create(
+        content_type=ContentType.objects.get_for_model(type(tmpl)), object_id=tmpl.pk,
+        file=SimpleUploadedFile(name, b'%PDF-fake'), original_filename=name,
+        mime_type='application/pdf', size_bytes=9)
+
+
+def _captured_msg(monkeypatch):
+    from django.core.mail import EmailMultiAlternatives
+    captured = {}
+
+    def fake_send(self, fail_silently=False):
+        captured['attachments'] = list(self.attachments)
+        captured['html'] = next((c for c, m in self.alternatives if m == 'text/html'), '')
+        return 1
+
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', fake_send)
+    return captured
+
+
+@pytest.mark.django_db
+def test_standing_attachment_rides_custom_send_and_skips_inline_logo(monkeypatch, client_obj):
+    from core.models import EmailTemplate
+    from core.email_utils import send_custom_email
+    _enable_email()
+    tmpl = EmailTemplate.objects.create(name='Welcome', subject_template='S',
+                                        body_template='<div>Hi</div>', is_active=True)
+    _attach_pdf_to_template(tmpl)
+    captured = _captured_msg(monkeypatch)
+    log = send_custom_email(tmpl, to_email='x@example.com', client=client_obj)
+    assert log.status == 'sent'
+    assert any(a[0] == 'terms.pdf' for a in captured['attachments'])
+    assert 'cid:logo' not in captured['html'], \
+        'an inline CID logo cannot ride a message that carries attachments'
+
+
+@pytest.mark.django_db
+def test_standing_attachment_rides_event_send(monkeypatch, client_obj):
+    from core.models import EmailTemplate, Contact, Ticket
+    from core.email_utils import send_ticket_email
+    _enable_email()
+    tmpl, _ = EmailTemplate.objects.update_or_create(
+        trigger='ticket_created',
+        defaults={'subject_template': 'S', 'body_template': '<div>Hi</div>', 'is_active': True})
+    _attach_pdf_to_template(tmpl, 'intake.pdf')
+    contact = Contact.objects.create(client=client_obj, first_name='W', last_name='D',
+                                     email='w@example.com', is_primary=True)
+    ticket = Ticket.objects.create(client=client_obj, contact=contact, subject='S', description='D')
+    captured = _captured_msg(monkeypatch)
+    send_ticket_email('ticket_created', ticket)
+    assert any(a[0] == 'intake.pdf' for a in captured['attachments'])
+
+
+@pytest.mark.django_db
+def test_template_upload_refuses_blocked_extension(client, admin_user):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from django.contrib.contenttypes.models import ContentType
+    from core.models import EmailTemplate, Attachment
+    client.force_login(admin_user)
+    tmpl = EmailTemplate.objects.create(name='T', subject_template='S', body_template='<div>x</div>')
+    client.post(f'/settings/email-templates/{tmpl.pk}/edit/', {
+        'name': 'T', 'subject_template': 'S', 'is_active': '1', 'body_template': '<div>x</div>',
+        'attachments': [SimpleUploadedFile('evil.exe', b'MZ'),
+                        SimpleUploadedFile('fine.pdf', b'%PDF')],
+    })
+    ct = ContentType.objects.get_for_model(EmailTemplate)
+    names = set(Attachment.objects.filter(content_type=ct, object_id=tmpl.pk)
+                .values_list('original_filename', flat=True))
+    assert names == {'fine.pdf'}
+
+
+@pytest.mark.django_db
+def test_template_attachment_delete_is_scoped_to_templates(client, admin_user, client_obj):
+    """The template-attachment delete route must refuse an attachment that
+    belongs to anything else — a ticket's file is not its to remove."""
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from django.contrib.contenttypes.models import ContentType
+    from core.models import Attachment, Ticket
+    client.force_login(admin_user)
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    att = Attachment.objects.create(
+        content_type=ContentType.objects.get_for_model(Ticket), object_id=ticket.pk,
+        file=SimpleUploadedFile('evidence.pdf', b'%PDF'), original_filename='evidence.pdf',
+        mime_type='application/pdf', size_bytes=4)
+    resp = client.post(f'/settings/email-templates/attachments/{att.pk}/delete/')
+    assert resp.status_code == 404
+    assert Attachment.objects.filter(pk=att.pk).exists()
+
+
+@pytest.mark.django_db
+def test_compose_attachment_sent_and_bad_file_refuses_send(monkeypatch, client, admin_user, client_obj):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from core.models import EmailTemplate, Contact, EmailSendLog
+    _enable_email()
+    client.force_login(admin_user)
+    tmpl = EmailTemplate.objects.create(name='T', subject_template='S', body_template='<div>x</div>')
+    Contact.objects.create(client=client_obj, first_name='W', last_name='D',
+                           email='w@example.com', is_primary=True)
+    captured = _captured_msg(monkeypatch)
+    resp = client.post('/email/customer/', {
+        'client': client_obj.pk, 'template': tmpl.pk, 'custom_email': 'w@example.com',
+        'subject': 'Hi', 'body': '<div>Hello</div>',
+        'attachments': [SimpleUploadedFile('photo-list.pdf', b'%PDF')],
+    })
+    assert resp.status_code == 302
+    assert any(a[0] == 'photo-list.pdf' for a in captured['attachments'])
+    # And a blocked file refuses the whole send — a person chose it.
+    before = EmailSendLog.objects.count()
+    resp = client.post('/email/customer/', {
+        'client': client_obj.pk, 'template': tmpl.pk, 'custom_email': 'w@example.com',
+        'subject': 'Hi', 'body': '<div>Hello</div>',
+        'attachments': [SimpleUploadedFile('evil.exe', b'MZ')],
+    })
+    assert resp.status_code == 200
+    assert EmailSendLog.objects.count() == before, 'nothing may have been sent or logged'
+
+
+@pytest.mark.django_db
+def test_missing_standing_attachment_sends_without_it_and_says_so(monkeypatch, client_obj):
+    from core.models import EmailTemplate
+    from core.email_utils import send_custom_email
+    _enable_email()
+    tmpl = EmailTemplate.objects.create(name='T', subject_template='S',
+                                        body_template='<div>x</div>', is_active=True)
+    att = _attach_pdf_to_template(tmpl)
+    att.file.delete(save=False)  # the row remains; the file is gone
+    captured = _captured_msg(monkeypatch)
+    log = send_custom_email(tmpl, to_email='x@example.com', client=client_obj)
+    assert log.status == 'sent'
+    assert 'terms.pdf' in log.detail
+    assert not captured['attachments']
+
+
 @pytest.mark.django_db
 def test_outbound_save_seeds_default_address_from_company_email(client, admin_user):
     from core.models import SiteSettings, SendingAddress
@@ -14833,7 +14973,7 @@ def test_customer_email_compose_renders_template_and_sends_edited_text(client, a
     assert 'value="Thanks, Pat"' in body and 'Hi Pat, from' in body
     # POST: the edited text goes, not a fresh render; the ticket gets an internal note.
     sent = {}
-    def fake_smtp(site, subject, plain_body, html_body, logo_data, logo_mime, to_email, cc=None, bcc=None, label='', sender=None):
+    def fake_smtp(site, subject, plain_body, html_body, logo_data, logo_mime, to_email, cc=None, bcc=None, label='', sender=None, attachments=None):
         sent.update(subject=subject, body=plain_body, to=to_email); return 'sent', '', ''
     monkeypatch.setattr(email_utils, '_smtp_send', fake_smtp)
     r = client.post(reverse('core:customer_email'), {'ticket': ticket.pk, 'template': t.pk, 'contact': c.contacts.first().pk, 'subject': 'Thanks, Pat (edited)', 'body': 'Edited body.'})

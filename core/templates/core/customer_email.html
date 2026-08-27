@@ -36,7 +36,7 @@
 </form>
 {% if render_error %}<div class="alert alert-danger">{{ render_error }}</div>{% endif %}
 {% if chosen %}
-<form method="post" action="{% url 'core:customer_email' %}" class="card">
+<form method="post" action="{% url 'core:customer_email' %}" class="card" enctype="multipart/form-data">
     {% csrf_token %}
     {% if client %}<input type="hidden" name="client" value="{{ client.pk }}">{% endif %}{% if prospect %}<input type="hidden" name="prospect" value="{{ prospect.pk }}">{% endif %}
     {% if ticket %}<input type="hidden" name="ticket" value="{{ ticket.pk }}">{% endif %}{% if work_order %}<input type="hidden" name="work_order" value="{{ work_order.pk }}">{% endif %}{% if follow_up %}<input type="hidden" name="follow_up" value="{{ follow_up.pk }}">{% endif %}
@@ -45,7 +45,8 @@
     <div class="card-body">
         {% include "core/partials/email_recipient_fields.html" with no_contacts_note="There is no contact list for this recipient." %}
         <div class="mb-3"><label class="form-label required">Subject</label><input type="text" name="subject" value="{{ subject }}" class="form-control" required></div>
-        <div class="mb-0"><label class="form-label required">Body</label>{% include "core/partials/email_editor.html" with name="body" value=body editor_id="compose-body" %}<div class="form-hint">The signature is added below the body on send.</div></div>
+        <div class="mb-3"><label class="form-label required">Body</label>{% include "core/partials/email_editor.html" with name="body" value=body editor_id="compose-body" %}<div class="form-hint">The signature is added below the body on send.</div></div>
+        <div class="mb-0"><label class="form-label">Attachments</label><input type="file" name="attachments" class="form-control" multiple><div class="form-hint">Sent with this email only.{% if chosen.standing_attachments %} This template also always attaches its standing files.{% endif %}</div></div>
     </div>
     <div class="card-footer"><button type="submit" class="btn btn-primary">{% ticon 'send' 'icon-sm' %} Send</button>{% if follow_up %} <span class="text-secondary small ms-2">Sending marks the follow-up done.</span>{% endif %}</div>
 </form>

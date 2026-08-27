@@ -227,10 +227,14 @@ def _greeting_name(client, contact):
     return client.name
 
 
-def _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type, to_email, cc=None, bcc=None, label='', sender=None):
+def _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type, to_email, cc=None, bcc=None, label='', sender=None, attachments=None):
     """Send one branded message through the shop's SMTP settings, as `sender`
-    (a SendingAddress, or None for the fallback From). Returns
-    (status, reason, detail) for the send log; never raises."""
+    (a SendingAddress, or None for the fallback From). attachments is a list
+    of (filename, bytes, mimetype); callers that pass any must also build the
+    HTML with embed_logo=False — an inline CID logo needs the 'related'
+    subtype, which does not mix with file attachments (same constraint the
+    document-email path has always had). Returns (status, reason, detail)
+    for the send log; never raises."""
     from django.core.mail import EmailMultiAlternatives
 
     connection, from_email = _connection_and_from(site, sender)
@@ -245,7 +249,10 @@ def _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type, 
             connection=connection,
         )
         msg.attach_alternative(html_body, 'text/html')
-        if logo_data:
+        if attachments:
+            for filename, content, mimetype in attachments:
+                msg.attach(filename, content, mimetype or 'application/octet-stream')
+        elif logo_data:
             from email.mime.image import MIMEImage
             # 'related' (not the default 'mixed') so the image is bound to the HTML
             # and `cid:logo` resolves inline.
@@ -328,12 +335,35 @@ def email_context(*, client, contact=None, ticket=None, work_order=None, user=No
     }
 
 
+def template_attachments(template):
+    """The standing files a template carries (Settings > Email Templates), as
+    ([(filename, bytes, mimetype)], [missing filenames]). A file gone from
+    storage is skipped LOUDLY — the email still goes, and the send log's
+    detail names what it went without."""
+    from django.contrib.contenttypes.models import ContentType
+    from .models import Attachment
+    out, missing = [], []
+    ct = ContentType.objects.get_for_model(type(template))
+    for att in Attachment.objects.filter(content_type=ct, object_id=template.pk):
+        try:
+            with att.file.open('rb') as f:
+                out.append((att.original_filename, f.read(),
+                            att.mime_type or 'application/octet-stream'))
+        except Exception:
+            logger.error('Standing attachment %s on email template %s is missing from '
+                         'storage; sending without it.', att.original_filename, template.pk)
+            missing.append(att.original_filename)
+    return out, missing
+
+
 def send_custom_email(template, *, to_email, client, contact=None, ticket=None,
-                      work_order=None, user=None, subject=None, body=None, cc=None):
+                      work_order=None, user=None, subject=None, body=None, cc=None,
+                      extra_attachments=None):
     """Send a custom (person-chosen) template to one address. subject/body,
     when given, are the already-edited text from the compose screen and win
-    over a fresh render. Honors every suppression layer; always writes an
-    EmailSendLog row. Returns the log row."""
+    over a fresh render; extra_attachments are one-off files from that
+    screen, sent alongside the template's standing attachments. Honors every
+    suppression layer; always writes an EmailSendLog row. Returns the log row."""
     from .models import SiteSettings, EmailSignature, EmailSendLog
     site = SiteSettings.get()
     trigger = f'custom:{template.name or template.pk}'[:30]
@@ -371,16 +401,23 @@ def send_custom_email(template, *, to_email, client, contact=None, ticket=None,
         body = email_html.sanitize(body)
         body_is_html = True
 
+    attachments, missing = template_attachments(template)
+    attachments.extend(extra_attachments or [])
+
     sig_obj = template.signature or EmailSignature.objects.filter(is_default=True).first()
     sig_body, sig_is_html = _rendered_signature(sig_obj)
     email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
         body, body_is_html, sig_body, sig_is_html, site)
     html_body, logo_data, logo_mime_type = _build_html_email(
         email_body, sig_email, subject, ticket, site,
+        embed_logo=not attachments,
         body_is_html=body_is_html, signature_is_html=sig_is_html)
     status, reason, detail = _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type,
                                         to_email, cc=cc, label=trigger,
-                                        sender=sending_address_for(site, 'customer_emails'))
+                                        sender=sending_address_for(site, 'customer_emails'),
+                                        attachments=attachments)
+    if status == 'sent' and missing:
+        detail = f'sent without missing attachment(s): {", ".join(missing)}'
     return _log(status, reason, detail)
 
 
@@ -458,15 +495,20 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
         )
         return
 
+    attachments, missing = template_attachments(template)
     email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
         body, template.body_format == 'html', sig_body, sig_is_html, site)
     html_body, logo_data, logo_mime_type = _build_html_email(
         email_body, sig_email, subject, ticket, site,
+        embed_logo=not attachments,
         body_is_html=body_is_html, signature_is_html=sig_is_html)
 
     status, reason, detail = _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type,
                                         to_email, cc=cc, bcc=bcc, label=f'trigger {trigger}',
-                                        sender=sending_address_for(site, 'ticket_events'))
+                                        sender=sending_address_for(site, 'ticket_events'),
+                                        attachments=attachments)
+    if status == 'sent' and missing:
+        detail = f'sent without missing attachment(s): {", ".join(missing)}'
 
     EmailSendLog.objects.create(
         ticket=ticket, to_email=to_email, trigger=trigger,

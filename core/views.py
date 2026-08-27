@@ -7716,8 +7716,15 @@ class SettingsView(SettingsAdminMixin, View):
                         'is_active': False,
                     }
                 )
-            ctx['email_templates'] = EmailTemplate.objects.filter(trigger__isnull=False).select_related('signature')
-            ctx['custom_templates'] = EmailTemplate.objects.filter(trigger__isnull=True).select_related('signature').order_by('name')
+            ctx['email_templates'] = list(EmailTemplate.objects.filter(trigger__isnull=False).select_related('signature'))
+            ctx['custom_templates'] = list(EmailTemplate.objects.filter(trigger__isnull=True).select_related('signature').order_by('name'))
+            # Standing attachments per template, for the rows below.
+            tmpl_ct = ContentType.objects.get_for_model(EmailTemplate)
+            atts_by_tmpl = {}
+            for att in Attachment.objects.filter(content_type=tmpl_ct):
+                atts_by_tmpl.setdefault(att.object_id, []).append(att)
+            for tmpl in ctx['email_templates'] + ctx['custom_templates']:
+                tmpl.standing_attachments = atts_by_tmpl.get(tmpl.pk, [])
             ctx['email_signatures'] = EmailSignature.objects.all()
             from .forms import EmailBrandingForm
             from .email_utils import _email_header_color
@@ -8533,6 +8540,15 @@ class EmailTemplateUpdateView(SettingsAdminMixin, View):
         sig_id = request.POST.get('signature')
         tmpl.signature_id = int(sig_id) if sig_id else None
         tmpl.save()
+        # Standing attachments ride every send of this template. Same
+        # validation as every other upload (_save_attachments); name what
+        # was refused instead of skipping silently.
+        files = request.FILES.getlist('attachments')
+        if files:
+            saved = _save_attachments(request, tmpl)
+            refused = {f.name for f in files} - {a.original_filename for a in saved}
+            if refused:
+                messages.warning(request, f'Not attached (blocked type or too large): {", ".join(sorted(refused))}.')
         messages.success(request, f'Email template "{tmpl.label}" saved.')
         return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
 
@@ -9466,15 +9482,35 @@ class CustomerEmailView(LoginRequiredMixin, View):
             # The editor posts markup; an empty document is still markup.
             messages.error(request, 'Subject and body cannot be empty.')
             return render(request, self.template_name, ctx)
+        # One-off attachments for this send. A person chose these files, so a
+        # refused one refuses the send rather than quietly going without it.
+        extra = []
+        refused = []
+        site = SiteSettings.get()
+        max_bytes = site.max_attachment_size_mb * 1024 * 1024
+        blocked = site.get_blocked_extensions()
+        for f in request.FILES.getlist('attachments'):
+            ext = f.name.rsplit('.', 1)[-1].lower() if '.' in f.name else ''
+            if ext in blocked or f.size > max_bytes:
+                refused.append(f.name)
+                continue
+            extra.append((f.name, f.read(), f.content_type or 'application/octet-stream'))
+        if refused:
+            messages.error(request, f'Not sent. Attachment refused (blocked type or over '
+                                    f'{site.max_attachment_size_mb} MB): {", ".join(refused)}.')
+            return render(request, self.template_name, ctx)
         who = ctx['client'] or ctx['prospect']
         log = send_custom_email(chosen, to_email=to_email, client=who, contact=contact,
                                 ticket=ctx['ticket'], work_order=ctx['work_order'], user=request.user,
-                                subject=subject, body=body)
+                                subject=subject, body=body, extra_attachments=extra)
         if log.status == 'sent':
             messages.success(request, f'Sent "{subject}" to {to_email}.')
             if ctx['ticket'] is not None:
+                sent_note = f'Emailed {to_email}: {subject}'
+                if extra:
+                    sent_note += ' (attached: ' + ', '.join(name for name, _, _ in extra) + ')'
                 TicketReply.objects.create(ticket=ctx['ticket'], reply_type='internal', created_by=request.user,
-                                           content=f'Emailed {to_email}: {subject}')
+                                           content=sent_note)
             return redirect(ctx['back_url'])
         reason = dict(log.REASON_CHOICES).get(log.reason, log.reason)
         messages.error(request, f'Not sent: {reason}. {log.detail}'.strip())
@@ -9500,6 +9536,21 @@ class EmailTemplateCreateView(SettingsAdminMixin, View):
             quick_send=request.POST.get('quick_send') == '1',
         )
         messages.success(request, f'Email template "{name}" added.')
+        return redirect(f"{reverse('core:settings')}?tab=email_templates")
+
+
+class EmailTemplateAttachmentDeleteView(SettingsAdminMixin, View):
+    """Settings: remove one standing attachment from an email template. Scoped
+    to template-owned attachments only — this route must not be able to touch
+    a ticket's or work order's files."""
+
+    def post(self, request, pk):
+        ct = ContentType.objects.get_for_model(EmailTemplate)
+        att = get_object_or_404(Attachment, pk=pk, content_type=ct)
+        name = att.original_filename
+        att.file.delete(save=False)
+        att.delete()
+        messages.success(request, f'Removed "{name}" from the template.')
         return redirect(f"{reverse('core:settings')}?tab=email_templates")
 
 
