@@ -4586,6 +4586,26 @@ def test_filter_allowlist_blocks_safeseq_and_every_html_producing_filter():
 
 
 @pytest.mark.django_db
+def test_literal_filter_arguments_cannot_smuggle_markup():
+    """R3 finding: Django marks LITERAL string arguments safe, so
+    {{ missing|default:"<img …>" }} and a join separator emitted raw markup
+    that bleach never saw (it ran before render, and the token was stashed
+    around it). Two layers close it: literal args carrying HTML
+    metacharacters refuse the token visibly, and a post-render bleach pass
+    guarantees nothing that only exists after rendering survives."""
+    from core.email_html import render_body
+    evil_arg = '<img src=x onerror=1>'
+    html = render_body(f'<div>{{{{ missing|default:"{evil_arg}" }}}}</div>', {})
+    assert '<img' not in html
+    html = render_body(f'<div>{{{{ vals|join:"{evil_arg}" }}}}</div>', {'vals': ['a', 'b']})
+    assert '<img' not in html
+    # Ordinary literal arguments keep working.
+    html = render_body('<div>{{ missing|default:"n/a" }} on {{ when|date:"M j" }}</div>',
+                       {'when': __import__('datetime').datetime(2026, 8, 26)})
+    assert 'n/a' in html and 'on Aug 26' in html
+
+
+@pytest.mark.django_db
 def test_sales_only_state_never_becomes_the_global_default_sender():
     """R1 finding 2: an install whose only address is the old sales one (the
     email_from-blank, email_sales_from-set shape) must not start sending

@@ -65,7 +65,11 @@ ALLOWED_VAR_FILTERS = {
 def _variable_token_allowed(token):
     """True when every filter on a {{ … }} token is an allowed text-only
     built-in, decided by compiling the token with Django itself and comparing
-    the resolved filter FUNCTIONS against the allowlist."""
+    the resolved filter FUNCTIONS against the allowlist. Literal string
+    arguments may carry no HTML metacharacters: Django marks literals SAFE,
+    so |default:"<img …>" would emit raw markup the sanitizer never saw
+    (review round 3 finding — the post-render clean in render_body is the
+    guarantee; this refusal is the visible-to-the-author layer)."""
     from django.template import Template, TemplateSyntaxError
     from django.template.defaultfilters import register as _builtin
     allowed_funcs = {_builtin.filters[name] for name in ALLOWED_VAR_FILTERS
@@ -76,8 +80,13 @@ def _variable_token_allowed(token):
         return False
     if len(nodelist) != 1 or not hasattr(nodelist[0], 'filter_expression'):
         return False
-    return all(func in allowed_funcs
-               for func, _args in nodelist[0].filter_expression.filters)
+    for func, args in nodelist[0].filter_expression.filters:
+        if func not in allowed_funcs:
+            return False
+        for is_variable, value in args:
+            if not is_variable and any(ch in str(value) for ch in '<>&'):
+                return False
+    return True
 
 
 def _token_allowed(token):
@@ -108,7 +117,6 @@ def sanitize(html):
     operators inside them; a token outside the allowed construct set (see
     _token_allowed) is escaped into visible literal text instead of stashed,
     so it can never execute."""
-    import bleach
     tokens = []
 
     neutralized_any = False
@@ -123,13 +131,7 @@ def sanitize(html):
         return f'MBTOKEN{len(tokens) - 1}NEKOTBM'
 
     protected = _TEMPLATE_TOKEN.sub(_stash, html or '')
-    cleaned = bleach.clean(
-        protected,
-        tags=ALLOWED_TAGS,
-        attributes=ALLOWED_ATTRS,
-        protocols=ALLOWED_PROTOCOLS,
-        strip=True,
-    )
+    cleaned = _bleach_clean(protected)
     for i, token in enumerate(tokens):
         cleaned = cleaned.replace(f'MBTOKEN{i}NEKOTBM', token)
     if neutralized_any:
@@ -153,6 +155,17 @@ def _neutralize(token):
     alone is not enough — {{ x|safe }} contains nothing escape() rewrites and
     would still be live syntax — so the braces themselves become entities."""
     return escape(token).replace('{', '&#123;').replace('}', '&#125;')
+
+
+def _bleach_clean(html):
+    import bleach
+    return bleach.clean(
+        html,
+        tags=ALLOWED_TAGS,
+        attributes=ALLOWED_ATTRS,
+        protocols=ALLOWED_PROTOCOLS,
+        strip=True,
+    )
 
 
 def text_to_html(text):
@@ -181,6 +194,13 @@ def render_body(body_html, ctx):
     came from a variable or is insignificant whitespace)."""
     from django.template import Template, Context
     rendered = Template(sanitize(body_html)).render(Context(ctx, autoescape=True))
+    # The guarantee (review round 3): rendering can INTRODUCE markup the
+    # pre-render pass never saw — Django marks literal filter arguments
+    # safe, so |default:"<img …>" emits its argument raw. Cleaning the
+    # RENDERED output closes that whole class, present and future, not just
+    # the filters anyone has thought of. Escaped customer text passes
+    # through unchanged (bleach re-serializes entities as entities).
+    rendered = _bleach_clean(rendered)
     return rendered.replace('\r\n', '\n').replace('\n', '<br>')
 
 
