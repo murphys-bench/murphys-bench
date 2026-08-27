@@ -7706,12 +7706,13 @@ class SettingsView(SettingsAdminMixin, View):
             ctx.update(_log_search_context(self.request))
         if active_tab == 'email_templates':
             # Ensure all 4 trigger templates exist
+            from .email_html import text_to_html
             for trigger, _ in EmailTemplate.TRIGGER_CHOICES:
                 EmailTemplate.objects.get_or_create(
                     trigger=trigger,
                     defaults={
                         'subject_template': '[{{{{ ticket.ticket_number }}}}] {{{{ ticket.subject }}}}',
-                        'body_template': 'Hi {{{{ customer_name }}}},\n\nYour ticket {{{{ ticket.ticket_number }}}} has been updated.\n\nThank you,\n{{{{ tech_name }}}}',
+                        'body_template': text_to_html('Hi {{{{ customer_name }}}},\n\nYour ticket {{{{ ticket.ticket_number }}}} has been updated.\n\nThank you,\n{{{{ tech_name }}}}'),
                         'is_active': False,
                     }
                 )
@@ -8523,8 +8524,11 @@ class EmailTemplateUpdateView(SettingsAdminMixin, View):
             tmpl.name = request.POST.get('name').strip()
         if tmpl.is_custom:
             tmpl.quick_send = request.POST.get('quick_send') == '1'
+        from .email_html import sanitize
         tmpl.subject_template = request.POST.get('subject_template', tmpl.subject_template).strip()
-        tmpl.body_template = request.POST.get('body_template', tmpl.body_template).strip()
+        if 'body_template' in request.POST:
+            tmpl.body_template = sanitize(request.POST['body_template'].strip())
+            tmpl.body_format = 'html'
         tmpl.is_active = request.POST.get('is_active') == '1'
         sig_id = request.POST.get('signature')
         tmpl.signature_id = int(sig_id) if sig_id else None
@@ -8544,8 +8548,9 @@ class EmailSignatureCreateView(SettingsAdminMixin, View):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
+        from .email_html import sanitize
         name = request.POST.get('name', '').strip()
-        body = request.POST.get('body', '').strip()
+        body = sanitize(request.POST.get('body', '').strip())
         is_default = request.POST.get('is_default') == '1'
         if name and body:
             sig = EmailSignature(name=name, body=body, is_default=is_default)
@@ -8559,9 +8564,12 @@ class EmailSignatureUpdateView(SettingsAdminMixin, View):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
+        from .email_html import sanitize
         sig = get_object_or_404(EmailSignature, pk=pk)
         sig.name = request.POST.get('name', sig.name).strip()
-        sig.body = request.POST.get('body', sig.body).strip()
+        if 'body' in request.POST:
+            sig.body = sanitize(request.POST['body'].strip())
+            sig.body_format = 'html'
         sig.is_default = request.POST.get('is_default') == '1'
         sig.save()
         messages.success(request, f'Signature "{sig.name}" saved.')
@@ -9405,6 +9413,11 @@ class CustomerEmailView(LoginRequiredMixin, View):
             try:
                 subject, body = render_email_template(chosen, email_context(
                     client=who, contact=default_contact, ticket=ticket, work_order=work_order, user=request.user))
+                if chosen.body_format != 'html':
+                    # An unconverted legacy body renders plain; the editor
+                    # needs HTML, so convert what it is handed.
+                    from .email_html import text_to_html
+                    body = text_to_html(body)
             except Exception:
                 render_error = 'This template has a syntax error; fix it in Settings, Email Templates.'
         return {
@@ -9448,7 +9461,9 @@ class CustomerEmailView(LoginRequiredMixin, View):
             return render(request, self.template_name, ctx)
         subject = (request.POST.get('subject') or '').strip()
         body = request.POST.get('body') or ''
-        if not subject or not body.strip():
+        from django.utils.html import strip_tags
+        if not subject or not strip_tags(body).strip():
+            # The editor posts markup; an empty document is still markup.
             messages.error(request, 'Subject and body cannot be empty.')
             return render(request, self.template_name, ctx)
         who = ctx['client'] or ctx['prospect']
@@ -9474,16 +9489,77 @@ class EmailTemplateCreateView(SettingsAdminMixin, View):
         if not name:
             messages.error(request, 'Give the template a name.')
             return redirect(f"{reverse('core:settings')}?tab=email_templates")
+        from .email_html import sanitize, text_to_html
         sig_id = request.POST.get('signature')
+        body = sanitize((request.POST.get('body_template') or '').strip())
         EmailTemplate.objects.create(
             name=name,
             subject_template=(request.POST.get('subject_template') or '').strip() or '{{ site_name }}: a note about your recent service',
-            body_template=(request.POST.get('body_template') or '').strip() or 'Hi {{ customer_name }},\n\n\n\nThank you,\n{{ tech_name }}',
+            body_template=body or text_to_html('Hi {{ customer_name }},\n\n\n\nThank you,\n{{ tech_name }}'),
             signature_id=int(sig_id) if sig_id else None, is_active=True,
             quick_send=request.POST.get('quick_send') == '1',
         )
         messages.success(request, f'Email template "{name}" added.')
         return redirect(f"{reverse('core:settings')}?tab=email_templates")
+
+
+class EmailTemplateTestSendView(SettingsAdminMixin, View):
+    """Settings: send one template to the acting admin's own address, sample
+    values filled in, so its rendering can be checked in a real inbox. The
+    recipient is fixed server-side (never read from the request body) — the
+    same reasoning as the outbound email test."""
+
+    def post(self, request, pk):
+        from types import SimpleNamespace
+        from .email_utils import (render_email_template, _compose_email_bodies,
+                                  _rendered_signature, _build_html_email,
+                                  _smtp_send, sending_address_for)
+        from .models import EmailSignature, EmailSendLog
+        tmpl = get_object_or_404(EmailTemplate, pk=pk)
+        site = SiteSettings.get()
+        back = redirect(f"{reverse('core:settings')}?tab=email_templates")
+        to_email = (request.user.email or '').strip()
+        if not to_email:
+            messages.error(request, 'Your user account has no email address to send the test to.')
+            return back
+        if not site.email_enabled:
+            messages.error(request, 'Outbound email is disabled (Settings, Outbound Email).')
+            return back
+        ctx = {
+            'ticket': SimpleNamespace(ticket_number='TKT-00000', subject='A sample ticket',
+                                      get_status_display='In Progress'),
+            'client': SimpleNamespace(name='Sample Client'),
+            'contact': SimpleNamespace(first_name='Sam', last_name='Sample', email=to_email),
+            'customer_name': 'Sam',
+            'tech_name': request.user.get_full_name() or request.user.username,
+            'status': 'In Progress',
+            'site_name': site.company_name or "Murphy's Bench",
+        }
+        try:
+            subject, body = render_email_template(tmpl, ctx)
+        except Exception:
+            messages.error(request, f'"{tmpl.label}" has a syntax error; fix the template and try again.')
+            return back
+        sig_obj = tmpl.signature or EmailSignature.objects.filter(is_default=True).first()
+        sig_body, sig_is_html = _rendered_signature(sig_obj)
+        email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
+            body, tmpl.body_format == 'html', sig_body, sig_is_html, site)
+        html_body, logo_data, logo_mime = _build_html_email(
+            email_body, sig_email, subject, None, site,
+            body_is_html=body_is_html, signature_is_html=sig_is_html)
+        kind = 'ticket_events' if tmpl.trigger else 'customer_emails'
+        status, reason, detail = _smtp_send(
+            site, f'[TEST] {subject}', plain_body, html_body, logo_data, logo_mime,
+            to_email, label=f'test template {tmpl.pk}',
+            sender=sending_address_for(site, kind))
+        EmailSendLog.objects.create(ticket=None, to_email=to_email, trigger='test:template',
+                                    status=status, reason=reason, detail=detail)
+        if status == 'sent':
+            messages.success(request, f'Test of "{tmpl.label}" sent to {to_email}.')
+        else:
+            messages.error(request, f'Test send failed: {detail or reason}. '
+                                    f'Check Outbound Email settings and the logs.')
+        return back
 
 
 class EmailTemplateDeleteView(SettingsAdminMixin, View):

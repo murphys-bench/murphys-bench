@@ -42,13 +42,14 @@
                 <div class="col-md-8"><label class="form-label">Name</label><input type="text" name="name" value="{{ tmpl.name }}" class="form-control" required></div>
                 <div class="col-md-4 d-flex align-items-end"><label class="form-check form-switch mb-2"><input type="checkbox" name="is_active" value="1" class="form-check-input" {% if tmpl.is_active %}checked{% endif %}><span class="form-check-label">Active</span></label></div>
                 <div class="col-12"><label class="form-label">Subject</label><input type="text" name="subject_template" value="{{ tmpl.subject_template }}" class="form-control font-monospace"></div>
-                <div class="col-12"><label class="form-label">Body</label><textarea name="body_template" rows="6" class="form-control font-monospace">{{ tmpl.body_template }}</textarea></div>
+                <div class="col-12"><label class="form-label">Body</label>{% include "core/partials/email_editor.html" with name="body_template" value=tmpl.body_template editor_id=tmpl.pk|stringformat:"s"|add:"-tmpl-body" %}</div>
                 <div class="col-12"><label class="form-label">Signature</label><select name="signature" class="form-select" style="max-width: 20rem;"><option value="">Use the default signature</option>{% for sig in email_signatures %}<option value="{{ sig.pk }}" {% if tmpl.signature_id == sig.pk %}selected{% endif %}>{{ sig.name }}</option>{% endfor %}</select></div>
                 <div class="col-12"><label class="form-check form-switch"><input type="checkbox" name="quick_send" value="1" class="form-check-input" {% if tmpl.quick_send %}checked{% endif %}><span class="form-check-label">One-click send</span></label><div class="form-hint">Shows this template as a single send button on finished tickets and work orders.</div></div>
             </div>
         </div>
-        <div class="card-footer d-flex align-items-center gap-2"><button type="submit" class="btn btn-primary">Save</button><button type="submit" formaction="{% url 'core:email_template_delete' tmpl.pk %}" class="btn btn-outline-danger" data-mb-confirm="Delete the template {{ tmpl.name }}?">Delete</button><span class="ms-auto text-secondary small">Updated {{ tmpl.updated_at|date:"M j, Y g:i A" }}</span></div>
+        <div class="card-footer d-flex align-items-center gap-2"><button type="submit" class="btn btn-primary">Save</button><button type="submit" form="tmpl-test-{{ tmpl.pk }}" class="btn">Send me a test</button><button type="submit" formaction="{% url 'core:email_template_delete' tmpl.pk %}" class="btn btn-outline-danger" data-mb-confirm="Delete the template {{ tmpl.name }}?">Delete</button><span class="ms-auto text-secondary small">Updated {{ tmpl.updated_at|date:"M j, Y g:i A" }}</span></div>
     </form>
+    <form id="tmpl-test-{{ tmpl.pk }}" method="post" action="{% url 'core:email_template_test_send' tmpl.pk %}">{% csrf_token %}</form>
     {% empty %}
     <div class="card-body border-top text-secondary">None yet. The four event templates below are sent by Murphy's Bench itself; add your own here for the emails you send by hand.</div>
     {% endfor %}
@@ -59,17 +60,18 @@
     <div class="card-header"><h3 class="card-title">{{ tmpl.get_trigger_display }}</h3><div class="card-actions"><label class="form-check form-switch mb-0"><input type="checkbox" name="is_active" value="1" class="form-check-input" {% if tmpl.is_active %}checked{% endif %}><span class="form-check-label">Active</span></label></div></div>
     <div class="card-body">
         <div class="mb-3"><label class="form-label">Subject</label><input type="text" name="subject_template" value="{{ tmpl.subject_template }}" class="form-control font-monospace"></div>
-        <div class="mb-3"><label class="form-label">Body</label><textarea name="body_template" rows="8" class="form-control font-monospace">{{ tmpl.body_template }}</textarea></div>
+        <div class="mb-3"><label class="form-label">Body</label>{% include "core/partials/email_editor.html" with name="body_template" value=tmpl.body_template editor_id=tmpl.pk|stringformat:"s"|add:"-tmpl-body" %}</div>
         <div class="mb-0"><label class="form-label">Signature</label><select name="signature" class="form-select" style="max-width: 20rem;"><option value="">Use the default signature</option>{% for sig in email_signatures %}<option value="{{ sig.pk }}" {% if tmpl.signature_id == sig.pk %}selected{% endif %}>{{ sig.name }}{% if sig.is_default %} (default){% endif %}</option>{% endfor %}</select></div>
     </div>
-    <div class="card-footer d-flex align-items-center"><button type="submit" class="btn btn-primary">Save template</button><span class="ms-auto text-secondary small">Updated {{ tmpl.updated_at|date:"M j, Y g:i A" }}</span></div>
+    <div class="card-footer d-flex align-items-center gap-2"><button type="submit" class="btn btn-primary">Save template</button><button type="submit" form="tmpl-test-{{ tmpl.pk }}" class="btn">Send me a test</button><span class="ms-auto text-secondary small">Updated {{ tmpl.updated_at|date:"M j, Y g:i A" }}</span></div>
 </form>
+<form id="tmpl-test-{{ tmpl.pk }}" method="post" action="{% url 'core:email_template_test_send' tmpl.pk %}">{% csrf_token %}</form>
 {% endfor %}
 <div class="card">
     <div class="card-header"><div><h3 class="card-title">Email signatures</h3><div class="card-subtitle">Appended below the body. The default is used by any template with no signature set.</div></div><div class="card-actions"><button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#sig-new">{% ticon 'plus' 'icon-sm' %} Signature</button></div></div>
     <form method="post" action="{% url 'core:email_sig_create' %}" class="collapse" id="sig-new">{% csrf_token %}
         <div class="card-body border-top">
-            <div class="row g-2"><div class="col-md-8"><label class="form-label">Name</label><input type="text" name="name" class="form-control" placeholder="e.g. Standard, After-hours" required></div><div class="col-md-4 d-flex align-items-end"><label class="form-check mb-2"><input type="checkbox" name="is_default" value="1" class="form-check-input"><span class="form-check-label">Default</span></label></div><div class="col-12"><label class="form-label">Body</label><textarea name="body" rows="5" class="form-control font-monospace" placeholder="Plain text. Blank lines become paragraph breaks in HTML email."></textarea></div></div>
+            <div class="row g-2"><div class="col-md-8"><label class="form-label">Name</label><input type="text" name="name" class="form-control" placeholder="e.g. Standard, After-hours" required></div><div class="col-md-4 d-flex align-items-end"><label class="form-check mb-2"><input type="checkbox" name="is_default" value="1" class="form-check-input"><span class="form-check-label">Default</span></label></div><div class="col-12"><label class="form-label">Body</label>{% include "core/partials/email_editor.html" with name="body" value="" editor_id="sig-new-body" %}</div></div>
         </div>
         <div class="card-footer"><button type="submit" class="btn btn-primary">Create signature</button></div>
     </form>
@@ -77,12 +79,12 @@
     {% for sig in email_signatures %}
         <div class="list-group-item">
             <div class="d-flex align-items-start gap-2">
-                <div class="flex-fill"><div class="fw-medium">{{ sig.name }}{% if sig.is_default %} <span class="badge bg-blue-lt">Default</span>{% endif %}</div><div class="text-secondary small" style="white-space: pre-line;">{{ sig.body|truncatechars:200 }}</div></div>
+                <div class="flex-fill"><div class="fw-medium">{{ sig.name }}{% if sig.is_default %} <span class="badge bg-blue-lt">Default</span>{% endif %}</div><div class="text-secondary small">{{ sig.body|striptags|truncatechars:200 }}</div></div>
                 <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#sig-edit-{{ sig.pk }}">Edit</button>
                 <form method="post" action="{% url 'core:email_sig_delete' sig.pk %}" data-mb-confirm="Delete the signature {{ sig.name }}?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Delete</button></form>
             </div>
             <form method="post" action="{% url 'core:email_sig_update' sig.pk %}" class="collapse mt-2" id="sig-edit-{{ sig.pk }}">{% csrf_token %}
-                <div class="row g-2"><div class="col-md-8"><input type="text" name="name" value="{{ sig.name }}" class="form-control" required></div><div class="col-md-4 d-flex align-items-center"><label class="form-check mb-0"><input type="checkbox" name="is_default" value="1" class="form-check-input" {% if sig.is_default %}checked{% endif %}><span class="form-check-label">Default</span></label></div><div class="col-12"><textarea name="body" rows="5" class="form-control font-monospace">{{ sig.body }}</textarea></div><div class="col-12"><button type="submit" class="btn btn-sm btn-primary">Save</button></div></div>
+                <div class="row g-2"><div class="col-md-8"><input type="text" name="name" value="{{ sig.name }}" class="form-control" required></div><div class="col-md-4 d-flex align-items-center"><label class="form-check mb-0"><input type="checkbox" name="is_default" value="1" class="form-check-input" {% if sig.is_default %}checked{% endif %}><span class="form-check-label">Default</span></label></div><div class="col-12">{% include "core/partials/email_editor.html" with name="body" value=sig.body editor_id=sig.pk|stringformat:"s"|add:"-sig-body" %}</div><div class="col-12"><button type="submit" class="btn btn-sm btn-primary">Save</button></div></div>
             </form>
         </div>
     {% empty %}<div class="list-group-item text-secondary">No signatures yet.</div>{% endfor %}

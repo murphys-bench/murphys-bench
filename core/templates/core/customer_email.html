@@ -1,8 +1,14 @@
 {% extends "core/base_tabler.html" %}
-{% load mb_tabler %}
+{% load mb_tabler static %}
 
 {% block title %}Email {% if client %}{{ client.name }}{% else %}{{ prospect.display_name }}{% endif %} - Murphy's Bench{% endblock %}
 {% block room %}desk{% endblock %}
+
+{% block extra_head %}
+    <link rel="stylesheet" href="{% static 'vendor/trix/2.1.19/trix.css' %}">
+    <script defer src="{% static 'vendor/trix/2.1.19/trix.umd.min.js' %}"></script>
+    <script defer src="{% static 'js/mb-email-editor.js' %}"></script>
+{% endblock %}
 
 {% block page_header %}
 <div class="page-header d-print-none">
@@ -39,7 +45,7 @@
     <div class="card-body">
         {% include "core/partials/email_recipient_fields.html" with no_contacts_note="There is no contact list for this recipient." %}
         <div class="mb-3"><label class="form-label required">Subject</label><input type="text" name="subject" value="{{ subject }}" class="form-control" required></div>
-        <div class="mb-0"><label class="form-label required">Body</label><textarea name="body" rows="12" class="form-control" required>{{ body }}</textarea><div class="form-hint">The signature is added below the body on send.</div></div>
+        <div class="mb-0"><label class="form-label required">Body</label>{% include "core/partials/email_editor.html" with name="body" value=body editor_id="compose-body" %}<div class="form-hint">The signature is added below the body on send.</div></div>
     </div>
     <div class="card-footer"><button type="submit" class="btn btn-primary">{% ticon 'send' 'icon-sm' %} Send</button>{% if follow_up %} <span class="text-secondary small ms-2">Sending marks the follow-up done.</span>{% endif %}</div>
 </form>

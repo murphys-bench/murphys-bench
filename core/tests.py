@@ -4307,6 +4307,208 @@ def test_sending_address_add_rejects_garbage_email(client, admin_user):
     assert SendingAddress.objects.count() == 0
 
 
+# ---------------------------------------------------------------------------
+# HTML email bodies (mig 0118) — editor pipeline, escaping, buttons, plain twin
+# ---------------------------------------------------------------------------
+
+def _captured_send(monkeypatch):
+    """Patch EmailMultiAlternatives.send and hand back the capture dict:
+    'html' = the text/html alternative, 'plain' = the body, 'from' = From."""
+    from django.core.mail import EmailMultiAlternatives
+    captured = {}
+
+    def fake_send(self, fail_silently=False):
+        captured['plain'] = self.body
+        captured['html'] = next((c for c, m in self.alternatives if m == 'text/html'), '')
+        captured['from'] = self.from_email
+        return 1
+
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', fake_send)
+    return captured
+
+
+@pytest.mark.django_db
+def test_variable_content_is_escaped_never_markup(monkeypatch, client_obj):
+    """THE injection guard: customer text pulled in by a variable renders as
+    words. A reply carrying <script> or <a href> must arrive inert."""
+    from types import SimpleNamespace
+    from core.models import EmailTemplate, Contact, Ticket
+    from core.email_utils import send_ticket_email
+    _enable_email()
+    EmailTemplate.objects.update_or_create(
+        trigger='reply_added',
+        defaults={'subject_template': 'Re: {{ ticket.ticket_number }}',
+                  'body_template': '<div>Hi {{ customer_name }},<br>{{ reply.content }}</div>',
+                  'body_format': 'html', 'is_active': True})
+    contact = Contact.objects.create(client=client_obj, first_name='Wayne', last_name='D',
+                                     email='wayne@example.com', is_primary=True)
+    ticket = Ticket.objects.create(client=client_obj, contact=contact, subject='S', description='D')
+    captured = _captured_send(monkeypatch)
+    evil = '<script>alert(1)</script> and <a href="https://evil.example/x">click</a>'
+    send_ticket_email('reply_added', ticket, extra_context={'reply': SimpleNamespace(content=evil)})
+    assert '<script>' not in captured['html']
+    assert 'evil.example/x"' not in captured['html'] or '<a href="https://evil.example/x">' not in captured['html']
+    assert '&lt;script&gt;' in captured['html'], 'the customer text must survive as visible words'
+
+
+@pytest.mark.django_db
+def test_multiline_variable_content_keeps_line_breaks(monkeypatch, client_obj):
+    from types import SimpleNamespace
+    from core.models import EmailTemplate, Contact, Ticket
+    from core.email_utils import send_ticket_email
+    _enable_email()
+    EmailTemplate.objects.update_or_create(
+        trigger='reply_added',
+        defaults={'subject_template': 'Re', 'body_template': '<div>{{ reply.content }}</div>',
+                  'body_format': 'html', 'is_active': True})
+    contact = Contact.objects.create(client=client_obj, first_name='W', last_name='D',
+                                     email='w@example.com', is_primary=True)
+    ticket = Ticket.objects.create(client=client_obj, contact=contact, subject='S', description='D')
+    captured = _captured_send(monkeypatch)
+    send_ticket_email('reply_added', ticket,
+                      extra_context={'reply': SimpleNamespace(content='line one\nline two')})
+    assert 'line one<br>line two' in captured['html']
+    assert 'line one\nline two' in captured['plain']
+
+
+@pytest.mark.django_db
+def test_link_and_button_render_in_html_and_plain_twin(monkeypatch, client_obj):
+    from core.models import EmailTemplate
+    from core.email_utils import send_custom_email
+    site = _enable_email()
+    site.email_header_color = '#407742'
+    site.save()
+    tmpl = EmailTemplate.objects.create(
+        name='Thank You', is_active=True,
+        subject_template='Thanks',
+        body_template=('<div>If you were happy, '
+                       '<a href="https://g.page/r/x/review"><mb-button>Leave a review</mb-button></a>'
+                       ' or read our <a href="https://example.com/faq">FAQ</a>.</div>'))
+    captured = _captured_send(monkeypatch)
+    log = send_custom_email(tmpl, to_email='x@example.com', client=client_obj)
+    assert log.status == 'sent'
+    html = captured['html']
+    assert 'background-color:#407742' in html, 'button takes the email branding color'
+    assert '<mb-button>' not in html, 'the marker never reaches the recipient'
+    assert '<a href="https://g.page/r/x/review"' in html
+    assert '<a href="https://example.com/faq" style=' in html, 'plain links get a visible style'
+    assert 'Leave a review: https://g.page/r/x/review' in captured['plain']
+    assert 'FAQ: https://example.com/faq' in captured['plain']
+
+
+@pytest.mark.django_db
+def test_bare_url_in_body_autolinks(monkeypatch, client_obj):
+    from core.models import EmailTemplate
+    from core.email_utils import send_custom_email
+    _enable_email()
+    tmpl = EmailTemplate.objects.create(
+        name='Note', is_active=True, subject_template='S',
+        body_template='<div>See https://example.com/help for details.</div>')
+    captured = _captured_send(monkeypatch)
+    send_custom_email(tmpl, to_email='x@example.com', client=client_obj)
+    assert '<a href="https://example.com/help"' in captured['html']
+
+
+@pytest.mark.django_db
+def test_template_save_sanitizes_body(client, admin_user):
+    from core.models import EmailTemplate
+    client.force_login(admin_user)
+    tmpl = EmailTemplate.objects.create(name='T', subject_template='S',
+                                        body_template='<div>ok</div>')
+    client.post(f'/settings/email-templates/{tmpl.pk}/edit/', {
+        'name': 'T', 'subject_template': 'S', 'is_active': '1',
+        'body_template': '<div onclick="x()">hi</div><script>alert(1)</script>'
+                         '<a href="javascript:alert(1)">j</a>',
+    })
+    tmpl.refresh_from_db()
+    assert '<script' not in tmpl.body_template
+    assert 'onclick' not in tmpl.body_template
+    assert 'javascript:' not in tmpl.body_template
+    assert 'hi' in tmpl.body_template
+
+
+@pytest.mark.django_db
+def test_text_to_html_preserves_tokens_and_breaks():
+    from core.email_html import text_to_html
+    src = 'Hi {{ customer_name }},\n\nDone on {{ ticket.created_at|date:"M j" }} & thanks.\n{% if x %}Y{% endif %}'
+    out = text_to_html(src)
+    assert '{{ ticket.created_at|date:"M j" }}' in out, 'filter quotes must survive conversion'
+    assert '{% if x %}' in out
+    assert '<br><br>' in out
+    assert '&amp; thanks' in out
+
+
+@pytest.mark.django_db
+def test_migration_conversion_renders_same_visible_text(client_obj):
+    """A representative pre-0118 plain body, converted by the migration's
+    frozen converter, renders the same words the old pipeline showed."""
+    import importlib
+    from types import SimpleNamespace
+    from core.email_html import render_body, to_plain
+    mig = importlib.import_module('core.migrations.0118_email_html_bodies')
+    legacy = ('Hi {{ customer_name }},\n\nThe status of your ticket '
+              '{{ ticket.ticket_number }} has been updated to: {{ status }}\n\nThanks,\n{{ site_name }}')
+    converted = mig._text_to_html(legacy)
+    ctx = {'customer_name': 'Wayne', 'status': 'In Progress', 'site_name': 'Shamrock',
+           'ticket': SimpleNamespace(ticket_number='TKT-00042')}
+    plain = to_plain(render_body(converted, ctx))
+    assert 'Hi Wayne,' in plain
+    assert 'TKT-00042 has been updated to: In Progress' in plain
+    assert 'Thanks,\nShamrock' in plain
+
+
+@pytest.mark.django_db
+def test_settings_email_templates_tab_carries_the_editor(client, admin_user):
+    client.force_login(admin_user)
+    resp = client.get('/settings/?tab=email_templates')
+    body = resp.content.decode()
+    assert 'trix-editor' in body
+    assert 'vendor/trix/2.1.19/trix.umd.min.js' in body
+
+
+@pytest.mark.django_db
+def test_template_test_send_goes_to_own_address_only(monkeypatch, client, admin_user):
+    from core.models import EmailTemplate, EmailSendLog
+    _enable_email()
+    admin_user.email = 'mike@example.com'
+    admin_user.save()
+    client.force_login(admin_user)
+    tmpl = EmailTemplate.objects.create(name='T', subject_template='Hello {{ customer_name }}',
+                                        body_template='<div>Hi {{ customer_name }}</div>')
+    captured = {}
+
+    def fake_send(self, fail_silently=False):
+        captured['to'] = list(self.to)
+        return 1
+
+    from django.core.mail import EmailMultiAlternatives
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', fake_send)
+    # A recipient in the POST body must be ignored — fixed destination.
+    client.post(f'/settings/email-templates/{tmpl.pk}/test-send/', {'to': 'other@example.com'})
+    assert captured['to'] == ['mike@example.com']
+    assert EmailSendLog.objects.filter(trigger='test:template', status='sent',
+                                       to_email='mike@example.com').exists()
+
+
+@pytest.mark.django_db
+def test_compose_post_body_is_sanitized_before_send(monkeypatch, client, admin_user, client_obj):
+    from core.models import EmailTemplate, Contact
+    _enable_email()
+    client.force_login(admin_user)
+    tmpl = EmailTemplate.objects.create(name='T', subject_template='S', body_template='<div>x</div>')
+    Contact.objects.create(client=client_obj, first_name='W', last_name='D',
+                           email='w@example.com', is_primary=True)
+    captured = _captured_send(monkeypatch)
+    resp = client.post('/email/customer/', {
+        'client': client_obj.pk, 'template': tmpl.pk,
+        'custom_email': 'w@example.com', 'subject': 'Hi',
+        'body': '<div>Fine text</div><script>alert(1)</script>',
+    })
+    assert resp.status_code == 302
+    assert '<script>' not in captured['html']
+    assert 'Fine text' in captured['html']
+
+
 @pytest.mark.django_db
 def test_outbound_save_seeds_default_address_from_company_email(client, admin_user):
     from core.models import SiteSettings, SendingAddress

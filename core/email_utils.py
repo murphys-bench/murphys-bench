@@ -150,8 +150,13 @@ def _suppression_reason(to_email, client, site):
     return '', ''
 
 
-def _build_html_email(body, signature_body, subject, ticket, site, embed_logo=True):
+def _build_html_email(body, signature_body, subject, ticket, site, embed_logo=True,
+                      body_is_html=False, signature_is_html=False):
     """Render the HTML email wrapper. Returns (html_str, logo_data, logo_mime_type).
+
+    body/signature marked html arrive as SANITIZED, email-safe HTML from
+    core.email_html and render as markup; anything else is escaped text with
+    its line breaks preserved, exactly as before mig 0118.
 
     embed_logo=False skips the inline CID logo (the header falls back to the
     company name) — used by document cover emails, where the branding lives in
@@ -159,6 +164,7 @@ def _build_html_email(body, signature_body, subject, ticket, site, embed_logo=Tr
     that also carries the attachment.
     """
     from django.template.loader import render_to_string
+    from django.utils.safestring import mark_safe
     import os
 
     logo_data = None
@@ -184,8 +190,10 @@ def _build_html_email(body, signature_body, subject, ticket, site, embed_logo=Tr
     title_bar_color = _email_header_color(site)
     html = render_to_string('core/email/base_email.html', {
         'subject': subject,
-        'body': body,
-        'signature': signature_body,
+        'body': mark_safe(body) if body_is_html else body,
+        'body_is_html': body_is_html,
+        'signature': mark_safe(signature_body) if signature_is_html else signature_body,
+        'signature_is_html': signature_is_html,
         'company_name': site.company_name or "Murphy's Bench",
         'has_logo': has_logo,
         'title_bar_color': title_bar_color,
@@ -257,11 +265,42 @@ def _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type, 
 
 def render_email_template(template, ctx):
     """Render a template's subject and body against ctx (a plain dict).
+    The subject is plain text. An HTML-format body (everything since mig
+    0118) renders with variable escaping ON — customer content is words,
+    never markup — and comes back as HTML, not yet email-safe-transformed.
     Raises on a syntax error so the caller can report it."""
     from django.template import Template, Context
-    context = Context(ctx, autoescape=False)
-    return (Template(template.subject_template).render(context).strip(),
-            Template(template.body_template).render(context))
+    from . import email_html
+    subject = Template(template.subject_template).render(Context(ctx, autoescape=False)).strip()
+    if template.body_format == 'html':
+        body = email_html.render_body(template.body_template, ctx)
+    else:
+        body = Template(template.body_template).render(Context(ctx, autoescape=False))
+    return subject, body
+
+
+def _rendered_signature(sig_obj):
+    """(body, is_html) for a signature, tolerating unconverted legacy rows."""
+    if sig_obj is None:
+        return '', False
+    return sig_obj.body, sig_obj.body_format == 'html'
+
+
+def _compose_email_bodies(body, body_is_html, sig_body, sig_is_html, site):
+    """Bridge body + signature, each possibly HTML or legacy text, into what
+    _smtp_send needs: (html_for_wrapper, html_flag, sig_for_wrapper,
+    sig_flag, plain_text_body)."""
+    from . import email_html
+    if body_is_html:
+        email_body, body_plain = email_html.finish_for_email(body, site)
+    else:
+        email_body, body_plain = body, body
+    if sig_body and sig_is_html:
+        sig_email, sig_plain = email_html.finish_for_email(email_html.sanitize(sig_body), site)
+    else:
+        sig_email, sig_plain = sig_body, sig_body
+    plain = f'{body_plain}\n\n--\n{sig_plain}' if sig_plain else body_plain
+    return email_body, body_is_html, sig_email, sig_is_html, plain
 
 
 def email_context(*, client, contact=None, ticket=None, work_order=None, user=None, site=None):
@@ -324,11 +363,21 @@ def send_custom_email(template, *, to_email, client, contact=None, ticket=None,
         except Exception:
             logger.exception('Email template render failed for custom template %s.', template.pk)
             return _log('failed', 'send_error', 'template render error')
+        body_is_html = template.body_format == 'html'
+    else:
+        # The compose screen posts the editor's HTML, variables already
+        # substituted. Sanitized here regardless of what the browser sent.
+        from . import email_html
+        body = email_html.sanitize(body)
+        body_is_html = True
 
     sig_obj = template.signature or EmailSignature.objects.filter(is_default=True).first()
-    signature_body = sig_obj.body if sig_obj else ''
-    html_body, logo_data, logo_mime_type = _build_html_email(body, signature_body, subject, ticket, site)
-    plain_body = f"{body}\n\n--\n{signature_body}" if signature_body else body
+    sig_body, sig_is_html = _rendered_signature(sig_obj)
+    email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
+        body, body_is_html, sig_body, sig_is_html, site)
+    html_body, logo_data, logo_mime_type = _build_html_email(
+        email_body, sig_email, subject, ticket, site,
+        body_is_html=body_is_html, signature_is_html=sig_is_html)
     status, reason, detail = _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type,
                                         to_email, cc=cc, label=trigger,
                                         sender=sending_address_for(site, 'customer_emails'))
@@ -381,10 +430,8 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
 
     # Resolve signature: template's own → default → none
     sig_obj = template.signature or EmailSignature.objects.filter(is_default=True).first()
-    signature_body = sig_obj.body if sig_obj else ''
+    sig_body, sig_is_html = _rendered_signature(sig_obj)
 
-    # Render subject and body as Django templates
-    from django.template import Template, Context
     ctx = {
         'ticket': ticket,
         'client': ticket.client,
@@ -396,11 +443,9 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
     }
     if extra_context:
         ctx.update(extra_context)
-    context = Context(ctx, autoescape=False)
 
     try:
-        subject = Template(template.subject_template).render(context)
-        body = Template(template.body_template).render(context)
+        subject, body = render_email_template(template, ctx)
     except Exception:
         logger.exception(
             'Email template render failed for trigger %s (ticket %s) — check the '
@@ -413,13 +458,11 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
         )
         return
 
-    # Build HTML version
-    html_body, logo_data, logo_mime_type = _build_html_email(body, signature_body, subject.strip(), ticket, site)
-
-    # Plain-text version appends signature below a separator
-    plain_body = body
-    if signature_body:
-        plain_body = f"{body}\n\n--\n{signature_body}"
+    email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
+        body, template.body_format == 'html', sig_body, sig_is_html, site)
+    html_body, logo_data, logo_mime_type = _build_html_email(
+        email_body, sig_email, subject, ticket, site,
+        body_is_html=body_is_html, signature_is_html=sig_is_html)
 
     status, reason, detail = _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type,
                                         to_email, cc=cc, bcc=bcc, label=f'trigger {trigger}',

@@ -2780,7 +2780,11 @@ class EmailSignature(models.Model):
     """Reusable email signature blocks. One can be marked as default."""
 
     name        = models.CharField(max_length=100, unique=True)
-    body        = models.TextField(help_text='Plain text. Use blank lines between paragraphs. Rendered with line breaks in HTML emails.')
+    body        = models.TextField(help_text='Appended below the email body.')
+    # 'html' since migration 0118 (the formatting editor); 'text' only exists
+    # so an unconverted body still renders correctly.
+    body_format = models.CharField(max_length=5, default='html',
+                                   choices=[('text', 'Plain text'), ('html', 'HTML')])
     is_default  = models.BooleanField(default=False, help_text='Used when a template has no signature assigned.')
     created_at  = models.DateTimeField(auto_now_add=True)
     updated_at  = models.DateTimeField(auto_now=True)
@@ -2819,8 +2823,12 @@ class EmailTemplate(models.Model):
         help_text='Django template syntax. Variables: {{ ticket.ticket_number }}, {{ ticket.subject }}, {{ customer_name }}, {{ client.name }}, {{ contact.first_name }}, {{ status }}, {{ tech_name }}',
     )
     body_template = models.TextField(
-        help_text='Plain text body. Same template variables available.',
+        help_text='Email body (HTML from the formatting editor). Same template variables available.',
     )
+    # 'html' since migration 0118 (the formatting editor); 'text' only exists
+    # so an unconverted body still renders correctly.
+    body_format = models.CharField(max_length=5, default='html',
+                                   choices=[('text', 'Plain text'), ('html', 'HTML')])
     signature = models.ForeignKey(
         'EmailSignature',
         on_delete=models.SET_NULL,

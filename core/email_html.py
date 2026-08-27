@@ -1,0 +1,182 @@
+"""HTML email bodies.
+
+The editor (Trix, static/js/mb-email-editor.js) stores template and signature
+bodies as a small HTML subset: div/br paragraphs, strong/em/del, links,
+lists, and <mb-button> (a link the email renders as a colored button).
+Everything here treats that subset as the contract:
+
+  sanitize()        — allowlist what the operator authored; strip the rest.
+                      Applied on save AND again at send.
+  text_to_html()    — one-time conversion of a legacy plain-text body
+                      (migration 0118, and any stray plain body).
+  render_body()     — fill Django template variables into an HTML body with
+                      escaping ON, so variable content (a customer's reply)
+                      is always words, never markup. Variable line breaks
+                      become <br>.
+  finish_for_email()— turn the rendered HTML into what mail apps respect
+                      (styles inlined, buttons built, bare URLs linked) plus
+                      the plain-text twin.
+
+Django template tokens ({{ … }} / {% … %}) are protected through the
+sanitizer so filter arguments like |date:"M j" survive; only staff author
+bodies, so the tokens themselves are trusted the same way template text
+always has been.
+"""
+import re
+
+from django.utils.html import escape
+
+#: What the editor can produce and email can render. Anything else is
+#: stripped on save and again at send.
+ALLOWED_TAGS = ['div', 'p', 'br', 'strong', 'em', 'del', 'a', 'ul', 'ol',
+                'li', 'mb-button']
+ALLOWED_ATTRS = {'a': ['href']}
+ALLOWED_PROTOCOLS = ['http', 'https', 'mailto']
+
+_TEMPLATE_TOKEN = re.compile(r'({{.*?}}|{%.*?%})', re.S)
+
+# A URL sitting in plain text (already-escaped text, so & appears as &amp;).
+_BARE_URL = re.compile(r'(?<![">])\bhttps?://[^\s<>"]+', re.I)
+
+_LINK_STYLE = 'color:#1d6fd8;'
+
+
+def sanitize(html):
+    """Reduce operator-authored HTML to the allowed subset. Template tokens
+    are stashed around the sanitizer so it cannot mangle quotes or comparison
+    operators inside them."""
+    import bleach
+    tokens = []
+
+    def _stash(m):
+        tokens.append(m.group(0))
+        return f'MBTOKEN{len(tokens) - 1}NEKOTBM'
+
+    protected = _TEMPLATE_TOKEN.sub(_stash, html or '')
+    cleaned = bleach.clean(
+        protected,
+        tags=ALLOWED_TAGS,
+        attributes=ALLOWED_ATTRS,
+        protocols=ALLOWED_PROTOCOLS,
+        strip=True,
+    )
+    for i, token in enumerate(tokens):
+        cleaned = cleaned.replace(f'MBTOKEN{i}NEKOTBM', token)
+    return cleaned
+
+
+def text_to_html(text):
+    """A legacy plain-text body as equivalent HTML: literal text escaped,
+    newlines as <br>, template tokens untouched (escaping a filter's quotes
+    would break the token at render time). Newlines inside a token stay
+    newlines — a <br> inside {% for %} would break the tag."""
+    if not text:
+        return ''
+    parts = _TEMPLATE_TOKEN.split(text.replace('\r\n', '\n'))
+    out = []
+    for i, part in enumerate(parts):
+        if i % 2:
+            out.append(part)
+        else:
+            out.append(escape(part).replace('\n', '<br>'))
+    return '<div>' + ''.join(out) + '</div>'
+
+
+def render_body(body_html, ctx):
+    """Fill template variables into an HTML body. Escaping is ON: variable
+    content is words, never markup — this is the line that keeps a customer
+    reply from smuggling HTML into the shop's branded email. Line breaks
+    inside variable values come out as <br> (author-typed line structure is
+    already <br>/<div> markup, so any literal newline left after rendering
+    came from a variable or is insignificant whitespace)."""
+    from django.template import Template, Context
+    rendered = Template(sanitize(body_html)).render(Context(ctx, autoescape=True))
+    return rendered.replace('\r\n', '\n').replace('\n', '<br>')
+
+
+def _build_button(href, label, site):
+    from .email_utils import _email_header_color, _contrast_text_color
+    color = _email_header_color(site)
+    text_color = _contrast_text_color(color)
+    return (f'<div style="margin:14px 0;">'
+            f'<a href="{href}" target="_blank" '
+            f'style="display:inline-block;background-color:{color};color:{text_color};'
+            f'padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:bold;">'
+            f'{label}</a></div>')
+
+
+def _linkify_outside_anchors(html):
+    """Wrap bare URLs in text with <a>, skipping anything already inside an
+    anchor (or an attribute — only text between tags is touched)."""
+    parts = re.split(r'(<[^>]+>)', html)
+    depth = 0
+    out = []
+    for part in parts:
+        if part.startswith('<'):
+            tag = part.lower()
+            if tag.startswith('<a ') or tag == '<a>':
+                depth += 1
+            elif tag.startswith('</a'):
+                depth = max(0, depth - 1)
+            out.append(part)
+        elif depth == 0:
+            out.append(_BARE_URL.sub(
+                lambda m: f'<a href="{m.group(0)}" style="{_LINK_STYLE}">{m.group(0)}</a>',
+                part))
+        else:
+            out.append(part)
+    return ''.join(out)
+
+
+def _email_safe(html, site):
+    """Inline the styling mail apps actually respect."""
+    # Buttons: the marker + link collapse into one styled anchor, whichever
+    # way the editor nested them.
+    html = re.sub(
+        r'<a href="([^"]*)"[^>]*>\s*<mb-button>(.*?)</mb-button>\s*</a>',
+        lambda m: _build_button(m.group(1), m.group(2), site), html, flags=re.S)
+    html = re.sub(
+        r'<mb-button>\s*<a href="([^"]*)"[^>]*>(.*?)</a>\s*</mb-button>',
+        lambda m: _build_button(m.group(1), m.group(2), site), html, flags=re.S)
+    # A stray marker with no link inside renders as plain text.
+    html = html.replace('<mb-button>', '').replace('</mb-button>', '')
+    # Ordinary links get a visible color even where the app's stylesheet is
+    # ignored; ones already styled (the buttons above) are left alone.
+    html = re.sub(r'<a href="([^"]*)">', rf'<a href="\1" style="{_LINK_STYLE}">', html)
+    html = _linkify_outside_anchors(html)
+    # Lists need explicit margins or Outlook squeezes them oddly.
+    html = html.replace('<ul>', '<ul style="margin:8px 0;padding-left:24px;">')
+    html = html.replace('<ol>', '<ol style="margin:8px 0;padding-left:24px;">')
+    return html
+
+
+def to_plain(html):
+    """The plain-text twin of a rendered HTML body: links become
+    "label: URL", lists become "- item", paragraphs become lines."""
+    import html as html_mod
+    text = html or ''
+    text = re.sub(
+        r'<a [^>]*href="([^"]*)"[^>]*>(.*?)</a>',
+        lambda m: (m.group(2) if _strip_tags(m.group(2)).strip() == m.group(1).strip()
+                   else f'{_strip_tags(m.group(2)).strip()}: {m.group(1)}'),
+        text, flags=re.S)
+    text = re.sub(r'<br\s*/?>', '\n', text)
+    text = re.sub(r'</div>\s*<div[^>]*>', '\n', text)
+    text = re.sub(r'</(p|div|ul|ol)>', '\n', text)
+    text = re.sub(r'<li[^>]*>', '- ', text)
+    text = re.sub(r'</li>', '\n', text)
+    text = _strip_tags(text)
+    text = html_mod.unescape(text)
+    # Collapse the blank-line noise tag removal leaves behind.
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+def _strip_tags(html):
+    return re.sub(r'<[^>]+>', '', html or '')
+
+
+def finish_for_email(rendered_html, site):
+    """(html for the email, plain-text twin) from a rendered body."""
+    email_html = _email_safe(rendered_html, site)
+    return email_html, to_plain(email_html)
