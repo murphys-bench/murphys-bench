@@ -36,6 +36,7 @@
         }
     </style>
     {% endwith %}
+    {% block extra_head %}{% endblock %}
 </head>
 <body data-room="{% block room %}work{% endblock %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
 <div class="page">

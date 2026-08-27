@@ -29,7 +29,7 @@
         <div class="card-body border-top">
             <div class="mb-3"><label class="form-label required">Name</label><input type="text" name="name" class="form-control" placeholder="e.g. Satisfaction follow-up" required></div>
             <div class="mb-3"><label class="form-label">Subject</label><input type="text" name="subject_template" class="form-control font-monospace" placeholder="How did we do on {% templatetag openvariable %} ticket.ticket_number {% templatetag closevariable %}?"></div>
-            <div class="mb-3"><label class="form-label">Body</label><textarea name="body_template" rows="6" class="form-control font-monospace" placeholder="Hi {% templatetag openvariable %} customer_name {% templatetag closevariable %},"></textarea></div>
+            <div class="mb-3"><label class="form-label">Body</label>{% include "core/partials/email_editor.html" with name="body_template" value="" editor_id="tmpl-new-body" %}</div>
             <div class="mb-3"><label class="form-label">Signature</label><select name="signature" class="form-select" style="max-width: 20rem;"><option value="">Use the default signature</option>{% for sig in email_signatures %}<option value="{{ sig.pk }}">{{ sig.name }}</option>{% endfor %}</select></div>
             <div class="mb-0"><label class="form-check form-switch"><input type="checkbox" name="quick_send" value="1" class="form-check-input"><span class="form-check-label">One-click send</span></label><div class="form-hint">Shows this template as a single send button on finished tickets and work orders. One click sends it to the customer and records the follow-up.</div></div>
         </div>
