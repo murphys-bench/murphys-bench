@@ -8276,6 +8276,50 @@ def test_maintenance_tab_shows_backup_status_and_updates(admin_user, client, set
     assert 'Software updates' in body  # Backups + Updates cards share the Maintenance tab
 
 
+@pytest.mark.django_db
+def test_maintenance_backups_page_has_no_nested_or_orphaned_forms(admin_user, client, settings, tmp_path):
+    """Regression (v0.14.0 Tabler rebuild, reported by a tester on v0.15.0):
+    the backup-status partial carries its own "Run backup now" <form> and was
+    included INSIDE the backup settings <form>. Browsers drop a nested form's
+    opening tag, so its closing tag ended the settings form early -- every
+    field, both Test buttons and Save were orphaned outside any form (settings
+    could never save; "Run backup now" submitted an empty settings POST that
+    rendered required-field errors with the toggles off). Guards the whole
+    rendered page: no <form> may open inside another, and every submit control
+    must sit inside exactly one form."""
+    from html.parser import HTMLParser
+
+    # Isolate BASE_DIR: a real logs/backup-status.json in the queued/running
+    # state would suppress the Run-backup-now form and let the broken template
+    # pass this test vacuously (review finding on the first cut of this test).
+    settings.BASE_DIR = tmp_path
+    client.force_login(admin_user)
+    resp = client.get('/settings/?tab=maintenance')
+    assert resp.status_code == 200
+
+    class FormAudit(HTMLParser):
+        depth = 0
+        nested = 0
+        orphaned_submits = 0
+
+        def handle_starttag(self, tag, attrs):
+            if tag == 'form':
+                if self.depth:
+                    self.nested += 1
+                self.depth += 1
+            elif tag == 'button' and dict(attrs).get('type') == 'submit' and self.depth != 1:
+                self.orphaned_submits += 1
+
+        def handle_endtag(self, tag):
+            if tag == 'form':
+                self.depth -= 1
+
+    audit = FormAudit()
+    audit.feed(resp.content.decode())
+    assert audit.nested == 0, 'a <form> is nested inside another form'
+    assert audit.orphaned_submits == 0, 'a submit button sits outside any form'
+
+
 def test_request_backup_now_writes_trigger_and_refuses_double(settings, tmp_path):
     settings.BASE_DIR = tmp_path
     from core import backup_ops

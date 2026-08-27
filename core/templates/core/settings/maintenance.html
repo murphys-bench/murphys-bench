@@ -1,7 +1,9 @@
 {% load mb_tabler %}
-<form method="post" class="card mb-3">{% csrf_token %}<input type="hidden" name="tab" value="backups">
+<div class="card mb-3">
     <div class="card-header"><div><h3 class="card-title">Backups</h3><div class="card-subtitle">Each backup is a consistent snapshot of the database, attachments and settings, shipped <strong>off this server</strong> to the destinations below; the MB server itself is never a backup location.</div></div></div>
+    {# The status block carries its own "Run backup now" <form>, so it must sit OUTSIDE the settings form: a nested form's closing tag ends the outer form early and orphans every field below it (the v0.14.0 regression). #}
     <div class="card-body border-bottom">{% include 'core/partials/backup_status.html' %}</div>
+    <form method="post">{% csrf_token %}<input type="hidden" name="tab" value="backups">
     <div class="card-body">
         {% for err in forms.backups.non_field_errors %}<div class="alert alert-danger">{{ err }}</div>{% endfor %}
         {% for field in forms.backups %}{% if field.errors %}<div class="alert alert-danger">{{ field.label }}: {{ field.errors|join:", " }}</div>{% endif %}{% endfor %}
@@ -45,7 +47,8 @@
         </div>
     </div>
     <div class="card-footer"><button type="submit" class="btn btn-primary">Save backup settings</button></div>
-</form>
+    </form>
+</div>
 <div class="card mb-3">
     <div class="card-header"><div><h3 class="card-title">Restore</h3><div class="card-subtitle">Put this server back to the state captured in a backup. This <strong>replaces</strong> the current database, attachments and media. Your current data is copied aside first, but getting it back is a command-line step, so treat this as one-way.</div></div></div>
     <div class="card-body">
