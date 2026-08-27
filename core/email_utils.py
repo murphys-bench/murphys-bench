@@ -95,11 +95,16 @@ def sending_address_for(site, kind):
 def _connection_and_from(site, sender):
     """The SMTP connection and From header for one send.
 
-    `sender` is a SendingAddress or None. A sender's own login fields override
-    the main outbound server field by field; anything blank rides the main
-    server, and smtp_use_tls only applies when the sender brings its own host.
-    With no sender at all the From falls back to the company email, then the
-    SMTP username, then DEFAULT_FROM_EMAIL — never a hardcoded address."""
+    `sender` is a SendingAddress or None. A sender with its OWN host brings
+    its own login: the main server's username and password are NEVER sent to
+    a different host (review round 1 risk — a typo'd host must not receive
+    the shop's real credentials; the address form requires credentials
+    alongside an own host, and a blank pair here goes out unauthenticated
+    and fails loud at SMTP rather than borrowing the main login). A sender
+    with no own host rides the main server entirely, its own username and
+    password overriding only the login. With no sender at all the From falls
+    back to the company email, then the SMTP username, then
+    DEFAULT_FROM_EMAIL — never a hardcoded address."""
     from django.core.mail import get_connection
     from django.conf import settings as django_settings
 
@@ -107,11 +112,16 @@ def _connection_and_from(site, sender):
     s_port = sender.smtp_port if sender else None
     s_user = sender.smtp_username if sender else ''
     s_pass = sender.smtp_password if sender else ''
-    host = s_host or site.email_host or django_settings.EMAIL_HOST
+    if s_host:
+        host = s_host
+        username, password = s_user, s_pass
+        use_tls = sender.smtp_use_tls
+    else:
+        host = site.email_host or django_settings.EMAIL_HOST
+        username = s_user or site.email_username or django_settings.EMAIL_HOST_USER
+        password = s_pass or site.email_password or django_settings.EMAIL_HOST_PASSWORD
+        use_tls = site.email_use_tls
     port = s_port or site.email_port or django_settings.EMAIL_PORT
-    username = s_user or site.email_username or django_settings.EMAIL_HOST_USER
-    password = s_pass or site.email_password or django_settings.EMAIL_HOST_PASSWORD
-    use_tls = sender.smtp_use_tls if s_host else site.email_use_tls
     use_ssl = port == 465
     connection = get_connection(
         backend='django.core.mail.backends.smtp.EmailBackend',
@@ -555,15 +565,17 @@ def send_document_email(to_email, subject, cover_body, *, kind,
 
     # Short branded cover (no inline logo — the PDF carries the branding, and a
     # 'related' image would complicate the multipart/mixed tree that holds the
-    # attachment). Default signature if one is configured.
+    # attachment). Default signature if one is configured; post-0118 that
+    # signature is HTML and must go through the same compose bridge as every
+    # other send, or its tags show as literal text. (Review round 1 finding.)
     sig_obj = EmailSignature.objects.filter(is_default=True).first()
-    signature_body = sig_obj.body if sig_obj else ''
+    sig_body, sig_is_html = _rendered_signature(sig_obj)
+    email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
+        cover_body, False, sig_body, sig_is_html, site)
     html_body, _logo, _mime = _build_html_email(
-        cover_body, signature_body, subject, None, site, embed_logo=False,
+        email_body, sig_email, subject, None, site, embed_logo=False,
+        body_is_html=body_is_html, signature_is_html=sig_is_html,
     )
-    plain_body = cover_body
-    if signature_body:
-        plain_body = f"{cover_body}\n\n--\n{signature_body}"
 
     connection, from_email = _connection_and_from(site, sending_address_for(site, kind))
 

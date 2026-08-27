@@ -776,6 +776,17 @@ class SendingAddressForm(forms.ModelForm):
             'smtp_password': forms.PasswordInput(attrs={'class': _SS_INPUT}, render_value=True),
         }
 
+    def clean(self):
+        cleaned = super().clean()
+        # An own host must bring its own login: sending the MAIN server's
+        # credentials to whatever host was typed here would hand the shop's
+        # real SMTP password to a wrong or hostile machine on one typo.
+        if cleaned.get('smtp_host') and not (cleaned.get('smtp_username') and cleaned.get('smtp_password')):
+            raise forms.ValidationError(
+                'An address with its own SMTP host needs its own username and '
+                'password; the main server login is never used on a different host.')
+        return cleaned
+
 
 class InboundEmailSettingsForm(forms.ModelForm):
     class Meta:

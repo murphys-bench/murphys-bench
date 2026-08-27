@@ -2764,14 +2764,20 @@ class SendingAddress(models.Model):
 
     @classmethod
     def get_default(cls):
-        return cls.objects.filter(is_default=True).first() or cls.objects.first()
+        # Deliberately NO fall-through to "any row": an install whose only
+        # address is a special-purpose one (the migrated sales address, say)
+        # must not have that row quietly become the sender for everything.
+        # No default means the company-email fallback in _connection_and_from.
+        # (Review round 1 finding.)
+        return cls.objects.filter(is_default=True).first()
 
     def save(self, *args, **kwargs):
-        # Single default, same pattern as EmailSignature; the first row ever
-        # created becomes the default so the list never has zero defaults.
+        # Single default, same pattern as EmailSignature. Only a NEWLY created
+        # row auto-promotes when no default exists — editing an existing
+        # special-purpose row must never quietly make it the global sender.
         if self.is_default:
             SendingAddress.objects.exclude(pk=self.pk).update(is_default=False)
-        elif not SendingAddress.objects.exclude(pk=self.pk).filter(is_default=True).exists():
+        elif self._state.adding and not SendingAddress.objects.filter(is_default=True).exists():
             self.is_default = True
         super().save(*args, **kwargs)
 

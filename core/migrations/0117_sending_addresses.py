@@ -19,14 +19,19 @@ def seed_sending_addresses(apps, schema_editor):
         return
     default_email = (site.email_from or '').strip()
     sales_email = (site.email_sales_from or '').strip()
-    default_row = None
     if default_email:
-        default_row = SendingAddress.objects.create(
+        SendingAddress.objects.create(
             display_name=site.company_name or '', email=default_email, is_default=True)
     if sales_email and sales_email != default_email:
+        # NEVER the default, even when it is the only row: on an install with
+        # a sales address but no support From, making sales the default would
+        # switch ticket events and internal mail to the sales identity. With
+        # no default row, those kinds fall back to the company email instead,
+        # matching the old email_from-blank behavior as closely as the new
+        # model allows. (Review round 1 finding.)
         sales_row = SendingAddress.objects.create(
             display_name=site.company_name or '', email=sales_email,
-            is_default=default_row is None)
+            is_default=False)
         site.from_quotes = sales_row
         site.from_receipts = sales_row
         site.save(update_fields=['from_quotes', 'from_receipts'])

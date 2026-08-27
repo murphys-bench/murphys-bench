@@ -9209,17 +9209,24 @@ def _resolve_desk_context(request):
     """
     src = request.POST if request.method == 'POST' else request.GET
 
-    def _get(model, key):
+    def _get(model, key, scoped_getter=None):
         raw = src.get(key)
         if not raw:
             return None
         try:
-            return get_object_or_404(model, pk=int(raw))
+            pk = int(raw)
         except (TypeError, ValueError):
             raise _ConflictingContext(f'bad {key}')
+        if scoped_getter is not None:
+            return scoped_getter(request, pk)
+        return get_object_or_404(model, pk=pk)
 
-    work_order = _get(WorkOrder, 'work_order')
-    ticket = _get(Ticket, 'ticket')
+    # Ticket and work-order ids go through the same visibility scoping as
+    # every other route: a tech must not be able to render or send an email
+    # against a record they cannot otherwise see. (Review round 1, an
+    # inherited gap: this resolver used bare pk lookups since it was built.)
+    work_order = _get(WorkOrder, 'work_order', _get_scoped_wo_or_404)
+    ticket = _get(Ticket, 'ticket', _get_scoped_ticket_or_404)
     client = _get(Client, 'client')
     prospect = _get(Prospect, 'prospect')
 
@@ -9621,6 +9628,13 @@ class EmailTemplateDeleteView(SettingsAdminMixin, View):
         if not tmpl.is_custom:
             messages.error(request, 'Event templates stay; turn one off instead.')
         else:
+            # Standing attachments are GenericFK rows, so nothing cascades:
+            # without this they would survive as orphaned private files with
+            # no UI owner. Files first, then rows, then the template.
+            ct = ContentType.objects.get_for_model(EmailTemplate)
+            for att in Attachment.objects.filter(content_type=ct, object_id=tmpl.pk):
+                att.file.delete(save=False)
+                att.delete()
             tmpl.delete()
             messages.success(request, f'Email template "{tmpl.name}" deleted.')
         return redirect(f"{reverse('core:settings')}?tab=email_templates")

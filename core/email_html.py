@@ -35,8 +35,29 @@ ALLOWED_PROTOCOLS = ['http', 'https', 'mailto']
 
 _TEMPLATE_TOKEN = re.compile(r'({{.*?}}|{%.*?%})', re.S)
 
-# A URL sitting in plain text (already-escaped text, so & appears as &amp;).
-_BARE_URL = re.compile(r'(?<![">])\bhttps?://[^\s<>"]+', re.I)
+# The template constructs a body may use. Anything else — {% autoescape %},
+# {% debug %}, {% include %}, {% load %}, a |safe filter — is neutralized to
+# visible literal text, because each of those can turn variable content into
+# live markup or leak state. The escaping guarantee must hold against a
+# careless (or compromised) settings account, not just a careful one.
+# (Review round 1 finding: {{ reply.content|safe }} bypassed escaping.)
+_SAFE_BLOCK_TAGS = {'if', 'elif', 'else', 'endif', 'for', 'empty', 'endfor',
+                    'comment', 'endcomment', 'now', 'templatetag'}
+_UNSAFE_FILTER = re.compile(r'\|\s*safe\b')
+
+
+def _token_allowed(token):
+    if token.startswith('{{'):
+        return not _UNSAFE_FILTER.search(token)
+    inner = token[2:-2].strip()
+    name = inner.split(None, 1)[0] if inner else ''
+    return name in _SAFE_BLOCK_TAGS
+
+# A URL sitting in plain text. The text is already escaped, so a literal &
+# appears as &amp; (allowed mid-URL for query strings) while &quot; / &lt; /
+# &gt; mark where the customer's own markup was escaped — the URL stops
+# there, so a link never swallows escaped-markup fragments into its href.
+_BARE_URL = re.compile(r"\bhttps?://(?:&amp;|[^\s<>&\"'])+", re.I)
 
 _LINK_STYLE = 'color:#1d6fd8;'
 
@@ -44,12 +65,21 @@ _LINK_STYLE = 'color:#1d6fd8;'
 def sanitize(html):
     """Reduce operator-authored HTML to the allowed subset. Template tokens
     are stashed around the sanitizer so it cannot mangle quotes or comparison
-    operators inside them."""
+    operators inside them; a token outside the allowed construct set (see
+    _token_allowed) is escaped into visible literal text instead of stashed,
+    so it can never execute."""
     import bleach
     tokens = []
 
     def _stash(m):
-        tokens.append(m.group(0))
+        token = m.group(0)
+        if not _token_allowed(token):
+            # Visible literal text that the template engine can never parse:
+            # HTML-escaping alone is not enough, because a token like
+            # {{ x|safe }} contains nothing escape() rewrites and would still
+            # be live template syntax. The braces themselves become entities.
+            return escape(token).replace('{', '&#123;').replace('}', '&#125;')
+        tokens.append(token)
         return f'MBTOKEN{len(tokens) - 1}NEKOTBM'
 
     protected = _TEMPLATE_TOKEN.sub(_stash, html or '')
@@ -120,12 +150,20 @@ def _linkify_outside_anchors(html):
                 depth = max(0, depth - 1)
             out.append(part)
         elif depth == 0:
-            out.append(_BARE_URL.sub(
-                lambda m: f'<a href="{m.group(0)}" style="{_LINK_STYLE}">{m.group(0)}</a>',
-                part))
+            out.append(_BARE_URL.sub(_autolink_one, part))
         else:
             out.append(part)
     return ''.join(out)
+
+
+def _autolink_one(m):
+    url = m.group(0)
+    # Sentence punctuation hugging the URL is prose, not address.
+    trailing = ''
+    while url and url[-1] in '.,;:!?)':
+        trailing = url[-1] + trailing
+        url = url[:-1]
+    return f'<a href="{url}" style="{_LINK_STYLE}">{url}</a>{trailing}'
 
 
 def _email_safe(html, site):
