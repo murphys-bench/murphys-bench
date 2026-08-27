@@ -8289,6 +8289,10 @@ def test_maintenance_backups_page_has_no_nested_or_orphaned_forms(admin_user, cl
     must sit inside exactly one form."""
     from html.parser import HTMLParser
 
+    # Isolate BASE_DIR: a real logs/backup-status.json in the queued/running
+    # state would suppress the Run-backup-now form and let the broken template
+    # pass this test vacuously (review finding on the first cut of this test).
+    settings.BASE_DIR = tmp_path
     client.force_login(admin_user)
     resp = client.get('/settings/?tab=maintenance')
     assert resp.status_code == 200
