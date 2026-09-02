@@ -382,9 +382,27 @@ def list_client_invoices(in_client_id):
     """All non-deleted invoices IN holds for one IN client — the read behind
     Pull from IN (mirroring invoices IN's own recurring engine generated, so
     MB's billing worklist can reflect them instead of duplicating them).
-    Read-only toward IN; raises InvoiceNinjaError on any problem."""
-    data = _request('GET', '/invoices', params={'client_id': in_client_id})
-    return [row for row in (data.get('data') or []) if not row.get('is_deleted')]
+    Read-only toward IN; raises InvoiceNinjaError on any problem.
+
+    Follows IN's pagination to the end rather than quietly reading page one —
+    a missed page would report 'no candidate' and steer the operator into
+    preparing a duplicate draft. Fails loud past a sanity cap instead of
+    scanning forever."""
+    rows, page = [], 1
+    while True:
+        data = _request('GET', '/invoices',
+                        params={'client_id': in_client_id, 'per_page': 100, 'page': page})
+        rows.extend(r for r in (data.get('data') or []) if not r.get('is_deleted'))
+        pagination = ((data.get('meta') or {}).get('pagination') or {})
+        total_pages = int(pagination.get('total_pages') or 1)
+        if page >= total_pages:
+            return rows
+        page += 1
+        if page > 25:
+            raise InvoiceNinjaError(
+                'Invoice Ninja reports more than 2,500 invoices for this client — '
+                'refusing to scan further. Link this one by hand.'
+            )
 
 
 def status_label(status_id):

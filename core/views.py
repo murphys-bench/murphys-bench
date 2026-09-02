@@ -2821,6 +2821,13 @@ class SaleDraftSendView(SaleAccessMixin, View):
     def post(self, request, pk):
         from . import invoice_ninja
         sale = get_object_or_404(Sale, pk=pk, is_recurring=True)
+        if sale.pulled_from_in:
+            messages.error(
+                request,
+                f'{sale.sale_number} mirrors an invoice Invoice Ninja generated — '
+                'MB reads its status back but never sends or re-sends it.',
+            )
+            return redirect('core:sale_detail', pk=pk)
         if not SiteSettings.get().invoice_ninja_enabled:
             messages.error(request, 'Invoice Ninja is not enabled in Settings.')
             return redirect('core:sale_detail', pk=pk)
@@ -2865,6 +2872,12 @@ class SaleCheckINView(SaleAccessMixin, View):
         return redirect(next_url)
 
 
+_PULLED_NO_CHARGE_MSG = (
+    '{number} mirrors an invoice Invoice Ninja generated on its own — MB never '
+    'charges it. Charge or record payment in Invoice Ninja, then use Check IN.'
+)
+
+
 class SaleChargeView(SaleAccessMixin, View):
     """Slice 5d — trigger Invoice Ninja to charge the client's card on file for
     an already-pushed sale. GET renders a confirmation screen (server-computed
@@ -2891,6 +2904,9 @@ class SaleChargeView(SaleAccessMixin, View):
         if not _can_process_payments(request.user):
             return HttpResponse('Forbidden', status=403)
         sale = get_object_or_404(Sale, pk=pk)
+        if sale.pulled_from_in:
+            messages.error(request, _PULLED_NO_CHARGE_MSG.format(number=sale.sale_number))
+            return redirect('core:sale_detail', pk=pk)
         if not sale.invoice_ninja_id:
             messages.error(request, f'{sale.sale_number} has not been sent to Invoice Ninja yet — send it as a draft first.')
             return redirect('core:sale_detail', pk=pk)
@@ -2914,6 +2930,9 @@ class SaleChargeView(SaleAccessMixin, View):
         if not _can_process_payments(request.user):
             return HttpResponse('Forbidden', status=403)
         sale = get_object_or_404(Sale, pk=pk)
+        if sale.pulled_from_in:
+            messages.error(request, _PULLED_NO_CHARGE_MSG.format(number=sale.sale_number))
+            return redirect('core:sale_detail', pk=pk)
         if not SiteSettings.get().invoice_ninja_enabled:
             messages.error(request, 'Invoice Ninja is not enabled in Settings.')
             return redirect('core:sale_detail', pk=pk)
@@ -3110,6 +3129,13 @@ class SaleCheckoutView(SaleAccessMixin, View):
         from . import invoice_ninja
         sale = get_object_or_404(Sale, pk=pk)
 
+        if sale.pulled_from_in:
+            messages.error(
+                request,
+                f'{sale.sale_number} mirrors an invoice Invoice Ninja generated — '
+                'record its payment in Invoice Ninja, then use Check IN.',
+            )
+            return redirect('core:sale_detail', pk=pk)
         if sale.is_locked:
             messages.error(request, f'{sale.sale_number} is already {sale.get_status_display().lower()}.')
             return redirect('core:sale_detail', pk=pk)
@@ -3167,6 +3193,13 @@ class SaleSendINView(SaleAccessMixin, View):
     def post(self, request, pk):
         from . import invoice_ninja
         sale = get_object_or_404(Sale, pk=pk)
+        if sale.pulled_from_in:
+            messages.error(
+                request,
+                f'{sale.sale_number} mirrors an invoice Invoice Ninja generated — '
+                'MB never sends it back to Invoice Ninja.',
+            )
+            return redirect('core:sale_detail', pk=pk)
         if not SiteSettings.get().invoice_ninja_enabled:
             messages.error(request, 'Invoice Ninja is not enabled in Settings.')
             return redirect('core:sale_detail', pk=pk)
@@ -3698,6 +3731,10 @@ class ContractPullINView(SaleAccessMixin, View):
         ).select_related('client').order_by('client__name', 'contract_number'):
             if not contract.is_billing_month(today):
                 continue
+            # end_date is authoritative when set (same rule as is_billing_due):
+            # an ended contract must not invite linking new invoices.
+            if contract.end_date and today > contract.end_date:
+                continue
             if _contract_sale_for_period(contract, today) is not None:
                 continue
             in_client_id = (contract.client.invoice_ninja_id or '').strip()
@@ -3730,6 +3767,19 @@ class ContractPullINView(SaleAccessMixin, View):
                             'line_items': inv.get('line_items') or [],
                         })
             rows.append(row)
+        # Preselect a row's lone candidate only when no OTHER row offers the same
+        # invoice — two contracts sharing one candidate must both start on Skip,
+        # so a double-link can never happen by default-submit.
+        offered = {}
+        for row in rows:
+            for cand in row['candidates']:
+                offered[cand['id']] = offered.get(cand['id'], 0) + 1
+        for row in rows:
+            row['preselect_id'] = (
+                row['candidates'][0]['id']
+                if len(row['candidates']) == 1 and offered[row['candidates'][0]['id']] == 1
+                else None
+            )
         return rows
 
     def get(self, request):
@@ -3749,10 +3799,18 @@ class ContractPullINView(SaleAccessMixin, View):
             return redirect('core:contract_billing_list')
         today = timezone.localdate()
         pulled, skipped_race = 0, 0
+        consumed = set()  # each IN invoice may be linked ONCE per pull run
         for row in self._candidate_rows(today):
             contract = row['contract']
             choice = (request.POST.get(f'contract_{contract.pk}') or 'skip').strip()
             if choice in ('', 'skip'):
+                continue
+            if choice in consumed:
+                messages.warning(
+                    request,
+                    f'{contract.contract_number}: that invoice was already linked '
+                    'to another contract in this pull run — nothing was linked for it.',
+                )
                 continue
             # Only an invoice the server itself just verified as a candidate for
             # THIS contract's period may be linked — a posted id is never trusted.
@@ -3768,6 +3826,7 @@ class ContractPullINView(SaleAccessMixin, View):
                 with transaction.atomic():
                     sale = Sale.objects.create(
                         client=contract.client, is_recurring=True, contract=contract,
+                        pulled_from_in=True,
                         billing_period=contract.period_key(today), created_by=request.user,
                         invoice_ninja_id=match['id'], invoice_ninja_ref=match['number'],
                         in_status=match['status'], in_status_checked_at=tz.now(),
@@ -3794,9 +3853,11 @@ class ContractPullINView(SaleAccessMixin, View):
                             unit_price=Decimal(str(match['amount'] or '0')),
                             logged_by=request.user,
                         )
+                consumed.add(match['id'])
                 pulled += 1
             except IntegrityError:
-                # A concurrent prepare/pull created this period's record first.
+                # A concurrent prepare/pull already holds this period's record or
+                # this invoice (uniq_contract_billing_period / uniq_sale_invoice_ninja_id).
                 skipped_race += 1
         if pulled:
             messages.success(request, f'Pulled {pulled} invoice{"s" if pulled != 1 else ""} in from Invoice Ninja.')
@@ -6259,6 +6320,10 @@ def _guard_line_host(request, host):
             raise PermissionDenied
     elif isinstance(host, (Sale, Client, Contract)):
         if not _can_view_sales(request.user):
+            raise PermissionDenied
+        # A locked Sale (completed, void, or a pulled IN mirror) is read-only at
+        # the route, not just in the editor template a browser happens to render.
+        if isinstance(host, Sale) and host.is_locked:
             raise PermissionDenied
     elif isinstance(host, (Estimate, EstimateOption)):
         if not _can_view_estimates(request.user):

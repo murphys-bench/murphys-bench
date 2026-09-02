@@ -36,12 +36,12 @@
             {% else %}
                 {% for cand in row.candidates %}
                 <label class="form-check">
-                    <input class="form-check-input" type="radio" name="contract_{{ row.contract.pk }}" value="{{ cand.id }}" {% if row.candidates|length == 1 %}checked{% endif %}>
+                    <input class="form-check-input" type="radio" name="contract_{{ row.contract.pk }}" value="{{ cand.id }}" {% if cand.id == row.preselect_id %}checked{% endif %}>
                     <span class="form-check-label">Invoice #{{ cand.number }} &middot; {{ cand.date|date:"M j, Y" }} &middot; ${{ cand.amount|floatformat:2 }} &middot; {{ cand.status }}</span>
                 </label>
                 {% endfor %}
                 <label class="form-check">
-                    <input class="form-check-input" type="radio" name="contract_{{ row.contract.pk }}" value="skip" {% if row.candidates|length != 1 %}checked{% endif %}>
+                    <input class="form-check-input" type="radio" name="contract_{{ row.contract.pk }}" value="skip" {% if not row.preselect_id %}checked{% endif %}>
                     <span class="form-check-label text-secondary">Skip — do not link anything for this contract</span>
                 </label>
             {% endif %}

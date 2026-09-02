@@ -1578,6 +1578,13 @@ class Sale(models.Model):
     # draft per period regardless of cadence. Blank for non-contract sales.
     billing_period = models.CharField(max_length=12, blank=True)
 
+    # Provenance: this Sale MIRRORS an invoice Invoice Ninja generated on its own
+    # (Pull from IN). A mirror is read-only toward IN forever: MB reads its status
+    # back but never re-sends, charges, or edits it — IN is the money authority for
+    # this record. Deleting the mirror just unlinks it; the invoice becomes
+    # pullable again.
+    pulled_from_in = models.BooleanField(default=False)
+
     sale_number = models.CharField(max_length=20, unique=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', db_index=True)
     is_recurring = models.BooleanField(
@@ -1621,6 +1628,15 @@ class Sale(models.Model):
                 condition=models.Q(contract__isnull=False),
                 name='uniq_contract_billing_period',
             ),
+            # One MB sale per IN invoice — a wrong or raced money link (the same
+            # external invoice mirrored under two contracts) is refused by the
+            # database, not just by view logic. Blank ids (never pushed/pulled)
+            # must not collide.
+            models.UniqueConstraint(
+                fields=['invoice_ninja_id'],
+                condition=~models.Q(invoice_ninja_id=''),
+                name='uniq_sale_invoice_ninja_id',
+            ),
         ]
 
     def __str__(self):
@@ -1634,8 +1650,9 @@ class Sale(models.Model):
 
     @property
     def is_locked(self):
-        """Read-only once completed or voided."""
-        return self.status in ('completed', 'void')
+        """Read-only once completed or voided — and always for a pulled mirror,
+        whose content belongs to the Invoice Ninja invoice it reflects."""
+        return self.status in ('completed', 'void') or self.pulled_from_in
 
     @property
     def line_items_total(self):
@@ -1781,20 +1798,26 @@ class Contract(models.Model):
         return f"{y}"
 
     def period_bounds(self, on_date):
-        """First and last calendar day of the billing period on_date falls in,
-        per cadence — the date window an externally generated invoice must land
-        in to belong to this period (Pull from IN)."""
+        """First and last calendar day of the billing period on_date falls in —
+        the date window an externally generated invoice must land in to belong
+        to this period (Pull from IN). ANCHORED like is_billing_month, not
+        calendar-aligned: a February-anchored quarterly contract's periods run
+        Feb–Apr, May–Jul, …, and a July-anchored annual contract's period runs
+        Jul 1 to the following Jun 30 — never the bare calendar quarter/year."""
         import calendar
         from datetime import date
-        y = on_date.year
-        if self.billing_cadence == 'monthly':
-            m = on_date.month
-            return date(y, m, 1), date(y, m, calendar.monthrange(y, m)[1])
-        if self.billing_cadence == 'quarterly':
-            q_start = ((on_date.month - 1) // 3) * 3 + 1
-            q_end = q_start + 2
-            return date(y, q_start, 1), date(y, q_end, calendar.monthrange(y, q_end)[1])
-        return date(y, 1, 1), date(y, 12, 31)  # annual
+        months = {'monthly': 1, 'quarterly': 3, 'annual': 12}[self.billing_cadence]
+        offset = (on_date.month - self._anchor_month()) % months
+        start_y, start_m = on_date.year, on_date.month - offset
+        if start_m < 1:
+            start_m += 12
+            start_y -= 1
+        end_y, end_m = start_y, start_m + months - 1
+        if end_m > 12:
+            end_m -= 12
+            end_y += 1
+        return (date(start_y, start_m, 1),
+                date(end_y, end_m, calendar.monthrange(end_y, end_m)[1]))
 
     def is_billing_due(self, as_of=None):
         """True once this contract is due in as_of's period: the month must be a

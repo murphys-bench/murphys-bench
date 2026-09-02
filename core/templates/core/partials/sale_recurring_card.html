@@ -6,7 +6,11 @@ Ninja; nothing is charged. The operator charges the card by hand in IN, then
 <div class="card" id="sale-recurring-card">
     <div class="card-header"><h3 class="card-title">Recurring charge</h3></div>
     <div class="card-body">
+        {% if sale.pulled_from_in %}
+        <p class="text-secondary">This record mirrors an invoice Invoice Ninja generated on its own (Pull from IN). Murphy's Bench reads its status back and changes nothing in Invoice Ninja; charge or record payment there, then Check IN.</p>
+        {% else %}
         <p class="text-secondary">Monthly billing. Sending creates a <strong>draft</strong> invoice in Invoice Ninja; it charges nothing. Charge the card in Invoice Ninja, then Check IN to record payment here.</p>
+        {% endif %}
         {% if sale.invoice_ninja_id %}
             <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
                 <span class="badge {% if sale.in_status|lower == 'paid' %}bg-green-lt{% else %}bg-blue-lt{% endif %}">Invoice Ninja #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }}{% if sale.in_status %} &middot; {{ sale.in_status }}{% endif %}</span>
@@ -15,8 +19,10 @@ Ninja; nothing is charged. The operator charges the card by hand in IN, then
             {% if invoice_ninja_enabled %}
             <div class="btn-list">
                 <form method="post" action="{% url 'core:sale_check_in' sale.pk %}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-primary">Check IN</button></form>
+                {% if not sale.pulled_from_in %}
                 {% if can_process_payments and sale.in_status|lower != 'paid' %}<a href="{% url 'core:sale_charge' sale.pk %}" class="btn btn-success">Charge card on file</a>{% endif %}
                 <form method="post" action="{% url 'core:sale_send_draft' sale.pk %}" class="d-inline" data-mb-confirm="Re-send this as another draft invoice in Invoice Ninja?">{% csrf_token %}<input type="hidden" name="confirm_resend" value="1"><button type="submit" class="btn">Re-send draft</button></form>
+                {% endif %}
             </div>
             {% endif %}
         {% elif invoice_ninja_enabled %}
