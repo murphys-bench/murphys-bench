@@ -378,6 +378,23 @@ def check_sale_status(sale):
     return label
 
 
+def list_client_invoices(in_client_id):
+    """All non-deleted invoices IN holds for one IN client — the read behind
+    Pull from IN (mirroring invoices IN's own recurring engine generated, so
+    MB's billing worklist can reflect them instead of duplicating them).
+    Read-only toward IN; raises InvoiceNinjaError on any problem."""
+    data = _request('GET', '/invoices', params={'client_id': in_client_id})
+    return [row for row in (data.get('data') or []) if not row.get('is_deleted')]
+
+
+def status_label(status_id):
+    """Human label for an IN invoice status_id (shared vocabulary with the
+    read-back paths)."""
+    if status_id is None:
+        return 'Unknown'
+    return _IN_STATUS_LABELS.get(int(status_id), f'Unknown ({status_id})')
+
+
 # Slice 5d — MB-initiated charge against a client's card on file. MB never
 # touches a card or money: this triggers IN's own auto-bill action against an
 # already-pushed invoice, IN charges the client's stored Square token, and MB

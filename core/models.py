@@ -1780,6 +1780,22 @@ class Contract(models.Model):
             return f"{y}-Q{(on_date.month - 1) // 3 + 1}"
         return f"{y}"
 
+    def period_bounds(self, on_date):
+        """First and last calendar day of the billing period on_date falls in,
+        per cadence — the date window an externally generated invoice must land
+        in to belong to this period (Pull from IN)."""
+        import calendar
+        from datetime import date
+        y = on_date.year
+        if self.billing_cadence == 'monthly':
+            m = on_date.month
+            return date(y, m, 1), date(y, m, calendar.monthrange(y, m)[1])
+        if self.billing_cadence == 'quarterly':
+            q_start = ((on_date.month - 1) // 3) * 3 + 1
+            q_end = q_start + 2
+            return date(y, q_start, 1), date(y, q_end, calendar.monthrange(y, q_end)[1])
+        return date(y, 1, 1), date(y, 12, 31)  # annual
+
     def is_billing_due(self, as_of=None):
         """True once this contract is due in as_of's period: the month must be a
         billing month for the cadence AND the billing_day must have arrived

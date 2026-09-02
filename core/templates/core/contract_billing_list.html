@@ -15,6 +15,7 @@
                     <form method="post" action="{% url 'core:contract_billing_prepare_all' %}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-primary" {% if not due_unprepared_count %}disabled{% endif %}>Prepare all due{% if due_unprepared_count %} ({{ due_unprepared_count }}){% endif %}</button></form>
                     {% if invoice_ninja_enabled %}
                     <a href="{% url 'core:contract_billing_send_drafts' %}" class="btn btn-success {% if not prepared_unsent_count %}disabled{% endif %}">Send prepared drafts to Invoice Ninja{% if prepared_unsent_count %} ({{ prepared_unsent_count }}){% endif %}</a>
+                    <a href="{% url 'core:contract_billing_pull_in' %}" class="btn">Pull from IN</a>
                     {% else %}
                     <span class="text-secondary small">Enable Invoice Ninja in Settings to send drafts.</span>
                     {% endif %}

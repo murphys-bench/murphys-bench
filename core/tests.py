@@ -8893,6 +8893,136 @@ def test_contract_billing_list_renders(client, client_obj, admin_user):
     assert b'Contract Billing' in r.content
 
 
+# ── Pull from IN (Sep 2026) ──────────────────────────────────────────────
+# The manual step after a billing cycle: mirror invoices IN's own recurring
+# engine generated into MB, so the worklist reflects them instead of preparing
+# a duplicate. Read-only toward IN; the operator confirms every match; a posted
+# invoice id the server did not itself verify as a candidate is never linked.
+# All tests run against a mocked IN — no live calls.
+
+def _pull_in_setup(client_obj, monkeypatch, invoices):
+    """Enable IN, link the MB client to an IN client, and serve `invoices` from
+    the mocked list read."""
+    from core import invoice_ninja
+    from core.models import SiteSettings
+    s = SiteSettings.get()
+    s.invoice_ninja_enabled = True
+    s.save()
+    client_obj.invoice_ninja_id = 'inclient-1'
+    client_obj.save(update_fields=['invoice_ninja_id'])
+
+    def fake_request(method, path, *, params=None, json=None):
+        assert method == 'GET' and path == '/invoices'
+        return {'data': invoices}
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+
+
+def _in_invoice(inv_id, number, date_str, amount, status_id=2, line_items=None):
+    return {'id': inv_id, 'number': number, 'date': date_str, 'amount': amount,
+            'status_id': status_id, 'is_deleted': False,
+            'line_items': line_items if line_items is not None else []}
+
+
+@pytest.mark.django_db
+def test_pull_in_lists_only_this_periods_unlinked_invoices(client, client_obj, admin_user, monkeypatch):
+    from django.utils import timezone
+    from core.models import Sale
+    today = timezone.localdate()
+    in_period = today.replace(day=15).isoformat()
+    Contract.objects.create(client=client_obj, title='IN-billed', status='active',
+                            billing_cadence='monthly', billing_day=1)
+    # An old invoice already mirrored in MB must not be offered again.
+    Sale.objects.create(client=client_obj, invoice_ninja_id='inv-linked')
+    _pull_in_setup(client_obj, monkeypatch, [
+        _in_invoice('inv-new', '2001', in_period, 25),
+        _in_invoice('inv-old', '1901', '2020-01-15', 25),
+        _in_invoice('inv-linked', '1999', in_period, 25),
+    ])
+    client.force_login(admin_user)
+    r = client.get(reverse('core:contract_billing_pull_in'))
+    assert r.status_code == 200
+    row = r.context['rows'][0]
+    assert [c['id'] for c in row['candidates']] == ['inv-new']
+
+
+@pytest.mark.django_db
+def test_pull_in_post_creates_linked_mirror_sale(client, client_obj, admin_user, monkeypatch):
+    from django.utils import timezone
+    from core.models import Sale
+    from core.views import _monthly_row_state
+    today = timezone.localdate()
+    contract = Contract.objects.create(client=client_obj, title='IN-billed', status='active',
+                                       billing_cadence='monthly', billing_day=1)
+    _pull_in_setup(client_obj, monkeypatch, [
+        _in_invoice('inv-9', '2009', today.isoformat(), 25, status_id=4,
+                    line_items=[{'product_key': 'Residential Essential', 'notes': '', 'quantity': 1, 'cost': 25}]),
+    ])
+    client.force_login(admin_user)
+    r = client.post(reverse('core:contract_billing_pull_in'), {f'contract_{contract.pk}': 'inv-9'}, follow=True)
+    sale = Sale.objects.get(contract=contract)
+    assert sale.invoice_ninja_id == 'inv-9'
+    assert sale.invoice_ninja_ref == '2009'
+    assert sale.billing_period == contract.period_key(today)
+    assert sale.in_status == 'Paid'
+    assert _monthly_row_state(sale) == 'paid'
+    lines = list(sale.line_items.all())
+    assert len(lines) == 1 and lines[0].description == 'Residential Essential'
+    assert lines[0].line_total == 25
+    assert b'Pulled 1 invoice' in r.content
+
+
+@pytest.mark.django_db
+def test_pull_in_post_refuses_unverified_invoice_id(client, client_obj, admin_user, monkeypatch):
+    """A posted invoice id the server did not itself list as a candidate (out of
+    period here, but the same guard covers any forged id) is never linked."""
+    from core.models import Sale
+    contract = Contract.objects.create(client=client_obj, title='IN-billed', status='active',
+                                       billing_cadence='monthly', billing_day=1)
+    _pull_in_setup(client_obj, monkeypatch, [
+        _in_invoice('inv-out', '1900', '2020-01-15', 25),
+    ])
+    client.force_login(admin_user)
+    client.post(reverse('core:contract_billing_pull_in'), {f'contract_{contract.pk}': 'inv-out'})
+    assert Sale.objects.filter(contract=contract).count() == 0
+
+
+@pytest.mark.django_db
+def test_pull_in_skips_contract_that_already_has_a_period_record(client, client_obj, admin_user, monkeypatch):
+    from core.views import _prepare_contract_sale
+    contract = Contract.objects.create(client=client_obj, title='IN-billed', status='active',
+                                       billing_cadence='monthly', billing_day=1)
+    contract.line_items.create(kind='labor', description='X', quantity=1, unit_price=25)
+    _prepare_contract_sale(contract, admin_user)
+    _pull_in_setup(client_obj, monkeypatch, [])
+    client.force_login(admin_user)
+    r = client.get(reverse('core:contract_billing_pull_in'))
+    assert all(row['contract'].pk != contract.pk for row in r.context['rows'])
+
+
+@pytest.mark.django_db
+def test_pull_in_unlinked_client_makes_no_api_call(client, client_obj, admin_user, monkeypatch):
+    from core import invoice_ninja
+    from core.models import SiteSettings
+    s = SiteSettings.get()
+    s.invoice_ninja_enabled = True
+    s.save()
+    Contract.objects.create(client=client_obj, title='IN-billed', status='active',
+                            billing_cadence='monthly', billing_day=1)
+    monkeypatch.setattr(invoice_ninja, '_request',
+                        lambda *a, **k: pytest.fail('should not call the IN API for an unlinked client'))
+    client.force_login(admin_user)
+    r = client.get(reverse('core:contract_billing_pull_in'))
+    assert r.status_code == 200
+    assert r.context['rows'][0]['in_linked'] is False
+
+
+@pytest.mark.django_db
+def test_pull_in_requires_invoice_ninja_enabled(client, client_obj, admin_user):
+    client.force_login(admin_user)
+    r = client.get(reverse('core:contract_billing_pull_in'), follow=True)
+    assert b'not enabled' in r.content
+
+
 # ── Device/Asset merge (Aug 15 2026) ────────────────────────────────────
 # Promotion is gone: one machine = one Device record, coverage is a contract
 # link on the device. The merge migration itself (0107) is drilled against a

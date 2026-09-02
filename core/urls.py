@@ -36,6 +36,7 @@ urlpatterns = [
     path('contracts/<int:pk>/prepare/', views.ContractBillingPrepareView.as_view(), name='contract_billing_prepare'),
     path('contract-billing/prepare-all/', views.ContractBatchPrepareView.as_view(), name='contract_billing_prepare_all'),
     path('contract-billing/send-drafts/', views.ContractBatchSendView.as_view(), name='contract_billing_send_drafts'),
+    path('contract-billing/pull-from-in/', views.ContractPullINView.as_view(), name='contract_billing_pull_in'),
     path('mileage/', views.MileageListView.as_view(), name='mileage_list'),
     path('mileage/new/', views.MileageCreateView.as_view(), name='mileage_create'),
     path('mileage/<int:pk>/edit/', views.MileageUpdateView.as_view(), name='mileage_edit'),

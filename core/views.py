@@ -3673,6 +3673,151 @@ class ContractBatchSendView(SaleAccessMixin, View):
         return redirect('core:contract_billing_list')
 
 
+class ContractPullINView(SaleAccessMixin, View):
+    """Pull from IN — the manual step after a billing cycle that mirrors invoices
+    Invoice Ninja generated on its own (its recurring engine) into MB, so the
+    billing worklist reflects them instead of preparing a duplicate. Read-only
+    toward IN: nothing is sent, charged, or changed there. GET lists each
+    contract still missing this period's record with the candidate IN invoices
+    dated inside the period; the operator confirms each match (MB never guesses
+    silently — a wrong money link is the Larm's defect). POST creates the linked
+    mirror Sale with IN's own line items, and only for invoices the server
+    re-verified as candidates."""
+
+    def _candidate_rows(self, today):
+        """Contracts missing this period's record, each with its verified
+        candidate IN invoices. One IN read per distinct client."""
+        from . import invoice_ninja
+        linked_ids = set(
+            Sale.objects.exclude(invoice_ninja_id='').values_list('invoice_ninja_id', flat=True)
+        )
+        invoices_by_client = {}
+        rows = []
+        for contract in Contract.objects.filter(
+            status='active', client__is_active=True,
+        ).select_related('client').order_by('client__name', 'contract_number'):
+            if not contract.is_billing_month(today):
+                continue
+            if _contract_sale_for_period(contract, today) is not None:
+                continue
+            in_client_id = (contract.client.invoice_ninja_id or '').strip()
+            row = {'contract': contract, 'client': contract.client,
+                   'in_linked': bool(in_client_id), 'candidates': [], 'error': ''}
+            if in_client_id:
+                if in_client_id not in invoices_by_client:
+                    try:
+                        invoices_by_client[in_client_id] = invoice_ninja.list_client_invoices(in_client_id)
+                    except invoice_ninja.InvoiceNinjaError as e:
+                        invoices_by_client[in_client_id] = e
+                fetched = invoices_by_client[in_client_id]
+                if isinstance(fetched, invoice_ninja.InvoiceNinjaError):
+                    row['error'] = str(fetched)
+                else:
+                    start, end = contract.period_bounds(today)
+                    for inv in fetched:
+                        inv_id = str(inv.get('id') or '')
+                        inv_date = _parse_in_date(inv.get('date'))
+                        if not inv_id or inv_id in linked_ids or inv_date is None:
+                            continue
+                        if not (start <= inv_date <= end):
+                            continue
+                        row['candidates'].append({
+                            'id': inv_id,
+                            'number': str(inv.get('number') or ''),
+                            'date': inv_date,
+                            'amount': inv.get('amount'),
+                            'status': invoice_ninja.status_label(inv.get('status_id')),
+                            'line_items': inv.get('line_items') or [],
+                        })
+            rows.append(row)
+        return rows
+
+    def get(self, request):
+        if not SiteSettings.get().invoice_ninja_enabled:
+            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
+            return redirect('core:contract_billing_list')
+        today = timezone.localdate()
+        rows = self._candidate_rows(today)
+        return render(request, 'core/contract_pull_in.html', {'rows': rows, 'today': today})
+
+    def post(self, request):
+        from decimal import Decimal, InvalidOperation
+        from django.db import IntegrityError, transaction
+        from django.utils import timezone as tz
+        if not SiteSettings.get().invoice_ninja_enabled:
+            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
+            return redirect('core:contract_billing_list')
+        today = timezone.localdate()
+        pulled, skipped_race = 0, 0
+        for row in self._candidate_rows(today):
+            contract = row['contract']
+            choice = (request.POST.get(f'contract_{contract.pk}') or 'skip').strip()
+            if choice in ('', 'skip'):
+                continue
+            # Only an invoice the server itself just verified as a candidate for
+            # THIS contract's period may be linked — a posted id is never trusted.
+            match = next((c for c in row['candidates'] if c['id'] == choice), None)
+            if match is None:
+                messages.warning(
+                    request,
+                    f'{contract.contract_number}: the selected invoice is no longer '
+                    'a valid match for this period — nothing was linked for it.',
+                )
+                continue
+            try:
+                with transaction.atomic():
+                    sale = Sale.objects.create(
+                        client=contract.client, is_recurring=True, contract=contract,
+                        billing_period=contract.period_key(today), created_by=request.user,
+                        invoice_ninja_id=match['id'], invoice_ninja_ref=match['number'],
+                        in_status=match['status'], in_status_checked_at=tz.now(),
+                    )
+                    for li in match['line_items']:
+                        try:
+                            qty = Decimal(str(li.get('quantity') or '1'))
+                            price = Decimal(str(li.get('cost') or '0'))
+                        except InvalidOperation:
+                            qty, price = Decimal('1'), Decimal('0')
+                        LineItem.objects.create(
+                            content_object=sale, kind='labor',
+                            description=(li.get('product_key') or li.get('notes') or 'Invoice line'),
+                            quantity=qty, unit_price=price,
+                            notes=(li.get('notes') or '') if li.get('product_key') else '',
+                            logged_by=request.user,
+                        )
+                    if not match['line_items']:
+                        # IN returned no lines — one summary line keeps MB's total honest.
+                        LineItem.objects.create(
+                            content_object=sale, kind='labor',
+                            description=f'Invoice {match["number"]}'.strip(),
+                            quantity=Decimal('1'),
+                            unit_price=Decimal(str(match['amount'] or '0')),
+                            logged_by=request.user,
+                        )
+                pulled += 1
+            except IntegrityError:
+                # A concurrent prepare/pull created this period's record first.
+                skipped_race += 1
+        if pulled:
+            messages.success(request, f'Pulled {pulled} invoice{"s" if pulled != 1 else ""} in from Invoice Ninja.')
+        if skipped_race:
+            messages.warning(request, f'{skipped_race} contract{"s" if skipped_race != 1 else ""} already had a record for this period.')
+        if not pulled and not skipped_race:
+            messages.info(request, 'Nothing was pulled in.')
+        return redirect('core:contract_billing_list')
+
+
+def _parse_in_date(value):
+    """IN invoice dates arrive as 'YYYY-MM-DD'; anything else is treated as
+    unusable rather than guessed at."""
+    from datetime import date
+    try:
+        y, m, d = str(value or '').split('-')
+        return date(int(y), int(m), int(d))
+    except (ValueError, TypeError):
+        return None
+
+
 # --- Ticket Views ---
 
 TICKET_CLOSED_STATUSES = ['resolved', 'closed']
