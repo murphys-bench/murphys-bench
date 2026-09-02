@@ -303,13 +303,13 @@ def test_reset_keeps_attachment_files_when_the_transaction_rolls_back(client_obj
     assert storage.exists(name)
 
     # Fail late: let the real plan run, then blow up before the commit.
+    # deletion_plan yields (label, queryset); the command calls .delete().
     real_plan = operational_data.deletion_plan
 
     class Exploding:
-        class objects:
-            @staticmethod
-            def all():
-                raise RuntimeError('disk full partway through the wipe')
+        @staticmethod
+        def delete():
+            raise RuntimeError('disk full partway through the wipe')
 
     def failing_plan():
         return list(real_plan()) + [('Exploding', Exploding)]
@@ -3537,11 +3537,12 @@ pdf_skip = pytest.mark.skipif(not _weasyprint_ok(),
 
 
 def _enable_email():
-    from core.models import SiteSettings
+    from core.models import SiteSettings, SendingAddress
     site = SiteSettings.get()
     site.email_enabled = True
-    site.email_from = 'support@example.com'
     site.save()
+    SendingAddress.objects.get_or_create(email='support@example.com',
+                                         defaults={'is_default': True})
     return site
 
 
@@ -3564,7 +3565,7 @@ def test_send_document_email_sends_and_logs(monkeypatch, client_obj):
 
     log = send_document_email(
         'wayne@davis.example', subject='Your Report',
-        cover_body='Here is your report.',
+        cover_body='Here is your report.', kind='reports',
         attachments=[('Repair-Report-WO-1.pdf', b'%PDF-fake', 'application/pdf')],
         client=client_obj, trigger='wo_report',
     )
@@ -3586,7 +3587,7 @@ def test_send_document_email_honors_client_suppression(client_obj):
     client_obj.save()
 
     log = send_document_email(
-        'x@example.com', subject='S', cover_body='B',
+        'x@example.com', subject='S', cover_body='B', kind='reports',
         attachments=[('a.pdf', b'%PDF', 'application/pdf')],
         client=client_obj, trigger='wo_report',
     )
@@ -3599,7 +3600,7 @@ def test_send_document_email_no_address_is_logged(client_obj):
     from core.email_utils import send_document_email
     _enable_email()
     log = send_document_email(
-        '', subject='S', cover_body='B', client=client_obj, trigger='wo_report',
+        '', subject='S', cover_body='B', kind='reports', client=client_obj, trigger='wo_report',
     )
     assert log.status == 'suppressed'
     assert log.reason == 'no_address'
@@ -3613,7 +3614,7 @@ def test_send_document_email_respects_contact_optout(client_obj):
     c = Contact.objects.create(client=client_obj, first_name='No', last_name='Mail',
                                email='no@example.com', receives_email=False)
     log = send_document_email(
-        'no@example.com', subject='S', cover_body='B',
+        'no@example.com', subject='S', cover_body='B', kind='reports',
         attachments=[('a.pdf', b'%PDF', 'application/pdf')],
         client=client_obj, contact=c, trigger='wo_report',
     )
@@ -4134,11 +4135,13 @@ def test_estimate_custom_log_creates_line_item_on_estimate(client, admin_user, c
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
-def test_quote_email_uses_sales_from_when_set(client_obj):
+def test_quote_email_uses_quotes_sending_address_when_set(client_obj):
     from django.core.mail import EmailMultiAlternatives
     from core.email_utils import send_document_email
+    from core.models import SendingAddress
     site = _enable_email()
-    site.email_sales_from = 'sales@example.com'
+    sales = SendingAddress.objects.create(display_name='Shamrock Sales', email='sales@example.com')
+    site.from_quotes = sales
     site.save()
 
     captured = {}
@@ -4150,23 +4153,21 @@ def test_quote_email_uses_sales_from_when_set(client_obj):
     import unittest.mock
     with unittest.mock.patch.object(EmailMultiAlternatives, 'send', fake_send):
         log = send_document_email(
-            'x@example.com', subject='Quote', cover_body='B',
-            from_email=site.email_sales_from,
+            'x@example.com', subject='Quote', cover_body='B', kind='quotes',
             attachments=[('a.pdf', b'%PDF', 'application/pdf')],
             client=client_obj, trigger='estimate_quote',
         )
     assert log.status == 'sent'
-    assert captured['from'] == 'sales@example.com'
+    assert captured['from'] == 'Shamrock Sales <sales@example.com>'
 
 
 @pytest.mark.django_db
-def test_quote_email_falls_back_to_support_from_when_sales_blank(client_obj):
+def test_quote_email_falls_back_to_default_sending_address(client_obj):
     from django.core.mail import EmailMultiAlternatives
     from core.email_utils import send_document_email
     site = _enable_email()
-    assert not site.email_sales_from
+    assert site.from_quotes is None
 
-    sales_from = site.email_sales_from or site.email_from or None
     captured = {}
 
     def fake_send(self, fail_silently=False):
@@ -4176,13 +4177,738 @@ def test_quote_email_falls_back_to_support_from_when_sales_blank(client_obj):
     import unittest.mock
     with unittest.mock.patch.object(EmailMultiAlternatives, 'send', fake_send):
         log = send_document_email(
-            'x@example.com', subject='Quote', cover_body='B',
-            from_email=sales_from,
+            'x@example.com', subject='Quote', cover_body='B', kind='quotes',
             attachments=[('a.pdf', b'%PDF', 'application/pdf')],
             client=client_obj, trigger='estimate_quote',
         )
     assert log.status == 'sent'
-    assert captured['from'] == site.email_from
+    assert captured['from'] == 'support@example.com'
+
+
+# ---------------------------------------------------------------------------
+# Sending addresses (mig 0117) — per-kind From resolution
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_sending_address_kind_resolution_uses_pick_else_default():
+    from core.email_utils import sending_address_for, EMAIL_KINDS
+    from core.models import SiteSettings, SendingAddress
+    site = SiteSettings.get()
+    default = SendingAddress.objects.create(email='support@example.com', is_default=True)
+    sales = SendingAddress.objects.create(email='sales@example.com')
+    site.from_quotes = sales
+    site.save()
+    site = SiteSettings.get()
+    assert sending_address_for(site, 'quotes') == sales
+    for kind in EMAIL_KINDS:
+        if kind != 'quotes':
+            assert sending_address_for(site, kind) == default, kind
+    with pytest.raises(ValueError):
+        sending_address_for(site, 'no_such_kind')
+
+
+@pytest.mark.django_db
+def test_first_sending_address_becomes_default_and_single_default_holds():
+    from core.models import SendingAddress
+    a = SendingAddress.objects.create(email='a@example.com')
+    a.refresh_from_db()
+    assert a.is_default, 'the first row ever created must become the default'
+    b = SendingAddress.objects.create(email='b@example.com', is_default=True)
+    a.refresh_from_db()
+    assert b.is_default and not a.is_default
+
+
+@pytest.mark.django_db
+def test_sending_address_own_login_overrides_connection_field_by_field():
+    from core.email_utils import _connection_and_from
+    from core.models import SiteSettings, SendingAddress
+    site = SiteSettings.get()
+    site.email_host = 'mail.main.example'
+    site.email_port = 587
+    site.email_username = 'mainuser'
+    site.email_password = 'mainpass'
+    site.save()
+    sender = SendingAddress.objects.create(
+        display_name='Sales', email='sales@example.com',
+        smtp_host='mail.other.example', smtp_username='salesuser', smtp_password='salespass')
+    conn, from_email = _connection_and_from(SiteSettings.get(), sender)
+    assert from_email == 'Sales <sales@example.com>'
+    assert conn.host == 'mail.other.example'
+    assert conn.username == 'salesuser'
+    assert conn.password == 'salespass'
+    assert conn.port == 587, 'blank port must ride the main server setting'
+    # And a row with no login of its own rides the main server entirely.
+    plain = SendingAddress.objects.create(email='billing@example.com')
+    conn2, from2 = _connection_and_from(SiteSettings.get(), plain)
+    assert (conn2.host, conn2.username, conn2.password) == ('mail.main.example', 'mainuser', 'mainpass')
+    assert from2 == 'billing@example.com'
+
+
+@pytest.mark.django_db
+def test_connection_from_falls_back_to_company_email_never_hardcoded():
+    from core.email_utils import _connection_and_from
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    site.company_email = 'shop@example.com'
+    site.save()
+    _, from_email = _connection_and_from(SiteSettings.get(), None)
+    assert from_email == 'shop@example.com'
+
+
+@pytest.mark.django_db
+def test_ticket_event_email_sends_as_ticket_events_pick(monkeypatch, client_obj):
+    from django.core.mail import EmailMultiAlternatives
+    from core.models import SendingAddress, EmailTemplate, Contact, Ticket
+    from core.email_utils import send_ticket_email
+    site = _enable_email()
+    desk = SendingAddress.objects.create(display_name='SCS Support', email='desk@example.com')
+    site.from_ticket_events = desk
+    site.save()
+    EmailTemplate.objects.update_or_create(
+        trigger='ticket_created',
+        defaults={'subject_template': 'Hi', 'body_template': 'Body', 'is_active': True})
+    contact = Contact.objects.create(client=client_obj, first_name='Wayne', last_name='D',
+                                     email='wayne@example.com', is_primary=True)
+    ticket = Ticket.objects.create(client=client_obj, contact=contact, subject='S', description='D')
+
+    captured = {}
+
+    def fake_send(self, fail_silently=False):
+        captured['from'] = self.from_email
+        return 1
+
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', fake_send)
+    send_ticket_email('ticket_created', ticket)
+    assert captured['from'] == 'SCS Support <desk@example.com>'
+
+
+@pytest.mark.django_db
+def test_sending_address_delete_guard_and_make_default(client, admin_user):
+    from core.models import SendingAddress
+    client.force_login(admin_user)
+    a = SendingAddress.objects.create(email='a@example.com', is_default=True)
+    b = SendingAddress.objects.create(email='b@example.com')
+    # The default cannot be deleted while another row exists.
+    client.post(f'/settings/sending-addresses/{a.pk}/delete/')
+    assert SendingAddress.objects.filter(pk=a.pk).exists()
+    # Make b the default, then a deletes fine.
+    client.post(f'/settings/sending-addresses/{b.pk}/make-default/')
+    b.refresh_from_db()
+    assert b.is_default
+    client.post(f'/settings/sending-addresses/{a.pk}/delete/')
+    assert not SendingAddress.objects.filter(pk=a.pk).exists()
+
+
+@pytest.mark.django_db
+def test_sending_address_add_rejects_garbage_email(client, admin_user):
+    from core.models import SendingAddress
+    client.force_login(admin_user)
+    client.post('/settings/sending-addresses/add/', {'email': 'not-an-address'})
+    assert SendingAddress.objects.count() == 0
+
+
+# ---------------------------------------------------------------------------
+# HTML email bodies (mig 0118) — editor pipeline, escaping, buttons, plain twin
+# ---------------------------------------------------------------------------
+
+def _captured_send(monkeypatch):
+    """Patch EmailMultiAlternatives.send and hand back the capture dict:
+    'html' = the text/html alternative, 'plain' = the body, 'from' = From."""
+    from django.core.mail import EmailMultiAlternatives
+    captured = {}
+
+    def fake_send(self, fail_silently=False):
+        captured['plain'] = self.body
+        captured['html'] = next((c for c, m in self.alternatives if m == 'text/html'), '')
+        captured['from'] = self.from_email
+        return 1
+
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', fake_send)
+    return captured
+
+
+@pytest.mark.django_db
+def test_variable_content_is_escaped_never_markup(monkeypatch, client_obj):
+    """THE injection guard: customer text pulled in by a variable renders as
+    words. A reply carrying <script> or <a href> must arrive inert."""
+    from types import SimpleNamespace
+    from core.models import EmailTemplate, Contact, Ticket
+    from core.email_utils import send_ticket_email
+    _enable_email()
+    EmailTemplate.objects.update_or_create(
+        trigger='reply_added',
+        defaults={'subject_template': 'Re: {{ ticket.ticket_number }}',
+                  'body_template': '<div>Hi {{ customer_name }},<br>{{ reply.content }}</div>',
+                  'body_format': 'html', 'is_active': True})
+    contact = Contact.objects.create(client=client_obj, first_name='Wayne', last_name='D',
+                                     email='wayne@example.com', is_primary=True)
+    ticket = Ticket.objects.create(client=client_obj, contact=contact, subject='S', description='D')
+    captured = _captured_send(monkeypatch)
+    evil = '<script>alert(1)</script> and <a href="https://evil.example/x">click</a>'
+    send_ticket_email('reply_added', ticket, extra_context={'reply': SimpleNamespace(content=evil)})
+    html = captured['html']
+    assert '<script' not in html
+    assert '&lt;script&gt;' in html, 'the customer text must survive as visible words'
+    assert '&lt;a href=' in html, "the customer's own tag must be visible text"
+    # The auto-linker may turn the URL TEXT into a link (deliberate, matching
+    # what mail apps do to bare URLs), but every anchor it makes must be the
+    # exact clean URL with MB's own styling — never the customer's tag, never
+    # an href polluted with escaped-markup fragments.
+    import re as _re
+    for anchor in _re.findall(r'<a [^>]*>', html):
+        if 'evil.example' in anchor:
+            assert anchor == '<a href="https://evil.example/x" style="color:#1d6fd8;">', anchor
+
+
+@pytest.mark.django_db
+def test_multiline_variable_content_keeps_line_breaks(monkeypatch, client_obj):
+    from types import SimpleNamespace
+    from core.models import EmailTemplate, Contact, Ticket
+    from core.email_utils import send_ticket_email
+    _enable_email()
+    EmailTemplate.objects.update_or_create(
+        trigger='reply_added',
+        defaults={'subject_template': 'Re', 'body_template': '<div>{{ reply.content }}</div>',
+                  'body_format': 'html', 'is_active': True})
+    contact = Contact.objects.create(client=client_obj, first_name='W', last_name='D',
+                                     email='w@example.com', is_primary=True)
+    ticket = Ticket.objects.create(client=client_obj, contact=contact, subject='S', description='D')
+    captured = _captured_send(monkeypatch)
+    send_ticket_email('reply_added', ticket,
+                      extra_context={'reply': SimpleNamespace(content='line one\nline two')})
+    assert 'line one<br>line two' in captured['html']
+    assert 'line one\nline two' in captured['plain']
+
+
+@pytest.mark.django_db
+def test_link_and_button_render_in_html_and_plain_twin(monkeypatch, client_obj):
+    from core.models import EmailTemplate
+    from core.email_utils import send_custom_email
+    site = _enable_email()
+    site.email_header_color = '#407742'
+    site.save()
+    tmpl = EmailTemplate.objects.create(
+        name='Thank You', is_active=True,
+        subject_template='Thanks',
+        body_template=('<div>If you were happy, '
+                       '<a href="https://g.page/r/x/review"><mb-button>Leave a review</mb-button></a>'
+                       ' or read our <a href="https://example.com/faq">FAQ</a>.</div>'))
+    captured = _captured_send(monkeypatch)
+    log = send_custom_email(tmpl, to_email='x@example.com', client=client_obj)
+    assert log.status == 'sent'
+    html = captured['html']
+    assert 'background-color:#407742' in html, 'button takes the email branding color'
+    assert '<mb-button>' not in html, 'the marker never reaches the recipient'
+    assert '<a href="https://g.page/r/x/review"' in html
+    assert '<a href="https://example.com/faq" style=' in html, 'plain links get a visible style'
+    assert 'Leave a review: https://g.page/r/x/review' in captured['plain']
+    assert 'FAQ: https://example.com/faq' in captured['plain']
+
+
+@pytest.mark.django_db
+def test_bare_url_in_body_autolinks(monkeypatch, client_obj):
+    from core.models import EmailTemplate
+    from core.email_utils import send_custom_email
+    _enable_email()
+    tmpl = EmailTemplate.objects.create(
+        name='Note', is_active=True, subject_template='S',
+        body_template='<div>See https://example.com/help for details.</div>')
+    captured = _captured_send(monkeypatch)
+    send_custom_email(tmpl, to_email='x@example.com', client=client_obj)
+    assert '<a href="https://example.com/help"' in captured['html']
+
+
+@pytest.mark.django_db
+def test_template_save_sanitizes_body(client, admin_user):
+    from core.models import EmailTemplate
+    client.force_login(admin_user)
+    tmpl = EmailTemplate.objects.create(name='T', subject_template='S',
+                                        body_template='<div>ok</div>')
+    client.post(f'/settings/email-templates/{tmpl.pk}/edit/', {
+        'name': 'T', 'subject_template': 'S', 'is_active': '1',
+        'body_template': '<div onclick="x()">hi</div><script>alert(1)</script>'
+                         '<a href="javascript:alert(1)">j</a>',
+    })
+    tmpl.refresh_from_db()
+    assert '<script' not in tmpl.body_template
+    assert 'onclick' not in tmpl.body_template
+    assert 'javascript:' not in tmpl.body_template
+    assert 'hi' in tmpl.body_template
+
+
+@pytest.mark.django_db
+def test_text_to_html_preserves_tokens_and_breaks():
+    from core.email_html import text_to_html
+    src = 'Hi {{ customer_name }},\n\nDone on {{ ticket.created_at|date:"M j" }} & thanks.\n{% if x %}Y{% endif %}'
+    out = text_to_html(src)
+    assert '{{ ticket.created_at|date:"M j" }}' in out, 'filter quotes must survive conversion'
+    assert '{% if x %}' in out
+    assert '<br><br>' in out
+    assert '&amp; thanks' in out
+
+
+@pytest.mark.django_db
+def test_migration_conversion_renders_same_visible_text(client_obj):
+    """A representative pre-0118 plain body, converted by the migration's
+    frozen converter, renders the same words the old pipeline showed."""
+    import importlib
+    from types import SimpleNamespace
+    from core.email_html import render_body, to_plain
+    mig = importlib.import_module('core.migrations.0118_email_html_bodies')
+    legacy = ('Hi {{ customer_name }},\n\nThe status of your ticket '
+              '{{ ticket.ticket_number }} has been updated to: {{ status }}\n\nThanks,\n{{ site_name }}')
+    converted = mig._text_to_html(legacy)
+    ctx = {'customer_name': 'Wayne', 'status': 'In Progress', 'site_name': 'Shamrock',
+           'ticket': SimpleNamespace(ticket_number='TKT-00042')}
+    plain = to_plain(render_body(converted, ctx))
+    assert 'Hi Wayne,' in plain
+    assert 'TKT-00042 has been updated to: In Progress' in plain
+    assert 'Thanks,\nShamrock' in plain
+
+
+@pytest.mark.django_db
+def test_settings_email_templates_tab_carries_the_editor(client, admin_user):
+    client.force_login(admin_user)
+    resp = client.get('/settings/?tab=email_templates')
+    body = resp.content.decode()
+    assert 'trix-editor' in body
+    assert 'vendor/trix/2.1.19/trix.umd.min.js' in body
+
+
+@pytest.mark.django_db
+def test_template_test_send_goes_to_own_address_only(monkeypatch, client, admin_user):
+    from core.models import EmailTemplate, EmailSendLog
+    _enable_email()
+    admin_user.email = 'mike@example.com'
+    admin_user.save()
+    client.force_login(admin_user)
+    tmpl = EmailTemplate.objects.create(name='T', subject_template='Hello {{ customer_name }}',
+                                        body_template='<div>Hi {{ customer_name }}</div>')
+    captured = {}
+
+    def fake_send(self, fail_silently=False):
+        captured['to'] = list(self.to)
+        return 1
+
+    from django.core.mail import EmailMultiAlternatives
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', fake_send)
+    # A recipient in the POST body must be ignored — fixed destination.
+    client.post(f'/settings/email-templates/{tmpl.pk}/test-send/', {'to': 'other@example.com'})
+    assert captured['to'] == ['mike@example.com']
+    assert EmailSendLog.objects.filter(trigger='test:template', status='sent',
+                                       to_email='mike@example.com').exists()
+
+
+@pytest.mark.django_db
+def test_compose_post_body_is_sanitized_before_send(monkeypatch, client, admin_user, client_obj):
+    from core.models import EmailTemplate, Contact
+    _enable_email()
+    client.force_login(admin_user)
+    tmpl = EmailTemplate.objects.create(name='T', subject_template='S', body_template='<div>x</div>')
+    Contact.objects.create(client=client_obj, first_name='W', last_name='D',
+                           email='w@example.com', is_primary=True)
+    captured = _captured_send(monkeypatch)
+    resp = client.post('/email/customer/', {
+        'client': client_obj.pk, 'template': tmpl.pk,
+        'custom_email': 'w@example.com', 'subject': 'Hi',
+        'body': '<div>Fine text</div><script>alert(1)</script>',
+    })
+    assert resp.status_code == 302
+    assert '<script>' not in captured['html']
+    assert 'Fine text' in captured['html']
+
+
+# ---------------------------------------------------------------------------
+# Review round 1 regressions (outside review, Aug 26 2026)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_safe_filter_and_autoescape_off_cannot_bypass_escaping(monkeypatch, client_obj):
+    """R1 finding 1: an author (or compromised settings account) writing
+    {{ reply.content|safe }} or {% autoescape off %} must not turn customer
+    text into live markup. Dangerous tokens are neutralized to visible
+    literal text; ordinary variables still render escaped."""
+    from types import SimpleNamespace
+    from core.models import EmailTemplate, Contact, Ticket
+    from core.email_utils import send_ticket_email
+    _enable_email()
+    EmailTemplate.objects.update_or_create(
+        trigger='reply_added',
+        defaults={'subject_template': 'Re',
+                  'body_template': ('<div>{{ reply.content|safe }}<br>'
+                                    '{% autoescape off %}{{ reply.content }}{% endautoescape %}<br>'
+                                    '{% debug %}</div>'),
+                  'body_format': 'html', 'is_active': True})
+    contact = Contact.objects.create(client=client_obj, first_name='W', last_name='D',
+                                     email='w@example.com', is_primary=True)
+    ticket = Ticket.objects.create(client=client_obj, contact=contact, subject='S', description='D')
+    captured = _captured_send(monkeypatch)
+    send_ticket_email('reply_added', ticket,
+                      extra_context={'reply': SimpleNamespace(content='<img src=x onerror=alert(1)>')})
+    html = captured['html']
+    assert '<img' not in html, 'no live tag may come out of any of the three bypasses'
+    # The escaped-variable path (inside the neutralized autoescape block, the
+    # plain {{ reply.content }} still renders, escaped) — the customer's text
+    # is visible words, onerror included, but only as text.
+    assert '&lt;img src=x onerror=alert(1)&gt;' in html
+    # The dangerous tokens themselves show as literal text, so the author can
+    # see they did not take effect.
+    assert 'reply.content|safe' in html
+    assert 'debug' in html
+
+
+@pytest.mark.django_db
+def test_filter_allowlist_blocks_safeseq_and_every_html_producing_filter():
+    """R2 finding: |safe was a blacklist of one; |safeseq|join:"" rebuilt live
+    markup from escaped-per-item pieces, and a |safeseq inside an allowed
+    {% for %} does the same character by character. Variable filters are now a
+    positive allowlist of text-only built-ins, and block tags may carry no
+    filters at all; ordinary filters keep working."""
+    from types import SimpleNamespace
+    from datetime import datetime
+    from core.email_html import render_body
+    evil = '<img src=x onerror=alert(1)>'
+    ctx = {'reply': SimpleNamespace(content=evil),
+           'ticket': SimpleNamespace(created_at=datetime(2026, 8, 26))}
+    body = ('<div>{{ reply.content|safeseq|join:"" }}<br>'
+            '{% for c in reply.content|safeseq %}{{ c }}{% endfor %}<br>'
+            '{{ reply.content|json_script:"x" }}<br>'
+            'Kept: {{ reply.content|upper }} on {{ ticket.created_at|date:"M j" }}</div>')
+    html = render_body(body, ctx)
+    assert '<img' not in html
+    assert '<script' not in html
+    # The allowed filters still work: escaped-uppercased customer text and a
+    # formatted date prove the allowlist is not a blanket ban.
+    assert '&lt;IMG SRC=X ONERROR=ALERT(1)&gt;' in html
+    assert 'on Aug 26' in html
+    # The refused tokens are visible literal text, so the author sees them.
+    assert 'safeseq' in html
+
+
+@pytest.mark.django_db
+def test_literal_filter_arguments_cannot_smuggle_markup():
+    """R3 finding: Django marks LITERAL string arguments safe, so
+    {{ missing|default:"<img …>" }} and a join separator emitted raw markup
+    that bleach never saw (it ran before render, and the token was stashed
+    around it). Two layers close it: literal args carrying HTML
+    metacharacters refuse the token visibly, and a post-render bleach pass
+    guarantees nothing that only exists after rendering survives."""
+    from core.email_html import render_body
+    evil_arg = '<img src=x onerror=1>'
+    html = render_body(f'<div>{{{{ missing|default:"{evil_arg}" }}}}</div>', {})
+    assert '<img' not in html
+    # The refusal is visible to the author, not a silent drop (R4 note).
+    assert 'missing|default' in html
+    html = render_body(f'<div>{{{{ vals|join:"{evil_arg}" }}}}</div>', {'vals': ['a', 'b']})
+    assert '<img' not in html
+    # Ordinary literal arguments keep working — a bare ampersand included
+    # (R4 P3: "R&D" is real fallback copy; only < > and entity-shaped
+    # sequences are refused, the post-render clean being the boundary).
+    html = render_body('<div>{{ missing|default:"R&D" }} on {{ when|date:"M j" }}</div>',
+                       {'when': __import__('datetime').datetime(2026, 8, 26)})
+    assert 'R&amp;D' in html and 'on Aug 26' in html
+    # An entity-shaped argument is still refused — it could reconstruct
+    # markup through entity decoding.
+    html = render_body('<div>{{ missing|default:"&lt;b&gt;" }}</div>', {})
+    assert '<b>' not in html
+
+
+@pytest.mark.django_db
+def test_sales_only_state_never_becomes_the_global_default_sender():
+    """R1 finding 2: an install whose only address is the old sales one (the
+    email_from-blank, email_sales_from-set shape) must not start sending
+    ticket events and internal mail as sales. No default row means the
+    company-email fallback, and editing the sales row must not promote it."""
+    from core.models import SiteSettings, SendingAddress
+    from core.email_utils import sending_address_for, _connection_and_from
+    site = SiteSettings.get()
+    site.company_email = 'shop@example.com'
+    site.save()
+    # The migration seeds this shape with the historical model (no save()
+    # hooks), so build it the same way: one row, deliberately not default.
+    sales = SendingAddress.objects.create(display_name='', email='sales@example.com')
+    SendingAddress.objects.filter(pk=sales.pk).update(is_default=False)
+    sales.refresh_from_db()
+    site.from_quotes = sales
+    site.save()
+    site = SiteSettings.get()
+    assert sending_address_for(site, 'quotes') == sales
+    assert sending_address_for(site, 'ticket_events') is None, \
+        'no default row means no default, never "any row"'
+    _, from_email = _connection_and_from(site, sending_address_for(site, 'ticket_events'))
+    assert from_email == 'shop@example.com'
+    # An ordinary edit of the sales row must not quietly promote it either.
+    sales.display_name = 'Sales'
+    sales.save()
+    assert not SendingAddress.objects.get(pk=sales.pk).is_default
+
+
+@pytest.mark.django_db
+def test_document_email_renders_html_default_signature(monkeypatch, client_obj):
+    """R1 finding 3: quote/receipt/report cover emails must render an HTML
+    (post-0118) default signature as markup, not as visible tags."""
+    from django.core.mail import EmailMultiAlternatives
+    from core.models import EmailSignature
+    from core.email_utils import send_document_email
+    _enable_email()
+    EmailSignature.objects.create(name='Std', body='<div><strong>Mike</strong><br>Shamrock</div>',
+                                  body_format='html', is_default=True)
+    captured = {}
+
+    def fake_send(self, fail_silently=False):
+        captured['plain'] = self.body
+        captured['html'] = next((c for c, m in self.alternatives if m == 'text/html'), '')
+        return 1
+
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', fake_send)
+    log = send_document_email('x@example.com', subject='Quote', cover_body='Hello,\nyour quote.',
+                              kind='quotes', client=client_obj, trigger='estimate_quote')
+    assert log.status == 'sent'
+    assert '<strong>Mike</strong>' in captured['html']
+    assert '&lt;div&gt;' not in captured['html'], 'signature tags must not be visible text'
+    assert 'Mike\nShamrock' in captured['plain']
+    assert '<div>' not in captured['plain']
+
+
+@pytest.mark.django_db
+def test_template_delete_removes_standing_attachment_rows_and_files(client, admin_user):
+    """R1 finding 4: deleting a custom template must not orphan its standing
+    attachments (private files with no UI owner)."""
+    from django.contrib.contenttypes.models import ContentType
+    from core.models import EmailTemplate, Attachment
+    client.force_login(admin_user)
+    tmpl = EmailTemplate.objects.create(name='T', subject_template='S', body_template='<div>x</div>')
+    att = _attach_pdf_to_template(tmpl)
+    storage, name = att.file.storage, att.file.name
+    assert storage.exists(name)
+    client.post(f'/settings/email-templates/{tmpl.pk}/delete/')
+    assert not EmailTemplate.objects.filter(pk=tmpl.pk).exists()
+    ct = ContentType.objects.get_for_model(EmailTemplate)
+    assert not Attachment.objects.filter(content_type=ct, object_id=tmpl.pk).exists()
+    assert not storage.exists(name), 'the file must go with the row'
+
+
+@pytest.mark.django_db
+def test_reset_operational_data_keeps_template_standing_attachments(client_obj):
+    """Sibling of R1 finding 4: the reset wipes operational attachments but a
+    template's standing files are CONFIGURATION, like the template itself —
+    a cleared install must not end up with templates whose promised files
+    are gone."""
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from django.core.management import call_command
+    from django.contrib.contenttypes.models import ContentType
+    from core.models import EmailTemplate, Attachment, Ticket
+    tmpl = EmailTemplate.objects.create(name='T', subject_template='S', body_template='<div>x</div>')
+    keep = _attach_pdf_to_template(tmpl)
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    goner = Attachment.objects.create(
+        content_type=ContentType.objects.get_for_model(Ticket), object_id=ticket.pk,
+        file=SimpleUploadedFile('photo.jpg', b'fake'), original_filename='photo.jpg',
+        mime_type='image/jpeg', size_bytes=4)
+    keep_storage, keep_name = keep.file.storage, keep.file.name
+    call_command('reset_operational_data', confirm='DELETE ALL OPERATIONAL DATA')
+    assert Attachment.objects.filter(pk=keep.pk).exists(), 'template attachment row must survive'
+    assert keep_storage.exists(keep_name), 'template attachment file must survive'
+    assert not Attachment.objects.filter(pk=goner.pk).exists()
+
+
+@pytest.mark.django_db
+def test_compose_route_respects_ticket_visibility_scoping(client, client_obj):
+    """R1 inherited concern: the Email Customer resolver must apply the same
+    ticket/WO visibility scoping as every other route — a tech cannot render
+    or send a template against another tech's ticket."""
+    from core.models import User, Ticket, EmailTemplate
+    owner = User.objects.create_user(username='owner-tech', password='x')
+    outsider = User.objects.create_user(username='outsider-tech', password='x')
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D',
+                                   assigned_to=owner)
+    EmailTemplate.objects.create(name='T', subject_template='S', body_template='<div>x</div>')
+    client.force_login(outsider)
+    resp = client.get(f'/email/customer/?ticket={ticket.pk}')
+    assert resp.status_code == 404
+    client.force_login(owner)
+    resp = client.get(f'/email/customer/?ticket={ticket.pk}')
+    assert resp.status_code == 200
+
+
+@pytest.mark.django_db
+def test_own_smtp_host_never_gets_main_credentials():
+    """R1 risk: a sender with its own host must not carry the MAIN server's
+    login to that host, and the form refuses an own host without its own
+    credentials."""
+    from core.models import SiteSettings, SendingAddress
+    from core.email_utils import _connection_and_from
+    from core.forms import SendingAddressForm
+    site = SiteSettings.get()
+    site.email_host = 'mail.main.example'
+    site.email_username = 'mainuser'
+    site.email_password = 'mainpass'
+    site.save()
+    bare = SendingAddress.objects.create(email='s@example.com', smtp_host='mail.other.example')
+    conn, _ = _connection_and_from(SiteSettings.get(), bare)
+    assert conn.host == 'mail.other.example'
+    assert conn.username == '' and conn.password == '', \
+        'the main login must never travel to a different host'
+    form = SendingAddressForm({'email': 'x@example.com', 'smtp_host': 'mail.other.example'})
+    assert not form.is_valid()
+    assert 'own username' in str(form.errors)
+
+
+# ---------------------------------------------------------------------------
+# Email attachments — standing on a template, one-off from the compose page
+# ---------------------------------------------------------------------------
+
+def _attach_pdf_to_template(tmpl, name='terms.pdf'):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from django.contrib.contenttypes.models import ContentType
+    from core.models import Attachment
+    return Attachment.objects.create(
+        content_type=ContentType.objects.get_for_model(type(tmpl)), object_id=tmpl.pk,
+        file=SimpleUploadedFile(name, b'%PDF-fake'), original_filename=name,
+        mime_type='application/pdf', size_bytes=9)
+
+
+def _captured_msg(monkeypatch):
+    from django.core.mail import EmailMultiAlternatives
+    captured = {}
+
+    def fake_send(self, fail_silently=False):
+        captured['attachments'] = list(self.attachments)
+        captured['html'] = next((c for c, m in self.alternatives if m == 'text/html'), '')
+        return 1
+
+    monkeypatch.setattr(EmailMultiAlternatives, 'send', fake_send)
+    return captured
+
+
+@pytest.mark.django_db
+def test_standing_attachment_rides_custom_send_and_skips_inline_logo(monkeypatch, client_obj):
+    from core.models import EmailTemplate
+    from core.email_utils import send_custom_email
+    _enable_email()
+    tmpl = EmailTemplate.objects.create(name='Welcome', subject_template='S',
+                                        body_template='<div>Hi</div>', is_active=True)
+    _attach_pdf_to_template(tmpl)
+    captured = _captured_msg(monkeypatch)
+    log = send_custom_email(tmpl, to_email='x@example.com', client=client_obj)
+    assert log.status == 'sent'
+    assert any(a[0] == 'terms.pdf' for a in captured['attachments'])
+    assert 'cid:logo' not in captured['html'], \
+        'an inline CID logo cannot ride a message that carries attachments'
+
+
+@pytest.mark.django_db
+def test_standing_attachment_rides_event_send(monkeypatch, client_obj):
+    from core.models import EmailTemplate, Contact, Ticket
+    from core.email_utils import send_ticket_email
+    _enable_email()
+    tmpl, _ = EmailTemplate.objects.update_or_create(
+        trigger='ticket_created',
+        defaults={'subject_template': 'S', 'body_template': '<div>Hi</div>', 'is_active': True})
+    _attach_pdf_to_template(tmpl, 'intake.pdf')
+    contact = Contact.objects.create(client=client_obj, first_name='W', last_name='D',
+                                     email='w@example.com', is_primary=True)
+    ticket = Ticket.objects.create(client=client_obj, contact=contact, subject='S', description='D')
+    captured = _captured_msg(monkeypatch)
+    send_ticket_email('ticket_created', ticket)
+    assert any(a[0] == 'intake.pdf' for a in captured['attachments'])
+
+
+@pytest.mark.django_db
+def test_template_upload_refuses_blocked_extension(client, admin_user):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from django.contrib.contenttypes.models import ContentType
+    from core.models import EmailTemplate, Attachment
+    client.force_login(admin_user)
+    tmpl = EmailTemplate.objects.create(name='T', subject_template='S', body_template='<div>x</div>')
+    client.post(f'/settings/email-templates/{tmpl.pk}/edit/', {
+        'name': 'T', 'subject_template': 'S', 'is_active': '1', 'body_template': '<div>x</div>',
+        'attachments': [SimpleUploadedFile('evil.exe', b'MZ'),
+                        SimpleUploadedFile('fine.pdf', b'%PDF')],
+    })
+    ct = ContentType.objects.get_for_model(EmailTemplate)
+    names = set(Attachment.objects.filter(content_type=ct, object_id=tmpl.pk)
+                .values_list('original_filename', flat=True))
+    assert names == {'fine.pdf'}
+
+
+@pytest.mark.django_db
+def test_template_attachment_delete_is_scoped_to_templates(client, admin_user, client_obj):
+    """The template-attachment delete route must refuse an attachment that
+    belongs to anything else — a ticket's file is not its to remove."""
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from django.contrib.contenttypes.models import ContentType
+    from core.models import Attachment, Ticket
+    client.force_login(admin_user)
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    att = Attachment.objects.create(
+        content_type=ContentType.objects.get_for_model(Ticket), object_id=ticket.pk,
+        file=SimpleUploadedFile('evidence.pdf', b'%PDF'), original_filename='evidence.pdf',
+        mime_type='application/pdf', size_bytes=4)
+    resp = client.post(f'/settings/email-templates/attachments/{att.pk}/delete/')
+    assert resp.status_code == 404
+    assert Attachment.objects.filter(pk=att.pk).exists()
+
+
+@pytest.mark.django_db
+def test_compose_attachment_sent_and_bad_file_refuses_send(monkeypatch, client, admin_user, client_obj):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from core.models import EmailTemplate, Contact, EmailSendLog
+    _enable_email()
+    client.force_login(admin_user)
+    tmpl = EmailTemplate.objects.create(name='T', subject_template='S', body_template='<div>x</div>')
+    Contact.objects.create(client=client_obj, first_name='W', last_name='D',
+                           email='w@example.com', is_primary=True)
+    captured = _captured_msg(monkeypatch)
+    resp = client.post('/email/customer/', {
+        'client': client_obj.pk, 'template': tmpl.pk, 'custom_email': 'w@example.com',
+        'subject': 'Hi', 'body': '<div>Hello</div>',
+        'attachments': [SimpleUploadedFile('photo-list.pdf', b'%PDF')],
+    })
+    assert resp.status_code == 302
+    assert any(a[0] == 'photo-list.pdf' for a in captured['attachments'])
+    # And a blocked file refuses the whole send — a person chose it.
+    before = EmailSendLog.objects.count()
+    resp = client.post('/email/customer/', {
+        'client': client_obj.pk, 'template': tmpl.pk, 'custom_email': 'w@example.com',
+        'subject': 'Hi', 'body': '<div>Hello</div>',
+        'attachments': [SimpleUploadedFile('evil.exe', b'MZ')],
+    })
+    assert resp.status_code == 200
+    assert EmailSendLog.objects.count() == before, 'nothing may have been sent or logged'
+
+
+@pytest.mark.django_db
+def test_missing_standing_attachment_sends_without_it_and_says_so(monkeypatch, client_obj):
+    from core.models import EmailTemplate
+    from core.email_utils import send_custom_email
+    _enable_email()
+    tmpl = EmailTemplate.objects.create(name='T', subject_template='S',
+                                        body_template='<div>x</div>', is_active=True)
+    att = _attach_pdf_to_template(tmpl)
+    att.file.delete(save=False)  # the row remains; the file is gone
+    captured = _captured_msg(monkeypatch)
+    log = send_custom_email(tmpl, to_email='x@example.com', client=client_obj)
+    assert log.status == 'sent'
+    assert 'terms.pdf' in log.detail
+    assert not captured['attachments']
+
+
+@pytest.mark.django_db
+def test_outbound_save_seeds_default_address_from_company_email(client, admin_user):
+    from core.models import SiteSettings, SendingAddress
+    site = SiteSettings.get()
+    site.company_email = 'shop@example.com'
+    site.save()
+    client.force_login(admin_user)
+    resp = client.post('/settings/', {
+        'tab': 'outbound',
+        'outbound-email_port': '587',
+        'outbound-email_suppression_patterns': 'noreply@*',
+    })
+    assert resp.status_code == 302
+    row = SendingAddress.objects.get()
+    assert row.email == 'shop@example.com' and row.is_default
 
 
 @pdf_skip
@@ -9813,7 +10539,6 @@ def test_failed_send_records_why_not_just_that_it_failed(client, admin_user, cli
     site = SiteSettings.get()
     site.email_enabled = True
     site.email_host = 'mail.example.com'
-    site.email_from = 'shop@example.com'
     site.save()
     EmailTemplate.objects.update_or_create(
         trigger='ticket_created',
@@ -11044,12 +11769,13 @@ def test_operational_registry_deletion_plan_is_resolvable_and_ordered(db):
     # Client still deletes after everything that cannot rely on cascading.
     assert labels[-2] == 'Clients', f'Clients must delete after the rest, got {labels[-2]}'
 
-    # Every entry resolves (raises LookupError otherwise) and is a real model.
-    for _label, model in plan:
-        assert hasattr(model, 'objects'), f'{model} is not a manager-bearing model'
+    # Every entry resolves (raises LookupError otherwise) to a real queryset
+    # the reset can delete (keep_filter rows already excluded).
+    for _label, qs in plan:
+        assert hasattr(qs, 'delete') and hasattr(qs, 'model'), f'{qs!r} is not a queryset'
 
     # Nothing that only cascades should be in the plan.
-    planned = {m.__name__ for _l, m in plan}
+    planned = {qs.model.__name__ for _l, qs in plan}
     assert 'Contact' not in planned, 'Contact cascades from Client, do not delete it explicitly'
     assert 'Ticket' not in planned, 'Ticket cascades from Client, do not delete it explicitly'
 
@@ -14831,7 +15557,7 @@ def test_customer_email_compose_renders_template_and_sends_edited_text(client, a
     assert 'value="Thanks, Pat"' in body and 'Hi Pat, from' in body
     # POST: the edited text goes, not a fresh render; the ticket gets an internal note.
     sent = {}
-    def fake_smtp(site, subject, plain_body, html_body, logo_data, logo_mime, to_email, cc=None, bcc=None, label=''):
+    def fake_smtp(site, subject, plain_body, html_body, logo_data, logo_mime, to_email, cc=None, bcc=None, label='', sender=None, attachments=None):
         sent.update(subject=subject, body=plain_body, to=to_email); return 'sent', '', ''
     monkeypatch.setattr(email_utils, '_smtp_send', fake_smtp)
     r = client.post(reverse('core:customer_email'), {'ticket': ticket.pk, 'template': t.pk, 'contact': c.contacts.first().pk, 'subject': 'Thanks, Pat (edited)', 'body': 'Edited body.'})

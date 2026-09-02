@@ -10,8 +10,15 @@
             <div class="col-12"><label class="form-check">{{ forms.outbound.email_use_tls|tabler_input }}<span class="form-check-label">Use TLS</span></label></div>
             <div class="col-md-6"><label class="form-label">Username</label>{{ forms.outbound.email_username|tabler_input }}</div>
             <div class="col-md-6"><label class="form-label">Password</label>{{ forms.outbound.email_password|tabler_input }}</div>
-            <div class="col-md-6"><label class="form-label">From address</label>{{ forms.outbound.email_from|tabler_input }}<div class="form-hint">Shown to clients in the From field.</div></div>
-            <div class="col-md-6"><label class="form-label">Sales from address</label>{{ forms.outbound.email_sales_from|tabler_input }}<div class="form-hint">Used when emailing quotes. Blank uses the From address.</div></div>
+            <div class="col-12">
+                <div class="hr-text">From address by email kind</div>
+                <div class="form-hint mb-2">Each kind of outgoing email sends as one of the addresses in the Sending addresses card below. Blank = the default address{% if default_sending_address %} ({{ default_sending_address.email }}){% endif %}.</div>
+                <div class="row g-2">
+                    {% for field, label, hint in forms.outbound.from_kind_fields %}
+                    <div class="col-md-6"><label class="form-label">{{ label }}</label>{{ field }}<div class="form-hint">{{ hint }}</div></div>
+                    {% endfor %}
+                </div>
+            </div>
             <div class="col-12"><label class="form-label">Suppression patterns</label>{{ forms.outbound.email_suppression_patterns|tabler_input }}<div class="form-hint">One fnmatch pattern per line. Matching senders never receive automated replies (for example <code>noreply@*</code>).</div></div>
             <div class="col-12">
                 <div class="hr-text">Internal notifications</div>
@@ -25,6 +32,59 @@
     </div>
     <div class="card-footer"><button type="submit" class="btn btn-primary">Save outbound email</button></div>
 </form>
+<div class="card mt-3">
+    <div class="card-header"><div><h3 class="card-title">Sending addresses</h3><div class="card-subtitle">The identities outgoing email is sent as. The default is used by every kind of email without its own pick above. Replies to a non-support address arrive at that mailbox, not in Murphy's Bench.</div></div><div class="card-actions"><button type="button" class="btn btn-primary btn-sm" data-bs-toggle="collapse" data-bs-target="#addr-new">{% ticon 'plus' 'icon-sm' %} Address</button></div></div>
+    <form method="post" action="{% url 'core:sending_address_add' %}" class="collapse" id="addr-new">{% csrf_token %}
+        <div class="card-body border-top">
+            <div class="row g-2">
+                <div class="col-md-5"><label class="form-label">Display name</label><input type="text" name="display_name" class="form-control" placeholder="Shamrock Sales"><div class="form-hint">Shown before the address in the customer's inbox.</div></div>
+                <div class="col-md-5"><label class="form-label required">Email address</label><input type="email" name="email" class="form-control" placeholder="sales@yourdomain.com" required><div class="form-hint">Must exist at your mail host (a mailbox or alias).</div></div>
+                <div class="col-md-2 d-flex align-items-end"><label class="form-check mb-2"><input type="checkbox" name="is_default" value="1" class="form-check-input"><span class="form-check-label">Default</span></label></div>
+                <div class="col-12">
+                    <button type="button" class="btn btn-sm btn-ghost-secondary" data-bs-toggle="collapse" data-bs-target="#addr-new-login">Own mail login (optional)</button>
+                    <div class="collapse mt-2" id="addr-new-login">
+                        <div class="form-hint mb-2">Only needed when your mail host refuses a From address that does not match the login. Anything blank rides the main outbound server above.</div>
+                        <div class="row g-2">
+                            <div class="col-md-4"><label class="form-label">SMTP host</label><input type="text" name="smtp_host" class="form-control" placeholder="Blank = main host"></div>
+                            <div class="col-md-2"><label class="form-label">Port</label><input type="number" name="smtp_port" class="form-control" placeholder="587"></div>
+                            <div class="col-md-3"><label class="form-label">Username</label><input type="text" name="smtp_username" class="form-control" placeholder="Blank = main username"></div>
+                            <div class="col-md-3"><label class="form-label">Password</label><input type="password" name="smtp_password" class="form-control"></div>
+                            <div class="col-12"><label class="form-check"><input type="checkbox" name="smtp_use_tls" value="1" class="form-check-input" checked><span class="form-check-label">Use TLS (with own host)</span></label></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card-footer"><button type="submit" class="btn btn-primary">Add address</button></div>
+    </form>
+    <div class="list-group list-group-flush">
+    {% for addr in sending_addresses %}
+        <div class="list-group-item">
+            <div class="d-flex align-items-center gap-2">
+                <div class="flex-fill"><span class="fw-medium">{{ addr.from_header }}</span>{% if addr.is_default %} <span class="badge bg-blue-lt">Default</span>{% endif %}{% if addr.has_own_login %} <span class="badge bg-purple-lt">Own login</span>{% endif %}</div>
+                {% if not addr.is_default %}<form method="post" action="{% url 'core:sending_address_make_default' addr.pk %}">{% csrf_token %}<button type="submit" class="btn btn-sm">Make default</button></form>{% endif %}
+                <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#addr-edit-{{ addr.pk }}">Edit</button>
+                <form method="post" action="{% url 'core:sending_address_delete' addr.pk %}" data-mb-confirm="Delete the sending address {{ addr.email }}?">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost-danger">Delete</button></form>
+            </div>
+            <form method="post" action="{% url 'core:sending_address_edit' addr.pk %}" class="collapse mt-2" id="addr-edit-{{ addr.pk }}">{% csrf_token %}
+                <div class="row g-2">
+                    <div class="col-md-5"><label class="form-label">Display name</label><input type="text" name="display_name" value="{{ addr.display_name }}" class="form-control"></div>
+                    <div class="col-md-5"><label class="form-label required">Email address</label><input type="email" name="email" value="{{ addr.email }}" class="form-control" required></div>
+                    <div class="col-md-2 d-flex align-items-end"><label class="form-check mb-2"><input type="checkbox" name="is_default" value="1" class="form-check-input" {% if addr.is_default %}checked{% endif %}><span class="form-check-label">Default</span></label></div>
+                    <div class="col-md-4"><label class="form-label">SMTP host</label><input type="text" name="smtp_host" value="{{ addr.smtp_host }}" class="form-control" placeholder="Blank = main host"></div>
+                    <div class="col-md-2"><label class="form-label">Port</label><input type="number" name="smtp_port" value="{{ addr.smtp_port|default_if_none:'' }}" class="form-control" placeholder="587"></div>
+                    <div class="col-md-3"><label class="form-label">Username</label><input type="text" name="smtp_username" value="{{ addr.smtp_username }}" class="form-control" placeholder="Blank = main username"></div>
+                    <div class="col-md-3"><label class="form-label">Password</label><input type="password" name="smtp_password" value="{{ addr.smtp_password }}" class="form-control"></div>
+                    <div class="col-12"><label class="form-check"><input type="checkbox" name="smtp_use_tls" value="1" class="form-check-input" {% if addr.smtp_use_tls %}checked{% endif %}><span class="form-check-label">Use TLS (with own host)</span></label></div>
+                    <div class="col-12"><button type="submit" class="btn btn-sm btn-primary">Save</button></div>
+                </div>
+            </form>
+        </div>
+    {% empty %}
+        <div class="list-group-item text-secondary">No sending addresses yet. Outgoing email falls back to the company email from Company Info. Add your support address here (it becomes the default), then any others: sales, billing, anything.</div>
+    {% endfor %}
+    </div>
+</div>
 <div class="card mt-3">
     <div class="card-header"><div><h3 class="card-title">Suppressed addresses</h3><div class="card-subtitle">Never receive automated email, regardless of the patterns above.</div></div></div>
     <form method="post" action="{% url 'core:suppressed_address_add' %}" class="card-body border-bottom">
@@ -48,7 +108,7 @@
     <div class="card-header"><h3 class="card-title">Send a test email</h3></div>
     {% comment %}The recipient is fixed server-side (your own address, else the From address). Not a field: an arbitrary-recipient test sends through the shop's SMTP credentials, which is a relay. See EmailTestOutboundView.{% endcomment %}
     <div class="card-body">
-        <p class="text-secondary">Sends to <strong>{{ request.user.email|default:settings.email_from|default:settings.email_username|default:"no address on file" }}</strong>.</p>
+        <p class="text-secondary">Sends to <strong>{% firstof request.user.email default_sending_address.email settings.email_username "no address on file" %}</strong>.</p>
         <button type="button" class="btn" hx-post="{% url 'core:settings_test_outbound' %}" hx-target="#outbound-test-result" hx-swap="innerHTML">Send test email</button>
         <div id="outbound-test-result"></div>
     </div>

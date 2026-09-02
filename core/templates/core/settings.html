@@ -1,8 +1,14 @@
 {% extends "core/base_tabler.html" %}
-{% load mb_tabler %}
+{% load mb_tabler static %}
 
 {% block title %}Settings - Murphy's Bench{% endblock %}
 {% block room %}office{% endblock %}
+
+{% block extra_head %}{% if active_tab == 'email_templates' %}
+    <link rel="stylesheet" href="{% static 'vendor/trix/2.1.19/trix.css' %}">
+    <script defer src="{% static 'vendor/trix/2.1.19/trix.umd.min.js' %}"></script>
+    <script defer src="{% static 'js/mb-email-editor.js' %}"></script>
+{% endif %}{% endblock %}
 
 {% block page_header %}
 <div class="page-header d-print-none">

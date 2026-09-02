@@ -52,6 +52,11 @@ class OperationalModel:
     # NOT delete it explicitly (it is still counted for the report).
     delete_order: Optional[int] = None
 
+    # Rows matching this filter are CONFIGURATION riding an operational table
+    # (an email template's standing attachments, say): the reset keeps them
+    # and the count report does not show them.
+    keep_filter: Optional[dict] = None
+
 
 # Declared in the order the reset command reports counts.
 REGISTRY = (
@@ -70,7 +75,13 @@ REGISTRY = (
     # ⚠ Attachment FILES are unlinked by the reset command only after its
     # transaction commits; deleting them alongside the rows made a rollback
     # restore rows whose files were already gone.
-    OperationalModel('core.Attachment', 'Attachments (+ files)', delete_order=10),
+    # A template's STANDING attachments are configuration, exactly like the
+    # template that carries them — a reset that kept the template but wiped
+    # its promised file would leave a button that quietly sends less than it
+    # says. Everything else attached (tickets, replies, work orders) goes.
+    OperationalModel('core.Attachment', 'Attachments (+ files)', delete_order=10,
+                     keep_filter={'content_type__app_label': 'core',
+                                  'content_type__model': 'emailtemplate'}),
     OperationalModel('core.CustomFieldValue', 'Custom-field values', delete_order=20),
 
     # ── Logs ────────────────────────────────────────────────────────────────
@@ -144,6 +155,7 @@ NON_OPERATIONAL = {
     'core.CannedResponseCategory': 'configuration',
     'core.EmailTemplate': 'configuration',
     'core.EmailSignature': 'configuration',
+    'core.SendingAddress': 'configuration',
     'core.CustomField': 'a field DEFINITION is configuration; its VALUES are wiped',
     'core.KBArticle': 'configuration',
     'core.KBCategory': 'configuration',
@@ -191,17 +203,27 @@ def evidence_querysets():
     return out
 
 
+def operational_queryset(entry):
+    qs = resolve(entry.model).objects.all()
+    if entry.keep_filter:
+        qs = qs.exclude(**entry.keep_filter)
+    return qs
+
+
 def count_entries():
-    """(label, queryset) for every operational model, in report order."""
-    return [(entry.label, resolve(entry.model).objects.all()) for entry in REGISTRY]
+    """(label, queryset) for every operational model, in report order.
+    Configuration rows riding an operational table (keep_filter) are not
+    counted — they are not going anywhere."""
+    return [(entry.label, operational_queryset(entry)) for entry in REGISTRY]
 
 
 def deletion_plan():
-    """(label, model) for the models the reset deletes explicitly, in order.
+    """(label, queryset) for what the reset deletes explicitly, in order.
 
     Anything with no `delete_order` is omitted: it cascades from another entry,
-    and deleting it explicitly would only risk fighting that cascade.
+    and deleting it explicitly would only risk fighting that cascade. A
+    keep_filter narrows the queryset so configuration rows survive.
     """
     deletable = [e for e in REGISTRY if e.delete_order is not None]
-    return [(e.label, resolve(e.model))
+    return [(e.label, operational_queryset(e))
             for e in sorted(deletable, key=lambda e: e.delete_order)]

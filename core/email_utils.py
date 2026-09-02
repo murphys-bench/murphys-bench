@@ -75,6 +75,69 @@ def _email_logo_field(site):
     return getattr(site, 'email_logo', None) or site.company_logo
 
 
+# The kinds of outgoing email, each with its own default sending address on
+# Settings > Outbound Email (SiteSettings.from_<kind>). Blank = the default
+# SendingAddress row.
+EMAIL_KINDS = ('ticket_events', 'customer_emails', 'quotes', 'receipts',
+               'reports', 'internal')
+
+
+def sending_address_for(site, kind):
+    """The SendingAddress this kind of outgoing email sends as: the kind's own
+    pick, else the default row, else None (an install with no addresses yet;
+    the connection helper then falls back to the company email)."""
+    from .models import SendingAddress
+    if kind not in EMAIL_KINDS:
+        raise ValueError(f'Unknown email kind {kind!r}')
+    return getattr(site, f'from_{kind}', None) or SendingAddress.get_default()
+
+
+def _connection_and_from(site, sender):
+    """The SMTP connection and From header for one send.
+
+    `sender` is a SendingAddress or None. A sender with its OWN host brings
+    its own login: the main server's username and password are NEVER sent to
+    a different host (review round 1 risk — a typo'd host must not receive
+    the shop's real credentials; the address form requires credentials
+    alongside an own host, and a blank pair here goes out unauthenticated
+    and fails loud at SMTP rather than borrowing the main login). A sender
+    with no own host rides the main server entirely, its own username and
+    password overriding only the login. With no sender at all the From falls
+    back to the company email, then the SMTP username, then
+    DEFAULT_FROM_EMAIL — never a hardcoded address."""
+    from django.core.mail import get_connection
+    from django.conf import settings as django_settings
+
+    s_host = sender.smtp_host if sender else ''
+    s_port = sender.smtp_port if sender else None
+    s_user = sender.smtp_username if sender else ''
+    s_pass = sender.smtp_password if sender else ''
+    if s_host:
+        host = s_host
+        username, password = s_user, s_pass
+        use_tls = sender.smtp_use_tls
+    else:
+        host = site.email_host or django_settings.EMAIL_HOST
+        username = s_user or site.email_username or django_settings.EMAIL_HOST_USER
+        password = s_pass or site.email_password or django_settings.EMAIL_HOST_PASSWORD
+        use_tls = site.email_use_tls
+    port = s_port or site.email_port or django_settings.EMAIL_PORT
+    use_ssl = port == 465
+    connection = get_connection(
+        backend='django.core.mail.backends.smtp.EmailBackend',
+        host=host, port=port, username=username, password=password,
+        use_tls=use_tls and not use_ssl, use_ssl=use_ssl,
+        fail_silently=True,
+    )
+    if sender is not None:
+        from_email = sender.from_header
+    else:
+        from_email = ((site.company_email or '').strip()
+                      or (site.email_username or '').strip()
+                      or django_settings.DEFAULT_FROM_EMAIL)
+    return connection, from_email
+
+
 def _suppression_reason(to_email, client, site):
     """Return (reason, detail) if this address must NOT be emailed, else ('', '').
 
@@ -97,8 +160,13 @@ def _suppression_reason(to_email, client, site):
     return '', ''
 
 
-def _build_html_email(body, signature_body, subject, ticket, site, embed_logo=True):
+def _build_html_email(body, signature_body, subject, ticket, site, embed_logo=True,
+                      body_is_html=False, signature_is_html=False):
     """Render the HTML email wrapper. Returns (html_str, logo_data, logo_mime_type).
+
+    body/signature marked html arrive as SANITIZED, email-safe HTML from
+    core.email_html and render as markup; anything else is escaped text with
+    its line breaks preserved, exactly as before mig 0118.
 
     embed_logo=False skips the inline CID logo (the header falls back to the
     company name) — used by document cover emails, where the branding lives in
@@ -106,6 +174,7 @@ def _build_html_email(body, signature_body, subject, ticket, site, embed_logo=Tr
     that also carries the attachment.
     """
     from django.template.loader import render_to_string
+    from django.utils.safestring import mark_safe
     import os
 
     logo_data = None
@@ -131,8 +200,10 @@ def _build_html_email(body, signature_body, subject, ticket, site, embed_logo=Tr
     title_bar_color = _email_header_color(site)
     html = render_to_string('core/email/base_email.html', {
         'subject': subject,
-        'body': body,
-        'signature': signature_body,
+        'body': mark_safe(body) if body_is_html else body,
+        'body_is_html': body_is_html,
+        'signature': mark_safe(signature_body) if signature_is_html else signature_body,
+        'signature_is_html': signature_is_html,
         'company_name': site.company_name or "Murphy's Bench",
         'has_logo': has_logo,
         'title_bar_color': title_bar_color,
@@ -166,24 +237,17 @@ def _greeting_name(client, contact):
     return client.name
 
 
-def _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type, to_email, cc=None, bcc=None, label=''):
-    """Send one branded message through the shop's SMTP settings. Returns
-    (status, reason, detail) for the send log; never raises."""
-    from django.core.mail import EmailMultiAlternatives, get_connection
-    from django.conf import settings as django_settings
+def _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type, to_email, cc=None, bcc=None, label='', sender=None, attachments=None):
+    """Send one branded message through the shop's SMTP settings, as `sender`
+    (a SendingAddress, or None for the fallback From). attachments is a list
+    of (filename, bytes, mimetype); callers that pass any must also build the
+    HTML with embed_logo=False — an inline CID logo needs the 'related'
+    subtype, which does not mix with file attachments (same constraint the
+    document-email path has always had). Returns (status, reason, detail)
+    for the send log; never raises."""
+    from django.core.mail import EmailMultiAlternatives
 
-    use_ssl = site.email_port == 465
-    connection = get_connection(
-        backend='django.core.mail.backends.smtp.EmailBackend',
-        host=site.email_host or django_settings.EMAIL_HOST,
-        port=site.email_port or django_settings.EMAIL_PORT,
-        username=site.email_username or django_settings.EMAIL_HOST_USER,
-        password=site.email_password or django_settings.EMAIL_HOST_PASSWORD,
-        use_tls=site.email_use_tls and not use_ssl,
-        use_ssl=use_ssl,
-        fail_silently=True,
-    )
-    from_email = site.email_from or django_settings.DEFAULT_FROM_EMAIL
+    connection, from_email = _connection_and_from(site, sender)
     try:
         msg = EmailMultiAlternatives(
             subject=subject.strip(),
@@ -195,7 +259,10 @@ def _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type, 
             connection=connection,
         )
         msg.attach_alternative(html_body, 'text/html')
-        if logo_data:
+        if attachments:
+            for filename, content, mimetype in attachments:
+                msg.attach(filename, content, mimetype or 'application/octet-stream')
+        elif logo_data:
             from email.mime.image import MIMEImage
             # 'related' (not the default 'mixed') so the image is bound to the HTML
             # and `cid:logo` resolves inline.
@@ -215,11 +282,42 @@ def _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type, 
 
 def render_email_template(template, ctx):
     """Render a template's subject and body against ctx (a plain dict).
+    The subject is plain text. An HTML-format body (everything since mig
+    0118) renders with variable escaping ON — customer content is words,
+    never markup — and comes back as HTML, not yet email-safe-transformed.
     Raises on a syntax error so the caller can report it."""
     from django.template import Template, Context
-    context = Context(ctx, autoescape=False)
-    return (Template(template.subject_template).render(context).strip(),
-            Template(template.body_template).render(context))
+    from . import email_html
+    subject = Template(template.subject_template).render(Context(ctx, autoescape=False)).strip()
+    if template.body_format == 'html':
+        body = email_html.render_body(template.body_template, ctx)
+    else:
+        body = Template(template.body_template).render(Context(ctx, autoescape=False))
+    return subject, body
+
+
+def _rendered_signature(sig_obj):
+    """(body, is_html) for a signature, tolerating unconverted legacy rows."""
+    if sig_obj is None:
+        return '', False
+    return sig_obj.body, sig_obj.body_format == 'html'
+
+
+def _compose_email_bodies(body, body_is_html, sig_body, sig_is_html, site):
+    """Bridge body + signature, each possibly HTML or legacy text, into what
+    _smtp_send needs: (html_for_wrapper, html_flag, sig_for_wrapper,
+    sig_flag, plain_text_body)."""
+    from . import email_html
+    if body_is_html:
+        email_body, body_plain = email_html.finish_for_email(body, site)
+    else:
+        email_body, body_plain = body, body
+    if sig_body and sig_is_html:
+        sig_email, sig_plain = email_html.finish_for_email(email_html.sanitize(sig_body), site)
+    else:
+        sig_email, sig_plain = sig_body, sig_body
+    plain = f'{body_plain}\n\n--\n{sig_plain}' if sig_plain else body_plain
+    return email_body, body_is_html, sig_email, sig_is_html, plain
 
 
 def email_context(*, client, contact=None, ticket=None, work_order=None, user=None, site=None):
@@ -247,12 +345,35 @@ def email_context(*, client, contact=None, ticket=None, work_order=None, user=No
     }
 
 
+def template_attachments(template):
+    """The standing files a template carries (Settings > Email Templates), as
+    ([(filename, bytes, mimetype)], [missing filenames]). A file gone from
+    storage is skipped LOUDLY — the email still goes, and the send log's
+    detail names what it went without."""
+    from django.contrib.contenttypes.models import ContentType
+    from .models import Attachment
+    out, missing = [], []
+    ct = ContentType.objects.get_for_model(type(template))
+    for att in Attachment.objects.filter(content_type=ct, object_id=template.pk):
+        try:
+            with att.file.open('rb') as f:
+                out.append((att.original_filename, f.read(),
+                            att.mime_type or 'application/octet-stream'))
+        except Exception:
+            logger.error('Standing attachment %s on email template %s is missing from '
+                         'storage; sending without it.', att.original_filename, template.pk)
+            missing.append(att.original_filename)
+    return out, missing
+
+
 def send_custom_email(template, *, to_email, client, contact=None, ticket=None,
-                      work_order=None, user=None, subject=None, body=None, cc=None):
+                      work_order=None, user=None, subject=None, body=None, cc=None,
+                      extra_attachments=None):
     """Send a custom (person-chosen) template to one address. subject/body,
     when given, are the already-edited text from the compose screen and win
-    over a fresh render. Honors every suppression layer; always writes an
-    EmailSendLog row. Returns the log row."""
+    over a fresh render; extra_attachments are one-off files from that
+    screen, sent alongside the template's standing attachments. Honors every
+    suppression layer; always writes an EmailSendLog row. Returns the log row."""
     from .models import SiteSettings, EmailSignature, EmailSendLog
     site = SiteSettings.get()
     trigger = f'custom:{template.name or template.pk}'[:30]
@@ -282,13 +403,31 @@ def send_custom_email(template, *, to_email, client, contact=None, ticket=None,
         except Exception:
             logger.exception('Email template render failed for custom template %s.', template.pk)
             return _log('failed', 'send_error', 'template render error')
+        body_is_html = template.body_format == 'html'
+    else:
+        # The compose screen posts the editor's HTML, variables already
+        # substituted. Sanitized here regardless of what the browser sent.
+        from . import email_html
+        body = email_html.sanitize(body)
+        body_is_html = True
+
+    attachments, missing = template_attachments(template)
+    attachments.extend(extra_attachments or [])
 
     sig_obj = template.signature or EmailSignature.objects.filter(is_default=True).first()
-    signature_body = sig_obj.body if sig_obj else ''
-    html_body, logo_data, logo_mime_type = _build_html_email(body, signature_body, subject, ticket, site)
-    plain_body = f"{body}\n\n--\n{signature_body}" if signature_body else body
+    sig_body, sig_is_html = _rendered_signature(sig_obj)
+    email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
+        body, body_is_html, sig_body, sig_is_html, site)
+    html_body, logo_data, logo_mime_type = _build_html_email(
+        email_body, sig_email, subject, ticket, site,
+        embed_logo=not attachments,
+        body_is_html=body_is_html, signature_is_html=sig_is_html)
     status, reason, detail = _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type,
-                                        to_email, cc=cc, label=trigger)
+                                        to_email, cc=cc, label=trigger,
+                                        sender=sending_address_for(site, 'customer_emails'),
+                                        attachments=attachments)
+    if status == 'sent' and missing:
+        detail = f'sent without missing attachment(s): {", ".join(missing)}'
     return _log(status, reason, detail)
 
 
@@ -338,10 +477,8 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
 
     # Resolve signature: template's own → default → none
     sig_obj = template.signature or EmailSignature.objects.filter(is_default=True).first()
-    signature_body = sig_obj.body if sig_obj else ''
+    sig_body, sig_is_html = _rendered_signature(sig_obj)
 
-    # Render subject and body as Django templates
-    from django.template import Template, Context
     ctx = {
         'ticket': ticket,
         'client': ticket.client,
@@ -353,11 +490,9 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
     }
     if extra_context:
         ctx.update(extra_context)
-    context = Context(ctx, autoescape=False)
 
     try:
-        subject = Template(template.subject_template).render(context)
-        body = Template(template.body_template).render(context)
+        subject, body = render_email_template(template, ctx)
     except Exception:
         logger.exception(
             'Email template render failed for trigger %s (ticket %s) — check the '
@@ -370,16 +505,20 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
         )
         return
 
-    # Build HTML version
-    html_body, logo_data, logo_mime_type = _build_html_email(body, signature_body, subject.strip(), ticket, site)
-
-    # Plain-text version appends signature below a separator
-    plain_body = body
-    if signature_body:
-        plain_body = f"{body}\n\n--\n{signature_body}"
+    attachments, missing = template_attachments(template)
+    email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
+        body, template.body_format == 'html', sig_body, sig_is_html, site)
+    html_body, logo_data, logo_mime_type = _build_html_email(
+        email_body, sig_email, subject, ticket, site,
+        embed_logo=not attachments,
+        body_is_html=body_is_html, signature_is_html=sig_is_html)
 
     status, reason, detail = _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type,
-                                        to_email, cc=cc, bcc=bcc, label=f'trigger {trigger}')
+                                        to_email, cc=cc, bcc=bcc, label=f'trigger {trigger}',
+                                        sender=sending_address_for(site, 'ticket_events'),
+                                        attachments=attachments)
+    if status == 'sent' and missing:
+        detail = f'sent without missing attachment(s): {", ".join(missing)}'
 
     EmailSendLog.objects.create(
         ticket=ticket, to_email=to_email, trigger=trigger,
@@ -387,12 +526,13 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
     )
 
 
-def send_document_email(to_email, subject, cover_body, *, from_email=None,
-                        reply_to=None, attachments=None, client=None,
+def send_document_email(to_email, subject, cover_body, *, kind,
+                        attachments=None, client=None,
                         contact=None, cc=None, trigger='document',
                         related_ticket=None):
-    """Send an MB-generated document (repair report, quote) as a short HTML cover
-    email with PDF attachment(s).
+    """Send an MB-generated document (repair report, quote, receipt) as a
+    short HTML cover email with PDF attachment(s), sent as the kind's sending
+    address (Settings > Outbound Email).
 
     Honors every suppression layer and always writes an EmailSendLog row (ticket
     optional — these aren't ticket-triggered). Fail-loud: SMTP errors are logged
@@ -401,8 +541,7 @@ def send_document_email(to_email, subject, cover_body, *, from_email=None,
     attachments: list of (filename, content_bytes, mimetype).
     """
     from .models import SiteSettings, EmailSendLog, EmailSignature
-    from django.core.mail import EmailMultiAlternatives, get_connection
-    from django.conf import settings as django_settings
+    from django.core.mail import EmailMultiAlternatives
 
     site = SiteSettings.get()
 
@@ -426,38 +565,27 @@ def send_document_email(to_email, subject, cover_body, *, from_email=None,
 
     # Short branded cover (no inline logo — the PDF carries the branding, and a
     # 'related' image would complicate the multipart/mixed tree that holds the
-    # attachment). Default signature if one is configured.
+    # attachment). Default signature if one is configured; post-0118 that
+    # signature is HTML and must go through the same compose bridge as every
+    # other send, or its tags show as literal text. (Review round 1 finding.)
     sig_obj = EmailSignature.objects.filter(is_default=True).first()
-    signature_body = sig_obj.body if sig_obj else ''
+    sig_body, sig_is_html = _rendered_signature(sig_obj)
+    email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
+        cover_body, False, sig_body, sig_is_html, site)
     html_body, _logo, _mime = _build_html_email(
-        cover_body, signature_body, subject, None, site, embed_logo=False,
-    )
-    plain_body = cover_body
-    if signature_body:
-        plain_body = f"{cover_body}\n\n--\n{signature_body}"
-
-    use_ssl = site.email_port == 465
-    connection = get_connection(
-        backend='django.core.mail.backends.smtp.EmailBackend',
-        host=site.email_host or django_settings.EMAIL_HOST,
-        port=site.email_port or django_settings.EMAIL_PORT,
-        username=site.email_username or django_settings.EMAIL_HOST_USER,
-        password=site.email_password or django_settings.EMAIL_HOST_PASSWORD,
-        use_tls=site.email_use_tls and not use_ssl,
-        use_ssl=use_ssl,
-        fail_silently=True,
+        email_body, sig_email, subject, None, site, embed_logo=False,
+        body_is_html=body_is_html, signature_is_html=sig_is_html,
     )
 
-    sender = from_email or site.email_from or django_settings.DEFAULT_FROM_EMAIL
+    connection, from_email = _connection_and_from(site, sending_address_for(site, kind))
 
     try:
         msg = EmailMultiAlternatives(
             subject=subject,
             body=plain_body,
-            from_email=sender,
+            from_email=from_email,
             to=[to_email],
             cc=[e for e in (cc or []) if e and e != to_email],
-            reply_to=[reply_to] if reply_to else None,
             connection=connection,
         )
         msg.attach_alternative(html_body, 'text/html')
@@ -527,7 +655,8 @@ def send_internal_email(site, subject, body, to_email, ticket=None, trigger='int
             status='suppressed', reason='no_address')
     html_body = '<p>' + escape(body).replace('\n', '<br>') + '</p>'
     status, reason, detail = _smtp_send(site, subject, body, html_body,
-                                        None, None, to_email, label=trigger)
+                                        None, None, to_email, label=trigger,
+                                        sender=sending_address_for(site, 'internal'))
     return EmailSendLog.objects.create(
         ticket=ticket, to_email=to_email, trigger=trigger,
         status=status, reason=reason, detail=detail)

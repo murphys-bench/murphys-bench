@@ -57,7 +57,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         # Imported here so the module loads even if models move around.
-        from core.models import Attachment, User
+        from core.models import User
         from core import operational_data
 
         keep_users = {u.strip() for u in options['keep_users'].split(',') if u.strip()}
@@ -117,9 +117,14 @@ class Command(BaseCommand):
         # gone from storage, leaving restored Attachment rows pointing at nothing.
         # Collect the storage references now, wipe the rows in the transaction, and
         # only unlink the files once the DB change is durable.
+        # Only the rows the reset will actually delete: an email template's
+        # standing attachments are configuration (keep_filter in the registry)
+        # and their files must survive along with their rows.
+        attachment_entry = next(e for e in operational_data.REGISTRY
+                                if e.model == 'core.Attachment')
         files_to_unlink = [
             (att.file.storage, att.file.name)
-            for att in Attachment.objects.all()
+            for att in operational_data.operational_queryset(attachment_entry)
             if att.file
         ]
 
@@ -128,8 +133,8 @@ class Command(BaseCommand):
             # first (walk-in work orders, devices, counter sales and leads never
             # cascade from Client), children before parents, Client last because it
             # cascades to contacts, tickets and everything under them.
-            for _label, model in operational_data.deletion_plan():
-                model.objects.all().delete()
+            for _label, qs in operational_data.deletion_plan():
+                qs.delete()
 
             # Non-superuser users last (their personal queues cascade with them)
             users_to_delete.delete()
