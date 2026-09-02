@@ -8,6 +8,27 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## v0.16.0 — 2026-09-01
+
+Email grows up, and the billing worklist learns to tell the truth about invoices it didn't make. Email modernization: four outside-review rounds. Pull from IN: three.
+
+### Added
+
+- Formatting editor for email templates, signatures, and the Email Customer page: clickable links, branded buttons, lists. Every message still gets a plain-text twin.
+- Multiple sending addresses with a default per kind of email, on Settings, Outbound Email. Quotes and receipts send from your sales address out of the box; support mail stays on the support address.
+- Standing attachments on email templates, and one-off attachments when composing.
+- Per-template "Send me a test" button that emails the rendered template to your own address.
+- Pull from IN on Contract Billing: mirror invoices Invoice Ninja generated on its own (its recurring engine) into the worklist, so it shows their real status instead of "Not prepared". You confirm every match; nothing is sent, charged, or changed in Invoice Ninja.
+
+### Changed
+
+- A pulled invoice mirror is read-only in Murphy's Bench: no re-send, no charge, no line edits. Record its payment in Invoice Ninja and Check IN reflects it. Deleting the mirror un-links it so it can be pulled again.
+- The database now refuses two sales linked to the same Invoice Ninja invoice.
+
+### Fixed
+
+- A completed sale's line items could still be changed by direct request even though the editor hid the controls; all sale line routes now refuse edits on locked sales.
+
 ## v0.15.1 — 2026-08-27
 
 ### Fixed
