@@ -33,6 +33,7 @@
                 <div class="col-md-4"><label class="form-label">End</label>{{ form.end_date|tabler_input }}<div class="form-hint">Blank = open-ended.</div></div>
                 <div class="col-md-4"><label class="form-label">Renewal date</label>{{ form.renewal_date|tabler_input }}</div>
                 <div class="col-12"><label class="form-check">{{ form.auto_renew|tabler_input }}<span class="form-check-label">Auto-renew</span></label></div>
+                <div class="col-12"><label class="form-check">{{ form.billed_externally|tabler_input }}<span class="form-check-label">Billed outside Murphy's Bench</span></label><div class="form-hint">Invoicing is handled directly in your billing system; the billing run skips this contract.</div></div>
                 <div class="col-12"><label class="form-label">Notes</label>{{ form.notes|tabler_input }}</div>
             </div>
         </div>

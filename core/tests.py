@@ -8893,6 +8893,73 @@ def test_contract_billing_list_renders(client, client_obj, admin_user):
     assert b'Contract Billing' in r.content
 
 
+# ── Billed-externally toggle (Sep 2026) ──────────────────────────────────
+# A contract whose invoicing lives in the external billing system (e.g. IN's
+# own recurring invoices) opts out of MB draft generation. The flag stops NEW
+# draft creation only — a draft prepared before the flag was set still flows
+# normally, so nothing in flight is silently skipped.
+
+@pytest.mark.django_db
+def test_billed_externally_batch_prepare_skips(client, client_obj, admin_user):
+    from core.models import Sale
+    external = Contract.objects.create(client=client_obj, title='IN-billed', status='active',
+                                       billing_cadence='monthly', billing_day=1,
+                                       billed_externally=True)
+    external.line_items.create(kind='labor', description='X', quantity=1, unit_price=25)
+    normal = Contract.objects.create(client=client_obj, title='MB-billed', status='active',
+                                     billing_cadence='monthly', billing_day=1)
+    normal.line_items.create(kind='labor', description='Y', quantity=1, unit_price=50)
+    client.force_login(admin_user)
+    client.post(reverse('core:contract_billing_prepare_all'))
+    prepared = set(Sale.objects.filter(contract__isnull=False).values_list('contract_id', flat=True))
+    assert normal.pk in prepared
+    assert external.pk not in prepared
+
+
+@pytest.mark.django_db
+def test_billed_externally_single_prepare_refused(client, client_obj, admin_user):
+    from core.models import Sale
+    external = Contract.objects.create(client=client_obj, title='IN-billed', status='active',
+                                       billing_cadence='monthly', billing_day=1,
+                                       billed_externally=True)
+    client.force_login(admin_user)
+    r = client.post(reverse('core:contract_billing_prepare', args=[external.pk]), follow=True)
+    assert Sale.objects.filter(contract=external).count() == 0
+    assert b'billed outside' in r.content
+
+
+@pytest.mark.django_db
+def test_billed_externally_worklist_state_and_no_nag(client, client_obj, admin_user):
+    external = Contract.objects.create(client=client_obj, title='IN-billed', status='active',
+                                       billing_cadence='monthly', billing_day=1,
+                                       billed_externally=True)
+    client.force_login(admin_user)
+    r = client.get(reverse('core:contract_billing_list'))
+    assert b'Billed externally' in r.content
+    row = next(row for row in r.context['rows'] if row['contract'].pk == external.pk)
+    assert row['state'] == 'billed_externally'
+    # The flag removes the row from the "due but unprepared" nag count entirely.
+    assert r.context['due_unprepared_count'] == 0
+
+
+@pytest.mark.django_db
+def test_billed_externally_existing_draft_still_shows_real_state(client, client_obj, admin_user):
+    """Locks the rule: the flag stops NEW drafts only. A draft that existed before
+    the flag was set keeps its real worklist state so it can be reviewed/settled —
+    it is never hidden behind the Billed-externally chip."""
+    from core.views import _prepare_contract_sale
+    contract = Contract.objects.create(client=client_obj, title='Flip', status='active',
+                                       billing_cadence='monthly', billing_day=1)
+    contract.line_items.create(kind='labor', description='X', quantity=1, unit_price=25)
+    _prepare_contract_sale(contract, admin_user)
+    contract.billed_externally = True
+    contract.save(update_fields=['billed_externally'])
+    client.force_login(admin_user)
+    r = client.get(reverse('core:contract_billing_list'))
+    row = next(row for row in r.context['rows'] if row['contract'].pk == contract.pk)
+    assert row['state'] == 'prepared'
+
+
 # ── Device/Asset merge (Aug 15 2026) ────────────────────────────────────
 # Promotion is gone: one machine = one Device record, coverage is a contract
 # link on the device. The merge migration itself (0107) is drilled against a

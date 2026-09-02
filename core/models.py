@@ -1711,6 +1711,14 @@ class Contract(models.Model):
     end_date = models.DateField(null=True, blank=True, help_text='Blank = open-ended.')
     auto_renew = models.BooleanField(default=False)
     renewal_date = models.DateField(null=True, blank=True)
+    # The flag stops NEW draft creation only — a draft prepared before the flag was
+    # set still flows through review/send/settle normally, so nothing already in
+    # flight is silently skipped.
+    billed_externally = models.BooleanField(
+        default=False,
+        help_text='Invoicing for this contract is handled directly in your billing '
+                  'system. The billing run will not prepare drafts for it.',
+    )
     notes = models.TextField(blank=True)
 
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='contracts_created')

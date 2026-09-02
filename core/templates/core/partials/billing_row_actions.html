@@ -4,7 +4,8 @@ Expects state, sale, is_due, prepare_url, next_url; invoice_ninja_enabled from
 the page context.
 {% endcomment %}
 <div class="btn-list justify-content-end">
-{% if state == 'not_prepared' %}
+{% if state == 'billed_externally' %}
+{% elif state == 'not_prepared' %}
     {% if is_due %}<form method="post" action="{{ prepare_url }}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-sm btn-primary">Prepare draft</button></form>{% endif %}
 {% elif state == 'prepared' %}
     <a href="{% url 'core:sale_detail' sale.pk %}" class="btn btn-sm">Review</a>

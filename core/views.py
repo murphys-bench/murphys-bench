@@ -3559,7 +3559,13 @@ class ContractBillingListView(SaleAccessMixin, ListView):
         prepared_unsent = 0
         for c in contracts:
             sale = sales.get(c.id)
-            state = _monthly_row_state(sale)
+            # A contract billed outside MB shows its own state instead of nagging
+            # "Not prepared" — but a draft that already exists (prepared before the
+            # flag was set) still shows its real state so it can be settled.
+            if c.billed_externally and sale is None:
+                state = 'billed_externally'
+            else:
+                state = _monthly_row_state(sale)
             is_due = c.is_billing_due(today)
             rows.append({
                 'contract': c,
@@ -3588,6 +3594,13 @@ class ContractBillingPrepareView(SaleAccessMixin, View):
 
     def post(self, request, pk):
         contract = get_object_or_404(Contract, pk=pk)
+        if contract.billed_externally:
+            messages.error(
+                request,
+                f'{contract.contract_number} is billed outside Murphy\'s Bench — '
+                'the billing run does not prepare drafts for it.',
+            )
+            return redirect('core:contract_billing_list')
         sale, _created = _prepare_contract_sale(contract, request.user)
         return redirect('core:sale_detail', pk=sale.pk)
 
@@ -3599,7 +3612,9 @@ class ContractBatchPrepareView(SaleAccessMixin, View):
     def post(self, request):
         today = timezone.localdate()
         prepared = 0
-        for contract in Contract.objects.filter(status='active', client__is_active=True):
+        for contract in Contract.objects.filter(
+            status='active', client__is_active=True, billed_externally=False,
+        ):
             if not contract.is_billing_due(today):
                 continue
             _sale, created = _prepare_contract_sale(contract, request.user, today)

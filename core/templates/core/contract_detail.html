@@ -11,7 +11,7 @@
             <div class="col">
                 <div class="page-pretitle">Service Agreement &middot; <a href="{% url 'core:client_detail' contract.client.pk %}">{{ contract.client.name }}</a></div>
                 <h2 class="page-title">{{ contract.title }} <span class="text-secondary ms-2">{{ contract.contract_number }}</span></h2>
-                <div class="text-secondary"><span class="status-dot me-1" style="--tblr-status-color: {% if contract.status == 'active' %}var(--tblr-green){% elif contract.status == 'draft' %}var(--tblr-secondary){% elif contract.status == 'expired' %}var(--tblr-yellow){% else %}var(--tblr-red){% endif %};"></span>{{ contract.get_status_display }} &middot; {{ contract.get_billing_cadence_display }}, invoice day {{ contract.billing_day }} &middot; ${{ contract.line_items_total|floatformat:2 }} per cycle</div>
+                <div class="text-secondary"><span class="status-dot me-1" style="--tblr-status-color: {% if contract.status == 'active' %}var(--tblr-green){% elif contract.status == 'draft' %}var(--tblr-secondary){% elif contract.status == 'expired' %}var(--tblr-yellow){% else %}var(--tblr-red){% endif %};"></span>{{ contract.get_status_display }} &middot; {{ contract.get_billing_cadence_display }}, invoice day {{ contract.billing_day }} &middot; ${{ contract.line_items_total|floatformat:2 }} per cycle{% if contract.billed_externally %} &middot; billed externally{% endif %}</div>
             </div>
             <div class="col-auto">
                 <div class="btn-group" role="group">
@@ -41,7 +41,7 @@
                     <div class="col-6 col-md-2"><div class="subheader">Auto-renew</div>{{ contract.auto_renew|yesno:"Yes,No" }}</div>
                     {% if contract.notes %}<div class="col-12"><div class="subheader">Notes</div><div style="white-space: pre-line;">{{ contract.notes }}</div></div>{% endif %}
                 </div>
-                <div class="text-secondary small mb-2">These lines are copied into each billing period's draft invoice. MB never auto-charges; the billing run produces a draft you settle.</div>
+                <div class="text-secondary small mb-2">{% if contract.billed_externally %}This contract is billed outside Murphy's Bench &mdash; the billing run does not prepare drafts for it. These lines record the agreed recurring charges.{% else %}These lines are copied into each billing period's draft invoice. MB never auto-charges; the billing run produces a draft you settle.{% endif %}</div>
                 <form class="collapse mb-3" id="cl-custom" method="post" action="{% url 'core:contract_line_custom' contract.pk %}" hx-post="{% url 'core:contract_line_custom' contract.pk %}" hx-target="#contract-line-items-section" hx-swap="innerHTML" data-mb-reset-after="#cl-custom">
                     {% csrf_token %}
                     <div class="row g-2">
