@@ -37,6 +37,9 @@ Tickets include:
 - threaded customer replies
 - internal notes
 - outbound HTML email with company branding and signatures
+- a formatting editor for email templates: bold, lists, clickable links, and buttons colored to your branding
+- multiple sending addresses with a default per kind of email (support, sales, receipts, reports)
+- file attachments on emails: standing files on a template, or one-off files when composing
 - automatic acknowledgements
 - collapsed quoted email history
 - standard and custom statuses

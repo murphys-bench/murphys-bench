@@ -1,0 +1,11 @@
+{% comment %}
+Formatting editor for an email body. Renders the hidden input that carries the
+HTML plus a Trix editor bound to it. Params:
+  name      — the form field name the HTML posts under
+  value     — the current HTML body
+  editor_id — unique per form on the page (ids collide otherwise)
+The page must load the trix assets + mb-email-editor.js in extra_head
+(settings.html and customer_email.html do).
+{% endcomment %}
+<input type="hidden" id="{{ editor_id }}" name="{{ name }}" value="{{ value }}">
+<trix-editor input="{{ editor_id }}" class="trix-content form-control mb-email-editor"></trix-editor>

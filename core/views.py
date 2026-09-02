@@ -35,7 +35,7 @@ from .models import (
     CannedResponseCategory, CannedResponse, Invoice,
     OrgCredential, CredentialAccessLog,
     DeviceCredentialAccessLog,
-    EmailTemplate, EmailSignature,
+    EmailTemplate, EmailSignature, SendingAddress,
     StatusDefinition,
     SuppressedAddress,
     BlockedSender,
@@ -2410,7 +2410,6 @@ class EstimateQuoteEmailView(EstimateAccessMixin, View):
             return redirect('core:estimate_detail', pk=pk)
 
         company = site.company_name or "Murphy's Bench"
-        sales_from = site.email_sales_from or site.email_from or None
         scope_snippet = f' — {estimate.scope[:60]}' if estimate.scope else ''
         cover = (
             f"Hello,\n\nPlease find attached your quote {estimate.estimate_number}{scope_snippet}.\n\n"
@@ -2420,8 +2419,7 @@ class EstimateQuoteEmailView(EstimateAccessMixin, View):
             to_email,
             subject=f"{company}: Quote {estimate.estimate_number}",
             cover_body=cover,
-            from_email=sales_from,
-            reply_to=sales_from,
+            kind='quotes',
             attachments=[(f'Quote-{estimate.estimate_number}.pdf', pdf_bytes, 'application/pdf')],
             client=estimate.client,
             contact=contact,
@@ -6416,7 +6414,6 @@ class SaleReceiptEmailView(SaleAccessMixin, View):
             return redirect('core:sale_detail', pk=pk)
 
         company = site.company_name or "Murphy's Bench"
-        sales_from = site.email_sales_from or site.email_from or None
         cover = (
             f"Hello,\n\nThank you for your business. Please find attached your receipt "
             f"{sale.sale_number} for ${sale.amount or 0}.\n\n{company}"
@@ -6425,8 +6422,7 @@ class SaleReceiptEmailView(SaleAccessMixin, View):
             to_email,
             subject=f"{company}: Receipt {sale.sale_number}",
             cover_body=cover,
-            from_email=sales_from,
-            reply_to=sales_from,
+            kind='receipts',
             attachments=[(f'Receipt-{sale.sale_number}.pdf', pdf_bytes, 'application/pdf')],
             client=sale.client,
             contact=contact,
@@ -7034,6 +7030,7 @@ class WorkOrderReportEmailView(LoginRequiredMixin, View):
             to_email,
             subject=f"{company}: Repair Report {wo.work_order_number}",
             cover_body=cover,
+            kind='reports',
             attachments=[(f'Repair-Report-{wo.work_order_number}.pdf', pdf_bytes, 'application/pdf')],
             client=wo.client,
             contact=contact,
@@ -7305,7 +7302,8 @@ class EmailTestOutboundView(SettingsAdminMixin, View):
         own = (getattr(request.user, 'email', '') or '').strip()
         if own:
             return own
-        return (s.email_from or s.email_username or '').strip() or None
+        default = SendingAddress.get_default()
+        return ((default.email if default else '') or s.email_username or '').strip() or None
 
     def post(self, request):
         import smtplib, ssl
@@ -7324,7 +7322,8 @@ class EmailTestOutboundView(SettingsAdminMixin, View):
         try:
             msg = MIMEText("This is a test email from Murphy's Bench. Your outbound email is working correctly.")
             msg['Subject'] = "Murphy's Bench — Outbound Email Test"
-            msg['From'] = s.email_from or s.email_username
+            default = SendingAddress.get_default()
+            msg['From'] = (default.from_header if default else '') or s.email_username
             msg['To'] = to_addr
             ctx = ssl.create_default_context()
             # Port 465 = implicit SSL (SMTP_SSL); port 587 = STARTTLS
@@ -7684,6 +7683,8 @@ class SettingsView(SettingsAdminMixin, View):
             ctx.update(_kb_categories_context())
         if active_tab == 'outbound':
             ctx['suppressed_addresses'] = SuppressedAddress.objects.all()
+            ctx['sending_addresses'] = SendingAddress.objects.all()
+            ctx['default_sending_address'] = SendingAddress.get_default()
         if active_tab == 'inbound':
             ctx['blocked_senders'] = BlockedSender.objects.all()
         if active_tab == 'sla_plans':
@@ -7705,17 +7706,25 @@ class SettingsView(SettingsAdminMixin, View):
             ctx.update(_log_search_context(self.request))
         if active_tab == 'email_templates':
             # Ensure all 4 trigger templates exist
+            from .email_html import text_to_html
             for trigger, _ in EmailTemplate.TRIGGER_CHOICES:
                 EmailTemplate.objects.get_or_create(
                     trigger=trigger,
                     defaults={
                         'subject_template': '[{{{{ ticket.ticket_number }}}}] {{{{ ticket.subject }}}}',
-                        'body_template': 'Hi {{{{ customer_name }}}},\n\nYour ticket {{{{ ticket.ticket_number }}}} has been updated.\n\nThank you,\n{{{{ tech_name }}}}',
+                        'body_template': text_to_html('Hi {{{{ customer_name }}}},\n\nYour ticket {{{{ ticket.ticket_number }}}} has been updated.\n\nThank you,\n{{{{ tech_name }}}}'),
                         'is_active': False,
                     }
                 )
-            ctx['email_templates'] = EmailTemplate.objects.filter(trigger__isnull=False).select_related('signature')
-            ctx['custom_templates'] = EmailTemplate.objects.filter(trigger__isnull=True).select_related('signature').order_by('name')
+            ctx['email_templates'] = list(EmailTemplate.objects.filter(trigger__isnull=False).select_related('signature'))
+            ctx['custom_templates'] = list(EmailTemplate.objects.filter(trigger__isnull=True).select_related('signature').order_by('name'))
+            # Standing attachments per template, for the rows below.
+            tmpl_ct = ContentType.objects.get_for_model(EmailTemplate)
+            atts_by_tmpl = {}
+            for att in Attachment.objects.filter(content_type=tmpl_ct):
+                atts_by_tmpl.setdefault(att.object_id, []).append(att)
+            for tmpl in ctx['email_templates'] + ctx['custom_templates']:
+                tmpl.standing_attachments = atts_by_tmpl.get(tmpl.pk, [])
             ctx['email_signatures'] = EmailSignature.objects.all()
             from .forms import EmailBrandingForm
             from .email_utils import _email_header_color
@@ -7750,6 +7759,17 @@ class SettingsView(SettingsAdminMixin, View):
                         f'config until this is fixed and settings are saved again.',
                     )
                 return redirect(f"{request.path}?tab=maintenance")
+            if tab == 'outbound' and not SendingAddress.objects.exists():
+                # First save with an empty address list: seed the default from
+                # the company email so outgoing mail always has a real,
+                # editable From — never a hardcoded one.
+                seed = (SiteSettings.get().company_email or '').strip()
+                if seed:
+                    SendingAddress.objects.create(
+                        display_name=SiteSettings.get().company_name or '',
+                        email=seed, is_default=True)
+                    messages.info(request, f'Added {seed} as the default sending address '
+                                           f'(from Company Info). Edit it below.')
             messages.success(request, 'Settings saved.')
             return redirect(f"{request.path}?tab={tab}")
 
@@ -7775,6 +7795,12 @@ class SettingsView(SettingsAdminMixin, View):
             ctx.update(_checklist_items_context())
         if tab == 'display':
             ctx.update(_display_context())
+        if tab == 'outbound':
+            # Same extras the GET renders, so an invalid save doesn't blank the
+            # address and suppression cards.
+            ctx['suppressed_addresses'] = SuppressedAddress.objects.all()
+            ctx['sending_addresses'] = SendingAddress.objects.all()
+            ctx['default_sending_address'] = SendingAddress.get_default()
         if active_tab == 'maintenance':
             ctx.update(_maintenance_context())
         return render(request, 'core/settings.html', ctx)
@@ -8505,12 +8531,24 @@ class EmailTemplateUpdateView(SettingsAdminMixin, View):
             tmpl.name = request.POST.get('name').strip()
         if tmpl.is_custom:
             tmpl.quick_send = request.POST.get('quick_send') == '1'
+        from .email_html import sanitize
         tmpl.subject_template = request.POST.get('subject_template', tmpl.subject_template).strip()
-        tmpl.body_template = request.POST.get('body_template', tmpl.body_template).strip()
+        if 'body_template' in request.POST:
+            tmpl.body_template = sanitize(request.POST['body_template'].strip())
+            tmpl.body_format = 'html'
         tmpl.is_active = request.POST.get('is_active') == '1'
         sig_id = request.POST.get('signature')
         tmpl.signature_id = int(sig_id) if sig_id else None
         tmpl.save()
+        # Standing attachments ride every send of this template. Same
+        # validation as every other upload (_save_attachments); name what
+        # was refused instead of skipping silently.
+        files = request.FILES.getlist('attachments')
+        if files:
+            saved = _save_attachments(request, tmpl)
+            refused = {f.name for f in files} - {a.original_filename for a in saved}
+            if refused:
+                messages.warning(request, f'Not attached (blocked type or too large): {", ".join(sorted(refused))}.')
         messages.success(request, f'Email template "{tmpl.label}" saved.')
         return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
 
@@ -8526,8 +8564,9 @@ class EmailSignatureCreateView(SettingsAdminMixin, View):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
+        from .email_html import sanitize
         name = request.POST.get('name', '').strip()
-        body = request.POST.get('body', '').strip()
+        body = sanitize(request.POST.get('body', '').strip())
         is_default = request.POST.get('is_default') == '1'
         if name and body:
             sig = EmailSignature(name=name, body=body, is_default=is_default)
@@ -8541,9 +8580,12 @@ class EmailSignatureUpdateView(SettingsAdminMixin, View):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
+        from .email_html import sanitize
         sig = get_object_or_404(EmailSignature, pk=pk)
         sig.name = request.POST.get('name', sig.name).strip()
-        sig.body = request.POST.get('body', sig.body).strip()
+        if 'body' in request.POST:
+            sig.body = sanitize(request.POST['body'].strip())
+            sig.body_format = 'html'
         sig.is_default = request.POST.get('is_default') == '1'
         sig.save()
         messages.success(request, f'Signature "{sig.name}" saved.')
@@ -8560,6 +8602,48 @@ class EmailSignatureDeleteView(SettingsAdminMixin, View):
         sig.delete()
         messages.success(request, f'Signature "{name}" deleted.')
         return redirect(_sig_redirect())
+
+
+def _outbound_redirect():
+    return f"{reverse('core:settings')}?tab=outbound"
+
+
+class SendingAddressSaveView(SettingsAdminMixin, View):
+    """Settings: create (no pk) or update (pk) one sending address."""
+
+    def post(self, request, pk=None):
+        from .forms import SendingAddressForm
+        instance = get_object_or_404(SendingAddress, pk=pk) if pk else None
+        form = SendingAddressForm(request.POST, instance=instance)
+        if form.is_valid():
+            addr = form.save()
+            messages.success(request, f'Sending address {addr.email} saved.')
+        else:
+            errs = '; '.join(f'{field}: {errors[0]}' for field, errors in form.errors.items())
+            messages.error(request, f'Sending address not saved. {errs}')
+        return redirect(_outbound_redirect())
+
+
+class SendingAddressDeleteView(SettingsAdminMixin, View):
+    def post(self, request, pk):
+        addr = get_object_or_404(SendingAddress, pk=pk)
+        if addr.is_default and SendingAddress.objects.exclude(pk=pk).exists():
+            messages.error(request, f'{addr.email} is the default sending address. '
+                                    f'Make another address the default first.')
+            return redirect(_outbound_redirect())
+        email = addr.email
+        addr.delete()
+        messages.success(request, f'Sending address {email} deleted.')
+        return redirect(_outbound_redirect())
+
+
+class SendingAddressMakeDefaultView(SettingsAdminMixin, View):
+    def post(self, request, pk):
+        addr = get_object_or_404(SendingAddress, pk=pk)
+        addr.is_default = True
+        addr.save()
+        messages.success(request, f'{addr.email} is now the default sending address.')
+        return redirect(_outbound_redirect())
 
 
 class EmailBrandingUpdateView(SettingsAdminMixin, View):
@@ -9125,17 +9209,24 @@ def _resolve_desk_context(request):
     """
     src = request.POST if request.method == 'POST' else request.GET
 
-    def _get(model, key):
+    def _get(model, key, scoped_getter=None):
         raw = src.get(key)
         if not raw:
             return None
         try:
-            return get_object_or_404(model, pk=int(raw))
+            pk = int(raw)
         except (TypeError, ValueError):
             raise _ConflictingContext(f'bad {key}')
+        if scoped_getter is not None:
+            return scoped_getter(request, pk)
+        return get_object_or_404(model, pk=pk)
 
-    work_order = _get(WorkOrder, 'work_order')
-    ticket = _get(Ticket, 'ticket')
+    # Ticket and work-order ids go through the same visibility scoping as
+    # every other route: a tech must not be able to render or send an email
+    # against a record they cannot otherwise see. (Review round 1, an
+    # inherited gap: this resolver used bare pk lookups since it was built.)
+    work_order = _get(WorkOrder, 'work_order', _get_scoped_wo_or_404)
+    ticket = _get(Ticket, 'ticket', _get_scoped_ticket_or_404)
     client = _get(Client, 'client')
     prospect = _get(Prospect, 'prospect')
 
@@ -9345,6 +9436,11 @@ class CustomerEmailView(LoginRequiredMixin, View):
             try:
                 subject, body = render_email_template(chosen, email_context(
                     client=who, contact=default_contact, ticket=ticket, work_order=work_order, user=request.user))
+                if chosen.body_format != 'html':
+                    # An unconverted legacy body renders plain; the editor
+                    # needs HTML, so convert what it is handed.
+                    from .email_html import text_to_html
+                    body = text_to_html(body)
             except Exception:
                 render_error = 'This template has a syntax error; fix it in Settings, Email Templates.'
         return {
@@ -9388,18 +9484,40 @@ class CustomerEmailView(LoginRequiredMixin, View):
             return render(request, self.template_name, ctx)
         subject = (request.POST.get('subject') or '').strip()
         body = request.POST.get('body') or ''
-        if not subject or not body.strip():
+        from django.utils.html import strip_tags
+        if not subject or not strip_tags(body).strip():
+            # The editor posts markup; an empty document is still markup.
             messages.error(request, 'Subject and body cannot be empty.')
+            return render(request, self.template_name, ctx)
+        # One-off attachments for this send. A person chose these files, so a
+        # refused one refuses the send rather than quietly going without it.
+        extra = []
+        refused = []
+        site = SiteSettings.get()
+        max_bytes = site.max_attachment_size_mb * 1024 * 1024
+        blocked = site.get_blocked_extensions()
+        for f in request.FILES.getlist('attachments'):
+            ext = f.name.rsplit('.', 1)[-1].lower() if '.' in f.name else ''
+            if ext in blocked or f.size > max_bytes:
+                refused.append(f.name)
+                continue
+            extra.append((f.name, f.read(), f.content_type or 'application/octet-stream'))
+        if refused:
+            messages.error(request, f'Not sent. Attachment refused (blocked type or over '
+                                    f'{site.max_attachment_size_mb} MB): {", ".join(refused)}.')
             return render(request, self.template_name, ctx)
         who = ctx['client'] or ctx['prospect']
         log = send_custom_email(chosen, to_email=to_email, client=who, contact=contact,
                                 ticket=ctx['ticket'], work_order=ctx['work_order'], user=request.user,
-                                subject=subject, body=body)
+                                subject=subject, body=body, extra_attachments=extra)
         if log.status == 'sent':
             messages.success(request, f'Sent "{subject}" to {to_email}.')
             if ctx['ticket'] is not None:
+                sent_note = f'Emailed {to_email}: {subject}'
+                if extra:
+                    sent_note += ' (attached: ' + ', '.join(name for name, _, _ in extra) + ')'
                 TicketReply.objects.create(ticket=ctx['ticket'], reply_type='internal', created_by=request.user,
-                                           content=f'Emailed {to_email}: {subject}')
+                                           content=sent_note)
             return redirect(ctx['back_url'])
         reason = dict(log.REASON_CHOICES).get(log.reason, log.reason)
         messages.error(request, f'Not sent: {reason}. {log.detail}'.strip())
@@ -9414,16 +9532,92 @@ class EmailTemplateCreateView(SettingsAdminMixin, View):
         if not name:
             messages.error(request, 'Give the template a name.')
             return redirect(f"{reverse('core:settings')}?tab=email_templates")
+        from .email_html import sanitize, text_to_html
         sig_id = request.POST.get('signature')
+        body = sanitize((request.POST.get('body_template') or '').strip())
         EmailTemplate.objects.create(
             name=name,
             subject_template=(request.POST.get('subject_template') or '').strip() or '{{ site_name }}: a note about your recent service',
-            body_template=(request.POST.get('body_template') or '').strip() or 'Hi {{ customer_name }},\n\n\n\nThank you,\n{{ tech_name }}',
+            body_template=body or text_to_html('Hi {{ customer_name }},\n\n\n\nThank you,\n{{ tech_name }}'),
             signature_id=int(sig_id) if sig_id else None, is_active=True,
             quick_send=request.POST.get('quick_send') == '1',
         )
         messages.success(request, f'Email template "{name}" added.')
         return redirect(f"{reverse('core:settings')}?tab=email_templates")
+
+
+class EmailTemplateAttachmentDeleteView(SettingsAdminMixin, View):
+    """Settings: remove one standing attachment from an email template. Scoped
+    to template-owned attachments only — this route must not be able to touch
+    a ticket's or work order's files."""
+
+    def post(self, request, pk):
+        ct = ContentType.objects.get_for_model(EmailTemplate)
+        att = get_object_or_404(Attachment, pk=pk, content_type=ct)
+        name = att.original_filename
+        att.file.delete(save=False)
+        att.delete()
+        messages.success(request, f'Removed "{name}" from the template.')
+        return redirect(f"{reverse('core:settings')}?tab=email_templates")
+
+
+class EmailTemplateTestSendView(SettingsAdminMixin, View):
+    """Settings: send one template to the acting admin's own address, sample
+    values filled in, so its rendering can be checked in a real inbox. The
+    recipient is fixed server-side (never read from the request body) — the
+    same reasoning as the outbound email test."""
+
+    def post(self, request, pk):
+        from types import SimpleNamespace
+        from .email_utils import (render_email_template, _compose_email_bodies,
+                                  _rendered_signature, _build_html_email,
+                                  _smtp_send, sending_address_for)
+        from .models import EmailSignature, EmailSendLog
+        tmpl = get_object_or_404(EmailTemplate, pk=pk)
+        site = SiteSettings.get()
+        back = redirect(f"{reverse('core:settings')}?tab=email_templates")
+        to_email = (request.user.email or '').strip()
+        if not to_email:
+            messages.error(request, 'Your user account has no email address to send the test to.')
+            return back
+        if not site.email_enabled:
+            messages.error(request, 'Outbound email is disabled (Settings, Outbound Email).')
+            return back
+        ctx = {
+            'ticket': SimpleNamespace(ticket_number='TKT-00000', subject='A sample ticket',
+                                      get_status_display='In Progress'),
+            'client': SimpleNamespace(name='Sample Client'),
+            'contact': SimpleNamespace(first_name='Sam', last_name='Sample', email=to_email),
+            'customer_name': 'Sam',
+            'tech_name': request.user.get_full_name() or request.user.username,
+            'status': 'In Progress',
+            'site_name': site.company_name or "Murphy's Bench",
+        }
+        try:
+            subject, body = render_email_template(tmpl, ctx)
+        except Exception:
+            messages.error(request, f'"{tmpl.label}" has a syntax error; fix the template and try again.')
+            return back
+        sig_obj = tmpl.signature or EmailSignature.objects.filter(is_default=True).first()
+        sig_body, sig_is_html = _rendered_signature(sig_obj)
+        email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
+            body, tmpl.body_format == 'html', sig_body, sig_is_html, site)
+        html_body, logo_data, logo_mime = _build_html_email(
+            email_body, sig_email, subject, None, site,
+            body_is_html=body_is_html, signature_is_html=sig_is_html)
+        kind = 'ticket_events' if tmpl.trigger else 'customer_emails'
+        status, reason, detail = _smtp_send(
+            site, f'[TEST] {subject}', plain_body, html_body, logo_data, logo_mime,
+            to_email, label=f'test template {tmpl.pk}',
+            sender=sending_address_for(site, kind))
+        EmailSendLog.objects.create(ticket=None, to_email=to_email, trigger='test:template',
+                                    status=status, reason=reason, detail=detail)
+        if status == 'sent':
+            messages.success(request, f'Test of "{tmpl.label}" sent to {to_email}.')
+        else:
+            messages.error(request, f'Test send failed: {detail or reason}. '
+                                    f'Check Outbound Email settings and the logs.')
+        return back
 
 
 class EmailTemplateDeleteView(SettingsAdminMixin, View):
@@ -9434,6 +9628,13 @@ class EmailTemplateDeleteView(SettingsAdminMixin, View):
         if not tmpl.is_custom:
             messages.error(request, 'Event templates stay; turn one off instead.')
         else:
+            # Standing attachments are GenericFK rows, so nothing cascades:
+            # without this they would survive as orphaned private files with
+            # no UI owner. Files first, then rows, then the template.
+            ct = ContentType.objects.get_for_model(EmailTemplate)
+            for att in Attachment.objects.filter(content_type=ct, object_id=tmpl.pk):
+                att.file.delete(save=False)
+                att.delete()
             tmpl.delete()
             messages.success(request, f'Email template "{tmpl.name}" deleted.')
         return redirect(f"{reverse('core:settings')}?tab=email_templates")

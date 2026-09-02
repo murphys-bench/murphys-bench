@@ -203,6 +203,10 @@ urlpatterns = [
     path('my-security/', views.MySecurityView.as_view(), name='my_security'),
     path('settings/', views.SettingsView.as_view(), name='settings'),
     path('settings/test-outbound-email/', views.EmailTestOutboundView.as_view(), name='settings_test_outbound'),
+    path('settings/sending-addresses/add/', views.SendingAddressSaveView.as_view(), name='sending_address_add'),
+    path('settings/sending-addresses/<int:pk>/edit/', views.SendingAddressSaveView.as_view(), name='sending_address_edit'),
+    path('settings/sending-addresses/<int:pk>/delete/', views.SendingAddressDeleteView.as_view(), name='sending_address_delete'),
+    path('settings/sending-addresses/<int:pk>/make-default/', views.SendingAddressMakeDefaultView.as_view(), name='sending_address_make_default'),
     path('settings/suppressed-addresses/add/', views.SuppressedAddressAddView.as_view(), name='suppressed_address_add'),
     path('settings/suppressed-addresses/<int:pk>/delete/', views.SuppressedAddressDeleteView.as_view(), name='suppressed_address_delete'),
     path('settings/blocked-senders/add/', views.BlockedSenderAddView.as_view(), name='blocked_sender_add'),
@@ -266,6 +270,8 @@ urlpatterns = [
     path('settings/email-templates/<int:pk>/edit/', views.EmailTemplateUpdateView.as_view(), name='email_template_update'),
     path('settings/email-templates/new/', views.EmailTemplateCreateView.as_view(), name='email_template_create'),
     path('settings/email-templates/<int:pk>/delete/', views.EmailTemplateDeleteView.as_view(), name='email_template_delete'),
+    path('settings/email-templates/<int:pk>/test-send/', views.EmailTemplateTestSendView.as_view(), name='email_template_test_send'),
+    path('settings/email-templates/attachments/<int:pk>/delete/', views.EmailTemplateAttachmentDeleteView.as_view(), name='email_template_attachment_delete'),
     path('settings/email-branding/save/', views.EmailBrandingUpdateView.as_view(), name='email_branding_save'),
 
     # Settings — Email Signatures

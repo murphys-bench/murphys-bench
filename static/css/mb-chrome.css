@@ -57,3 +57,12 @@ body[data-room="work"]     { --mb-room: var(--tblr-primary); }
 [data-bs-theme="dark"] .page-title, [data-bs-theme="dark"] .card-title, [data-bs-theme="dark"] .empty-title { color: #f1f5f9; }
 [data-bs-theme="dark"] .badge.bg-secondary-lt { color: #d5dbe5; }
 [data-bs-theme="dark"] .list-group-item-action { color: #e2e8f0; }
+
+/* ── Email body editor (Trix) ────────────────────────────────────────────── */
+/* Trix ships light-only toolbar icons; invert them on the dark surface. The
+ * editing surface itself rides .form-control, which Tabler themes. */
+[data-bs-theme="dark"] trix-toolbar .trix-button--icon { filter: invert(0.85); }
+[data-bs-theme="dark"] trix-toolbar .trix-button { color: #e2e8f0; }
+[data-bs-theme="dark"] trix-toolbar .trix-button-group { border-color: #3a4352; }
+.mb-email-editor { min-height: 10rem; }
+trix-toolbar .trix-button-group { margin-bottom: 4px; }
