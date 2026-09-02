@@ -8,6 +8,12 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## v0.15.1 — 2026-08-27
+
+### Fixed
+
+- Backup settings could not be saved on v0.14.0/v0.15.0: the Save and Test buttons did nothing, and "Run backup now" showed field errors and turned the destination toggles off. Saved settings and scheduled backups were unaffected.
+
 ## v0.15.0 — 2026-08-26
 
 The shop hears about work, and the follow-up is one click. Four outside-review rounds before merge.
