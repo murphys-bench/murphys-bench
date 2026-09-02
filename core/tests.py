@@ -9119,6 +9119,16 @@ def test_pulled_mirror_line_items_locked_at_route(client, client_obj, admin_user
     assert r.status_code == 403
     line.refresh_from_db()
     assert line.description == 'Managed' and line.unit_price == 25
+    # Round 2 finding: the sale-specific ADD routes must refuse too, not just
+    # the shared update/delete routes.
+    from core.models import CatalogItem
+    r = client.post(reverse('core:sale_custom_log', args=[sale.pk]),
+                    {'custom_label': 'Injected line', 'kind': 'part', 'unit_price': '5'})
+    assert r.status_code == 403
+    item = CatalogItem.objects.create(name='Tune-up', item_type='service')
+    r = client.post(reverse('core:sale_labor_log', args=[sale.pk, item.pk]))
+    assert r.status_code == 403
+    assert sale.line_items.count() == 1  # still only the original mirrored line
 
 
 @pytest.mark.django_db

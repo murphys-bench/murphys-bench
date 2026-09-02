@@ -3090,6 +3090,9 @@ class SaleLaborLogView(SaleAccessMixin, View):
 
     def post(self, request, sale_pk, item_pk):
         sale = get_object_or_404(Sale, pk=sale_pk)
+        # Same guard as the shared update/delete routes — a locked sale (completed,
+        # void, or a pulled IN mirror) takes no new lines either.
+        _guard_line_host(request, sale)
         item = get_object_or_404(CatalogItem, pk=item_pk, is_active=True)
         _log_catalog_item(sale, item, request.user)
         return _render_line_items(request, sale)
@@ -3100,6 +3103,7 @@ class SaleCustomLogView(SaleAccessMixin, View):
 
     def post(self, request, sale_pk):
         sale = get_object_or_404(Sale, pk=sale_pk)
+        _guard_line_host(request, sale)
         label = request.POST.get('custom_label', '').strip()
         notes = request.POST.get('notes', '').strip()
         kind = request.POST.get('kind', 'part')
@@ -3862,7 +3866,7 @@ class ContractPullINView(SaleAccessMixin, View):
         if pulled:
             messages.success(request, f'Pulled {pulled} invoice{"s" if pulled != 1 else ""} in from Invoice Ninja.')
         if skipped_race:
-            messages.warning(request, f'{skipped_race} contract{"s" if skipped_race != 1 else ""} already had a record for this period.')
+            messages.warning(request, f'{skipped_race} contract{"s" if skipped_race != 1 else ""} skipped: a record for the period already existed, or the invoice was already linked.')
         if not pulled and not skipped_race:
             messages.info(request, 'Nothing was pulled in.')
         return redirect('core:contract_billing_list')
