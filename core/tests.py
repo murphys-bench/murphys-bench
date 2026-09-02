@@ -5680,6 +5680,7 @@ def test_push_sale_walkin_creates_and_caches_client(monkeypatch):
         return s
 
     calls = []
+    invoice_seq = iter(range(999, 2000))
     def fake_request(method, path, *, params=None, json=None):
         calls.append((method, path))
         if path == '/clients' and method == 'GET':
@@ -5687,7 +5688,10 @@ def test_push_sale_walkin_creates_and_caches_client(monkeypatch):
         if path == '/clients' and method == 'POST':
             return {'data': {'id': 500}}              # create Walk-In
         if path == '/invoices':
-            return {'data': {'id': 999, 'number': 'INV-9'}}
+            # Distinct id per created invoice — real IN never reissues one, and
+            # uniq_sale_invoice_ninja_id (rightly) refuses a duplicate.
+            n = next(invoice_seq)
+            return {'data': {'id': n, 'number': f'INV-{n}'}}
         return {'data': {'id': 1}}
     monkeypatch.setattr(invoice_ninja, '_request', fake_request)
 
@@ -9617,6 +9621,296 @@ def test_contract_billing_list_renders(client, client_obj, admin_user):
     r = client.get(reverse('core:contract_billing_list'))
     assert r.status_code == 200
     assert b'Contract Billing' in r.content
+
+
+# ── Pull from IN (Sep 2026) ──────────────────────────────────────────────
+# The manual step after a billing cycle: mirror invoices IN's own recurring
+# engine generated into MB, so the worklist reflects them instead of preparing
+# a duplicate. Read-only toward IN; the operator confirms every match; a posted
+# invoice id the server did not itself verify as a candidate is never linked.
+# All tests run against a mocked IN — no live calls.
+
+def _pull_in_setup(client_obj, monkeypatch, invoices):
+    """Enable IN, link the MB client to an IN client, and serve `invoices` from
+    the mocked list read."""
+    from core import invoice_ninja
+    from core.models import SiteSettings
+    s = SiteSettings.get()
+    s.invoice_ninja_enabled = True
+    s.save()
+    client_obj.invoice_ninja_id = 'inclient-1'
+    client_obj.save(update_fields=['invoice_ninja_id'])
+
+    def fake_request(method, path, *, params=None, json=None):
+        assert method == 'GET' and path == '/invoices'
+        return {'data': invoices}
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+
+
+def _in_invoice(inv_id, number, date_str, amount, status_id=2, line_items=None):
+    return {'id': inv_id, 'number': number, 'date': date_str, 'amount': amount,
+            'status_id': status_id, 'is_deleted': False,
+            'line_items': line_items if line_items is not None else []}
+
+
+@pytest.mark.django_db
+def test_pull_in_lists_only_this_periods_unlinked_invoices(client, client_obj, admin_user, monkeypatch):
+    from django.utils import timezone
+    from core.models import Sale
+    today = timezone.localdate()
+    in_period = today.replace(day=15).isoformat()
+    Contract.objects.create(client=client_obj, title='IN-billed', status='active',
+                            billing_cadence='monthly', billing_day=1)
+    # An old invoice already mirrored in MB must not be offered again.
+    Sale.objects.create(client=client_obj, invoice_ninja_id='inv-linked')
+    _pull_in_setup(client_obj, monkeypatch, [
+        _in_invoice('inv-new', '2001', in_period, 25),
+        _in_invoice('inv-old', '1901', '2020-01-15', 25),
+        _in_invoice('inv-linked', '1999', in_period, 25),
+    ])
+    client.force_login(admin_user)
+    r = client.get(reverse('core:contract_billing_pull_in'))
+    assert r.status_code == 200
+    row = r.context['rows'][0]
+    assert [c['id'] for c in row['candidates']] == ['inv-new']
+
+
+@pytest.mark.django_db
+def test_pull_in_post_creates_linked_mirror_sale(client, client_obj, admin_user, monkeypatch):
+    from django.utils import timezone
+    from core.models import Sale
+    from core.views import _monthly_row_state
+    today = timezone.localdate()
+    contract = Contract.objects.create(client=client_obj, title='IN-billed', status='active',
+                                       billing_cadence='monthly', billing_day=1)
+    _pull_in_setup(client_obj, monkeypatch, [
+        _in_invoice('inv-9', '2009', today.isoformat(), 25, status_id=4,
+                    line_items=[{'product_key': 'Residential Essential', 'notes': '', 'quantity': 1, 'cost': 25}]),
+    ])
+    client.force_login(admin_user)
+    r = client.post(reverse('core:contract_billing_pull_in'), {f'contract_{contract.pk}': 'inv-9'}, follow=True)
+    sale = Sale.objects.get(contract=contract)
+    assert sale.pulled_from_in is True
+    assert sale.is_locked  # a mirror is read-only in MB
+    assert sale.invoice_ninja_id == 'inv-9'
+    assert sale.invoice_ninja_ref == '2009'
+    assert sale.billing_period == contract.period_key(today)
+    assert sale.in_status == 'Paid'
+    assert _monthly_row_state(sale) == 'paid'
+    lines = list(sale.line_items.all())
+    assert len(lines) == 1 and lines[0].description == 'Residential Essential'
+    assert lines[0].line_total == 25
+    assert b'Pulled 1 invoice' in r.content
+
+
+@pytest.mark.django_db
+def test_pull_in_post_refuses_unverified_invoice_id(client, client_obj, admin_user, monkeypatch):
+    """A posted invoice id the server did not itself list as a candidate (out of
+    period here, but the same guard covers any forged id) is never linked."""
+    from core.models import Sale
+    contract = Contract.objects.create(client=client_obj, title='IN-billed', status='active',
+                                       billing_cadence='monthly', billing_day=1)
+    _pull_in_setup(client_obj, monkeypatch, [
+        _in_invoice('inv-out', '1900', '2020-01-15', 25),
+    ])
+    client.force_login(admin_user)
+    client.post(reverse('core:contract_billing_pull_in'), {f'contract_{contract.pk}': 'inv-out'})
+    assert Sale.objects.filter(contract=contract).count() == 0
+
+
+@pytest.mark.django_db
+def test_pull_in_skips_contract_that_already_has_a_period_record(client, client_obj, admin_user, monkeypatch):
+    from core.views import _prepare_contract_sale
+    contract = Contract.objects.create(client=client_obj, title='IN-billed', status='active',
+                                       billing_cadence='monthly', billing_day=1)
+    contract.line_items.create(kind='labor', description='X', quantity=1, unit_price=25)
+    _prepare_contract_sale(contract, admin_user)
+    _pull_in_setup(client_obj, monkeypatch, [])
+    client.force_login(admin_user)
+    r = client.get(reverse('core:contract_billing_pull_in'))
+    assert all(row['contract'].pk != contract.pk for row in r.context['rows'])
+
+
+@pytest.mark.django_db
+def test_pull_in_unlinked_client_makes_no_api_call(client, client_obj, admin_user, monkeypatch):
+    from core import invoice_ninja
+    from core.models import SiteSettings
+    s = SiteSettings.get()
+    s.invoice_ninja_enabled = True
+    s.save()
+    Contract.objects.create(client=client_obj, title='IN-billed', status='active',
+                            billing_cadence='monthly', billing_day=1)
+    monkeypatch.setattr(invoice_ninja, '_request',
+                        lambda *a, **k: pytest.fail('should not call the IN API for an unlinked client'))
+    client.force_login(admin_user)
+    r = client.get(reverse('core:contract_billing_pull_in'))
+    assert r.status_code == 200
+    assert r.context['rows'][0]['in_linked'] is False
+
+
+@pytest.mark.django_db
+def test_pull_in_requires_invoice_ninja_enabled(client, client_obj, admin_user):
+    client.force_login(admin_user)
+    r = client.get(reverse('core:contract_billing_pull_in'), follow=True)
+    assert b'not enabled' in r.content
+
+
+@pytest.mark.django_db
+def test_pull_in_one_invoice_cannot_link_two_contracts(client, client_obj, admin_user, monkeypatch):
+    """Review round 1 P1: two active contracts on one client, one unlinked
+    invoice. Neither row may preselect it, and a POST choosing it for both must
+    link it exactly once, refusing the second loudly."""
+    from django.utils import timezone
+    from core.models import Sale
+    today = timezone.localdate()
+    c1 = Contract.objects.create(client=client_obj, title='A', status='active',
+                                 billing_cadence='monthly', billing_day=1)
+    c2 = Contract.objects.create(client=client_obj, title='B', status='active',
+                                 billing_cadence='monthly', billing_day=1)
+    _pull_in_setup(client_obj, monkeypatch, [_in_invoice('inv-1', '3001', today.isoformat(), 25)])
+    client.force_login(admin_user)
+    r = client.get(reverse('core:contract_billing_pull_in'))
+    for row in r.context['rows']:
+        assert row['preselect_id'] is None  # shared candidate: both rows start on Skip
+    r = client.post(reverse('core:contract_billing_pull_in'),
+                    {f'contract_{c1.pk}': 'inv-1', f'contract_{c2.pk}': 'inv-1'}, follow=True)
+    assert Sale.objects.filter(invoice_ninja_id='inv-1').count() == 1
+    assert b'already linked to another contract in this pull run' in r.content
+
+
+@pytest.mark.django_db
+def test_sale_invoice_ninja_id_unique_at_database(client_obj):
+    """The DB refuses two MB sales mirroring/pushing the same IN invoice; blank
+    ids (never pushed) do not collide."""
+    from django.db import IntegrityError, transaction
+    from core.models import Sale
+    Sale.objects.create(client=client_obj, invoice_ninja_id='inv-dup')
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            Sale.objects.create(client=client_obj, invoice_ninja_id='inv-dup')
+    Sale.objects.create(client=client_obj)
+    Sale.objects.create(client=client_obj)  # two blanks coexist fine
+
+
+def _make_pulled_mirror(client_obj, admin_user):
+    from core.models import Contract as Ct, Sale
+    contract = Ct.objects.create(client=client_obj, title='IN-billed', status='active',
+                                 billing_cadence='monthly', billing_day=1)
+    sale = Sale.objects.create(
+        client=client_obj, is_recurring=True, contract=contract, pulled_from_in=True,
+        billing_period='2026-09', created_by=admin_user,
+        invoice_ninja_id='inv-mirror', invoice_ninja_ref='4001', in_status='Sent',
+    )
+    sale.line_items.create(kind='labor', description='Managed', quantity=1,
+                           unit_price=25, logged_by=admin_user)
+    return sale
+
+
+@pytest.mark.django_db
+def test_pulled_mirror_refuses_mb_originated_in_actions(client, client_obj, admin_user, monkeypatch):
+    """Review round 1 P1: a pulled mirror stays read-only toward IN. Re-send,
+    charge, and checkout are all refused server-side and no IN call is made."""
+    from core import invoice_ninja
+    from core.models import PaymentChargeAttempt, SiteSettings
+    s = SiteSettings.get(); s.invoice_ninja_enabled = True; s.save()
+    sale = _make_pulled_mirror(client_obj, admin_user)
+    monkeypatch.setattr(invoice_ninja, '_request',
+                        lambda *a, **k: pytest.fail('a pulled mirror must never call the IN API from an MB action'))
+    client.force_login(admin_user)
+    r = client.post(reverse('core:sale_send_draft', args=[sale.pk]),
+                    {'confirm_resend': '1'}, follow=True)
+    assert b'never sends or re-sends' in r.content
+    r = client.get(reverse('core:sale_charge', args=[sale.pk]), follow=True)
+    assert b'never' in r.content and b'charges' in r.content
+    client.post(reverse('core:sale_charge', args=[sale.pk]), {'confirm': '1'})
+    client.post(reverse('core:sale_checkout', args=[sale.pk]),
+                {'payment_method': 'card', 'amount': '25.00'})
+    sale.refresh_from_db()
+    assert sale.invoice_ninja_id == 'inv-mirror'  # link never overwritten
+    assert sale.status == 'draft'  # checkout refused
+    assert PaymentChargeAttempt.objects.filter(sale=sale).count() == 0
+
+
+@pytest.mark.django_db
+def test_pulled_mirror_line_items_locked_at_route(client, client_obj, admin_user):
+    """Review round 1 P2: a mirror's MB copy cannot drift from the IN invoice —
+    the shared line-item routes refuse, not just the editor template."""
+    sale = _make_pulled_mirror(client_obj, admin_user)
+    line = sale.line_items.first()
+    client.force_login(admin_user)
+    r = client.post(reverse('core:work_performed_update', args=[line.pk]),
+                    {'custom_label': 'Tampered', 'quantity': '9', 'unit_price': '999'})
+    assert r.status_code == 403
+    r = client.post(reverse('core:work_performed_delete', args=[line.pk]))
+    assert r.status_code == 403
+    line.refresh_from_db()
+    assert line.description == 'Managed' and line.unit_price == 25
+    # Round 2 finding: the sale-specific ADD routes must refuse too, not just
+    # the shared update/delete routes.
+    from core.models import CatalogItem
+    r = client.post(reverse('core:sale_custom_log', args=[sale.pk]),
+                    {'custom_label': 'Injected line', 'kind': 'part', 'unit_price': '5'})
+    assert r.status_code == 403
+    item = CatalogItem.objects.create(name='Tune-up', item_type='service')
+    r = client.post(reverse('core:sale_labor_log', args=[sale.pk, item.pk]))
+    assert r.status_code == 403
+    assert sale.line_items.count() == 1  # still only the original mirrored line
+
+
+@pytest.mark.django_db
+def test_period_bounds_follow_the_cadence_anchor():
+    """Review round 1 P2: candidate windows are anchored like is_billing_month,
+    not calendar-aligned."""
+    from core.models import Client as C, Contract as Ct
+    c = C.objects.create(name='Anchor Co')
+    q = Ct.objects.create(client=c, title='Q', status='active', billing_cadence='quarterly',
+                          billing_day=1, start_date=_date(2026, 2, 1))
+    assert q.period_bounds(_date(2026, 2, 10)) == (_date(2026, 2, 1), _date(2026, 4, 30))
+    assert q.period_bounds(_date(2026, 4, 10)) == (_date(2026, 2, 1), _date(2026, 4, 30))
+    a = Ct.objects.create(client=c, title='A', status='active', billing_cadence='annual',
+                          billing_day=1, start_date=_date(2026, 7, 1))
+    assert a.period_bounds(_date(2026, 7, 10)) == (_date(2026, 7, 1), _date(2027, 6, 30))
+    assert a.period_bounds(_date(2027, 3, 10)) == (_date(2026, 7, 1), _date(2027, 6, 30))
+    m = Ct.objects.create(client=c, title='M', status='active', billing_cadence='monthly',
+                          billing_day=1)
+    assert m.period_bounds(_date(2026, 2, 10)) == (_date(2026, 2, 1), _date(2026, 2, 28))
+
+
+@pytest.mark.django_db
+def test_pull_in_excludes_ended_contract(client, client_obj, admin_user, monkeypatch):
+    """Review round 1 (reviewer Q5): end_date is authoritative — an ended
+    contract must not invite linking new invoices."""
+    from datetime import timedelta
+    from django.utils import timezone
+    today = timezone.localdate()
+    ended = Contract.objects.create(client=client_obj, title='Ended', status='active',
+                                    billing_cadence='monthly', billing_day=1,
+                                    end_date=today - timedelta(days=40))
+    _pull_in_setup(client_obj, monkeypatch, [_in_invoice('inv-e', '5001', today.isoformat(), 25)])
+    client.force_login(admin_user)
+    r = client.get(reverse('core:contract_billing_pull_in'))
+    assert all(row['contract'].pk != ended.pk for row in r.context['rows'])
+
+
+@pytest.mark.django_db
+def test_list_client_invoices_follows_pagination(monkeypatch):
+    """Review round 1 P2: the IN list read walks every page instead of quietly
+    reading page one."""
+    from core import invoice_ninja
+    pages = {
+        1: {'data': [{'id': 'a', 'is_deleted': False}],
+            'meta': {'pagination': {'total_pages': 2}}},
+        2: {'data': [{'id': 'b', 'is_deleted': False}, {'id': 'c', 'is_deleted': True}],
+            'meta': {'pagination': {'total_pages': 2}}},
+    }
+    seen = []
+    def fake_request(method, path, *, params=None, json=None):
+        seen.append(params['page'])
+        return pages[params['page']]
+    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    rows = invoice_ninja.list_client_invoices('inclient-1')
+    assert seen == [1, 2]
+    assert [r['id'] for r in rows] == ['a', 'b']  # deleted row excluded
 
 
 # ── Device/Asset merge (Aug 15 2026) ────────────────────────────────────

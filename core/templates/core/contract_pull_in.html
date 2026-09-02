@@ -1,0 +1,63 @@
+{% extends "core/base_tabler.html" %}
+{% load mb_tabler %}
+
+{% block title %}Pull from Invoice Ninja - Murphy's Bench{% endblock %}
+{% block room %}register{% endblock %}
+
+{% block page_header %}
+<div class="page-header d-print-none">
+    <div class="container-fluid">
+        <div class="row g-2 align-items-center">
+            <div class="col"><div class="page-pretitle"><a href="{% url 'core:contract_billing_list' %}">Contract Billing</a></div><h2 class="page-title">Pull from Invoice Ninja</h2><div class="text-secondary">Mirror invoices Invoice Ninja generated on its own into Murphy's Bench, so the billing worklist reflects them instead of preparing a duplicate. Nothing is sent, charged, or changed in Invoice Ninja. Confirm each match below.</div></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+{% if rows %}
+    <form method="post">{% csrf_token %}
+    <div class="table-responsive">
+    <table class="table card-table table-vcenter">
+        <thead><tr><th>Contract</th><th>Client</th><th>Invoices in Invoice Ninja for {{ today|date:"M Y" }}</th></tr></thead>
+        <tbody>
+        {% for row in rows %}
+        <tr>
+            <td class="text-nowrap"><a href="{% url 'core:contract_detail' row.contract.pk %}">{{ row.contract.contract_number }}</a></td>
+            <td>{{ row.client.name }}</td>
+            <td>
+            {% if not row.in_linked %}
+                <span class="text-secondary">This client is not linked to an Invoice Ninja client yet — nothing to search.</span>
+            {% elif row.error %}
+                <span class="text-danger">Could not read Invoice Ninja: {{ row.error }}</span>
+            {% elif not row.candidates %}
+                <span class="text-secondary">No unlinked invoice dated in this period.</span>
+            {% else %}
+                {% for cand in row.candidates %}
+                <label class="form-check">
+                    <input class="form-check-input" type="radio" name="contract_{{ row.contract.pk }}" value="{{ cand.id }}" {% if cand.id == row.preselect_id %}checked{% endif %}>
+                    <span class="form-check-label">Invoice #{{ cand.number }} &middot; {{ cand.date|date:"M j, Y" }} &middot; ${{ cand.amount|floatformat:2 }} &middot; {{ cand.status }}</span>
+                </label>
+                {% endfor %}
+                <label class="form-check">
+                    <input class="form-check-input" type="radio" name="contract_{{ row.contract.pk }}" value="skip" {% if not row.preselect_id %}checked{% endif %}>
+                    <span class="form-check-label text-secondary">Skip — do not link anything for this contract</span>
+                </label>
+            {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="card-footer text-end">
+        <a href="{% url 'core:contract_billing_list' %}" class="btn">Cancel</a>
+        <button type="submit" class="btn btn-primary">Pull selected invoices in</button>
+    </div>
+    </form>
+{% else %}
+    <div class="empty"><div class="empty-icon">{% ticon 'contract' %}</div><p class="empty-title">Nothing to pull</p><p class="empty-subtitle text-secondary">Every contract in a billing month already has a record for this period.</p></div>
+{% endif %}
+</div>
+{% endblock %}

@@ -2819,6 +2819,13 @@ class SaleDraftSendView(SaleAccessMixin, View):
     def post(self, request, pk):
         from . import invoice_ninja
         sale = get_object_or_404(Sale, pk=pk, is_recurring=True)
+        if sale.pulled_from_in:
+            messages.error(
+                request,
+                f'{sale.sale_number} mirrors an invoice Invoice Ninja generated — '
+                'MB reads its status back but never sends or re-sends it.',
+            )
+            return redirect('core:sale_detail', pk=pk)
         if not SiteSettings.get().invoice_ninja_enabled:
             messages.error(request, 'Invoice Ninja is not enabled in Settings.')
             return redirect('core:sale_detail', pk=pk)
@@ -2863,6 +2870,12 @@ class SaleCheckINView(SaleAccessMixin, View):
         return redirect(next_url)
 
 
+_PULLED_NO_CHARGE_MSG = (
+    '{number} mirrors an invoice Invoice Ninja generated on its own — MB never '
+    'charges it. Charge or record payment in Invoice Ninja, then use Check IN.'
+)
+
+
 class SaleChargeView(SaleAccessMixin, View):
     """Slice 5d — trigger Invoice Ninja to charge the client's card on file for
     an already-pushed sale. GET renders a confirmation screen (server-computed
@@ -2889,6 +2902,9 @@ class SaleChargeView(SaleAccessMixin, View):
         if not _can_process_payments(request.user):
             return HttpResponse('Forbidden', status=403)
         sale = get_object_or_404(Sale, pk=pk)
+        if sale.pulled_from_in:
+            messages.error(request, _PULLED_NO_CHARGE_MSG.format(number=sale.sale_number))
+            return redirect('core:sale_detail', pk=pk)
         if not sale.invoice_ninja_id:
             messages.error(request, f'{sale.sale_number} has not been sent to Invoice Ninja yet — send it as a draft first.')
             return redirect('core:sale_detail', pk=pk)
@@ -2912,6 +2928,9 @@ class SaleChargeView(SaleAccessMixin, View):
         if not _can_process_payments(request.user):
             return HttpResponse('Forbidden', status=403)
         sale = get_object_or_404(Sale, pk=pk)
+        if sale.pulled_from_in:
+            messages.error(request, _PULLED_NO_CHARGE_MSG.format(number=sale.sale_number))
+            return redirect('core:sale_detail', pk=pk)
         if not SiteSettings.get().invoice_ninja_enabled:
             messages.error(request, 'Invoice Ninja is not enabled in Settings.')
             return redirect('core:sale_detail', pk=pk)
@@ -3069,6 +3088,9 @@ class SaleLaborLogView(SaleAccessMixin, View):
 
     def post(self, request, sale_pk, item_pk):
         sale = get_object_or_404(Sale, pk=sale_pk)
+        # Same guard as the shared update/delete routes — a locked sale (completed,
+        # void, or a pulled IN mirror) takes no new lines either.
+        _guard_line_host(request, sale)
         item = get_object_or_404(CatalogItem, pk=item_pk, is_active=True)
         _log_catalog_item(sale, item, request.user)
         return _render_line_items(request, sale)
@@ -3079,6 +3101,7 @@ class SaleCustomLogView(SaleAccessMixin, View):
 
     def post(self, request, sale_pk):
         sale = get_object_or_404(Sale, pk=sale_pk)
+        _guard_line_host(request, sale)
         label = request.POST.get('custom_label', '').strip()
         notes = request.POST.get('notes', '').strip()
         kind = request.POST.get('kind', 'part')
@@ -3108,6 +3131,13 @@ class SaleCheckoutView(SaleAccessMixin, View):
         from . import invoice_ninja
         sale = get_object_or_404(Sale, pk=pk)
 
+        if sale.pulled_from_in:
+            messages.error(
+                request,
+                f'{sale.sale_number} mirrors an invoice Invoice Ninja generated — '
+                'record its payment in Invoice Ninja, then use Check IN.',
+            )
+            return redirect('core:sale_detail', pk=pk)
         if sale.is_locked:
             messages.error(request, f'{sale.sale_number} is already {sale.get_status_display().lower()}.')
             return redirect('core:sale_detail', pk=pk)
@@ -3165,6 +3195,13 @@ class SaleSendINView(SaleAccessMixin, View):
     def post(self, request, pk):
         from . import invoice_ninja
         sale = get_object_or_404(Sale, pk=pk)
+        if sale.pulled_from_in:
+            messages.error(
+                request,
+                f'{sale.sale_number} mirrors an invoice Invoice Ninja generated — '
+                'MB never sends it back to Invoice Ninja.',
+            )
+            return redirect('core:sale_detail', pk=pk)
         if not SiteSettings.get().invoice_ninja_enabled:
             messages.error(request, 'Invoice Ninja is not enabled in Settings.')
             return redirect('core:sale_detail', pk=pk)
@@ -3669,6 +3706,179 @@ class ContractBatchSendView(SaleAccessMixin, View):
         if not sent and not failed:
             messages.info(request, 'No prepared drafts to send.')
         return redirect('core:contract_billing_list')
+
+
+class ContractPullINView(SaleAccessMixin, View):
+    """Pull from IN — the manual step after a billing cycle that mirrors invoices
+    Invoice Ninja generated on its own (its recurring engine) into MB, so the
+    billing worklist reflects them instead of preparing a duplicate. Read-only
+    toward IN: nothing is sent, charged, or changed there. GET lists each
+    contract still missing this period's record with the candidate IN invoices
+    dated inside the period; the operator confirms each match (MB never guesses
+    silently — a wrong money link is the Larm's defect). POST creates the linked
+    mirror Sale with IN's own line items, and only for invoices the server
+    re-verified as candidates."""
+
+    def _candidate_rows(self, today):
+        """Contracts missing this period's record, each with its verified
+        candidate IN invoices. One IN read per distinct client."""
+        from . import invoice_ninja
+        linked_ids = set(
+            Sale.objects.exclude(invoice_ninja_id='').values_list('invoice_ninja_id', flat=True)
+        )
+        invoices_by_client = {}
+        rows = []
+        for contract in Contract.objects.filter(
+            status='active', client__is_active=True,
+        ).select_related('client').order_by('client__name', 'contract_number'):
+            if not contract.is_billing_month(today):
+                continue
+            # end_date is authoritative when set (same rule as is_billing_due):
+            # an ended contract must not invite linking new invoices.
+            if contract.end_date and today > contract.end_date:
+                continue
+            if _contract_sale_for_period(contract, today) is not None:
+                continue
+            in_client_id = (contract.client.invoice_ninja_id or '').strip()
+            row = {'contract': contract, 'client': contract.client,
+                   'in_linked': bool(in_client_id), 'candidates': [], 'error': ''}
+            if in_client_id:
+                if in_client_id not in invoices_by_client:
+                    try:
+                        invoices_by_client[in_client_id] = invoice_ninja.list_client_invoices(in_client_id)
+                    except invoice_ninja.InvoiceNinjaError as e:
+                        invoices_by_client[in_client_id] = e
+                fetched = invoices_by_client[in_client_id]
+                if isinstance(fetched, invoice_ninja.InvoiceNinjaError):
+                    row['error'] = str(fetched)
+                else:
+                    start, end = contract.period_bounds(today)
+                    for inv in fetched:
+                        inv_id = str(inv.get('id') or '')
+                        inv_date = _parse_in_date(inv.get('date'))
+                        if not inv_id or inv_id in linked_ids or inv_date is None:
+                            continue
+                        if not (start <= inv_date <= end):
+                            continue
+                        row['candidates'].append({
+                            'id': inv_id,
+                            'number': str(inv.get('number') or ''),
+                            'date': inv_date,
+                            'amount': inv.get('amount'),
+                            'status': invoice_ninja.status_label(inv.get('status_id')),
+                            'line_items': inv.get('line_items') or [],
+                        })
+            rows.append(row)
+        # Preselect a row's lone candidate only when no OTHER row offers the same
+        # invoice — two contracts sharing one candidate must both start on Skip,
+        # so a double-link can never happen by default-submit.
+        offered = {}
+        for row in rows:
+            for cand in row['candidates']:
+                offered[cand['id']] = offered.get(cand['id'], 0) + 1
+        for row in rows:
+            row['preselect_id'] = (
+                row['candidates'][0]['id']
+                if len(row['candidates']) == 1 and offered[row['candidates'][0]['id']] == 1
+                else None
+            )
+        return rows
+
+    def get(self, request):
+        if not SiteSettings.get().invoice_ninja_enabled:
+            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
+            return redirect('core:contract_billing_list')
+        today = timezone.localdate()
+        rows = self._candidate_rows(today)
+        return render(request, 'core/contract_pull_in.html', {'rows': rows, 'today': today})
+
+    def post(self, request):
+        from decimal import Decimal, InvalidOperation
+        from django.db import IntegrityError, transaction
+        from django.utils import timezone as tz
+        if not SiteSettings.get().invoice_ninja_enabled:
+            messages.error(request, 'Invoice Ninja is not enabled in Settings.')
+            return redirect('core:contract_billing_list')
+        today = timezone.localdate()
+        pulled, skipped_race = 0, 0
+        consumed = set()  # each IN invoice may be linked ONCE per pull run
+        for row in self._candidate_rows(today):
+            contract = row['contract']
+            choice = (request.POST.get(f'contract_{contract.pk}') or 'skip').strip()
+            if choice in ('', 'skip'):
+                continue
+            if choice in consumed:
+                messages.warning(
+                    request,
+                    f'{contract.contract_number}: that invoice was already linked '
+                    'to another contract in this pull run — nothing was linked for it.',
+                )
+                continue
+            # Only an invoice the server itself just verified as a candidate for
+            # THIS contract's period may be linked — a posted id is never trusted.
+            match = next((c for c in row['candidates'] if c['id'] == choice), None)
+            if match is None:
+                messages.warning(
+                    request,
+                    f'{contract.contract_number}: the selected invoice is no longer '
+                    'a valid match for this period — nothing was linked for it.',
+                )
+                continue
+            try:
+                with transaction.atomic():
+                    sale = Sale.objects.create(
+                        client=contract.client, is_recurring=True, contract=contract,
+                        pulled_from_in=True,
+                        billing_period=contract.period_key(today), created_by=request.user,
+                        invoice_ninja_id=match['id'], invoice_ninja_ref=match['number'],
+                        in_status=match['status'], in_status_checked_at=tz.now(),
+                    )
+                    for li in match['line_items']:
+                        try:
+                            qty = Decimal(str(li.get('quantity') or '1'))
+                            price = Decimal(str(li.get('cost') or '0'))
+                        except InvalidOperation:
+                            qty, price = Decimal('1'), Decimal('0')
+                        LineItem.objects.create(
+                            content_object=sale, kind='labor',
+                            description=(li.get('product_key') or li.get('notes') or 'Invoice line'),
+                            quantity=qty, unit_price=price,
+                            notes=(li.get('notes') or '') if li.get('product_key') else '',
+                            logged_by=request.user,
+                        )
+                    if not match['line_items']:
+                        # IN returned no lines — one summary line keeps MB's total honest.
+                        LineItem.objects.create(
+                            content_object=sale, kind='labor',
+                            description=f'Invoice {match["number"]}'.strip(),
+                            quantity=Decimal('1'),
+                            unit_price=Decimal(str(match['amount'] or '0')),
+                            logged_by=request.user,
+                        )
+                consumed.add(match['id'])
+                pulled += 1
+            except IntegrityError:
+                # A concurrent prepare/pull already holds this period's record or
+                # this invoice (uniq_contract_billing_period / uniq_sale_invoice_ninja_id).
+                skipped_race += 1
+        if pulled:
+            messages.success(request, f'Pulled {pulled} invoice{"s" if pulled != 1 else ""} in from Invoice Ninja.')
+        if skipped_race:
+            messages.warning(request, f'{skipped_race} contract{"s" if skipped_race != 1 else ""} skipped: a record for the period already existed, or the invoice was already linked.')
+        if not pulled and not skipped_race:
+            messages.info(request, 'Nothing was pulled in.')
+        return redirect('core:contract_billing_list')
+
+
+def _parse_in_date(value):
+    """IN invoice dates arrive as 'YYYY-MM-DD'; anything else is treated as
+    unusable rather than guessed at."""
+    from datetime import date
+    try:
+        y, m, d = str(value or '').split('-')
+        return date(int(y), int(m), int(d))
+    except (ValueError, TypeError):
+        return None
 
 
 # --- Ticket Views ---
@@ -6112,6 +6322,10 @@ def _guard_line_host(request, host):
             raise PermissionDenied
     elif isinstance(host, (Sale, Client, Contract)):
         if not _can_view_sales(request.user):
+            raise PermissionDenied
+        # A locked Sale (completed, void, or a pulled IN mirror) is read-only at
+        # the route, not just in the editor template a browser happens to render.
+        if isinstance(host, Sale) and host.is_locked:
             raise PermissionDenied
     elif isinstance(host, (Estimate, EstimateOption)):
         if not _can_view_estimates(request.user):
