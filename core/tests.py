@@ -4406,6 +4406,47 @@ def test_link_and_button_render_in_html_and_plain_twin(monkeypatch, client_obj):
 
 
 @pytest.mark.django_db
+def test_button_position_markers_render_and_legacy_marker_stays_left():
+    from core.email_html import sanitize, finish_for_email
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    body = ('<div><a href="https://a.example/1"><mb-button>L</mb-button></a>'
+            '<mb-button-center><a href="https://a.example/2">C</a></mb-button-center>'
+            '<a href="https://a.example/3"><mb-button-right>R</mb-button-right></a>'
+            ' <mb-button-center>stray</mb-button-center></div>')
+    clean = sanitize(body)
+    assert '<mb-button-center>' in clean and '<mb-button-right>' in clean, \
+        'position markers survive the allowlist'
+    html, plain = finish_for_email(clean, site)
+    assert 'text-align:left;"><a href="https://a.example/1"' in html, \
+        'the original marker keeps its left position'
+    assert 'text-align:center;"><a href="https://a.example/2"' in html
+    assert 'text-align:right;"><a href="https://a.example/3"' in html
+    assert 'mb-button' not in html, 'no marker reaches the recipient'
+    assert 'stray' in html, 'a marker with no link renders as plain text'
+    assert 'L: https://a.example/1' in plain and 'R: https://a.example/3' in plain
+
+
+@pytest.mark.django_db
+def test_sender_display_name_with_comma_is_quoted_for_mail():
+    """Sep 6 2026: "Shamrock Computer Services, LLC <support@…>" was parsed
+    as two addresses and every send failed. The header must survive Django's
+    own address check, the one that raised."""
+    from email.utils import parseaddr
+    from django.core.mail import EmailMultiAlternatives
+    from core.models import SendingAddress
+    s = SendingAddress.objects.create(display_name='Shamrock Computer Services, LLC',
+                                      email='support@example.com')
+    assert s.from_header == '"Shamrock Computer Services, LLC" <support@example.com>'
+    assert parseaddr(s.from_header) == ('Shamrock Computer Services, LLC', 'support@example.com')
+    msg = EmailMultiAlternatives('s', 'b', s.from_header, ['x@example.com']).message()
+    assert 'support@example.com' in msg['From']
+    assert 'Shamrock Computer Services, LLC' in msg['From']
+    plain = SendingAddress.objects.create(display_name='Sales', email='sales@example.com')
+    assert plain.from_header == 'Sales <sales@example.com>', 'no specials, no quotes'
+
+
+@pytest.mark.django_db
 def test_bare_url_in_body_autolinks(monkeypatch, client_obj):
     from core.models import EmailTemplate
     from core.email_utils import send_custom_email

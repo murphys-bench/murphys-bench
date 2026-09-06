@@ -2793,8 +2793,12 @@ class SendingAddress(models.Model):
 
     @property
     def from_header(self):
+        # formataddr quotes a display name that carries a comma, period, or
+        # other address specials ("Shamrock Computer Services, LLC"); the bare
+        # f-string form parsed as two addresses and failed at send.
         if self.display_name:
-            return f'{self.display_name} <{self.email}>'
+            from email.utils import formataddr
+            return formataddr((self.display_name, self.email))
         return self.email
 
     @property

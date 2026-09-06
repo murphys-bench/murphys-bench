@@ -8,6 +8,16 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Fixed
+
+- A sending address whose display name has a comma or period in it ("Shamrock Computer Services, LLC") failed every send with an invalid-address error. The name is now quoted the way mail requires.
+
+### Changed
+
+- The email editor's Button tool opens a proper dialog (text, link, position) instead of two browser prompts, and each button can sit left, center, or right. Existing buttons keep their place; new ones default to centered. Click inside an existing button and press Button to edit or remove it.
+
 ## v0.16.0 — 2026-09-01
 
 Email grows up, and the billing worklist learns to tell the truth about invoices it didn't make. Email modernization: four outside-review rounds. Pull from IN: three.

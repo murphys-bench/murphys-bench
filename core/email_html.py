@@ -2,7 +2,8 @@
 
 The editor (Trix, static/js/mb-email-editor.js) stores template and signature
 bodies as a small HTML subset: div/br paragraphs, strong/em/del, links,
-lists, and <mb-button> (a link the email renders as a colored button).
+lists, and <mb-button> / <mb-button-center> / <mb-button-right> (a link the
+email renders as a colored button; the tag carries the button's position).
 Everything here treats that subset as the contract:
 
   sanitize()        — allowlist what the operator authored; strip the rest.
@@ -29,7 +30,13 @@ from django.utils.html import escape
 #: What the editor can produce and email can render. Anything else is
 #: stripped on save and again at send.
 ALLOWED_TAGS = ['div', 'p', 'br', 'strong', 'em', 'del', 'a', 'ul', 'ol',
-                'li', 'mb-button']
+                'li', 'mb-button', 'mb-button-center', 'mb-button-right']
+
+#: Button markers and the position each one carries. <mb-button> is the
+#: original marker (bodies saved before positions existed) and stays left.
+BUTTON_TAGS = {'mb-button': 'left', 'mb-button-center': 'center',
+               'mb-button-right': 'right'}
+_BUTTON_TAG = r'(mb-button(?:-center|-right)?)'
 ALLOWED_ATTRS = {'a': ['href']}
 ALLOWED_PROTOCOLS = ['http', 'https', 'mailto']
 
@@ -213,11 +220,13 @@ def render_body(body_html, ctx):
     return rendered.replace('\r\n', '\n').replace('\n', '<br>')
 
 
-def _build_button(href, label, site):
+def _build_button(href, label, site, align='left'):
     from .email_utils import _email_header_color, _contrast_text_color
     color = _email_header_color(site)
     text_color = _contrast_text_color(color)
-    return (f'<div style="margin:14px 0;">'
+    if align not in ('left', 'center', 'right'):
+        align = 'left'
+    return (f'<div style="margin:14px 0;text-align:{align};">'
             f'<a href="{href}" target="_blank" '
             f'style="display:inline-block;background-color:{color};color:{text_color};'
             f'padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:bold;">'
@@ -260,13 +269,15 @@ def _email_safe(html, site):
     # Buttons: the marker + link collapse into one styled anchor, whichever
     # way the editor nested them.
     html = re.sub(
-        r'<a href="([^"]*)"[^>]*>\s*<mb-button>(.*?)</mb-button>\s*</a>',
-        lambda m: _build_button(m.group(1), m.group(2), site), html, flags=re.S)
+        r'<a href="([^"]*)"[^>]*>\s*<' + _BUTTON_TAG + r'>(.*?)</\2>\s*</a>',
+        lambda m: _build_button(m.group(1), m.group(3), site, BUTTON_TAGS[m.group(2)]),
+        html, flags=re.S)
     html = re.sub(
-        r'<mb-button>\s*<a href="([^"]*)"[^>]*>(.*?)</a>\s*</mb-button>',
-        lambda m: _build_button(m.group(1), m.group(2), site), html, flags=re.S)
+        r'<' + _BUTTON_TAG + r'>\s*<a href="([^"]*)"[^>]*>(.*?)</a>\s*</\1>',
+        lambda m: _build_button(m.group(2), m.group(3), site, BUTTON_TAGS[m.group(1)]),
+        html, flags=re.S)
     # A stray marker with no link inside renders as plain text.
-    html = html.replace('<mb-button>', '').replace('</mb-button>', '')
+    html = re.sub(r'</?' + _BUTTON_TAG + r'>', '', html)
     # Ordinary links get a visible color even where the app's stylesheet is
     # ignored; ones already styled (the buttons above) are left alone.
     html = re.sub(r'<a href="([^"]*)">', rf'<a href="\1" style="{_LINK_STYLE}">', html)
