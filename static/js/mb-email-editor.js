@@ -103,12 +103,22 @@
         return !!doc.getCommonAttributesAtRange([p, p + 1])[attrName];
     }
 
+    // Whether the character at position p belongs to the same button as the
+    // seed: same position attribute AND the same link. Two adjacent buttons
+    // with the same position but different links are two buttons.
+    function sameButtonAt(doc, p, attrName, href) {
+        if (p < 0 || p >= doc.getLength()) return false;
+        var attrs = doc.getCommonAttributesAtRange([p, p + 1]);
+        return !!attrs[attrName] && (attrs.href || '') === href;
+    }
+
     // The whole run of one button around a position known to be inside it
     // (Trix reports attributes; the run's edges are found by walking).
     function buttonRunAt(doc, seed, attrName) {
+        var href = doc.getCommonAttributesAtRange([seed, seed + 1]).href || '';
         var start = seed, end = seed + 1;
-        while (hasAttrAt(doc, start - 1, attrName)) start--;
-        while (hasAttrAt(doc, end, attrName)) end++;
+        while (sameButtonAt(doc, start - 1, attrName, href)) start--;
+        while (sameButtonAt(doc, end, attrName, href)) end++;
         return [start, end];
     }
 
