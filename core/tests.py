@@ -4640,6 +4640,54 @@ def test_button_never_swallows_past_its_own_link():
     assert html.count('text-align:center;') == 1 and '<strong>Go</strong></a>' in html
 
 
+def _assert_well_nested(html):
+    # Every tag closes in the order it was opened. An anchor closed inside a
+    # <strong> that was opened inside it is exactly the breakage this guards.
+    stack = []
+    for closing, name in re.findall(r'<(/?)([a-z][a-z0-9-]*)[^>]*>', html):
+        if name in ('br', 'img'):
+            continue
+        if not closing:
+            stack.append(name)
+        else:
+            assert stack and stack[-1] == name, f'</{name}> closes while {stack[-3:]} are open in: {html}'
+            stack.pop()
+    assert not stack, f'left open: {stack}'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('body', [
+    # Round-3 review: the marker INSIDE formatting inside a link split the
+    # anchor across an open <strong>. Every shape here must come out well
+    # nested, with the formatting kept on the text it belonged to.
+    '<a href="https://a.example/"><strong><mb-button-center>Go</mb-button-center></strong> now</a>',
+    '<a href="https://a.example/">before <strong><mb-button-center>Go</mb-button-center></strong> now</a>',
+    '<a href="https://a.example/"><em><strong>b <mb-button-right>Go</mb-button-right> a</strong></em></a>',
+    '<a href="https://a.example/"><strong>b <mb-button>Go</mb-button></strong></a>',
+    '<a href="https://a.example/">b <del><mb-button-center>Go</mb-button-center> a</del> z</a>',
+    '<a href="https://a.example/"><strong><mb-button-center>Go</mb-button-center></strong></a>',
+    '<a href="https://a.example/">line<br><mb-button-center>Go<br>on</mb-button-center><br>more</a>',
+    '<a href="https://a.example/"><strong><mb-button-center>A</mb-button-center></strong>'
+    '<em><mb-button-right>B</mb-button-right></em></a>',
+])
+def test_button_inside_formatting_inside_a_link_splits_cleanly(body):
+    from core.email_html import sanitize, finish_for_email
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    clean = sanitize('<div>' + body + '</div>')
+    html, plain = finish_for_email(clean, site)
+    _assert_well_nested(html)
+    assert 'mb-button' not in html
+    assert html.count('text-align:') == clean.count('<mb-button'), 'one button per marker'
+    assert 'https://a.example/' in plain, 'the plain twin still lists the link'
+    # Text outside the marker is still a link to the same address: the word
+    # sits inside a plain (non-button) anchor to that address.
+    for word in ('before', 'now', 'more', ' a', ' z'):
+        if word in body:
+            assert re.search(r'<a href="https://a\.example/" style="color[^>]*>(?:(?!</a>).)*' + re.escape(word.strip()), html, re.S), word
+    assert not re.search(r'<(strong|em|del)></\1>', html), 'no empty formatting pairs sent'
+
+
 @pytest.mark.django_db
 def test_sending_address_label_is_unquoted_but_header_is_quoted():
     from core.models import SendingAddress

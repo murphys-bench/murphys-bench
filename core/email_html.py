@@ -275,19 +275,56 @@ _MARKER_AROUND_ANCHOR = re.compile(
     r'<' + _BUTTON_TAG + r'>\s*<a href="([^"]*)"[^>]*>(' + _NOT_ANCHOR + r'*?)</a>\s*</\1>', re.S)
 
 
+_TAG = re.compile(r'<(/?)([a-z][a-z0-9-]*)[^>]*>')
+
+
+def _open_tags(fragment):
+    """Formatting tags opened in ``fragment`` and still open at its end, in
+    order. Post-bleach the only inline tags are strong, em, del, br."""
+    stack = []
+    for closing, name in _TAG.findall(fragment):
+        if name == 'br':
+            continue
+        if not closing:
+            stack.append(name)
+        elif name in stack:
+            del stack[len(stack) - 1 - stack[::-1].index(name):]
+    return stack
+
+
+def _has_text(fragment):
+    return bool(_TAG.sub('', fragment).strip())
+
+
 def _split_anchor(m, site):
+    """One anchor holding a marker becomes: plain link (text before), button,
+    plain link (text after). Formatting open at the marker (``<strong>`` around
+    it, say) is closed before the split and reopened after it, and applied
+    inside the button label, so every piece is well formed on its own."""
     href, pre, tag, label, post = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
+    open_at_marker = _open_tags(pre)
+    close = ''.join(f'</{t}>' for t in reversed(open_at_marker))
+    reopen = ''.join(f'<{t}>' for t in open_at_marker)
     out = ''
-    if pre.strip():
-        out += f'<a href="{href}">{pre}</a>'
-    elif pre:
-        out += pre
-    out += _build_button(href, label, site, BUTTON_TAGS[tag])
-    if post.strip():
-        out += f'<a href="{href}">{post}</a>'
-    elif post:
-        out += post
+    if _has_text(pre):
+        out += f'<a href="{href}">{_drop_empty_pairs(pre + close)}</a>'
+    out += _build_button(href, reopen + label + close, site, BUTTON_TAGS[tag])
+    if _has_text(post):
+        out += f'<a href="{href}">{_drop_empty_pairs(reopen + post)}</a>'
     return out
+
+
+_EMPTY_PAIR = re.compile(r'<(strong|em|del)></\1>')
+
+
+def _drop_empty_pairs(fragment):
+    """``<strong></strong>`` left behind when a split closes and reopens
+    formatting at a piece's edge; harmless, but no reason to send it."""
+    while True:
+        cleaned = _EMPTY_PAIR.sub('', fragment)
+        if cleaned == fragment:
+            return fragment
+        fragment = cleaned
 
 
 def _email_safe(html, site):
