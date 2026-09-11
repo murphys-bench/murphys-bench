@@ -276,11 +276,15 @@ _MARKER_AROUND_ANCHOR = re.compile(
 
 
 _TAG = re.compile(r'<(/?)([a-z][a-z0-9-]*)[^>]*>')
+_FORMATTING = ('strong', 'em', 'del')
 
 
 def _open_tags(fragment):
-    """Formatting tags opened in ``fragment`` and still open at its end, in
-    order. Post-bleach the only inline tags are strong, em, del, br."""
+    """Tags opened in ``fragment`` and still open at its end, in order.
+    ``br`` is void and skipped. Post-bleach the anchor's content is a well
+    formed tree, so this is the marker's ancestor chain inside the anchor:
+    usually formatting (strong, em, del), but a hand-written body can put a
+    list or a div inside a link and bleach keeps it."""
     stack = []
     for closing, name in _TAG.findall(fragment):
         if name == 'br':
@@ -298,28 +302,36 @@ def _has_text(fragment):
 
 def _split_anchor(m, site):
     """One anchor holding a marker becomes: plain link (text before), button,
-    plain link (text after). Formatting open at the marker (``<strong>`` around
-    it, say) is closed before the split and reopened after it, and applied
-    inside the button label, so every piece is well formed on its own."""
+    plain link (text after). Tags open at the marker are closed before the
+    split and reopened after it, so every piece is well formed on its own;
+    formatting among them (strong, em, del) is applied inside the button
+    label too, a block (a list item, say) is not. A marker with no text in it
+    is not a button: the marker is dropped and the link left whole."""
     href, pre, tag, label, post = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
+    label = _drop_empty_pairs(label)
+    if not _has_text(label):
+        return f'<a href="{href}">{pre}{label}{post}</a>'
     open_at_marker = _open_tags(pre)
     close = ''.join(f'</{t}>' for t in reversed(open_at_marker))
     reopen = ''.join(f'<{t}>' for t in open_at_marker)
+    formatting = [t for t in open_at_marker if t in _FORMATTING]
+    label = ''.join(f'<{t}>' for t in formatting) + label + ''.join(f'</{t}>' for t in reversed(formatting))
     out = ''
     if _has_text(pre):
         out += f'<a href="{href}">{_drop_empty_pairs(pre + close)}</a>'
-    out += _build_button(href, reopen + label + close, site, BUTTON_TAGS[tag])
+    out += _build_button(href, label, site, BUTTON_TAGS[tag])
     if _has_text(post):
         out += f'<a href="{href}">{_drop_empty_pairs(reopen + post)}</a>'
     return out
 
 
-_EMPTY_PAIR = re.compile(r'<(strong|em|del)></\1>')
+_EMPTY_PAIR = re.compile(r'<([a-z][a-z0-9-]*)>\s*</\1>')
 
 
 def _drop_empty_pairs(fragment):
-    """``<strong></strong>`` left behind when a split closes and reopens
-    formatting at a piece's edge; harmless, but no reason to send it."""
+    """``<strong></strong>``, ``<li></li>`` and the like, left behind when a
+    split closes and reopens tags at a piece's edge; harmless, but no reason
+    to send them. Repeats so an emptied parent goes too."""
     while True:
         cleaned = _EMPTY_PAIR.sub('', fragment)
         if cleaned == fragment:
@@ -369,6 +381,9 @@ def to_plain(html):
         text, flags=re.S)
     text = re.sub(r'<br\s*/?>', '\n', text)
     text = re.sub(r'</div>\s*<div[^>]*>', '\n', text)
+    # A block opening right after text (a button that follows the plain part
+    # of a split link) starts a new line, or the two labels run together.
+    text = re.sub(r'(?<=[^\s>])<div[^>]*>', '\n', text)
     text = re.sub(r'</(p|div|ul|ol)>', '\n', text)
     text = re.sub(r'<li[^>]*>', '- ', text)
     text = re.sub(r'</li>', '\n', text)

@@ -4669,6 +4669,12 @@ def _assert_well_nested(html):
     '<a href="https://a.example/">line<br><mb-button-center>Go<br>on</mb-button-center><br>more</a>',
     '<a href="https://a.example/"><strong><mb-button-center>A</mb-button-center></strong>'
     '<em><mb-button-right>B</mb-button-right></em></a>',
+    # Round 4 review: the plain twin ran "pre: url" straight into "GoNow: url".
+    '<a href="https://a.example/"><strong>pre <em><mb-button-right>Go<br>Now</mb-button-right></em> post</strong> tail</a>',
+    # Round 4 review: a hand-written body can put a list or a div inside a
+    # link and bleach keeps it; the block must not end up inside the button.
+    '<a href="https://a.example/"><ul><li>x <mb-button-center>Go</mb-button-center> y</li></ul></a>',
+    '<a href="https://a.example/"><div>x</div><div><mb-button-center>Go</mb-button-center></div></a>',
 ])
 def test_button_inside_formatting_inside_a_link_splits_cleanly(body):
     from core.email_html import sanitize, finish_for_email
@@ -4678,14 +4684,39 @@ def test_button_inside_formatting_inside_a_link_splits_cleanly(body):
     html, plain = finish_for_email(clean, site)
     _assert_well_nested(html)
     assert 'mb-button' not in html
-    assert html.count('text-align:') == clean.count('<mb-button'), 'one button per marker'
+    assert html.count('display:inline-block;background-color:') == clean.count('<mb-button'), \
+        'one button per marker'
+    assert not re.search(r'display:inline-block;background-color:[^>]*>(?:<(?:strong|em|del)>)*<(?:ul|ol|li|div|p)', html), \
+        'no block inside a button label'
     assert 'https://a.example/' in plain, 'the plain twin still lists the link'
+    # Each "label: address" ends its line; a split never runs two together.
+    assert not re.search(r'https://a\.example/\S', plain), plain
     # Text outside the marker is still a link to the same address: the word
     # sits inside a plain (non-button) anchor to that address.
     for word in ('before', 'now', 'more', ' a', ' z'):
         if word in body:
             assert re.search(r'<a href="https://a\.example/" style="color[^>]*>(?:(?!</a>).)*' + re.escape(word.strip()), html, re.S), word
-    assert not re.search(r'<(strong|em|del)></\1>', html), 'no empty formatting pairs sent'
+    assert not re.search(r'<([a-z]+)></\1>', html), 'no empty pairs sent'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('body', [
+    '<a href="https://a.example/"><strong>pre <mb-button-center></mb-button-center> post</strong></a>',
+    '<a href="https://a.example/">pre <mb-button-center><strong></strong></mb-button-center> post</a>',
+    '<a href="https://a.example/">pre <mb-button-right> </mb-button-right> post</a>',
+])
+def test_button_with_no_text_is_not_a_button(body):
+    # Round 4 review: an empty marker (hand-written HTML; the dialog refuses
+    # an empty label) sent an empty button and a plain twin of "pre: u: u".
+    from core.email_html import sanitize, finish_for_email
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    html, plain = finish_for_email(sanitize('<div>' + body + '</div>'), site)
+    _assert_well_nested(html)
+    assert 'display:inline-block;background-color:' not in html, 'no button without text'
+    assert 'mb-button' not in html
+    assert plain.count('https://a.example/') == 1, plain
+    assert 'pre' in plain and 'post' in plain
 
 
 @pytest.mark.django_db
