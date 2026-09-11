@@ -268,11 +268,14 @@ def _autolink_one(m):
 # the marker and its label (no anchor tags; nested formatting is fine), text
 # after (no anchor tags). Post-bleach an anchor carries only href.
 _NOT_ANCHOR = r'(?:(?!<a\b|</a>).)'
+# Only an authored link matches: post-bleach an anchor carries href and nothing
+# else, and a button this pass has already built carries target and style, so
+# the patterns never re-match their own output.
 _ANCHOR_WITH_MARKER = re.compile(
-    r'<a href="([^"]*)"[^>]*>((?:(?!<a\b|</a>|<mb-button).)*?)'
+    r'<a href="([^"]*)">((?:(?!<a\b|</a>|<mb-button).)*?)'
     r'<' + _BUTTON_TAG + r'>(' + _NOT_ANCHOR + r'*?)</\3>(' + _NOT_ANCHOR + r'*?)</a>', re.S)
 _MARKER_AROUND_ANCHOR = re.compile(
-    r'<' + _BUTTON_TAG + r'>\s*<a href="([^"]*)"[^>]*>(' + _NOT_ANCHOR + r'*?)</a>\s*</\1>', re.S)
+    r'<' + _BUTTON_TAG + r'>\s*<a href="([^"]*)">(' + _NOT_ANCHOR + r'*?)</a>\s*</\1>', re.S)
 
 
 _TAG = re.compile(r'<(/?)([a-z][a-z0-9-]*)[^>]*>')
@@ -297,7 +300,19 @@ def _open_tags(fragment):
 
 
 def _has_text(fragment):
-    return bool(_TAG.sub('', fragment).strip())
+    return bool(_TAG.sub('', fragment).replace('&nbsp;', ' ').replace('\xa0', ' ').strip())
+
+
+_BLOCK_TAG = re.compile(r'</?(?:div|p|ul|ol|li)\b[^>]*>')
+
+
+def _button_label(label):
+    """The text a button carries, or '' when there is none. A block inside the
+    label (a hand-written list, say) cannot sit inside a button: its tags
+    become spaces and the words stay."""
+    label = _drop_empty_pairs(_BLOCK_TAG.sub(' ', label))
+    label = re.sub(r'[ \t]{2,}', ' ', label).strip()
+    return label if _has_text(label) else ''
 
 
 def _split_anchor(m, site):
@@ -306,11 +321,13 @@ def _split_anchor(m, site):
     split and reopened after it, so every piece is well formed on its own;
     formatting among them (strong, em, del) is applied inside the button
     label too, a block (a list item, say) is not. A marker with no text in it
-    is not a button: the marker is dropped and the link left whole."""
+    is not a button: the marker is dropped and the link left whole, or dropped
+    too when nothing else is in it (a link with nothing to click)."""
     href, pre, tag, label, post = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
-    label = _drop_empty_pairs(label)
-    if not _has_text(label):
-        return f'<a href="{href}">{pre}{label}{post}</a>'
+    label = _button_label(label)
+    if not label:
+        rest = _drop_empty_pairs(pre + post)
+        return f'<a href="{href}">{rest}</a>' if _has_text(rest) else ''
     open_at_marker = _open_tags(pre)
     close = ''.join(f'</{t}>' for t in reversed(open_at_marker))
     reopen = ''.join(f'<{t}>' for t in open_at_marker)
@@ -323,6 +340,15 @@ def _split_anchor(m, site):
     if _has_text(post):
         out += f'<a href="{href}">{_drop_empty_pairs(reopen + post)}</a>'
     return out
+
+
+def _wrapped_anchor(m, site):
+    """The other nesting, marker around the link: same label rules."""
+    tag, href, label = m.group(1), m.group(2), m.group(3)
+    text = _button_label(label)
+    if not text:
+        return f'<a href="{href}">{label}</a>' if _has_text(label) else ''
+    return _build_button(href, text, site, BUTTON_TAGS[tag])
 
 
 _EMPTY_PAIR = re.compile(r'<([a-z][a-z0-9-]*)>\s*</\1>')
@@ -354,9 +380,7 @@ def _email_safe(html, site):
         if new_html == html:
             break
         html = new_html
-    html = _MARKER_AROUND_ANCHOR.sub(
-        lambda m: _build_button(m.group(2), m.group(3), site, BUTTON_TAGS[m.group(1)]),
-        html)
+    html = _MARKER_AROUND_ANCHOR.sub(lambda m: _wrapped_anchor(m, site), html)
     # A stray marker with no link inside renders as plain text.
     html = re.sub(r'</?' + _BUTTON_TAG + r'>', '', html)
     # Ordinary links get a visible color even where the app's stylesheet is
@@ -381,9 +405,11 @@ def to_plain(html):
         text, flags=re.S)
     text = re.sub(r'<br\s*/?>', '\n', text)
     text = re.sub(r'</div>\s*<div[^>]*>', '\n', text)
-    # A block opening right after text (a button that follows the plain part
-    # of a split link) starts a new line, or the two labels run together.
-    text = re.sub(r'(?<=[^\s>])<div[^>]*>', '\n', text)
+    # A block opening right after text, or after the closing tag of a bold or
+    # italic word, starts a new line; otherwise a button that follows the
+    # plain part of a split link, or a word the author just made bold, runs
+    # straight into the button label.
+    text = re.sub(r'(?<=[^\s>])((?:</?(?:strong|em|del)>)*)<(?:div|p|ul|ol)\b[^>]*>', r'\1\n', text)
     text = re.sub(r'</(p|div|ul|ol)>', '\n', text)
     text = re.sub(r'<li[^>]*>', '- ', text)
     text = re.sub(r'</li>', '\n', text)

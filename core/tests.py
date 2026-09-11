@@ -4675,6 +4675,17 @@ def _assert_well_nested(html):
     # link and bleach keeps it; the block must not end up inside the button.
     '<a href="https://a.example/"><ul><li>x <mb-button-center>Go</mb-button-center> y</li></ul></a>',
     '<a href="https://a.example/"><div>x</div><div><mb-button-center>Go</mb-button-center></div></a>',
+    # Round 5 review: a block INSIDE the marker, and the marker-around-link
+    # nesting with a block in it, must not be sent inside the button either.
+    '<a href="https://a.example/">x <mb-button-center><ul><li>Go</li></ul></mb-button-center> y</a>',
+    '<a href="https://a.example/">x <mb-button-center>Go<div>now</div></mb-button-center> y</a>',
+    '<mb-button-center><a href="https://a.example/"><ul><li>Go</li></ul></a></mb-button-center>',
+    # Round 5 review, editor-reachable: a bold or italic word right before a
+    # button ran into its label in the plain twin.
+    '<strong>Bold</strong><a href="https://a.example/"><mb-button-center>Go</mb-button-center></a> after',
+    'Click <em>this</em><a href="https://a.example/"><mb-button-center>Go</mb-button-center></a>',
+    'Bold<strong><a href="https://a.example/"><mb-button-center>Go</mb-button-center></a></strong>',
+    'Before<a href="https://a.example/"><mb-button-center>Go</mb-button-center></a>after',
 ])
 def test_button_inside_formatting_inside_a_link_splits_cleanly(body):
     from core.email_html import sanitize, finish_for_email
@@ -4686,15 +4697,24 @@ def test_button_inside_formatting_inside_a_link_splits_cleanly(body):
     assert 'mb-button' not in html
     assert html.count('display:inline-block;background-color:') == clean.count('<mb-button'), \
         'one button per marker'
-    assert not re.search(r'display:inline-block;background-color:[^>]*>(?:<(?:strong|em|del)>)*<(?:ul|ol|li|div|p)', html), \
-        'no block inside a button label'
+    for m in re.finditer(r'display:inline-block;background-color:[^>]*>((?:(?!</a>).)*)</a>', html, re.S):
+        assert not re.search(r'<(?:ul|ol|li|div|p)\b', m.group(1)), f'block inside a button label: {m.group(1)}'
+        assert 'Go' in m.group(1) or 'A' in m.group(1) or 'B' in m.group(1), 'label text kept'
+    # Words around the button are still there, each on its own line.
+    for word in ('Bold', 'Click this', 'Before', 'after', 'now'):
+        if word.replace(' ', '') in re.sub(r'<[^>]+>', '', body).replace(' ', ''):
+            assert re.search(r'(^|\n)' + re.escape(word) + r'(\n|$| )', plain) or word in plain, (word, plain)
+    assert not re.search(r'[A-Za-z]Go: https', plain), f'a word ran into the button label: {plain}'
     assert 'https://a.example/' in plain, 'the plain twin still lists the link'
     # Each "label: address" ends its line; a split never runs two together.
     assert not re.search(r'https://a\.example/\S', plain), plain
-    # Text outside the marker is still a link to the same address: the word
-    # sits inside a plain (non-button) anchor to that address.
+    # Text outside the marker but inside the link is still a link to the same
+    # address: the word sits inside a plain (non-button) anchor to it.
+    outside = re.sub(r'<mb-button[a-z-]*>.*?</mb-button[a-z-]*>', '', body, flags=re.S)
+    outside = re.search(r'<a href[^>]*>(.*?)</a>', outside, re.S)
+    outside = outside.group(1) if outside else ''
     for word in ('before', 'now', 'more', ' a', ' z'):
-        if word in body:
+        if word in outside:
             assert re.search(r'<a href="https://a\.example/" style="color[^>]*>(?:(?!</a>).)*' + re.escape(word.strip()), html, re.S), word
     assert not re.search(r'<([a-z]+)></\1>', html), 'no empty pairs sent'
 
@@ -4704,6 +4724,9 @@ def test_button_inside_formatting_inside_a_link_splits_cleanly(body):
     '<a href="https://a.example/"><strong>pre <mb-button-center></mb-button-center> post</strong></a>',
     '<a href="https://a.example/">pre <mb-button-center><strong></strong></mb-button-center> post</a>',
     '<a href="https://a.example/">pre <mb-button-right> </mb-button-right> post</a>',
+    '<a href="https://a.example/">pre <mb-button-center>&nbsp;</mb-button-center> post</a>',
+    '<a href="https://a.example/">pre <mb-button-center><br></mb-button-center> post</a>',
+    '<mb-button-center><a href="https://a.example/"><strong></strong></a></mb-button-center>pre post',
 ])
 def test_button_with_no_text_is_not_a_button(body):
     # Round 4 review: an empty marker (hand-written HTML; the dialog refuses
@@ -4715,8 +4738,46 @@ def test_button_with_no_text_is_not_a_button(body):
     _assert_well_nested(html)
     assert 'display:inline-block;background-color:' not in html, 'no button without text'
     assert 'mb-button' not in html
-    assert plain.count('https://a.example/') == 1, plain
     assert 'pre' in plain and 'post' in plain
+    assert not re.search(r'<([a-z]+)></\1>', html), 'no empty pairs sent'
+    if 'pre' in re.sub(r'<[^>]+>', '', body.split('</a>')[0]):
+        assert plain.count('https://a.example/') == 1, plain
+    else:
+        assert 'https://a.example/' not in html, 'a link with nothing in it is not sent'
+
+
+@pytest.mark.django_db
+def test_link_with_only_an_empty_marker_is_dropped():
+    # Round 5 review: nothing to click means no link at all, not an empty one.
+    from core.email_html import sanitize, finish_for_email
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    for body in ('<a href="https://a.example/"><mb-button-center></mb-button-center></a>',
+                 '<a href="https://a.example/"><ul><li><mb-button-center></mb-button-center></li></ul></a>'):
+        html, plain = finish_for_email(sanitize('<div>Hello ' + body + ' there</div>'), site)
+        _assert_well_nested(html)
+        assert 'a.example' not in html and 'a.example' not in plain, html
+        assert 'Hello' in plain and 'there' in plain
+        assert not re.search(r'<([a-z]+)></\1>', html)
+
+
+@pytest.mark.django_db
+def test_plain_twin_breaks_lines_only_where_a_block_follows_text():
+    # Round 5 review: the plain-twin rule must not disturb ordinary bodies.
+    from core.email_html import sanitize, finish_for_email
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    cases = {
+        '<div>One</div><div>Two</div>': 'One\nTwo',
+        '<p>One</p><p>Two</p>': 'One\nTwo',
+        '<div>List:<ul><li>a</li><li>b</li></ul></div>': 'List:\n- a\n- b',
+        '<div>Text<div>nested</div></div>': 'Text\nnested',
+        '<div><strong>Bold</strong> then <em>it</em></div>': 'Bold then it',
+        '<div>See <a href="https://x.example/">the site</a> now</div>': 'See the site: https://x.example/ now',
+    }
+    for body, expected in cases.items():
+        _, plain = finish_for_email(sanitize(body), site)
+        assert plain == expected, (body, plain)
 
 
 @pytest.mark.django_db
