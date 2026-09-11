@@ -8,7 +8,9 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
-## Unreleased
+## v0.16.1 — 2026-09-10
+
+A dependency advisory turned into a boundary. WeasyPrint's fix landed, and the PDF asset path now refuses everything it never needed. Two outside-review rounds on the hardening.
 
 ### Security
 
