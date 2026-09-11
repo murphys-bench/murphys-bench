@@ -2789,7 +2789,15 @@ class SendingAddress(models.Model):
         verbose_name_plural = 'Sending addresses'
 
     def __str__(self):
-        return self.from_header
+        return self.label
+
+    @property
+    def label(self):
+        """What the UI shows: name and address, unquoted. Never put this on the
+        wire; from_header is the mail-safe form."""
+        if self.display_name:
+            return f'{self.display_name} <{self.email}>'
+        return self.email
 
     @property
     def from_header(self):

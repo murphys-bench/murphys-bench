@@ -264,18 +264,50 @@ def _autolink_one(m):
     return f'<a href="{url}" style="{_LINK_STYLE}">{url}</a>{trailing}'
 
 
+# Inside one anchor: text before the first marker (no anchor tags, no marker),
+# the marker and its label (no anchor tags; nested formatting is fine), text
+# after (no anchor tags). Post-bleach an anchor carries only href.
+_NOT_ANCHOR = r'(?:(?!<a\b|</a>).)'
+_ANCHOR_WITH_MARKER = re.compile(
+    r'<a href="([^"]*)"[^>]*>((?:(?!<a\b|</a>|<mb-button).)*?)'
+    r'<' + _BUTTON_TAG + r'>(' + _NOT_ANCHOR + r'*?)</\3>(' + _NOT_ANCHOR + r'*?)</a>', re.S)
+_MARKER_AROUND_ANCHOR = re.compile(
+    r'<' + _BUTTON_TAG + r'>\s*<a href="([^"]*)"[^>]*>(' + _NOT_ANCHOR + r'*?)</a>\s*</\1>', re.S)
+
+
+def _split_anchor(m, site):
+    href, pre, tag, label, post = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
+    out = ''
+    if pre.strip():
+        out += f'<a href="{href}">{pre}</a>'
+    elif pre:
+        out += pre
+    out += _build_button(href, label, site, BUTTON_TAGS[tag])
+    if post.strip():
+        out += f'<a href="{href}">{post}</a>'
+    elif post:
+        out += post
+    return out
+
+
 def _email_safe(html, site):
     """Inline the styling mail apps actually respect."""
     # Buttons: the marker + link collapse into one styled anchor, whichever
-    # way the editor nested them.
-    html = re.sub(
-        r'<a href="([^"]*)"[^>]*>\s*<' + _BUTTON_TAG + r'>(.*?)</\2>\s*</a>',
-        lambda m: _build_button(m.group(1), m.group(3), site, BUTTON_TAGS[m.group(2)]),
-        html, flags=re.S)
-    html = re.sub(
-        r'<' + _BUTTON_TAG + r'>\s*<a href="([^"]*)"[^>]*>(.*?)</a>\s*</\1>',
+    # way the editor nested them. Neither pattern may run past the end of an
+    # anchor: a lazy group that could cross </a> would swallow everything up
+    # to the next same-position button in the body and send it as one.
+    # A marker on part of a link's text (the editor groups same-link runs
+    # under one <a>) splits that link: text before and after stays a plain
+    # link, the marked part becomes the button. Repeat until stable so a
+    # second marker in the same anchor gets its own pass.
+    while True:
+        new_html = _ANCHOR_WITH_MARKER.sub(lambda m: _split_anchor(m, site), html)
+        if new_html == html:
+            break
+        html = new_html
+    html = _MARKER_AROUND_ANCHOR.sub(
         lambda m: _build_button(m.group(2), m.group(3), site, BUTTON_TAGS[m.group(1)]),
-        html, flags=re.S)
+        html)
     # A stray marker with no link inside renders as plain text.
     html = re.sub(r'</?' + _BUTTON_TAG + r'>', '', html)
     # Ordinary links get a visible color even where the app's stylesheet is

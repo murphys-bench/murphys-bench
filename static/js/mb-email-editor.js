@@ -112,6 +112,12 @@
         return !!attrs[attrName] && (attrs.href || '') === href;
     }
 
+    // p if the character at p carries any button marker, else -1.
+    function buttonSeedAt(doc, p) {
+        for (var name in ATTR_ALIGN) if (hasAttrAt(doc, p, name)) return p;
+        return -1;
+    }
+
     // The whole run of one button around a position known to be inside it
     // (Trix reports attributes; the run's edges are found by walking).
     function buttonRunAt(doc, seed, attrName) {
@@ -184,10 +190,10 @@
         var editor = state.editor, range = state.range, start = range[0];
         editor.setSelectedRange(range);
         editor.recordUndoEntry(state.existing ? 'Edit button' : 'Insert button');
-        if (state.existing) {
-            editor.deactivateAttribute(state.existing);
-            editor.deactivateAttribute('href');
-        }
+        // Clear every marker and link on the range, not only the one the
+        // dialog was opened for: a selection that overhangs a button would
+        // otherwise keep the old marker under the new one.
+        clearButton(editor);
         if (range[0] === range[1] || text !== state.text) {
             editor.insertString(text);   // replaces the selection, or inserts at the caret
         }
@@ -202,14 +208,19 @@
         closeDialog(dialog, false);
     }
 
+    // Drop every marker attribute and the link from the current selection.
+    function clearButton(editor) {
+        for (var name in ATTR_ALIGN) editor.deactivateAttribute(name);
+        editor.deactivateAttribute('href');
+    }
+
     function removeButton(dialog) {
         var state = dialog._mb;
         if (!state || !state.existing) return;
         var editor = state.editor;
         editor.setSelectedRange(state.range);
         editor.recordUndoEntry('Remove button');
-        editor.deactivateAttribute(state.existing);
-        editor.deactivateAttribute('href');
+        clearButton(editor);
         editor.setSelectedRange([state.range[1], state.range[1]]);
         closeDialog(dialog, false);
     }
@@ -225,14 +236,20 @@
         if (dialog._mb) { closeDialog(dialog, true); return; }
         var doc = editor.getDocument();
         var range = editor.getSelectedRange();
-        var attrs = range[0] === range[1]
-            ? doc.getCommonAttributesAtPosition(range[0])
-            : doc.getCommonAttributesAtRange(range);
-        var existing = buttonAttrIn(attrs), seed = -1;
-        if (existing) {
-            seed = hasAttrAt(doc, range[0], existing) ? range[0]
-                 : (hasAttrAt(doc, range[0] - 1, existing) ? range[0] - 1 : -1);
-            if (seed < 0) existing = null;
+        var existing = null, seed = -1;
+        if (range[0] === range[1]) {
+            // A caret: the button it just left (to the left) wins, so that
+            // "Insert, spot a typo, press Button again" edits the new button;
+            // otherwise the button it is about to enter.
+            seed = buttonSeedAt(doc, range[0] - 1);
+            if (seed < 0) seed = buttonSeedAt(doc, range[0]);
+            if (seed >= 0) existing = buttonAttrIn(doc.getCommonAttributesAtRange([seed, seed + 1]));
+        } else {
+            existing = buttonAttrIn(doc.getCommonAttributesAtRange(range));
+            if (existing) {
+                seed = hasAttrAt(doc, range[0], existing) ? range[0] : -1;
+                if (seed < 0) existing = null;
+            }
         }
         var editRange = range, href = '', align = rememberedAlign();
         if (existing) {
@@ -264,6 +281,17 @@
         var dialog = t.closest('[data-mb-button-dialog]');
         if (!dialog) return;
         if (e.key === 'Escape') { e.preventDefault(); closeDialog(dialog, true); }
-        else if (e.key === 'Enter' && t.tagName !== 'SELECT') { e.preventDefault(); applyButton(dialog); }
+        else if (e.key === 'Enter' && t.tagName !== 'SELECT' && !t.matches('input[type=button]')) {
+            e.preventDefault(); applyButton(dialog);   // a focused Cancel/Remove/Insert gets its own click
+        }
+    });
+
+    // The dialog holds the range it was opened on. Editing underneath it
+    // would shift that range, so the dialog closes the moment the editor gets
+    // focus back (Trix's own link dialog does the same).
+    addEventListener('trix-focus', function (e) {
+        var toolbar = e.target && e.target.toolbarElement;
+        var dialog = toolbar && toolbar.querySelector('[data-mb-button-dialog]');
+        if (dialog && dialog._mb) closeDialog(dialog, false);
     });
 })();

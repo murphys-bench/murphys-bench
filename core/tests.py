@@ -4598,6 +4598,58 @@ def test_button_position_markers_render_and_legacy_marker_stays_left():
 
 
 @pytest.mark.django_db
+def test_button_never_swallows_past_its_own_link():
+    # Review finding on the position-marker rewrite: a lazy match that could
+    # cross </a> ran on to the next same-position button in the body and sent
+    # everything between as one button. Three shapes the editor really
+    # produces, each with a later button that must stay its own.
+    from core.email_html import sanitize, finish_for_email
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    later = '<a href="https://z.example/"><mb-button-center>Later</mb-button-center></a>'
+    # 1. A button on part of a link's text (the editor groups same-link runs
+    #    under one <a>): the marked part is the button, the rest stays a link.
+    body = ('<div><a href="https://a.example/"><mb-button-center>One</mb-button-center> two</a>'
+            ' and ' + later + '</div>')
+    html, plain = finish_for_email(sanitize(body), site)
+    assert html.count('text-align:center;') == 2, 'two buttons, not one swallowing the other'
+    assert '>One</a>' in html and '<a href="https://a.example/" style=' in html and ' two</a>' in html, \
+        'the unmarked part of the link stays a plain link'
+    assert 'Later' in html and 'mb-button' not in html
+    assert 'One: https://a.example/' in plain and 'Later: https://z.example/' in plain
+    # 2. A link with text before the marker as well.
+    body = ('<div><a href="https://a.example/">pre <mb-button-right>Mid</mb-button-right> post</a>'
+            ' ' + later + '</div>')
+    html, _ = finish_for_email(sanitize(body), site)
+    assert html.count('text-align:right;') == 1 and html.count('text-align:center;') == 1
+    assert html.index('pre ') < html.index('>Mid</a>') < html.index(' post</a>') < html.index('Later')
+    # 3. Two buttons on the same link with different positions, back to back.
+    body = ('<div><a href="https://a.example/"><mb-button-center>A</mb-button-center>'
+            '<mb-button-right>B</mb-button-right></a> ' + later + '</div>')
+    html, plain = finish_for_email(sanitize(body), site)
+    assert html.count('text-align:center;') == 2 and html.count('text-align:right;') == 1
+    assert 'A: https://a.example/' in plain and 'B: https://a.example/' in plain
+    # 4. Marker wrapped around the link (the other nesting) still cannot run on.
+    body = ('<div><mb-button-center><a href="https://a.example/">A</a></mb-button-center>'
+            ' text <mb-button-center><a href="https://b.example/">B</a></mb-button-center></div>')
+    html, _ = finish_for_email(sanitize(body), site)
+    assert html.count('text-align:center;') == 2 and '>A</a>' in html and '>B</a>' in html
+    # Bold inside a button still renders as one button.
+    body = '<div><a href="https://a.example/"><mb-button-center><strong>Go</strong></mb-button-center></a></div>'
+    html, _ = finish_for_email(sanitize(body), site)
+    assert html.count('text-align:center;') == 1 and '<strong>Go</strong></a>' in html
+
+
+@pytest.mark.django_db
+def test_sending_address_label_is_unquoted_but_header_is_quoted():
+    from core.models import SendingAddress
+    a = SendingAddress(display_name='Shamrock Computer Services, LLC', email='sales@example.com')
+    assert str(a) == 'Shamrock Computer Services, LLC <sales@example.com>'
+    assert a.label == str(a)
+    assert a.from_header == '"Shamrock Computer Services, LLC" <sales@example.com>'
+
+
+@pytest.mark.django_db
 def test_sender_display_name_with_comma_is_quoted_for_mail():
     """Sep 6 2026: "Shamrock Computer Services, LLC <support@…>" was parsed
     as two addresses and every send failed. The header must survive Django's
