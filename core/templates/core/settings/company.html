@@ -9,7 +9,7 @@
             <div class="col-12"><label class="form-label">Address line 2</label>{{ forms.company.company_address_line2|tabler_input }}</div>
             <div class="col-md-6"><label class="form-label">Phone</label>{{ forms.company.company_phone|tabler_input }}</div>
             <div class="col-md-6"><label class="form-label">Email</label>{{ forms.company.company_email|tabler_input }}</div>
-            <div class="col-12"><label class="form-label">Logo</label>{% if settings.company_logo %}<div class="mb-2"><img src="{{ settings.company_logo.url }}" alt="Company logo" style="max-height:4rem;" class="border rounded p-1"></div>{% endif %}{{ forms.company.company_logo|tabler_input }}<div class="form-hint">PNG, JPG, or SVG. Horizontal with a transparent background works best.</div></div>
+            <div class="col-12"><label class="form-label">Logo</label>{% if settings.company_logo %}<div class="mb-2"><img src="{{ settings.company_logo.url }}" alt="Company logo" style="max-height:4rem;" class="border rounded p-1"></div>{% endif %}{{ forms.company.company_logo|tabler_input }}<div class="form-hint">PNG or JPG. Horizontal with a transparent background works best.</div></div>
         </div>
     </div>
     <div class="card-footer"><button type="submit" class="btn btn-primary">Save company info</button></div>

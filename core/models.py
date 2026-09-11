@@ -2473,7 +2473,7 @@ class SiteSettings(models.Model):
     company_email = models.EmailField(blank=True, default='')
     company_logo = models.ImageField(
         upload_to='company/', blank=True, null=True,
-        help_text='PNG, JPG, or SVG. Displayed on repair reports.',
+        help_text='PNG or JPG. Displayed on quotes, receipts, and repair reports.',
     )
 
     # Email branding — independent of the app's look. Blank values fall back to
@@ -2621,7 +2621,7 @@ class SiteSettings(models.Model):
     color_room_office   = models.CharField(max_length=7, default='#6c7a91', blank=True)
     site_logo = models.ImageField(
         upload_to='site/', blank=True, null=True,
-        help_text='Logo shown in the nav bar. PNG or SVG recommended. Leave blank to show text.',
+        help_text='Logo shown in the nav bar. PNG recommended. Leave blank to show text.',
     )
 
     # Login page logo (its own slot — the login screen has room for a richer/larger mark

@@ -10,9 +10,15 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+### Security
+
+- PDF rendering (quotes, receipts, repair reports, report exports) now loads assets only from the app's own media and static folders, plus the inline PNG chart pictures a report export carries, and refuses everything else, including paths that try to climb out of those folders. No document changes.
+
 ### Fixed
 
 - A sending address whose display name has a comma or period in it ("Shamrock Computer Services, LLC") failed every send with an invalid-address error. The name is now quoted the way mail requires.
+- The logo fields on Settings said SVG was accepted; it never was (the upload check requires a raster image). The help text and hints now say PNG or JPG. SVG stays out on purpose: the PDF renderer would follow references inside it.
+- WeasyPrint updated to 70.0 for CVE-2026-55073. MB's PDF rendering did not use the affected options, but the new version dropped the old asset-fetcher API, so the fetcher that embeds the company logo in quotes and reports was rebuilt on the new one.
 
 ### Changed
 
