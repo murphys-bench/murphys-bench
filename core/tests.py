@@ -3636,20 +3636,125 @@ def test_render_pdf_serves_local_assets_and_skips_missing(tmp_path, settings, ca
     # Regression for the WeasyPrint 70 upgrade: the fetcher API changed from a
     # callable to a URLFetcher subclass, and a plain-function fetcher crashed the
     # whole render on the first asset. A present /static/ asset must be served
-    # from disk and a missing /media/ asset must be skipped with a warning, not
-    # take the document down. Neither path is exercised by an asset-free render.
-    from core.pdf_utils import render_pdf, _TRANSPARENT_PNG
+    # from disk AND embedded, and a missing /media/ asset must be skipped with a
+    # warning, not take the document down. Neither path is exercised by an
+    # asset-free render.
+    from core.pdf_utils import render_pdf
     static_root = tmp_path / 'static'
     (static_root / 'img').mkdir(parents=True)
-    (static_root / 'img' / 'logo.png').write_bytes(_TRANSPARENT_PNG)
+    # A real raster logo that differs from the 1px stand-in (WeasyPrint dedups
+    # identical image bytes, so an identical file would not add an object).
+    (static_root / 'img' / 'logo.png').write_bytes(_png_upload(8, 8).read())
     settings.STATIC_ROOT = static_root
     settings.MEDIA_ROOT = tmp_path / 'media'   # exists nowhere: every ref is missing
+    # Baseline first, outside the log capture: a render carrying only the 1px
+    # stand-in for the missing asset.
+    only_missing = render_pdf('<p>Quote</p><img src="/media/logos/gone.png">')
+    caplog.clear()
     with caplog.at_level(logging.WARNING, logger='core'):
         out = render_pdf(
             '<p>Quote</p><img src="/static/img/logo.png"><img src="/media/logos/gone.png">')
     assert out[:5] == b'%PDF-'
+    # The served logo is actually embedded: more image objects than the baseline
+    # (exact counts depend on WeasyPrint internals, e.g. an alpha channel adds a
+    # mask object).
+    assert out.count(b'/Subtype /Image') > only_missing.count(b'/Subtype /Image') > 0
     missing = [r for r in caplog.records if 'PDF asset not found on disk' in r.getMessage()]
     assert len(missing) == 1 and missing[0].getMessage().endswith('logos/gone.png')
+
+
+# ---------------------------------------------------------------------------
+# PDF asset fetcher boundary. WeasyPrint's default fetcher can read local files
+# and reach any host the server can; MB's fetcher serves ONLY files under
+# MEDIA_ROOT / STATIC_ROOT and refuses everything else, so no template mistake,
+# SVG logo, or hand-edited body can turn PDF rendering into a file read or an
+# outbound request. These tests pin that boundary; loosening it is a security
+# change, not a convenience fix.
+# ---------------------------------------------------------------------------
+
+def _pdf_fetch(url):
+    from core.pdf_utils import _local_asset
+    return _local_asset(url)
+
+
+@pytest.mark.parametrize('url', [
+    'https://murphys-bench.local/media/../requirements.in',
+    'https://murphys-bench.local/media/%2e%2e/requirements.in',
+    'https://murphys-bench.local/static/../../requirements.in',
+    'https://murphys-bench.local/media/logos/../../../etc/hosts',
+])
+def test_pdf_asset_fetcher_refuses_paths_that_escape_their_folder(url, tmp_path, settings, caplog):
+    from core.pdf_utils import PDFAssetRefused
+    settings.MEDIA_ROOT = tmp_path / 'media'
+    settings.STATIC_ROOT = tmp_path / 'static'
+    with caplog.at_level(logging.WARNING, logger='core'), pytest.raises(PDFAssetRefused):
+        _pdf_fetch(url)
+    assert any('escapes' in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize('url', [
+    'https://example.com/logo.png',            # any network host
+    'http://10.0.0.1/admin',                    # LAN host (SSRF shape)
+    'file:///etc/passwd',                       # local file outside the folders
+    'https://murphys-bench.local/etc/passwd',   # our base host, not our folders
+    'https://murphys-bench.local/protected/x',  # private media is not a PDF asset
+    'data:image/png;base64,iVBORw0KGgo=',       # MB templates never use these
+])
+def test_pdf_asset_fetcher_refuses_everything_outside_media_and_static(url, caplog):
+    from core.pdf_utils import PDFAssetRefused
+    with caplog.at_level(logging.WARNING, logger='core'), pytest.raises(PDFAssetRefused):
+        _pdf_fetch(url)
+    assert any('refused' in r.getMessage() for r in caplog.records)
+
+
+def test_pdf_asset_fetcher_serves_a_file_inside_its_folder(tmp_path, settings):
+    from core.pdf_utils import _TRANSPARENT_PNG
+    media = tmp_path / 'media'
+    (media / 'company').mkdir(parents=True)
+    (media / 'company' / 'logo.png').write_bytes(_TRANSPARENT_PNG)
+    settings.MEDIA_ROOT = media
+    body, mime = _pdf_fetch('https://murphys-bench.local/media/company/logo.png')
+    try:
+        assert body.read() == _TRANSPARENT_PNG and mime == 'image/png'
+    finally:
+        body.close()
+
+
+@pdf_skip
+def test_render_pdf_survives_a_refused_asset(caplog):
+    # Refusal must degrade to "that image is missing", never a failed document:
+    # a quote still goes out if a template ever carries a bad reference.
+    from core.pdf_utils import render_pdf
+    with caplog.at_level(logging.WARNING, logger='core'):
+        out = render_pdf('<p>Quote</p><img src="https://example.com/x.png"><img src="file:///etc/hosts">')
+    assert out[:5] == b'%PDF-'
+    assert out.count(b'/Subtype /Image') == 0
+    assert sum('refused' in r.getMessage() for r in caplog.records) == 2
+
+
+def _svg_upload(name='logo.svg'):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg"><image href="file:///etc/passwd"/></svg>'
+    return SimpleUploadedFile(name, svg, content_type='image/svg+xml')
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('form_cls, field', [
+    ('CompanySettingsForm', 'company_logo'),
+    ('ColorSettingsForm', 'site_logo'),
+    ('ColorSettingsForm', 'login_logo'),
+])
+def test_logo_upload_rejects_svg(form_cls, field):
+    # SVG stays rejected on purpose. WeasyPrint renders SVG and follows the image
+    # references inside it through the PDF fetcher, so an SVG logo is a way to
+    # smuggle asset references into every quote and report. The help text used
+    # to promise SVG; the field never accepted it, and must not start to.
+    from core import forms as core_forms
+    from core.models import SiteSettings
+    form = getattr(core_forms, form_cls)(
+        data={}, files={field: _svg_upload()}, instance=SiteSettings.get())
+    form.is_valid()
+    assert field in form.errors
 
 
 @pdf_skip
