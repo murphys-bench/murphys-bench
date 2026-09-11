@@ -8,6 +8,12 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Fixed
+
+- WeasyPrint updated to 70.0 for CVE-2026-55073. MB's PDF rendering did not use the affected options, but the new version dropped the old asset-fetcher API, so the fetcher that embeds the company logo in quotes and reports was rebuilt on the new one.
+
 ## v0.16.0 — 2026-09-01
 
 Email grows up, and the billing worklist learns to tell the truth about invoices it didn't make. Email modernization: four outside-review rounds. Pull from IN: three.
