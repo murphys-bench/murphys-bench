@@ -4727,6 +4727,11 @@ def test_button_inside_formatting_inside_a_link_splits_cleanly(body):
     '<a href="https://a.example/">pre <mb-button-center>&nbsp;</mb-button-center> post</a>',
     '<a href="https://a.example/">pre <mb-button-center><br></mb-button-center> post</a>',
     '<mb-button-center><a href="https://a.example/"><strong></strong></a></mb-button-center>pre post',
+    # Round 6 review: whitespace entities other than &nbsp; counted as text.
+    '<a href="https://a.example/">pre <mb-button-center>&#160;</mb-button-center> post</a>',
+    '<a href="https://a.example/">pre <mb-button-center>&#8203;</mb-button-center> post</a>',
+    '<a href="https://a.example/">pre <mb-button-center>&ensp;<br>&#xa0;</mb-button-center> post</a>',
+    '<mb-button-center><a href="https://a.example/">&#160;</a></mb-button-center>pre post',
 ])
 def test_button_with_no_text_is_not_a_button(body):
     # Round 4 review: an empty marker (hand-written HTML; the dialog refuses
@@ -4759,6 +4764,28 @@ def test_link_with_only_an_empty_marker_is_dropped():
         assert 'a.example' not in html and 'a.example' not in plain, html
         assert 'Hello' in plain and 'there' in plain
         assert not re.search(r'<([a-z]+)></\1>', html)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('body, button_text, plain_line', [
+    # Round 6 review, editor-reachable: Enter inside a button label puts a
+    # line break in it; the plain twin must not glue the halves.
+    ('<a href="https://a.example/"><mb-button>Go<br>now</mb-button></a>', 'Go<br>now', 'Go now: https://a.example/'),
+    ('<a href="https://a.example/">Line<br>two</a>', None, 'Line two: https://a.example/'),
+    # Round 6 review: an empty block inside formatting inside the label lost
+    # the space between the words.
+    ('<a href="https://a.example/"><mb-button>Go<strong><div></div></strong>now</mb-button></a>', 'Go now', 'Go now: https://a.example/'),
+])
+def test_line_breaks_and_empty_blocks_inside_a_label_keep_words_apart(body, button_text, plain_line):
+    from core.email_html import sanitize, finish_for_email
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    html, plain = finish_for_email(sanitize('<div>' + body + '</div>'), site)
+    _assert_well_nested(html)
+    if button_text:
+        m = re.search(r'display:inline-block;background-color:[^>]*>((?:(?!</a>).)*)</a>', html, re.S)
+        assert m and m.group(1) == button_text, html
+    assert plain_line in plain, plain
 
 
 @pytest.mark.django_db

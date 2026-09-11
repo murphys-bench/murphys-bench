@@ -299,8 +299,15 @@ def _open_tags(fragment):
     return stack
 
 
+_INVISIBLE = ' \t\r\n\xa0\u200b\u2002\u2003\u2009\ufeff'
+
+
 def _has_text(fragment):
-    return bool(_TAG.sub('', fragment).replace('&nbsp;', ' ').replace('\xa0', ' ').strip())
+    """Whether anything a reader would see is in ``fragment``: tags are not
+    text, and neither is any whitespace entity (``&nbsp;``, ``&#160;``,
+    ``&ensp;``, a zero-width space)."""
+    import html as html_mod
+    return bool(html_mod.unescape(_TAG.sub('', fragment)).strip(_INVISIBLE))
 
 
 _BLOCK_TAG = re.compile(r'</?(?:div|p|ul|ol|li)\b[^>]*>')
@@ -347,7 +354,7 @@ def _wrapped_anchor(m, site):
     tag, href, label = m.group(1), m.group(2), m.group(3)
     text = _button_label(label)
     if not text:
-        return f'<a href="{href}">{label}</a>' if _has_text(label) else ''
+        return ''   # nothing to click: no link at all, not an empty one
     return _build_button(href, text, site, BUTTON_TAGS[tag])
 
 
@@ -357,9 +364,10 @@ _EMPTY_PAIR = re.compile(r'<([a-z][a-z0-9-]*)>\s*</\1>')
 def _drop_empty_pairs(fragment):
     """``<strong></strong>``, ``<li></li>`` and the like, left behind when a
     split closes and reopens tags at a piece's edge; harmless, but no reason
-    to send them. Repeats so an emptied parent goes too."""
+    to send them. A pair that held only whitespace leaves one space, so the
+    words on either side stay apart. Repeats so an emptied parent goes too."""
     while True:
-        cleaned = _EMPTY_PAIR.sub('', fragment)
+        cleaned = _EMPTY_PAIR.sub(lambda m: ' ' if re.search(r'>\s+<', m.group(0)) else '', fragment)
         if cleaned == fragment:
             return fragment
         fragment = cleaned
@@ -400,8 +408,8 @@ def to_plain(html):
     text = html or ''
     text = re.sub(
         r'<a [^>]*href="([^"]*)"[^>]*>(.*?)</a>',
-        lambda m: (m.group(2) if _strip_tags(m.group(2)).strip() == m.group(1).strip()
-                   else f'{_strip_tags(m.group(2)).strip()}: {m.group(1)}'),
+        lambda m: (m.group(2) if _label_text(m.group(2)) == m.group(1).strip()
+                   else f'{_label_text(m.group(2))}: {m.group(1)}'),
         text, flags=re.S)
     text = re.sub(r'<br\s*/?>', '\n', text)
     text = re.sub(r'</div>\s*<div[^>]*>', '\n', text)
@@ -422,6 +430,13 @@ def to_plain(html):
 
 def _strip_tags(html):
     return re.sub(r'<[^>]+>', '', html or '')
+
+
+def _label_text(html):
+    """A link's text for the plain twin: a line break inside it (Enter in
+    the middle of a button label) is a space, not two words glued."""
+    text = re.sub(r'<br\s*/?>', ' ', html or '')
+    return re.sub(r'\s+', ' ', _strip_tags(text)).strip()
 
 
 def finish_for_email(rendered_html, site):
