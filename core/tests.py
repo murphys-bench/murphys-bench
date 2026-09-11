@@ -3698,13 +3698,57 @@ def test_pdf_asset_fetcher_refuses_paths_that_escape_their_folder(url, tmp_path,
     'file:///etc/passwd',                       # local file outside the folders
     'https://murphys-bench.local/etc/passwd',   # our base host, not our folders
     'https://murphys-bench.local/protected/x',  # private media is not a PDF asset
-    'data:image/png;base64,iVBORw0KGgo=',       # MB templates never use these
 ])
 def test_pdf_asset_fetcher_refuses_everything_outside_media_and_static(url, caplog):
     from core.pdf_utils import PDFAssetRefused
     with caplog.at_level(logging.WARNING, logger='core'), pytest.raises(PDFAssetRefused):
         _pdf_fetch(url)
     assert any('refused' in r.getMessage() for r in caplog.records)
+
+
+# Inline images are how report charts reach the PDF (the browser posts the
+# canvas as a PNG data URL, the reports view checks it, the template embeds
+# it). The fetcher accepts exactly that shape and nothing else inline: an SVG
+# data URL would carry references the renderer follows, and anything that is
+# not a PNG has no business in a document.
+@pytest.mark.parametrize('url', [
+    'data:image/svg+xml;base64,PHN2Zy8+',                 # SVG can reference files
+    'data:text/html,<p>x</p>',                            # not an image at all
+    'data:image/jpeg;base64,/9j/4AAQ',                    # PNG only
+    'data:image/png;base64,not*valid*base64',             # bad base64
+    'data:image/png;base64,' + 'AAAA' * 8,                # base64 fine, not PNG bytes
+    'data:image/png,iVBORw0KGgo=',                        # must say base64
+])
+def test_pdf_asset_fetcher_refuses_inline_data_that_is_not_a_png(url, caplog):
+    from core.pdf_utils import PDFAssetRefused
+    with caplog.at_level(logging.WARNING, logger='core'), pytest.raises(PDFAssetRefused):
+        _pdf_fetch(url)
+    assert any('refused' in r.getMessage() for r in caplog.records)
+
+
+def test_pdf_asset_fetcher_refuses_an_oversized_inline_png():
+    import base64
+    from core.pdf_utils import PDFAssetRefused, _INLINE_PNG_MAX_BYTES, _PNG_MAGIC
+    big = _PNG_MAGIC + b'\0' * (_INLINE_PNG_MAX_BYTES + 1)
+    with pytest.raises(PDFAssetRefused):
+        _pdf_fetch('data:image/png;base64,' + base64.b64encode(big).decode())
+
+
+def test_pdf_asset_fetcher_serves_an_inline_png():
+    import base64
+    body, mime = _pdf_fetch(_PNG_1x1)
+    assert mime == 'image/png'
+    assert body.read() == base64.b64decode(_PNG_1x1.split(',', 1)[1])
+
+
+@pdf_skip
+def test_render_pdf_embeds_an_inline_png_chart():
+    # The report-export path: a chart picture travels as a data URL and must
+    # land in the PDF as an image, not be dropped as a refused asset.
+    from core.pdf_utils import render_pdf
+    out = render_pdf('<p>Report</p><img src="%s">' % _PNG_1x1)
+    assert out[:5] == b'%PDF-'
+    assert out.count(b'/Subtype /Image') >= 1
 
 
 def test_pdf_asset_fetcher_serves_a_file_inside_its_folder(tmp_path, settings):
@@ -15973,11 +16017,21 @@ def ReportsView_build(request, params):
 
 @pdf_skip
 @pytest.mark.django_db
-def test_reports_pdf_downloads_a_real_pdf(client, admin_user):
+def test_reports_pdf_downloads_a_real_pdf(client, admin_user, client_obj):
+    # One ticket inside the range, so the Ticket Volume section has data and
+    # actually places its chart (an empty period renders "No data" and no
+    # chart at all, which would make the embed assertion below vacuous).
+    from django.utils import timezone
+    t = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    Ticket.objects.filter(pk=t.pk).update(
+        created_at=timezone.make_aware(timezone.datetime(2026, 8, 10, 12, 0)))
     client.force_login(admin_user)
     r = client.post(reverse('core:reports_pdf'), {'domain': 'tickets', 'start_date': '2026-08-01', 'end_date': '2026-08-21', 'section': 'all', 'chart_chartVolume': _PNG_1x1})
     assert r.status_code == 200 and r['Content-Type'] == 'application/pdf'
     assert r.content.startswith(b'%PDF') and 'report-tickets-all-2026-08-01-to-2026-08-21.pdf' in r['Content-Disposition']
+    # The posted chart picture is IN the PDF. A valid PDF with the chart quietly
+    # dropped (a refused inline image) passed the two lines above unnoticed.
+    assert r.content.count(b'/Subtype /Image') >= 1
 
 
 # ── Internal notification email (Aug 25 2026): the shop hears about work ─────
