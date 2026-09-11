@@ -3632,6 +3632,27 @@ def test_render_pdf_produces_pdf_bytes():
 
 
 @pdf_skip
+def test_render_pdf_serves_local_assets_and_skips_missing(tmp_path, settings, caplog):
+    # Regression for the WeasyPrint 70 upgrade: the fetcher API changed from a
+    # callable to a URLFetcher subclass, and a plain-function fetcher crashed the
+    # whole render on the first asset. A present /static/ asset must be served
+    # from disk and a missing /media/ asset must be skipped with a warning, not
+    # take the document down. Neither path is exercised by an asset-free render.
+    from core.pdf_utils import render_pdf, _TRANSPARENT_PNG
+    static_root = tmp_path / 'static'
+    (static_root / 'img').mkdir(parents=True)
+    (static_root / 'img' / 'logo.png').write_bytes(_TRANSPARENT_PNG)
+    settings.STATIC_ROOT = static_root
+    settings.MEDIA_ROOT = tmp_path / 'media'   # exists nowhere: every ref is missing
+    with caplog.at_level(logging.WARNING, logger='core'):
+        out = render_pdf(
+            '<p>Quote</p><img src="/static/img/logo.png"><img src="/media/logos/gone.png">')
+    assert out[:5] == b'%PDF-'
+    missing = [r for r in caplog.records if 'PDF asset not found on disk' in r.getMessage()]
+    assert len(missing) == 1 and missing[0].getMessage().endswith('logos/gone.png')
+
+
+@pdf_skip
 @pytest.mark.django_db
 def test_email_report_view_renders_pdf_and_sends(monkeypatch, client, client_obj, admin_user):
     from django.core.mail import EmailMultiAlternatives
