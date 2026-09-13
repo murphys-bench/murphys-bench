@@ -8,11 +8,14 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
-## Unreleased
+## v0.16.2 — 2026-09-12
+
+The email patch. Eight outside-review rounds on the button rewrite, most of them on what the send step does with shapes the editor can produce.
 
 ### Fixed
 
 - A sending address whose display name has a comma or period in it ("Shamrock Computer Services, LLC") failed every send with an invalid-address error. The name is now quoted the way mail requires.
+- A button placed on part of a link, next to bold text, or with a line break in its label now sends correctly in both the HTML and plain-text versions of the message.
 
 ### Changed
 
