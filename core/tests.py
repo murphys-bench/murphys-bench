@@ -4733,7 +4733,7 @@ def test_button_inside_formatting_inside_a_link_splits_cleanly(body):
     '<a href="https://a.example/">pre <mb-button-center>&ensp;<br>&#xa0;</mb-button-center> post</a>',
     '<mb-button-center><a href="https://a.example/">&#160;</a></mb-button-center>pre post',
     # Round 7 review: the invisible set is a Unicode predicate, not a list.
-    '<a href="https://a.example/">pre <mb-button-center>&#8204;</mb-button-center> post</a>',    # zero-width joiner
+    '<a href="https://a.example/">pre <mb-button-center>&#8204;</mb-button-center> post</a>',    # zero-width non-joiner
     '<a href="https://a.example/">pre <mb-button-center>&shy;&#8288;</mb-button-center> post</a>',  # soft hyphen, word joiner
     '<a href="https://a.example/">pre <mb-button-center>&#8202;&#8239;&#12288;</mb-button-center> post</a>',  # hair, narrow nbsp, ideographic
     '<a href="https://a.example/">pre <mb-button-center>&#8232;&#x200e;&#xfe0f;</mb-button-center> post</a>',  # line sep, LRM, VS16

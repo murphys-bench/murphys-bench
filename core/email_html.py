@@ -24,6 +24,7 @@ bodies, so the tokens themselves are trusted the same way template text
 always has been.
 """
 import re
+import unicodedata
 
 from django.utils.html import escape
 
@@ -305,7 +306,6 @@ def _visible(ch):
     word joiner, direction marks), not a control (Cc), and not a combining
     mark on its own (M: a bare variation selector or accent has nothing to
     sit on; with a base character present, the base is what counts)."""
-    import unicodedata
     cat = unicodedata.category(ch)
     return not (cat[0] in 'ZM' or cat in ('Cf', 'Cc'))
 
