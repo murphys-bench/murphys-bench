@@ -749,7 +749,7 @@ class OutboundEmailSettingsForm(forms.ModelForm):
             f.queryset = SendingAddress.objects.all()
             f.empty_label = default_label
             f.widget.attrs['class'] = 'form-select'
-            f.label_from_instance = lambda a: a.from_header
+            f.label_from_instance = lambda a: a.label
 
     def from_kind_fields(self):
         """(bound field, label, hint) per kind, for the Outbound Email tab."""

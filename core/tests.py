@@ -4576,6 +4576,289 @@ def test_link_and_button_render_in_html_and_plain_twin(monkeypatch, client_obj):
 
 
 @pytest.mark.django_db
+def test_button_position_markers_render_and_legacy_marker_stays_left():
+    from core.email_html import sanitize, finish_for_email
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    body = ('<div><a href="https://a.example/1"><mb-button>L</mb-button></a>'
+            '<mb-button-center><a href="https://a.example/2">C</a></mb-button-center>'
+            '<a href="https://a.example/3"><mb-button-right>R</mb-button-right></a>'
+            ' <mb-button-center>stray</mb-button-center></div>')
+    clean = sanitize(body)
+    assert '<mb-button-center>' in clean and '<mb-button-right>' in clean, \
+        'position markers survive the allowlist'
+    html, plain = finish_for_email(clean, site)
+    assert 'text-align:left;"><a href="https://a.example/1"' in html, \
+        'the original marker keeps its left position'
+    assert 'text-align:center;"><a href="https://a.example/2"' in html
+    assert 'text-align:right;"><a href="https://a.example/3"' in html
+    assert 'mb-button' not in html, 'no marker reaches the recipient'
+    assert 'stray' in html, 'a marker with no link renders as plain text'
+    assert 'L: https://a.example/1' in plain and 'R: https://a.example/3' in plain
+
+
+@pytest.mark.django_db
+def test_button_never_swallows_past_its_own_link():
+    # Review finding on the position-marker rewrite: a lazy match that could
+    # cross </a> ran on to the next same-position button in the body and sent
+    # everything between as one button. Three shapes the editor really
+    # produces, each with a later button that must stay its own.
+    from core.email_html import sanitize, finish_for_email
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    later = '<a href="https://z.example/"><mb-button-center>Later</mb-button-center></a>'
+    # 1. A button on part of a link's text (the editor groups same-link runs
+    #    under one <a>): the marked part is the button, the rest stays a link.
+    body = ('<div><a href="https://a.example/"><mb-button-center>One</mb-button-center> two</a>'
+            ' and ' + later + '</div>')
+    html, plain = finish_for_email(sanitize(body), site)
+    assert html.count('text-align:center;') == 2, 'two buttons, not one swallowing the other'
+    assert '>One</a>' in html and '<a href="https://a.example/" style=' in html and ' two</a>' in html, \
+        'the unmarked part of the link stays a plain link'
+    assert 'Later' in html and 'mb-button' not in html
+    assert 'One: https://a.example/' in plain and 'Later: https://z.example/' in plain
+    # 2. A link with text before the marker as well.
+    body = ('<div><a href="https://a.example/">pre <mb-button-right>Mid</mb-button-right> post</a>'
+            ' ' + later + '</div>')
+    html, _ = finish_for_email(sanitize(body), site)
+    assert html.count('text-align:right;') == 1 and html.count('text-align:center;') == 1
+    assert html.index('pre ') < html.index('>Mid</a>') < html.index(' post</a>') < html.index('Later')
+    # 3. Two buttons on the same link with different positions, back to back.
+    body = ('<div><a href="https://a.example/"><mb-button-center>A</mb-button-center>'
+            '<mb-button-right>B</mb-button-right></a> ' + later + '</div>')
+    html, plain = finish_for_email(sanitize(body), site)
+    assert html.count('text-align:center;') == 2 and html.count('text-align:right;') == 1
+    assert 'A: https://a.example/' in plain and 'B: https://a.example/' in plain
+    # 4. Marker wrapped around the link (the other nesting) still cannot run on.
+    body = ('<div><mb-button-center><a href="https://a.example/">A</a></mb-button-center>'
+            ' text <mb-button-center><a href="https://b.example/">B</a></mb-button-center></div>')
+    html, _ = finish_for_email(sanitize(body), site)
+    assert html.count('text-align:center;') == 2 and '>A</a>' in html and '>B</a>' in html
+    # Bold inside a button still renders as one button.
+    body = '<div><a href="https://a.example/"><mb-button-center><strong>Go</strong></mb-button-center></a></div>'
+    html, _ = finish_for_email(sanitize(body), site)
+    assert html.count('text-align:center;') == 1 and '<strong>Go</strong></a>' in html
+
+
+def _assert_well_nested(html):
+    # Every tag closes in the order it was opened. An anchor closed inside a
+    # <strong> that was opened inside it is exactly the breakage this guards.
+    stack = []
+    for closing, name in re.findall(r'<(/?)([a-z][a-z0-9-]*)[^>]*>', html):
+        if name in ('br', 'img'):
+            continue
+        if not closing:
+            stack.append(name)
+        else:
+            assert stack and stack[-1] == name, f'</{name}> closes while {stack[-3:]} are open in: {html}'
+            stack.pop()
+    assert not stack, f'left open: {stack}'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('body', [
+    # Round-3 review: the marker INSIDE formatting inside a link split the
+    # anchor across an open <strong>. Every shape here must come out well
+    # nested, with the formatting kept on the text it belonged to.
+    '<a href="https://a.example/"><strong><mb-button-center>Go</mb-button-center></strong> now</a>',
+    '<a href="https://a.example/">before <strong><mb-button-center>Go</mb-button-center></strong> now</a>',
+    '<a href="https://a.example/"><em><strong>b <mb-button-right>Go</mb-button-right> a</strong></em></a>',
+    '<a href="https://a.example/"><strong>b <mb-button>Go</mb-button></strong></a>',
+    '<a href="https://a.example/">b <del><mb-button-center>Go</mb-button-center> a</del> z</a>',
+    '<a href="https://a.example/"><strong><mb-button-center>Go</mb-button-center></strong></a>',
+    '<a href="https://a.example/">line<br><mb-button-center>Go<br>on</mb-button-center><br>more</a>',
+    '<a href="https://a.example/"><strong><mb-button-center>A</mb-button-center></strong>'
+    '<em><mb-button-right>B</mb-button-right></em></a>',
+    # Round 4 review: the plain twin ran "pre: url" straight into "GoNow: url".
+    '<a href="https://a.example/"><strong>pre <em><mb-button-right>Go<br>Now</mb-button-right></em> post</strong> tail</a>',
+    # Round 4 review: a hand-written body can put a list or a div inside a
+    # link and bleach keeps it; the block must not end up inside the button.
+    '<a href="https://a.example/"><ul><li>x <mb-button-center>Go</mb-button-center> y</li></ul></a>',
+    '<a href="https://a.example/"><div>x</div><div><mb-button-center>Go</mb-button-center></div></a>',
+    # Round 5 review: a block INSIDE the marker, and the marker-around-link
+    # nesting with a block in it, must not be sent inside the button either.
+    '<a href="https://a.example/">x <mb-button-center><ul><li>Go</li></ul></mb-button-center> y</a>',
+    '<a href="https://a.example/">x <mb-button-center>Go<div>now</div></mb-button-center> y</a>',
+    '<mb-button-center><a href="https://a.example/"><ul><li>Go</li></ul></a></mb-button-center>',
+    # Round 5 review, editor-reachable: a bold or italic word right before a
+    # button ran into its label in the plain twin.
+    '<strong>Bold</strong><a href="https://a.example/"><mb-button-center>Go</mb-button-center></a> after',
+    'Click <em>this</em><a href="https://a.example/"><mb-button-center>Go</mb-button-center></a>',
+    'Bold<strong><a href="https://a.example/"><mb-button-center>Go</mb-button-center></a></strong>',
+    'Before<a href="https://a.example/"><mb-button-center>Go</mb-button-center></a>after',
+])
+def test_button_inside_formatting_inside_a_link_splits_cleanly(body):
+    from core.email_html import sanitize, finish_for_email
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    clean = sanitize('<div>' + body + '</div>')
+    html, plain = finish_for_email(clean, site)
+    _assert_well_nested(html)
+    assert 'mb-button' not in html
+    assert html.count('display:inline-block;background-color:') == clean.count('<mb-button'), \
+        'one button per marker'
+    for m in re.finditer(r'display:inline-block;background-color:[^>]*>((?:(?!</a>).)*)</a>', html, re.S):
+        assert not re.search(r'<(?:ul|ol|li|div|p)\b', m.group(1)), f'block inside a button label: {m.group(1)}'
+        assert 'Go' in m.group(1) or 'A' in m.group(1) or 'B' in m.group(1), 'label text kept'
+    # Words around the button are still there, each on its own line.
+    for word in ('Bold', 'Click this', 'Before', 'after', 'now'):
+        if word.replace(' ', '') in re.sub(r'<[^>]+>', '', body).replace(' ', ''):
+            assert re.search(r'(^|\n)' + re.escape(word) + r'(\n|$| )', plain) or word in plain, (word, plain)
+    assert not re.search(r'[A-Za-z]Go: https', plain), f'a word ran into the button label: {plain}'
+    assert 'https://a.example/' in plain, 'the plain twin still lists the link'
+    # Each "label: address" ends its line; a split never runs two together.
+    assert not re.search(r'https://a\.example/\S', plain), plain
+    # Text outside the marker but inside the link is still a link to the same
+    # address: the word sits inside a plain (non-button) anchor to it.
+    outside = re.sub(r'<mb-button[a-z-]*>.*?</mb-button[a-z-]*>', '', body, flags=re.S)
+    outside = re.search(r'<a href[^>]*>(.*?)</a>', outside, re.S)
+    outside = outside.group(1) if outside else ''
+    for word in ('before', 'now', 'more', ' a', ' z'):
+        if word in outside:
+            assert re.search(r'<a href="https://a\.example/" style="color[^>]*>(?:(?!</a>).)*' + re.escape(word.strip()), html, re.S), word
+    assert not re.search(r'<([a-z]+)></\1>', html), 'no empty pairs sent'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('body', [
+    '<a href="https://a.example/"><strong>pre <mb-button-center></mb-button-center> post</strong></a>',
+    '<a href="https://a.example/">pre <mb-button-center><strong></strong></mb-button-center> post</a>',
+    '<a href="https://a.example/">pre <mb-button-right> </mb-button-right> post</a>',
+    '<a href="https://a.example/">pre <mb-button-center>&nbsp;</mb-button-center> post</a>',
+    '<a href="https://a.example/">pre <mb-button-center><br></mb-button-center> post</a>',
+    '<mb-button-center><a href="https://a.example/"><strong></strong></a></mb-button-center>pre post',
+    # Round 6 review: whitespace entities other than &nbsp; counted as text.
+    '<a href="https://a.example/">pre <mb-button-center>&#160;</mb-button-center> post</a>',
+    '<a href="https://a.example/">pre <mb-button-center>&#8203;</mb-button-center> post</a>',
+    '<a href="https://a.example/">pre <mb-button-center>&ensp;<br>&#xa0;</mb-button-center> post</a>',
+    '<mb-button-center><a href="https://a.example/">&#160;</a></mb-button-center>pre post',
+    # Round 7 review: the invisible set is a Unicode predicate, not a list.
+    '<a href="https://a.example/">pre <mb-button-center>&#8204;</mb-button-center> post</a>',    # zero-width non-joiner
+    '<a href="https://a.example/">pre <mb-button-center>&shy;&#8288;</mb-button-center> post</a>',  # soft hyphen, word joiner
+    '<a href="https://a.example/">pre <mb-button-center>&#8202;&#8239;&#12288;</mb-button-center> post</a>',  # hair, narrow nbsp, ideographic
+    '<a href="https://a.example/">pre <mb-button-center>&#8232;&#x200e;&#xfe0f;</mb-button-center> post</a>',  # line sep, LRM, VS16
+])
+def test_button_with_no_text_is_not_a_button(body):
+    # Round 4 review: an empty marker (hand-written HTML; the dialog refuses
+    # an empty label) sent an empty button and a plain twin of "pre: u: u".
+    from core.email_html import sanitize, finish_for_email
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    html, plain = finish_for_email(sanitize('<div>' + body + '</div>'), site)
+    _assert_well_nested(html)
+    assert 'display:inline-block;background-color:' not in html, 'no button without text'
+    assert 'mb-button' not in html
+    assert 'pre' in plain and 'post' in plain
+    assert not re.search(r'<([a-z]+)></\1>', html), 'no empty pairs sent'
+    if 'pre' in re.sub(r'<[^>]+>', '', body.split('</a>')[0]):
+        assert plain.count('https://a.example/') == 1, plain
+    else:
+        assert 'https://a.example/' not in html, 'a link with nothing in it is not sent'
+
+
+@pytest.mark.django_db
+def test_link_with_only_an_empty_marker_is_dropped():
+    # Round 5 review: nothing to click means no link at all, not an empty one.
+    from core.email_html import sanitize, finish_for_email
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    for body in ('<a href="https://a.example/"><mb-button-center></mb-button-center></a>',
+                 '<a href="https://a.example/"><ul><li><mb-button-center></mb-button-center></li></ul></a>'):
+        html, plain = finish_for_email(sanitize('<div>Hello ' + body + ' there</div>'), site)
+        _assert_well_nested(html)
+        assert 'a.example' not in html and 'a.example' not in plain, html
+        assert 'Hello' in plain and 'there' in plain
+        assert not re.search(r'<([a-z]+)></\1>', html)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('body, button_text, plain_line', [
+    # Round 6 review, editor-reachable: Enter inside a button label puts a
+    # line break in it; the plain twin must not glue the halves.
+    ('<a href="https://a.example/"><mb-button>Go<br>now</mb-button></a>', 'Go<br>now', 'Go now: https://a.example/'),
+    ('<a href="https://a.example/">Line<br>two</a>', None, 'Line two: https://a.example/'),
+    # Round 6 review: an empty block inside formatting inside the label lost
+    # the space between the words.
+    ('<a href="https://a.example/"><mb-button>Go<strong><div></div></strong>now</mb-button></a>', 'Go now', 'Go now: https://a.example/'),
+    # Round 7 review: a block boundary inside an ordinary link's text, and an
+    # empty block in the text before a split marker, are spaces too.
+    ('<a href="https://a.example/">Go<div></div>now</a>', None, 'Go now: https://a.example/'),
+    ('<a href="https://a.example/"><ul><li>one</li><li>two</li></ul></a>', None, 'one two: https://a.example/'),
+    ('<a href="https://a.example/"><p>Go</p><p>now</p></a>', None, 'Go now: https://a.example/'),
+    ('<a href="https://a.example/">pre<div></div>x <mb-button>Go</mb-button></a>', 'Go', 'pre x: https://a.example/'),
+])
+def test_line_breaks_and_empty_blocks_inside_a_label_keep_words_apart(body, button_text, plain_line):
+    from core.email_html import sanitize, finish_for_email
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    html, plain = finish_for_email(sanitize('<div>' + body + '</div>'), site)
+    _assert_well_nested(html)
+    if button_text:
+        m = re.search(r'display:inline-block;background-color:[^>]*>((?:(?!</a>).)*)</a>', html, re.S)
+        assert m and m.group(1) == button_text, html
+    assert plain_line in plain, plain
+    assert 'prex' not in html and 'Gonow' not in html, html
+
+
+@pytest.mark.django_db
+def test_visible_text_is_never_treated_as_empty():
+    # The invisible predicate must not swallow real text: one character, a
+    # digit, punctuation, an emoji (with a variation selector), non-Latin
+    # script, visible entities, text padded with invisible characters.
+    from core.email_html import _has_text
+    for label in ('x', '0', '!', '\U0001f600', '\u2764\ufe0f', '\u65e5\u672c', '\u0639\u0631\u0628\u064a',
+                  '&amp;', '&copy;', '&lt;', '&amp;nbsp;', '&nbsp;go&nbsp;', '&#8203;go', '<strong>x</strong>'):
+        assert _has_text(label), repr(label)
+
+
+@pytest.mark.django_db
+def test_plain_twin_breaks_lines_only_where_a_block_follows_text():
+    # Round 5 review: the plain-twin rule must not disturb ordinary bodies.
+    from core.email_html import sanitize, finish_for_email
+    from core.models import SiteSettings
+    site = SiteSettings.get()
+    cases = {
+        '<div>One</div><div>Two</div>': 'One\nTwo',
+        '<p>One</p><p>Two</p>': 'One\nTwo',
+        '<div>List:<ul><li>a</li><li>b</li></ul></div>': 'List:\n- a\n- b',
+        '<div>Text<div>nested</div></div>': 'Text\nnested',
+        '<div><strong>Bold</strong> then <em>it</em></div>': 'Bold then it',
+        '<div>See <a href="https://x.example/">the site</a> now</div>': 'See the site: https://x.example/ now',
+    }
+    for body, expected in cases.items():
+        _, plain = finish_for_email(sanitize(body), site)
+        assert plain == expected, (body, plain)
+
+
+@pytest.mark.django_db
+def test_sending_address_label_is_unquoted_but_header_is_quoted():
+    from core.models import SendingAddress
+    a = SendingAddress(display_name='Shamrock Computer Services, LLC', email='sales@example.com')
+    assert str(a) == 'Shamrock Computer Services, LLC <sales@example.com>'
+    assert a.label == str(a)
+    assert a.from_header == '"Shamrock Computer Services, LLC" <sales@example.com>'
+
+
+@pytest.mark.django_db
+def test_sender_display_name_with_comma_is_quoted_for_mail():
+    """Sep 6 2026: "Shamrock Computer Services, LLC <support@…>" was parsed
+    as two addresses and every send failed. The header must survive Django's
+    own address check, the one that raised."""
+    from email.utils import parseaddr
+    from django.core.mail import EmailMultiAlternatives
+    from core.models import SendingAddress
+    s = SendingAddress.objects.create(display_name='Shamrock Computer Services, LLC',
+                                      email='support@example.com')
+    assert s.from_header == '"Shamrock Computer Services, LLC" <support@example.com>'
+    assert parseaddr(s.from_header) == ('Shamrock Computer Services, LLC', 'support@example.com')
+    msg = EmailMultiAlternatives('s', 'b', s.from_header, ['x@example.com']).message()
+    assert 'support@example.com' in msg['From']
+    assert 'Shamrock Computer Services, LLC' in msg['From']
+    plain = SendingAddress.objects.create(display_name='Sales', email='sales@example.com')
+    assert plain.from_header == 'Sales <sales@example.com>', 'no specials, no quotes'
+
+
+@pytest.mark.django_db
 def test_bare_url_in_body_autolinks(monkeypatch, client_obj):
     from core.models import EmailTemplate
     from core.email_utils import send_custom_email

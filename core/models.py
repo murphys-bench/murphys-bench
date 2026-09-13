@@ -2789,12 +2789,24 @@ class SendingAddress(models.Model):
         verbose_name_plural = 'Sending addresses'
 
     def __str__(self):
-        return self.from_header
+        return self.label
+
+    @property
+    def label(self):
+        """What the UI shows: name and address, unquoted. Never put this on the
+        wire; from_header is the mail-safe form."""
+        if self.display_name:
+            return f'{self.display_name} <{self.email}>'
+        return self.email
 
     @property
     def from_header(self):
+        # formataddr quotes a display name that carries a comma, period, or
+        # other address specials ("Shamrock Computer Services, LLC"); the bare
+        # f-string form parsed as two addresses and failed at send.
         if self.display_name:
-            return f'{self.display_name} <{self.email}>'
+            from email.utils import formataddr
+            return formataddr((self.display_name, self.email))
         return self.email
 
     @property

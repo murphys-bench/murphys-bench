@@ -66,3 +66,17 @@ body[data-room="work"]     { --mb-room: var(--tblr-primary); }
 [data-bs-theme="dark"] trix-toolbar .trix-button-group { border-color: #3a4352; }
 .mb-email-editor { min-height: 10rem; }
 trix-toolbar .trix-button-group { margin-bottom: 4px; }
+
+/* Email editor: the Button dialog (static/js/mb-email-editor.js). */
+trix-toolbar .mb-button-dialog:not(.trix-active) { display: none; }
+trix-toolbar .mb-button-dialog { max-width: 640px; }
+trix-toolbar .mb-button-dialog__fields { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+trix-toolbar .mb-button-dialog__field { display: flex; flex-direction: column; gap: 3px; flex: 1 1 180px; margin: 0; font-weight: 600; }
+trix-toolbar .mb-button-dialog__field--narrow { flex: 0 1 120px; }
+trix-toolbar .mb-button-dialog__field .trix-input--dialog { margin: 0; width: 100%; font-weight: normal; }
+trix-toolbar .mb-button-dialog__actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+trix-toolbar .mb-button-dialog__actions .trix-button-group { margin: 0; }
+trix-toolbar .mb-button-dialog__error { color: #b91c1c; }
+[data-bs-theme="dark"] trix-toolbar .trix-dialog { background: #1f2937; color: #e2e8f0; box-shadow: 0 0.3em 1em #000; border-top-color: #3a4352; }
+[data-bs-theme="dark"] trix-toolbar .trix-input--dialog { background: #111827; color: #e2e8f0; border-color: #3a4352; }
+[data-bs-theme="dark"] trix-toolbar .mb-button-dialog__error { color: #f87171; }

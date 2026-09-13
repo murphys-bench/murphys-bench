@@ -2,7 +2,8 @@
 
 The editor (Trix, static/js/mb-email-editor.js) stores template and signature
 bodies as a small HTML subset: div/br paragraphs, strong/em/del, links,
-lists, and <mb-button> (a link the email renders as a colored button).
+lists, and <mb-button> / <mb-button-center> / <mb-button-right> (a link the
+email renders as a colored button; the tag carries the button's position).
 Everything here treats that subset as the contract:
 
   sanitize()        — allowlist what the operator authored; strip the rest.
@@ -23,13 +24,20 @@ bodies, so the tokens themselves are trusted the same way template text
 always has been.
 """
 import re
+import unicodedata
 
 from django.utils.html import escape
 
 #: What the editor can produce and email can render. Anything else is
 #: stripped on save and again at send.
 ALLOWED_TAGS = ['div', 'p', 'br', 'strong', 'em', 'del', 'a', 'ul', 'ol',
-                'li', 'mb-button']
+                'li', 'mb-button', 'mb-button-center', 'mb-button-right']
+
+#: Button markers and the position each one carries. <mb-button> is the
+#: original marker (bodies saved before positions existed) and stays left.
+BUTTON_TAGS = {'mb-button': 'left', 'mb-button-center': 'center',
+               'mb-button-right': 'right'}
+_BUTTON_TAG = r'(mb-button(?:-center|-right)?)'
 ALLOWED_ATTRS = {'a': ['href']}
 ALLOWED_PROTOCOLS = ['http', 'https', 'mailto']
 
@@ -213,11 +221,13 @@ def render_body(body_html, ctx):
     return rendered.replace('\r\n', '\n').replace('\n', '<br>')
 
 
-def _build_button(href, label, site):
+def _build_button(href, label, site, align='left'):
     from .email_utils import _email_header_color, _contrast_text_color
     color = _email_header_color(site)
     text_color = _contrast_text_color(color)
-    return (f'<div style="margin:14px 0;">'
+    if align not in ('left', 'center', 'right'):
+        align = 'left'
+    return (f'<div style="margin:14px 0;text-align:{align};">'
             f'<a href="{href}" target="_blank" '
             f'style="display:inline-block;background-color:{color};color:{text_color};'
             f'padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:bold;">'
@@ -255,18 +265,143 @@ def _autolink_one(m):
     return f'<a href="{url}" style="{_LINK_STYLE}">{url}</a>{trailing}'
 
 
+# Inside one anchor: text before the first marker (no anchor tags, no marker),
+# the marker and its label (no anchor tags; nested formatting is fine), text
+# after (no anchor tags). Post-bleach an anchor carries only href.
+_NOT_ANCHOR = r'(?:(?!<a\b|</a>).)'
+# Only an authored link matches: post-bleach an anchor carries href and nothing
+# else, and a button this pass has already built carries target and style, so
+# the patterns never re-match their own output.
+_ANCHOR_WITH_MARKER = re.compile(
+    r'<a href="([^"]*)">((?:(?!<a\b|</a>|<mb-button).)*?)'
+    r'<' + _BUTTON_TAG + r'>(' + _NOT_ANCHOR + r'*?)</\3>(' + _NOT_ANCHOR + r'*?)</a>', re.S)
+_MARKER_AROUND_ANCHOR = re.compile(
+    r'<' + _BUTTON_TAG + r'>\s*<a href="([^"]*)">(' + _NOT_ANCHOR + r'*?)</a>\s*</\1>', re.S)
+
+
+_TAG = re.compile(r'<(/?)([a-z][a-z0-9-]*)[^>]*>')
+_FORMATTING = ('strong', 'em', 'del')
+
+
+def _open_tags(fragment):
+    """Tags opened in ``fragment`` and still open at its end, in order.
+    ``br`` is void and skipped. Post-bleach the anchor's content is a well
+    formed tree, so this is the marker's ancestor chain inside the anchor:
+    usually formatting (strong, em, del), but a hand-written body can put a
+    list or a div inside a link and bleach keeps it."""
+    stack = []
+    for closing, name in _TAG.findall(fragment):
+        if name == 'br':
+            continue
+        if not closing:
+            stack.append(name)
+        elif name in stack:
+            del stack[len(stack) - 1 - stack[::-1].index(name):]
+    return stack
+
+
+def _visible(ch):
+    """A character a reader would see: not a space of any kind (Unicode
+    category Z), not a format character (Cf: zero-width joiner, soft hyphen,
+    word joiner, direction marks), not a control (Cc), and not a combining
+    mark on its own (M: a bare variation selector or accent has nothing to
+    sit on; with a base character present, the base is what counts)."""
+    cat = unicodedata.category(ch)
+    return not (cat[0] in 'ZM' or cat in ('Cf', 'Cc'))
+
+
+def _has_text(fragment):
+    """Whether anything a reader would see is in ``fragment``: tags are not
+    text, and neither is any whitespace or invisible character, whether raw
+    or as an entity (``&nbsp;``, ``&#160;``, ``&ensp;``, ``&#8204;``)."""
+    import html as html_mod
+    return any(_visible(ch) for ch in html_mod.unescape(_TAG.sub('', fragment)))
+
+
+_BLOCK_TAG = re.compile(r'</?(?:div|p|ul|ol|li)\b[^>]*>')
+
+
+def _button_label(label):
+    """The text a button carries, or '' when there is none. A block inside the
+    label (a hand-written list, say) cannot sit inside a button: its tags
+    become spaces and the words stay."""
+    label = _drop_empty_pairs(_BLOCK_TAG.sub(' ', label))
+    label = re.sub(r'[ \t]{2,}', ' ', label).strip()
+    return label if _has_text(label) else ''
+
+
+def _split_anchor(m, site):
+    """One anchor holding a marker becomes: plain link (text before), button,
+    plain link (text after). Tags open at the marker are closed before the
+    split and reopened after it, so every piece is well formed on its own;
+    formatting among them (strong, em, del) is applied inside the button
+    label too, a block (a list item, say) is not. A marker with no text in it
+    is not a button: the marker is dropped and the link left whole, or dropped
+    too when nothing else is in it (a link with nothing to click)."""
+    href, pre, tag, label, post = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
+    label = _button_label(label)
+    if not label:
+        rest = _drop_empty_pairs(pre + post)
+        return f'<a href="{href}">{rest}</a>' if _has_text(rest) else ''
+    open_at_marker = _open_tags(pre)
+    close = ''.join(f'</{t}>' for t in reversed(open_at_marker))
+    reopen = ''.join(f'<{t}>' for t in open_at_marker)
+    formatting = [t for t in open_at_marker if t in _FORMATTING]
+    label = ''.join(f'<{t}>' for t in formatting) + label + ''.join(f'</{t}>' for t in reversed(formatting))
+    out = ''
+    if _has_text(pre):
+        out += f'<a href="{href}">{_drop_empty_pairs(pre + close)}</a>'
+    out += _build_button(href, label, site, BUTTON_TAGS[tag])
+    if _has_text(post):
+        out += f'<a href="{href}">{_drop_empty_pairs(reopen + post)}</a>'
+    return out
+
+
+def _wrapped_anchor(m, site):
+    """The other nesting, marker around the link: same label rules."""
+    tag, href, label = m.group(1), m.group(2), m.group(3)
+    text = _button_label(label)
+    if not text:
+        return ''   # nothing to click: no link at all, not an empty one
+    return _build_button(href, text, site, BUTTON_TAGS[tag])
+
+
+_EMPTY_PAIR = re.compile(r'<([a-z][a-z0-9-]*)>\s*</\1>')
+
+
+def _drop_empty_pairs(fragment):
+    """``<strong></strong>``, ``<li></li>`` and the like, left behind when a
+    split closes and reopens tags at a piece's edge; harmless, but no reason
+    to send them. A pair that held only whitespace, or an empty block (which
+    separated lines), leaves one space so the words on either side stay
+    apart. Repeats so an emptied parent goes too."""
+    while True:
+        cleaned = _EMPTY_PAIR.sub(
+            lambda m: ' ' if (re.search(r'>\s+<', m.group(0)) or _BLOCK_TAG.match(m.group(0))) else '',
+            fragment)
+        if cleaned == fragment:
+            return fragment
+        fragment = cleaned
+
+
 def _email_safe(html, site):
     """Inline the styling mail apps actually respect."""
     # Buttons: the marker + link collapse into one styled anchor, whichever
-    # way the editor nested them.
-    html = re.sub(
-        r'<a href="([^"]*)"[^>]*>\s*<mb-button>(.*?)</mb-button>\s*</a>',
-        lambda m: _build_button(m.group(1), m.group(2), site), html, flags=re.S)
-    html = re.sub(
-        r'<mb-button>\s*<a href="([^"]*)"[^>]*>(.*?)</a>\s*</mb-button>',
-        lambda m: _build_button(m.group(1), m.group(2), site), html, flags=re.S)
+    # way the editor nested them. Neither pattern may run past the end of an
+    # anchor: a lazy group that could cross </a> would swallow everything up
+    # to the next same-position button in the body and send it as one.
+    # A marker on part of a link's text (the editor groups same-link runs
+    # under one <a>) splits that link: text before and after stays a plain
+    # link, the marked part becomes the button. Repeat until stable so a
+    # second marker in the same anchor gets its own pass.
+    while True:
+        new_html = _ANCHOR_WITH_MARKER.sub(lambda m: _split_anchor(m, site), html)
+        if new_html == html:
+            break
+        html = new_html
+    html = _MARKER_AROUND_ANCHOR.sub(lambda m: _wrapped_anchor(m, site), html)
     # A stray marker with no link inside renders as plain text.
-    html = html.replace('<mb-button>', '').replace('</mb-button>', '')
+    html = re.sub(r'</?' + _BUTTON_TAG + r'>', '', html)
     # Ordinary links get a visible color even where the app's stylesheet is
     # ignored; ones already styled (the buttons above) are left alone.
     html = re.sub(r'<a href="([^"]*)">', rf'<a href="\1" style="{_LINK_STYLE}">', html)
@@ -284,11 +419,16 @@ def to_plain(html):
     text = html or ''
     text = re.sub(
         r'<a [^>]*href="([^"]*)"[^>]*>(.*?)</a>',
-        lambda m: (m.group(2) if _strip_tags(m.group(2)).strip() == m.group(1).strip()
-                   else f'{_strip_tags(m.group(2)).strip()}: {m.group(1)}'),
+        lambda m: (m.group(2) if _label_text(m.group(2)) == m.group(1).strip()
+                   else f'{_label_text(m.group(2))}: {m.group(1)}'),
         text, flags=re.S)
     text = re.sub(r'<br\s*/?>', '\n', text)
     text = re.sub(r'</div>\s*<div[^>]*>', '\n', text)
+    # A block opening right after text, or after the closing tag of a bold or
+    # italic word, starts a new line; otherwise a button that follows the
+    # plain part of a split link, or a word the author just made bold, runs
+    # straight into the button label.
+    text = re.sub(r'(?<=[^\s>])((?:</?(?:strong|em|del)>)*)<(?:div|p|ul|ol)\b[^>]*>', r'\1\n', text)
     text = re.sub(r'</(p|div|ul|ol)>', '\n', text)
     text = re.sub(r'<li[^>]*>', '- ', text)
     text = re.sub(r'</li>', '\n', text)
@@ -301,6 +441,15 @@ def to_plain(html):
 
 def _strip_tags(html):
     return re.sub(r'<[^>]+>', '', html or '')
+
+
+def _label_text(html):
+    """A link's text for the plain twin: a line break or a block boundary
+    inside it (Enter in the middle of a button label; a hand-written list in
+    a link) is a space, not two words glued."""
+    text = re.sub(r'<br\s*/?>', ' ', html or '')
+    text = _BLOCK_TAG.sub(' ', text)
+    return re.sub(r'\s+', ' ', _strip_tags(text)).strip()
 
 
 def finish_for_email(rendered_html, site):
