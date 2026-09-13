@@ -4732,6 +4732,11 @@ def test_button_inside_formatting_inside_a_link_splits_cleanly(body):
     '<a href="https://a.example/">pre <mb-button-center>&#8203;</mb-button-center> post</a>',
     '<a href="https://a.example/">pre <mb-button-center>&ensp;<br>&#xa0;</mb-button-center> post</a>',
     '<mb-button-center><a href="https://a.example/">&#160;</a></mb-button-center>pre post',
+    # Round 7 review: the invisible set is a Unicode predicate, not a list.
+    '<a href="https://a.example/">pre <mb-button-center>&#8204;</mb-button-center> post</a>',    # zero-width joiner
+    '<a href="https://a.example/">pre <mb-button-center>&shy;&#8288;</mb-button-center> post</a>',  # soft hyphen, word joiner
+    '<a href="https://a.example/">pre <mb-button-center>&#8202;&#8239;&#12288;</mb-button-center> post</a>',  # hair, narrow nbsp, ideographic
+    '<a href="https://a.example/">pre <mb-button-center>&#8232;&#x200e;&#xfe0f;</mb-button-center> post</a>',  # line sep, LRM, VS16
 ])
 def test_button_with_no_text_is_not_a_button(body):
     # Round 4 review: an empty marker (hand-written HTML; the dialog refuses
@@ -4775,6 +4780,12 @@ def test_link_with_only_an_empty_marker_is_dropped():
     # Round 6 review: an empty block inside formatting inside the label lost
     # the space between the words.
     ('<a href="https://a.example/"><mb-button>Go<strong><div></div></strong>now</mb-button></a>', 'Go now', 'Go now: https://a.example/'),
+    # Round 7 review: a block boundary inside an ordinary link's text, and an
+    # empty block in the text before a split marker, are spaces too.
+    ('<a href="https://a.example/">Go<div></div>now</a>', None, 'Go now: https://a.example/'),
+    ('<a href="https://a.example/"><ul><li>one</li><li>two</li></ul></a>', None, 'one two: https://a.example/'),
+    ('<a href="https://a.example/"><p>Go</p><p>now</p></a>', None, 'Go now: https://a.example/'),
+    ('<a href="https://a.example/">pre<div></div>x <mb-button>Go</mb-button></a>', 'Go', 'pre x: https://a.example/'),
 ])
 def test_line_breaks_and_empty_blocks_inside_a_label_keep_words_apart(body, button_text, plain_line):
     from core.email_html import sanitize, finish_for_email
@@ -4786,6 +4797,18 @@ def test_line_breaks_and_empty_blocks_inside_a_label_keep_words_apart(body, butt
         m = re.search(r'display:inline-block;background-color:[^>]*>((?:(?!</a>).)*)</a>', html, re.S)
         assert m and m.group(1) == button_text, html
     assert plain_line in plain, plain
+    assert 'prex' not in html and 'Gonow' not in html, html
+
+
+@pytest.mark.django_db
+def test_visible_text_is_never_treated_as_empty():
+    # The invisible predicate must not swallow real text: one character, a
+    # digit, punctuation, an emoji (with a variation selector), non-Latin
+    # script, visible entities, text padded with invisible characters.
+    from core.email_html import _has_text
+    for label in ('x', '0', '!', '\U0001f600', '\u2764\ufe0f', '\u65e5\u672c', '\u0639\u0631\u0628\u064a',
+                  '&amp;', '&copy;', '&lt;', '&amp;nbsp;', '&nbsp;go&nbsp;', '&#8203;go', '<strong>x</strong>'):
+        assert _has_text(label), repr(label)
 
 
 @pytest.mark.django_db

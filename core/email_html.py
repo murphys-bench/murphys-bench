@@ -299,15 +299,23 @@ def _open_tags(fragment):
     return stack
 
 
-_INVISIBLE = ' \t\r\n\xa0\u200b\u2002\u2003\u2009\ufeff'
+def _visible(ch):
+    """A character a reader would see: not a space of any kind (Unicode
+    category Z), not a format character (Cf: zero-width joiner, soft hyphen,
+    word joiner, direction marks), not a control (Cc), and not a combining
+    mark on its own (M: a bare variation selector or accent has nothing to
+    sit on; with a base character present, the base is what counts)."""
+    import unicodedata
+    cat = unicodedata.category(ch)
+    return not (cat[0] in 'ZM' or cat in ('Cf', 'Cc'))
 
 
 def _has_text(fragment):
     """Whether anything a reader would see is in ``fragment``: tags are not
-    text, and neither is any whitespace entity (``&nbsp;``, ``&#160;``,
-    ``&ensp;``, a zero-width space)."""
+    text, and neither is any whitespace or invisible character, whether raw
+    or as an entity (``&nbsp;``, ``&#160;``, ``&ensp;``, ``&#8204;``)."""
     import html as html_mod
-    return bool(html_mod.unescape(_TAG.sub('', fragment)).strip(_INVISIBLE))
+    return any(_visible(ch) for ch in html_mod.unescape(_TAG.sub('', fragment)))
 
 
 _BLOCK_TAG = re.compile(r'</?(?:div|p|ul|ol|li)\b[^>]*>')
@@ -364,10 +372,13 @@ _EMPTY_PAIR = re.compile(r'<([a-z][a-z0-9-]*)>\s*</\1>')
 def _drop_empty_pairs(fragment):
     """``<strong></strong>``, ``<li></li>`` and the like, left behind when a
     split closes and reopens tags at a piece's edge; harmless, but no reason
-    to send them. A pair that held only whitespace leaves one space, so the
-    words on either side stay apart. Repeats so an emptied parent goes too."""
+    to send them. A pair that held only whitespace, or an empty block (which
+    separated lines), leaves one space so the words on either side stay
+    apart. Repeats so an emptied parent goes too."""
     while True:
-        cleaned = _EMPTY_PAIR.sub(lambda m: ' ' if re.search(r'>\s+<', m.group(0)) else '', fragment)
+        cleaned = _EMPTY_PAIR.sub(
+            lambda m: ' ' if (re.search(r'>\s+<', m.group(0)) or _BLOCK_TAG.match(m.group(0))) else '',
+            fragment)
         if cleaned == fragment:
             return fragment
         fragment = cleaned
@@ -433,9 +444,11 @@ def _strip_tags(html):
 
 
 def _label_text(html):
-    """A link's text for the plain twin: a line break inside it (Enter in
-    the middle of a button label) is a space, not two words glued."""
+    """A link's text for the plain twin: a line break or a block boundary
+    inside it (Enter in the middle of a button label; a hand-written list in
+    a link) is a space, not two words glued."""
     text = re.sub(r'<br\s*/?>', ' ', html or '')
+    text = _BLOCK_TAG.sub(' ', text)
     return re.sub(r'\s+', ' ', _strip_tags(text)).strip()
 
 
