@@ -92,14 +92,13 @@ The installer:
 2. Creates a Python virtual environment.
 3. Installs the Python dependencies.
 4. Creates `.env` with unique application and encryption keys.
-5. Builds the locally hosted CSS.
-6. Runs database migrations.
-7. Collects static files.
-8. Creates the initial superuser.
-9. Seeds obviously-fake demo data, so the app is usable immediately (skip with `--no-demo-data`).
-10. Runs Django checks and the test suite.
-11. Installs and starts the Gunicorn systemd service.
-12. Configures and enables the nginx site.
+5. Runs database migrations.
+6. Collects static files.
+7. Creates the initial superuser.
+8. Seeds obviously-fake demo data, so the app is usable immediately (skip with `--no-demo-data`).
+9. Runs Django checks and the test suite.
+10. Installs and starts the Gunicorn systemd service.
+11. Configures and enables the nginx site.
 
 The installer preserves an existing `.env` when rerun. Review the script before rerunning it on a system whose web-server configuration has been changed manually.
 

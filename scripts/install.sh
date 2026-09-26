@@ -47,7 +47,7 @@
 #                      address this box answers on — auto-detected — unless you
 #                      override it)
 #
-# Safe to re-run: an existing .env is never overwritten; deps/migrate/build/web
+# Safe to re-run: an existing .env is never overwritten; deps/migrate/web
 # steps are idempotent (re-running just confirms/reloads).
 set -euo pipefail
 
