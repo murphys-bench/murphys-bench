@@ -12,7 +12,7 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ### Removed
 
-- `scripts/build_css.sh`, the no-op stub kept since v0.14.0. A box still on v0.13.x must update to v0.16.2 first, then to the latest.
+- `scripts/build_css.sh`, the no-op stub kept since v0.14.0. A box still on v0.13.x must first run `scripts/update.sh v0.16.2` from a shell (its Update button can't pick a version), then update normally.
 - A 48 MB Tailwind build tool committed by mistake in v0.14.0. Nothing used it.
 
 ## v0.16.2 — 2026-09-12

@@ -2,7 +2,7 @@
 
 Murphy's Bench includes an installation script for a fresh Ubuntu 24.04 or 26.04 LTS server or VM dedicated to the application.
 
-The script installs the required system packages and Python dependencies, creates the database and application secrets, builds the CSS, runs migrations and tests, and configures Gunicorn and nginx.
+The script installs the required system packages and Python dependencies, creates the database and application secrets, runs migrations, collects static files, runs the tests, and configures Gunicorn and nginx.
 
 ```bash
 git clone <REPO_URL> murphys-bench

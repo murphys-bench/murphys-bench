@@ -47,4 +47,4 @@ Include migrations when a model change requires them. Keep migrations limited to
 
 Follow the existing patterns in the files you are changing rather than introducing a new structure or dependency without a clear need.
 
-Murphy's Bench is a server-rendered Django application using HTMX and Alpine.js, not a SPA or separate frontend application. New features should generally stay within that structure unless there is a strong reason not to.
+Murphy's Bench is a server-rendered Django application using HTMX and Tabler, not a SPA or separate frontend application. New features should generally stay within that structure unless there is a strong reason not to.
