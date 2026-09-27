@@ -11069,10 +11069,10 @@ def test_static_refs_resolve_under_manifest_storage(client, admin_user):
         },
     }
     with override_settings(STORAGES=manifest):
-        # Unauthenticated page — base_focus.html chrome.
+        # Unauthenticated page: Tabler focus chrome.
         assert client.get(reverse('two_factor:login')).status_code == 200
 
-        # Authenticated pages — base.html chrome, the sidebar, and the compiled CSS.
+        # Authenticated pages: Tabler chrome, the sidebar, and static assets.
         client.force_login(admin_user)
         for name in ('core:dashboard', 'core:ticket_list', 'core:work_order_list',
                      'core:client_list', 'core:settings'):

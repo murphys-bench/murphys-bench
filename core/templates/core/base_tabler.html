@@ -7,10 +7,10 @@
     <meta name="htmx-config" content='{"allowEval": false}'>
     <link rel="icon" type="image/svg+xml" href="{% static 'favicon.svg' %}">
     {% comment %}
-    THE TABLER FRAME. Pages rebuilt on Tabler extend this; pages not yet rebuilt
-    extended core/base.html (the Tailwind frame, deleted in v0.14.0). The two never shared a
-    page, so the two stylesheets never fight. When the last page moves, this
-    file becomes base.html and the old one is deleted.
+    THE TABLER FRAME. Sidebar app pages extend this, directly or via
+    worklist_base.html; sign-in and two-factor screens use base_tabler_focus.html.
+    Print, PDF and email templates are standalone. The old Tailwind frame,
+    core/base.html, was deleted in v0.14.0.
     Rules live in mb-docs/MB-ON-TABLER-DESIGN-RULES.md.
     {% endcomment %}
     <link rel="stylesheet" href="{% static 'vendor/tabler/1.4.0/tabler.min.css' %}">

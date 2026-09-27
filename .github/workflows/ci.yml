@@ -1,6 +1,6 @@
 name: CI
 
-# The gate: lint, build the self-hosted CSS, run Django checks, collectstatic, and
+# The gate: lint, run Django checks, collectstatic, and
 # the test spine automatically on every change, so broken code is caught here
 # instead of in production.
 #

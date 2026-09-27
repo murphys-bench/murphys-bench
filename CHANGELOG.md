@@ -8,6 +8,13 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Removed
+
+- `scripts/build_css.sh`, the no-op stub kept since v0.14.0. A box still on v0.13.x must first run `scripts/update.sh v0.16.2` from a shell (its Update button can't pick a version), then update normally.
+- A 48 MB Tailwind build tool committed by mistake in v0.14.0. Nothing used it.
+
 ## v0.16.2 — 2026-09-12
 
 The email patch. Eight outside-review rounds on the button rewrite, most of them on what the send step does with shapes the editor can produce.

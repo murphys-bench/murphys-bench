@@ -147,7 +147,7 @@ scripts/update.sh v0.1.0      # pin a specific tag
 scripts/update.sh main        # deploy latest on a branch (staging/testing only)
 ```
 
-`update.sh` backs up first, then pip-installs, migrates, rebuilds CSS,
+`update.sh` backs up first, then pip-installs, migrates, runs
 collectstatic, restarts, and health-checks. **If any step after the backup fails,
 it AUTOMATICALLY rolls back** — code (`git checkout` the previous commit) *and*
 database (`restore.sh` of the pre-update snapshot) — and re-verifies health. So a

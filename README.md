@@ -14,7 +14,7 @@ It also handles the break/fix side of the business. A phone call or email become
 
 The managed side is the core of the business, but both workflows are built into the same system.
 
-Murphy's Bench runs on your own server using Django, SQLite, HTMX, Alpine.js, and server-rendered pages. There is no hosted account, per-seat charge, or outside application database.
+Murphy's Bench runs on your own server using Django, SQLite, HTMX, and server-rendered pages. There is no hosted account, per-seat charge, or outside application database.
 
 > **Current status:** Murphy's Bench is used in daily production at one shop and is still under active development. It should be treated as an early self-hosted project, not a finished commercial product.
 
@@ -155,8 +155,7 @@ _(Screenshots use demonstration data.)_
 - Python 3.12
 - Django 5.2 LTS
 - HTMX
-- Alpine.js
-- Tailwind CSS, compiled locally with the standalone CLI
+- Tabler, vendored (no build step)
 - SQLite
 - Gunicorn
 - Nginx
