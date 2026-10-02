@@ -142,11 +142,12 @@ class Command(BaseCommand):
             self.run_id = uuid.uuid4().hex[:8]
             self.ctx = {}
             results = {'run_id': self.run_id, 'url': opts['url']}
-            code, ping = probe.json('GET', '/clients?per_page=1')
-            resp = probe.call('GET', '/clients?per_page=1')
-            results['in_version'] = resp.headers.get('X-APP-VERSION')
-            if code != 200:
-                raise CommandError(f'Token check failed: {code} {ping}')
+            if names != ['in_down']:  # in_down runs with IN's app stopped on purpose
+                code, ping = probe.json('GET', '/clients?per_page=1')
+                resp = probe.call('GET', '/clients?per_page=1')
+                results['in_version'] = resp.headers.get('X-APP-VERSION')
+                if code != 200:
+                    raise CommandError(f'Token check failed: {code} {ping}')
             for name in names:
                 self.stdout.write(f'-- {name}')
                 try:
@@ -452,11 +453,16 @@ class Command(BaseCommand):
         return {'mb_message': msg, 'seconds_to_fail': round(time.monotonic() - started, 2)}
 
     def s_in_down(self, probe):
+        try:
+            r = probe.call('GET', '/clients?per_page=1', timeout=90)
+            raw = {'http': r.status_code, 'content_type': r.headers.get('Content-Type'), 'body': r.text[:120]}
+        except requests.RequestException as e:
+            raw = {'error': type(e).__name__}
+        raw['seconds'] = probe.timings[-1][2]
         started = time.monotonic()
-        r = probe.call('GET', '/clients?per_page=1')
         kind, msg = mb_call(probe, 'GET', '/clients')
-        return {'http': r.status_code, 'content_type': r.headers.get('Content-Type'),
-                'mb_message': msg, 'seconds': round(time.monotonic() - started, 2)}
+        return {'raw_wait_up_to_90s': raw, 'mb_message': msg,
+                'mb_seconds': round(time.monotonic() - started, 2)}
 
 
 def summarize_timings(timings):
