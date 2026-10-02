@@ -307,6 +307,22 @@ class Command(BaseCommand):
         time.sleep(1)
         out['invoice_create_http'] = codes
         out['invoices_created'] = len(find_invoices(probe, custom_value4=key) or [])
+        # IN's guard is a 1-second lock on a hash of the body (StoreInvoiceRequest). The
+        # same click 2 seconds later:
+        time.sleep(2)
+        out['same_create_2s_later_http'] = probe.call('POST', '/invoices', json=payload).status_code
+        time.sleep(1)
+        out['invoices_after_2s_retry'] = len(find_invoices(probe, custom_value4=key) or [])
+        # Does IN honour idempotency_key on invoices, as it does on payments?
+        p3, key3 = self._draft(probe, 'IDEMKEY')
+        p3['idempotency_key'] = uuid.uuid4().hex
+        first = probe.call('POST', '/invoices', json=p3).status_code
+        time.sleep(2)
+        second = probe.call('POST', '/invoices', json=p3)
+        time.sleep(1)
+        out['invoice_idempotency_key'] = {'http': [first, second.status_code], 'body2': second.text[:120]
+                                          if second.status_code >= 400 else 'ok',
+                                          'invoices_created': len(find_invoices(probe, custom_value4=key3) or [])}
         # b. Two identical payments (same idempotency_key) at the same instant.
         p2, _ = self._draft(probe, 'PAYDOUBLE', cost=40.0)
         code, b = probe.json('POST', '/invoices', json=p2)
@@ -370,6 +386,11 @@ class Command(BaseCommand):
                                'in_changed_since_all_statuses': iid in (find_invoices(probe, updated_at=since3) or []),
                                'in_changed_since_default_status': iid in (find_invoices(
                                    probe, updated_at=since3, status='') or [])}
+        # A list call with no status parameter at all, as MB's list_client_invoices makes.
+        code, b = probe.json('GET', f'/invoices?client_id={self.ctx["client_id"]}&per_page=100')
+        rows = {r['id']: r for r in (b.get('data') or [])}
+        out['no_status_param_list'] = {'includes_deleted': iid in rows,
+                                       'is_deleted_flag': rows.get(iid, {}).get('is_deleted')}
         return out
 
     def s_too_many(self, probe):
