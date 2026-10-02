@@ -16842,3 +16842,26 @@ def test_migration_0116_collapses_cross_side_claims_before_widening_the_ticket_k
     first.refresh_from_db(); second.refresh_from_db()
     assert first.via_quick_send is True, 'the earliest send keeps the claim'
     assert second.via_quick_send is False and second.done_at is not None, 'later send stays as history'
+
+
+# ── in_connection_test: never writes to hosted IN ──
+
+@pytest.mark.parametrize('url', ['https://invoicing.co', 'https://app.invoicing.co/', 'https://x.invoiceninja.com'])
+def test_in_connection_test_refuses_hosted_in_before_any_request(url, tmp_path):
+    from unittest import mock
+    from django.core.management import call_command
+    from django.core.management.base import CommandError
+
+    token = tmp_path / 'tok'
+    token.write_text('t')
+    with mock.patch('requests.request') as req, pytest.raises(CommandError, match='Refusing'):
+        call_command('in_connection_test', url=url, token_file=str(token))
+    req.assert_not_called()
+
+
+def test_in_connection_test_hosted_check_is_not_fooled_by_lookalike_hosts():
+    from core.management.commands.in_connection_test import is_hosted
+
+    assert is_hosted('https://invoicing.co') and is_hosted('https://app.invoicing.co')
+    assert not is_hosted('http://10.58.58.11')
+    assert not is_hosted('https://notinvoicing.co')
