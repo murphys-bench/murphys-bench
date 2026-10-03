@@ -11,6 +11,12 @@ on:
     - cron: '0 13 * * 1'  # Monday 13:00 UTC
   workflow_dispatch: {}  # manual "Run workflow" button for an on-demand check
 
+# issues: write is what lets the failure step open its issue. The repo's
+# default token is read-only, so without this the alarm could never fire.
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   audit:
     runs-on: ubuntu-latest

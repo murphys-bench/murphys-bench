@@ -138,6 +138,18 @@ def _is_admin(user):
     return user.is_staff or user.has_perm_flag('can_manage_settings')
 
 
+def _safe_next(request, fallback=''):
+    """The form's `next` when it points back into MB, else `fallback`. Every
+    view that honors `next` goes through here: a raw one sends the user
+    wherever the posted value says, another site included (CodeQL
+    url-redirection, Oct 3 2026)."""
+    from django.utils.http import url_has_allowed_host_and_scheme
+    nxt = request.POST.get('next') or request.GET.get('next') or ''
+    if nxt and url_has_allowed_host_and_scheme(nxt, allowed_hosts={request.get_host()}):
+        return nxt
+    return fallback
+
+
 def _can_view_prospects(user):
     """Prospects are visible to everyone unless a role explicitly turns the flag
     off. Admins always qualify."""
@@ -1830,9 +1842,7 @@ class ClientCreateView(LoginRequiredMixin, CreateView):
     template_name = 'core/client_form.html'
 
     def _next(self):
-        from django.utils.http import url_has_allowed_host_and_scheme
-        nxt = self.request.POST.get('next') or self.request.GET.get('next') or ''
-        return nxt if url_has_allowed_host_and_scheme(nxt, allowed_hosts={self.request.get_host()}) else ''
+        return _safe_next(self.request)
 
     def get_success_url(self):
         # Came from an intake form? Go back to it with the new customer selected.
@@ -2858,7 +2868,7 @@ class SaleCheckINView(SaleAccessMixin, View):
     def post(self, request, pk):
         from . import invoice_ninja
         sale = get_object_or_404(Sale, pk=pk)
-        next_url = request.POST.get('next') or reverse('core:sale_detail', kwargs={'pk': pk})
+        next_url = _safe_next(request, reverse('core:sale_detail', kwargs={'pk': pk}))
         if not sale.invoice_ninja_id:
             messages.error(request, f'{sale.sale_number} has not been sent to Invoice Ninja yet.')
             return redirect(next_url)
@@ -3314,10 +3324,7 @@ class DeviceCreateView(LoginRequiredMixin, CreateView):
             return redirect(
                 reverse_lazy('core:work_order_create') + f'?device={self.object.pk}'
             )
-        next_url = self.request.POST.get('next') or self.request.GET.get('next')
-        if next_url:
-            return redirect(next_url)
-        return redirect(reverse_lazy('core:device_detail', kwargs={'pk': self.object.pk}))
+        return redirect(_safe_next(self.request, reverse('core:device_detail', kwargs={'pk': self.object.pk})))
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -8733,6 +8740,24 @@ class DeviceCredentialUpdateView(LoginRequiredMixin, View):
 
 # --- Email Template Manager ---
 
+def _template_save_warnings(request, tmpl):
+    """Say what in a just-saved template will not work as written: a subject
+    token outside the allowed set (shows as literal text), and any name
+    templates cannot reach (shows blank). The template still saves."""
+    from .email_html import guard_plain, refused_tokens
+    from .email_utils import unavailable_variables
+    refused = refused_tokens(tmpl.subject_template)
+    if refused:
+        messages.warning(request, 'Not allowed in a subject, so it will show as typed: '
+                                  f'{", ".join(refused)}.')
+    names = []
+    for source in (guard_plain(tmpl.subject_template), tmpl.body_template):
+        names += [n for n in unavailable_variables(source) if n not in names]
+    if names:
+        messages.warning(request, f'Templates cannot use {", ".join(names)}, so it will show blank. '
+                                  'What they can use is listed under Template variables.')
+
+
 class EmailTemplateUpdateView(SettingsAdminMixin, View):
     """Settings: update a single email template's subject, body, and active state."""
 
@@ -8763,6 +8788,7 @@ class EmailTemplateUpdateView(SettingsAdminMixin, View):
             refused = {f.name for f in files} - {a.original_filename for a in saved}
             if refused:
                 messages.warning(request, f'Not attached (blocked type or too large): {", ".join(sorted(refused))}.')
+        _template_save_warnings(request, tmpl)
         messages.success(request, f'Email template "{tmpl.label}" saved.')
         return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
 
@@ -9488,7 +9514,7 @@ class FollowUpDeleteView(LoginRequiredMixin, View):
             fu.hidden_at = timezone.now()
             fu.save(update_fields=['hidden_at'])
         messages.success(request, 'Removed from the history. The record of the send is kept, so the one-click button stays sent.')
-        return redirect(request.POST.get('next') or who_url)
+        return redirect(_safe_next(request, who_url))
 
 
 class QuickFollowUpSendView(LoginRequiredMixin, View):
@@ -9509,7 +9535,7 @@ class QuickFollowUpSendView(LoginRequiredMixin, View):
         ).first()
         if template is None:
             messages.error(request, 'That template is not set up for one-click send.')
-            return redirect(request.POST.get('next') or 'core:dashboard')
+            return redirect(_safe_next(request, reverse('core:dashboard')))
 
         # Exactly one record id. Contradictory input is refused, not resolved —
         # the button only ever posts one.
@@ -9530,7 +9556,7 @@ class QuickFollowUpSendView(LoginRequiredMixin, View):
             back = reverse('core:ticket_detail', args=[ticket.pk])
         else:
             return HttpResponseBadRequest('A ticket or work order is required.')
-        next_url = request.POST.get('next') or back
+        next_url = _safe_next(request, back)
 
         # The finished-record gate, server-side. The button's own eligibility
         # check hides it in the UI; THIS is what stops a direct POST from
@@ -9749,13 +9775,14 @@ class EmailTemplateCreateView(SettingsAdminMixin, View):
         from .email_html import sanitize, text_to_html
         sig_id = request.POST.get('signature')
         body = sanitize((request.POST.get('body_template') or '').strip())
-        EmailTemplate.objects.create(
+        tmpl = EmailTemplate.objects.create(
             name=name,
             subject_template=(request.POST.get('subject_template') or '').strip() or '{{ site_name }}: a note about your recent service',
             body_template=body or text_to_html('Hi {{ customer_name }},\n\n\n\nThank you,\n{{ tech_name }}'),
             signature_id=int(sig_id) if sig_id else None, is_active=True,
             quick_send=request.POST.get('quick_send') == '1',
         )
+        _template_save_warnings(request, tmpl)
         messages.success(request, f'Email template "{name}" added.')
         return redirect(f"{reverse('core:settings')}?tab=email_templates")
 

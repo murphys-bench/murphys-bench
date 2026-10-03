@@ -30,6 +30,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# Read-only token, declared rather than inherited from the repo setting.
+permissions:
+  contents: read
+
 jobs:
   clean-room:
     runs-on: ubuntu-latest

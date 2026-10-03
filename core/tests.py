@@ -122,7 +122,9 @@ def test_bad_email_template_is_logged(client_obj, caplog):
         trigger='ticket_created',
         defaults={
             'is_active': True,
-            'subject_template': '{% bad tag %}',
+            # An allowed tag left unclosed. (An unknown tag no longer breaks a
+            # subject: guard_plain shows it as literal text.)
+            'subject_template': '{% if ticket %}',
             'body_template': 'hi',
         },
     )
@@ -16842,3 +16844,192 @@ def test_migration_0116_collapses_cross_side_claims_before_widening_the_ticket_k
     first.refresh_from_db(); second.refresh_from_db()
     assert first.via_quick_send is True, 'the earliest send keeps the claim'
     assert second.via_quick_send is False and second.done_at is not None, 'later send stays as history'
+
+
+# ── CodeQL triage fixes, Oct 3 2026 ────────────────────────────────────────
+
+_OFFSITE = 'https://evil.example/phish'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('value, kept', [
+    ('/tickets/', True), ('/tickets/?tab=closed', True),
+    (_OFFSITE, False), ('//evil.example/x', False), ('javascript:alert(1)', False), ('', False),
+])
+def test_safe_next_keeps_only_addresses_inside_mb(rf, value, kept):
+    from core.views import _safe_next
+    request = rf.post('/', {'next': value})
+    assert _safe_next(request, '/fallback/') == (value if kept else '/fallback/')
+
+
+@pytest.mark.django_db
+def test_every_next_honoring_view_refuses_an_offsite_next(client, client_obj, admin_user):
+    """The four views CodeQL flagged (url-redirection) each send an offsite
+    `next` to their own fallback instead of following it."""
+    from django.utils import timezone
+    from core.models import FollowUp, Sale
+    client.force_login(admin_user)
+    sale = Sale.objects.create(client=client_obj)
+    fu = FollowUp.objects.create(client=client_obj, kind='planned', due_on=timezone.localdate())
+    posts = [
+        (reverse('core:sale_check_in', args=[sale.pk]), {}),
+        (reverse('core:device_create'), {'client': client_obj.pk, 'name': 'Next Laptop', 'device_type': 'laptop'}),
+        (reverse('core:follow_up_delete', args=[fu.pk]), {}),
+        (reverse('core:follow_up_quick_send'), {'template': '999999'}),
+    ]
+    for url, data in posts:
+        resp = client.post(url, {**data, 'next': _OFFSITE})
+        assert resp.status_code == 302, url
+        assert 'evil.example' not in resp.url, f'{url} followed an offsite next'
+    # A next inside MB is still honored.
+    resp = client.post(reverse('core:sale_check_in', args=[sale.pk]), {'next': '/sales/'})
+    assert resp.url == '/sales/'
+
+
+def _template_world(client_obj, admin_user):
+    from core.models import Contact
+    from core.email_utils import email_context
+    contact = Contact.objects.create(client=client_obj, first_name='Pat', last_name='Q',
+                                     email='pat@example.com', is_primary=True)
+    device = Device.objects.create(client=client_obj, name='Front Desk PC', device_type='desktop')
+    device.device_password = 'hunter2-secret'
+    device.save()
+    ticket = Ticket.objects.create(client=client_obj, subject='Slow PC', description='D',
+                                   device=device, created_by=admin_user)
+    wo = WorkOrder.objects.create(client=client_obj, ticket=ticket, device=device)
+    ctx = email_context(client=client_obj, contact=contact, ticket=ticket, work_order=wo, user=admin_user)
+    return ctx, ticket, wo
+
+
+@pytest.mark.django_db
+def test_template_cannot_reach_fields_outside_the_list(client_obj, admin_user):
+    """CodeQL template-injection (#34): templates got live records, so one
+    could email a device's decrypted password or a tech's password hash.
+    Now only TEMPLATE_VARIABLES reach a template."""
+    from core.email_utils import render_email_template
+    ctx, ticket, wo = _template_world(client_obj, admin_user)
+    t = EmailTemplate(subject_template='{{ ticket.created_by.password }}|{{ work_order.device.name }}',
+                      body_template='<div>{{ work_order.device.device_password }}'
+                                    '{{ ticket.device.device_password }}{{ client.email }}'
+                                    '[{{ ticket }}]{{ work_order.device.name }}</div>',
+                      body_format='html')
+    subject, body = render_email_template(t, ctx)
+    assert 'hunter2-secret' not in body
+    assert admin_user.password not in subject and 'pbkdf2' not in subject
+    assert subject == '|Front Desk PC'
+    assert '[]' in body, '{{ ticket }} alone prints nothing, not a dump of its fields'
+    assert 'Front Desk PC' in body
+
+
+@pytest.mark.django_db
+def test_every_listed_variable_renders_and_is_documented(client_obj, admin_user):
+    from pathlib import Path
+    from django.conf import settings
+    from core.email_utils import TEMPLATE_VARIABLES, render_email_template
+    from core.models import TicketReply
+    ctx, ticket, wo = _template_world(client_obj, admin_user)
+    ctx['reply'] = TicketReply.objects.create(ticket=ticket, content='Reply words', created_by=admin_user)
+    ctx['old_status'] = 'open'
+    t = EmailTemplate(subject_template='s', body_format='html',
+                      body_template='<div>' + '|'.join('{{ %s }}' % p for p in TEMPLATE_VARIABLES) + '</div>')
+    _subject, body = render_email_template(t, ctx)
+    for expected in (ticket.ticket_number, 'Slow PC', wo.work_order_number, 'Front Desk PC',
+                     'Acme Co', 'Pat', 'Reply words', 'open'):
+        assert expected in body, expected
+    help_table = (Path(settings.BASE_DIR) / 'core/templates/core/settings/email_templates.html').read_text()
+    for path in TEMPLATE_VARIABLES:
+        assert '{{ %s }}' % path in help_table, f'{path} is usable but not listed under Template variables'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('body_format', ['html', 'text'])
+def test_subject_and_plain_body_get_the_body_token_rules(client_obj, admin_user, body_format):
+    """The subject (and a legacy plain body) had no token guard at all, so
+    {% debug %} / {% include %} / |safe ran there while the HTML body refused
+    them."""
+    from core.email_utils import render_email_template
+    ctx, ticket, _wo = _template_world(client_obj, admin_user)
+    t = EmailTemplate(subject_template='Hi {% debug %}{% include "core/board.html" %} {{ ticket.ticket_number }}',
+                      body_template='{% load static %}{{ ticket.subject|safe }} {{ ticket.subject }}',
+                      body_format=body_format)
+    subject, body = render_email_template(t, ctx)
+    assert subject == f'Hi {{% debug %}}{{% include "core/board.html" %}} {ticket.ticket_number}'
+    assert 'Slow PC' in body
+    if body_format == 'text':
+        assert body == '{% load static %}{{ ticket.subject|safe }} Slow PC'
+
+
+@pytest.mark.django_db
+def test_template_save_names_what_will_not_work(client, admin_user):
+    from django.contrib.messages import get_messages
+    client.force_login(admin_user)
+    t = EmailTemplate.objects.create(name='Note', subject_template='s', body_template='b', is_active=True)
+    resp = client.post(reverse('core:email_template_update', args=[t.pk]), {
+        'name': 'Note', 'is_active': '1',
+        'subject_template': '{% debug %} {{ ticket.ticket_number }}',
+        'body_template': '<div>{{ client.email }}{% if work_order.device.device_password %}x{% endif %}'
+                         '{% for c in client.name %}{{ c }}{{ forloop.counter }}{% endfor %}</div>',
+    })
+    text = ' '.join(str(m) for m in get_messages(resp.wsgi_request))
+    assert '{% debug %}' in text
+    assert 'client.email' in text and 'work_order.device.device_password' in text
+    assert ' c,' not in text and 'forloop' not in text, 'loop variables are not unavailable names'
+    assert 'ticket.ticket_number' not in text
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('opener', ['{{', '{%', '{#'])
+def test_unclosed_template_openers_do_not_stall_rendering(opener):
+    """CodeQL polynomial-redos (#14): a run of unclosed openers took time
+    proportional to its length squared, in MB's token regex AND in Django's own
+    lexer (measured: 40k chars, 3 s; a full-size POST, hours). The guards now
+    neutralize stray openers before Django sees the text. At this size the old
+    code took well over 30 seconds; what remains is bleach's own pass."""
+    import time
+    from core import email_html
+    text = opener * 50000
+    start = time.monotonic()
+    html = email_html.render_body(email_html.sanitize(text), {})
+    plain = email_html.guard_plain(text)
+    from django.template import Template, Context
+    rendered_plain = Template(plain).render(Context({}))
+    assert time.monotonic() - start < 10
+    assert rendered_plain == text, 'stray openers still read as the characters typed'
+    assert '&#123;' in html or '{' in html
+
+
+def test_split_tokens_matches_the_old_regex():
+    """_split_tokens replaced re.compile(r'({{.*?}}|{%.*?%})', re.S).split for
+    speed; it must split every text the same way."""
+    import random
+    from core.email_html import _split_tokens
+    old = re.compile(r'({{.*?}}|{%.*?%})', re.S)
+    rng = random.Random(20261003)
+    alphabet = ['{', '}', '%', '#', 'a', ' ', '\n', '{{', '}}', '{%', '%}']
+    for _ in range(5000):
+        text = ''.join(rng.choice(alphabet) for _ in range(rng.randint(0, 14)))
+        assert _split_tokens(text) == old.split(text), repr(text)
+
+
+@pytest.mark.django_db
+def test_many_small_tokens_sanitize_in_one_pass():
+    """The token restore was one str.replace per token: tokens x length."""
+    import time
+    from core.email_html import sanitize
+    text = '<div>' + '{{ site_name }} ' * 40000 + '</div>'
+    start = time.monotonic()
+    out = sanitize(text)
+    assert time.monotonic() - start < 10
+    assert out.count('{{ site_name }}') == 40000
+
+
+def test_scheduled_audit_can_open_its_failure_issue():
+    """The repo's default workflow token is read-only; without issues: write
+    the audit's 'open an issue on failure' step can never succeed."""
+    from pathlib import Path
+    from django.conf import settings
+    wf = Path(settings.BASE_DIR) / '.github/workflows'
+    audit = (wf / 'scheduled-audit.yml').read_text()
+    assert 'issues.create' in audit and re.search(r'^permissions:\n(  .+\n)*  issues: write$', audit, re.M)
+    for name in ('ci.yml', 'clean-room.yml'):
+        assert re.search(r'^permissions:\n  contents: read$', (wf / name).read_text(), re.M), name

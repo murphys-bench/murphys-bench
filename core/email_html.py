@@ -19,9 +19,10 @@ Everything here treats that subset as the contract:
                       the plain-text twin.
 
 Django template tokens ({{ … }} / {% … %}) are protected through the
-sanitizer so filter arguments like |date:"M j" survive; only staff author
-bodies, so the tokens themselves are trusted the same way template text
-always has been.
+sanitizer so filter arguments like |date:"M j" survive. Only allowlisted
+constructs stay live (_token_allowed); guard_plain() applies the same rules
+to subject lines. What a variable can REACH is limited separately, by the
+plain-values context in email_utils (TEMPLATE_VARIABLES).
 """
 import re
 import unicodedata
@@ -41,7 +42,46 @@ _BUTTON_TAG = r'(mb-button(?:-center|-right)?)'
 ALLOWED_ATTRS = {'a': ['href']}
 ALLOWED_PROTOCOLS = ['http', 'https', 'mailto']
 
-_TEMPLATE_TOKEN = re.compile(r'({{.*?}}|{%.*?%})', re.S)
+_TOKEN_CLOSERS = {'{{': '}}', '{%': '%}'}
+
+#: A token longer than this is refused (shown as literal text). Real ones are
+#: a variable and a filter or two; the cap keeps every per-token parse small.
+MAX_TOKEN_LENGTH = 300
+
+#: A brace that opens template syntax ({{, {%, {#) outside any token. Left in
+#: place it is harmless as output but not as input: Django's lexer scans from
+#: every unclosed opener to the end of the line, so a body that is one long run
+#: of them takes hours to compile (CodeQL polynomial-redos, Oct 3 2026; a
+#: 40k-character run measured 3 seconds, a full-size POST would be hours).
+_STRAY_OPENER = re.compile(r'{(?=[{%#])')
+
+
+def _split_tokens(text):
+    """Split text into [text, token, text, token, ..., text], a token being
+    {{ ... }} or {% ... %} up to its FIRST closer (what the old non-greedy
+    regex matched). In linear time: once an opener kind has no closer left
+    in the text, no later opener of that kind can have one either, so the
+    search for it stops instead of rescanning the rest of the text from
+    every opener."""
+    out, last, i, n = [], 0, 0, len(text)
+    exhausted = set()
+    while True:
+        p = text.find('{', i)
+        if p == -1 or p + 1 >= n:
+            break
+        opener = text[p:p + 2]
+        if opener in _TOKEN_CLOSERS and opener not in exhausted:
+            q = text.find(_TOKEN_CLOSERS[opener], p + 2)
+            if q == -1:
+                exhausted.add(opener)
+            else:
+                out.append(text[last:p])
+                out.append(text[p:q + 2])
+                last = i = q + 2
+                continue
+        i = p + 1
+    out.append(text[last:])
+    return out
 
 # The template constructs a body may use. Anything else — {% autoescape %},
 # {% debug %}, {% include %}, a |safe or |safeseq filter, |json_script — is
@@ -107,6 +147,8 @@ def _variable_token_allowed(token):
 
 
 def _token_allowed(token):
+    if len(token) > MAX_TOKEN_LENGTH:
+        return False
     if token.startswith('{{'):
         return _variable_token_allowed(token)
     inner = token[2:-2].strip()
@@ -138,19 +180,21 @@ def sanitize(html):
 
     neutralized_any = False
 
-    def _stash(m):
+    def _stash(token):
         nonlocal neutralized_any
-        token = m.group(0)
         if not _token_allowed(token):
             neutralized_any = True
             return _neutralize(token)
         tokens.append(token)
         return f'MBTOKEN{len(tokens) - 1}NEKOTBM'
 
-    protected = _TEMPLATE_TOKEN.sub(_stash, html or '')
+    parts = _split_tokens(html or '')
+    protected = ''.join(_stash(part) if i % 2 else _STRAY_OPENER.sub('&#123;', part)
+                        for i, part in enumerate(parts))
     cleaned = _bleach_clean(protected)
-    for i, token in enumerate(tokens):
-        cleaned = cleaned.replace(f'MBTOKEN{i}NEKOTBM', token)
+    # One pass, not one replace() per token: a body of many small tokens
+    # would otherwise cost tokens x length.
+    cleaned = re.sub(r'MBTOKEN(\d+)NEKOTBM', lambda m: tokens[int(m.group(1))], cleaned)
     if neutralized_any:
         # A refused block tag can leave its partner dangling — an {% endfor %}
         # whose {% for %} was neutralized no longer compiles. When anything
@@ -162,9 +206,45 @@ def sanitize(html):
         try:
             Template(cleaned)
         except TemplateSyntaxError:
-            cleaned = re.sub(r'{%.*?%}', lambda m: _neutralize(m.group(0)),
-                             cleaned, flags=re.S)
+            cleaned = ''.join(_neutralize(part) if i % 2 and part.startswith('{%') else part
+                              for i, part in enumerate(_split_tokens(cleaned)))
     return cleaned
+
+
+def refused_tokens(text):
+    """The tokens in text that _token_allowed refuses, in order, for telling
+    the author what will not run."""
+    return [part for i, part in enumerate(_split_tokens(text or '')) if i % 2 and not _token_allowed(part)]
+
+
+def guard_plain(text):
+    """The sanitize() token rules for text that is not HTML: a subject line,
+    or a legacy plain-text body. Allowed tokens stay live; a refused token,
+    and any stray opener, renders as the literal characters typed (through
+    {% templatetag %}, since entities would show as entities in plain text).
+    Applied at render, so a value saved before this guard existed is covered."""
+    def literal(s):
+        return ''.join('{% templatetag openbrace %}' if c == '{'
+                       else '{% templatetag closebrace %}' if c == '}' else c for c in s)
+
+    def stray(s):
+        return _STRAY_OPENER.sub('{% templatetag openbrace %}', s)
+
+    parts = _split_tokens(text or '')
+    refused = any(i % 2 and not _token_allowed(part) for i, part in enumerate(parts))
+    guarded = ''.join((part if _token_allowed(part) else literal(part)) if i % 2 else stray(part)
+                      for i, part in enumerate(parts))
+    if refused:
+        # Same dangling-partner rule as sanitize(): if what is left no longer
+        # compiles, every block tag becomes literal text.
+        from django.template import Template, TemplateSyntaxError
+        try:
+            Template(guarded)
+        except TemplateSyntaxError:
+            guarded = ''.join(
+                (part if part.startswith('{{') and _token_allowed(part) else literal(part)) if i % 2
+                else stray(part) for i, part in enumerate(parts))
+    return guarded
 
 
 def _neutralize(token):
@@ -192,7 +272,7 @@ def text_to_html(text):
     newlines — a <br> inside {% for %} would break the tag."""
     if not text:
         return ''
-    parts = _TEMPLATE_TOKEN.split(text.replace('\r\n', '\n'))
+    parts = _split_tokens(text.replace('\r\n', '\n'))
     out = []
     for i, part in enumerate(parts):
         if i % 2:

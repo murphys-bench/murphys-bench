@@ -280,19 +280,126 @@ def _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type, 
         return 'failed', 'send_error', _error_detail(exc)
 
 
+#: Everything a template can use (Mike, Oct 3 2026). Templates used to get the
+#: live records, so anyone who could edit one could email any linked field,
+#: a device's decrypted password or a tech's password hash included, from an
+#: automatic send nobody reviews. Now they get plain copies of exactly these
+#: values; any other name renders blank, and the editor names it on save.
+#: Grow this list one field at a time, never by handing over a record.
+TEMPLATE_VARIABLES = (
+    'ticket.ticket_number', 'ticket.subject', 'ticket.get_status_display', 'ticket.device.name',
+    'work_order.work_order_number', 'work_order.get_status_display', 'work_order.device.name',
+    'client.name', 'contact.first_name',
+    'customer_name', 'tech_name', 'status', 'site_name',
+    'reply.content', 'old_status',
+)
+
+
+class _Fields(dict):
+    """A record's allowed fields. Prints as nothing, so {{ ticket }} alone is
+    blank like any other unavailable name, not a dump of the fields."""
+
+    def __str__(self):
+        return ''
+
+
+def safe_template_context(ctx):
+    """Plain strings for exactly TEMPLATE_VARIABLES, read out of ctx. A record
+    that is absent (no work order, no device) is left out entirely, so
+    {% if work_order %} still means what it says."""
+    out = {}
+    for path in TEMPLATE_VARIABLES:
+        keys = path.split('.')
+        value = ctx.get(keys[0])
+        if value is None:
+            continue
+        for attr in keys[1:-1]:
+            value = getattr(value, attr, None)
+            if value is None:
+                break
+        if value is None:
+            continue
+        if len(keys) > 1:
+            value = getattr(value, keys[-1], None)
+            if callable(value):
+                value = value()
+        node = out
+        for key in keys[:-1]:
+            node = node.setdefault(key, _Fields())
+        node[keys[-1]] = '' if value is None else str(value)
+    return out
+
+
+def unavailable_variables(source):
+    """Names a template uses that are not in TEMPLATE_VARIABLES (they render
+    blank), in order of first use. Read from Django's own parse, so a branch
+    of an {% if %} that a test send does not take is still checked. A syntax
+    error returns nothing here; rendering reports it."""
+    from django.template import Template, TemplateSyntaxError
+    from django.template.base import Variable, VariableNode
+    from django.template.defaulttags import ForNode, IfNode, TemplateLiteral
+    try:
+        nodelist = Template(source or '').nodelist
+    except TemplateSyntaxError:
+        return []
+    allowed = set(TEMPLATE_VARIABLES)
+    found = []
+
+    def check(expr, local):
+        names = [expr.var] + [arg for _f, args in expr.filters for is_var, arg in args if is_var]
+        for var in names:
+            if isinstance(var, Variable) and var.lookups:
+                path = '.'.join(var.lookups)
+                if var.lookups[0] not in local and path not in allowed and path not in found:
+                    found.append(path)
+
+    def condition(cond, local):
+        if cond is None:
+            return
+        if isinstance(cond, TemplateLiteral):
+            check(cond.value, local)
+            return
+        condition(getattr(cond, 'first', None), local)
+        condition(getattr(cond, 'second', None), local)
+
+    def walk(nodes, local):
+        for node in nodes:
+            if isinstance(node, VariableNode):
+                check(node.filter_expression, local)
+            elif isinstance(node, IfNode):
+                for cond, inner in node.conditions_nodelists:
+                    condition(cond, local)
+                    walk(inner, local)
+            elif isinstance(node, ForNode):
+                check(node.sequence, local)
+                walk(node.nodelist_loop, local | set(node.loopvars) | {'forloop'})
+                walk(node.nodelist_empty, local)
+            else:
+                for attr in getattr(node, 'child_nodelists', ()):
+                    walk(getattr(node, attr, None) or [], local)
+
+    walk(nodelist, frozenset())
+    return found
+
+
 def render_email_template(template, ctx):
-    """Render a template's subject and body against ctx (a plain dict).
-    The subject is plain text. An HTML-format body (everything since mig
-    0118) renders with variable escaping ON — customer content is words,
-    never markup — and comes back as HTML, not yet email-safe-transformed.
-    Raises on a syntax error so the caller can report it."""
+    """Render a template's subject and body against ctx (a plain dict), which
+    is first cut down to TEMPLATE_VARIABLES. The subject is plain text,
+    guarded like the body (email_html.guard_plain). An HTML-format body
+    (everything since mig 0118) renders with variable escaping ON — customer
+    content is words, never markup — and comes back as HTML, not yet
+    email-safe-transformed. Raises on a syntax error so the caller can
+    report it."""
     from django.template import Template, Context
     from . import email_html
-    subject = Template(template.subject_template).render(Context(ctx, autoescape=False)).strip()
+    ctx = safe_template_context(ctx)
+    subject = Template(email_html.guard_plain(template.subject_template)).render(
+        Context(ctx, autoescape=False)).strip()
     if template.body_format == 'html':
         body = email_html.render_body(template.body_template, ctx)
     else:
-        body = Template(template.body_template).render(Context(ctx, autoescape=False))
+        body = Template(email_html.guard_plain(template.body_template)).render(
+            Context(ctx, autoescape=False))
     return subject, body
 
 
