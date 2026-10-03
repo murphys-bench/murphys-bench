@@ -138,6 +138,18 @@ def _is_admin(user):
     return user.is_staff or user.has_perm_flag('can_manage_settings')
 
 
+def _safe_next(request, fallback=''):
+    """The form's `next` when it points back into MB, else `fallback`. Every
+    view that honors `next` goes through here: a raw one sends the user
+    wherever the posted value says, another site included (CodeQL
+    url-redirection, Oct 3 2026)."""
+    from django.utils.http import url_has_allowed_host_and_scheme
+    nxt = request.POST.get('next') or request.GET.get('next') or ''
+    if nxt and url_has_allowed_host_and_scheme(nxt, allowed_hosts={request.get_host()}):
+        return nxt
+    return fallback
+
+
 def _can_view_prospects(user):
     """Prospects are visible to everyone unless a role explicitly turns the flag
     off. Admins always qualify."""
@@ -1830,9 +1842,7 @@ class ClientCreateView(LoginRequiredMixin, CreateView):
     template_name = 'core/client_form.html'
 
     def _next(self):
-        from django.utils.http import url_has_allowed_host_and_scheme
-        nxt = self.request.POST.get('next') or self.request.GET.get('next') or ''
-        return nxt if url_has_allowed_host_and_scheme(nxt, allowed_hosts={self.request.get_host()}) else ''
+        return _safe_next(self.request)
 
     def get_success_url(self):
         # Came from an intake form? Go back to it with the new customer selected.
@@ -2858,7 +2868,7 @@ class SaleCheckINView(SaleAccessMixin, View):
     def post(self, request, pk):
         from . import invoice_ninja
         sale = get_object_or_404(Sale, pk=pk)
-        next_url = request.POST.get('next') or reverse('core:sale_detail', kwargs={'pk': pk})
+        next_url = _safe_next(request, reverse('core:sale_detail', kwargs={'pk': pk}))
         if not sale.invoice_ninja_id:
             messages.error(request, f'{sale.sale_number} has not been sent to Invoice Ninja yet.')
             return redirect(next_url)
@@ -3314,10 +3324,7 @@ class DeviceCreateView(LoginRequiredMixin, CreateView):
             return redirect(
                 reverse_lazy('core:work_order_create') + f'?device={self.object.pk}'
             )
-        next_url = self.request.POST.get('next') or self.request.GET.get('next')
-        if next_url:
-            return redirect(next_url)
-        return redirect(reverse_lazy('core:device_detail', kwargs={'pk': self.object.pk}))
+        return redirect(_safe_next(self.request, reverse('core:device_detail', kwargs={'pk': self.object.pk})))
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -8733,6 +8740,58 @@ class DeviceCredentialUpdateView(LoginRequiredMixin, View):
 
 # --- Email Template Manager ---
 
+def _email_text_too_large(request, *texts, outcome='Nothing was saved.'):
+    """Refuse email text over the size limit (email_html.MAX_EMAIL_TEXT_BYTES)
+    before any of it is parsed. True when refused; the message says why."""
+    from .email_html import EmailTextTooLarge, check_email_text_size
+    try:
+        for what, text in texts:
+            check_email_text_size(text, what)
+    except EmailTextTooLarge as exc:
+        messages.error(request, f'{exc} {outcome}')
+        return True
+    return False
+
+
+def _clean_body_or_refuse(request, posted, what):
+    """The posted HTML as it will be stored (sanitized), or None after
+    telling the user why not. Cleaning can grow text (each & becomes &amp;),
+    so the size check is on the stored form: a save that succeeds must not
+    leave something every send then refuses (review round 2)."""
+    from .email_html import EmailTextTooLarge, check_email_text_size, sanitize
+    try:
+        cleaned = sanitize((posted or '').strip())
+        check_email_text_size(cleaned, f'{what}, as stored once cleaned,')
+    except EmailTextTooLarge as exc:
+        messages.error(request, f'{exc} Nothing was saved.')
+        return None
+    return cleaned
+
+
+def _first_few(items, limit=10):
+    shown = ', '.join(items[:limit])
+    return shown if len(items) <= limit else f'{shown} and {len(items) - limit} more'
+
+
+def _template_save_warnings(request, tmpl, posted_body=None):
+    """Say what in a just-saved template will not work as written: a token
+    outside the allowed set (shows as literal text) in the subject or in the
+    body as posted, and any name templates cannot reach (shows blank). The
+    template still saves."""
+    from .email_html import refused_tokens
+    from .email_utils import unavailable_variables
+    refused = refused_tokens(tmpl.subject_template) + refused_tokens(posted_body or '')
+    if refused:
+        messages.warning(request, 'Not allowed in a template, so it will show as typed: '
+                                  f'{_first_few(refused)}.')
+    names = []
+    for source in (tmpl.subject_template, tmpl.body_template):
+        names += [n for n in unavailable_variables(source) if n not in names]
+    if names:
+        messages.warning(request, f'Templates cannot use {_first_few(names)}, so it will show blank. '
+                                  'What they can use is listed under Template variables.')
+
+
 class EmailTemplateUpdateView(SettingsAdminMixin, View):
     """Settings: update a single email template's subject, body, and active state."""
 
@@ -8741,14 +8800,26 @@ class EmailTemplateUpdateView(SettingsAdminMixin, View):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         tmpl = get_object_or_404(EmailTemplate, pk=pk)
+        # The subject and body this save will keep: the posted ones, or the
+        # stored ones when the form leaves them out (review rounds 3 and 4:
+        # checking only posted values let an old oversized row ride a partial
+        # save, then be parsed after the row was written).
+        if _email_text_too_large(request,
+                                 ('The subject', request.POST.get('subject_template', tmpl.subject_template)),
+                                 ('The body', request.POST.get('body_template', tmpl.body_template))):
+            return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
+        cleaned_body = None
+        if 'body_template' in request.POST:
+            cleaned_body = _clean_body_or_refuse(request, request.POST['body_template'], 'The body')
+            if cleaned_body is None:
+                return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
         if tmpl.is_custom and (request.POST.get('name') or '').strip():
             tmpl.name = request.POST.get('name').strip()
         if tmpl.is_custom:
             tmpl.quick_send = request.POST.get('quick_send') == '1'
-        from .email_html import sanitize
         tmpl.subject_template = request.POST.get('subject_template', tmpl.subject_template).strip()
-        if 'body_template' in request.POST:
-            tmpl.body_template = sanitize(request.POST['body_template'].strip())
+        if cleaned_body is not None:
+            tmpl.body_template = cleaned_body
             tmpl.body_format = 'html'
         tmpl.is_active = request.POST.get('is_active') == '1'
         sig_id = request.POST.get('signature')
@@ -8763,6 +8834,7 @@ class EmailTemplateUpdateView(SettingsAdminMixin, View):
             refused = {f.name for f in files} - {a.original_filename for a in saved}
             if refused:
                 messages.warning(request, f'Not attached (blocked type or too large): {", ".join(sorted(refused))}.')
+        _template_save_warnings(request, tmpl, request.POST.get('body_template'))
         messages.success(request, f'Email template "{tmpl.label}" saved.')
         return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
 
@@ -8778,9 +8850,12 @@ class EmailSignatureCreateView(SettingsAdminMixin, View):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
-        from .email_html import sanitize
+        if _email_text_too_large(request, ('The signature', request.POST.get('body', ''))):
+            return redirect(_sig_redirect())
         name = request.POST.get('name', '').strip()
-        body = sanitize(request.POST.get('body', '').strip())
+        body = _clean_body_or_refuse(request, request.POST.get('body'), 'The signature')
+        if body is None:
+            return redirect(_sig_redirect())
         is_default = request.POST.get('is_default') == '1'
         if name and body:
             sig = EmailSignature(name=name, body=body, is_default=is_default)
@@ -8794,11 +8869,15 @@ class EmailSignatureUpdateView(SettingsAdminMixin, View):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
-        from .email_html import sanitize
         sig = get_object_or_404(EmailSignature, pk=pk)
+        if _email_text_too_large(request, ('The signature', request.POST.get('body', ''))):
+            return redirect(_sig_redirect())
         sig.name = request.POST.get('name', sig.name).strip()
         if 'body' in request.POST:
-            sig.body = sanitize(request.POST['body'].strip())
+            cleaned = _clean_body_or_refuse(request, request.POST['body'], 'The signature')
+            if cleaned is None:
+                return redirect(_sig_redirect())
+            sig.body = cleaned
             sig.body_format = 'html'
         sig.is_default = request.POST.get('is_default') == '1'
         sig.save()
@@ -9488,7 +9567,7 @@ class FollowUpDeleteView(LoginRequiredMixin, View):
             fu.hidden_at = timezone.now()
             fu.save(update_fields=['hidden_at'])
         messages.success(request, 'Removed from the history. The record of the send is kept, so the one-click button stays sent.')
-        return redirect(request.POST.get('next') or who_url)
+        return redirect(_safe_next(request, who_url))
 
 
 class QuickFollowUpSendView(LoginRequiredMixin, View):
@@ -9509,7 +9588,7 @@ class QuickFollowUpSendView(LoginRequiredMixin, View):
         ).first()
         if template is None:
             messages.error(request, 'That template is not set up for one-click send.')
-            return redirect(request.POST.get('next') or 'core:dashboard')
+            return redirect(_safe_next(request, reverse('core:dashboard')))
 
         # Exactly one record id. Contradictory input is refused, not resolved —
         # the button only ever posts one.
@@ -9530,7 +9609,7 @@ class QuickFollowUpSendView(LoginRequiredMixin, View):
             back = reverse('core:ticket_detail', args=[ticket.pk])
         else:
             return HttpResponseBadRequest('A ticket or work order is required.')
-        next_url = request.POST.get('next') or back
+        next_url = _safe_next(request, back)
 
         # The finished-record gate, server-side. The button's own eligibility
         # check hides it in the UI; THIS is what stops a direct POST from
@@ -9627,6 +9706,7 @@ class CustomerEmailView(LoginRequiredMixin, View):
     template_name = 'core/customer_email.html'
 
     def _context(self, request):
+        from .email_html import EmailTextTooLarge
         from .email_utils import email_context, render_email_template
         src = request.POST if request.method == 'POST' else request.GET
         who = _resolve_desk_context(request)  # raises _ConflictingContext; get/post turn it into a 400
@@ -9655,6 +9735,8 @@ class CustomerEmailView(LoginRequiredMixin, View):
                     # needs HTML, so convert what it is handed.
                     from .email_html import text_to_html
                     body = text_to_html(body)
+            except EmailTextTooLarge as exc:
+                render_error = f'{exc} Shorten it in Settings, Email Templates.'
             except Exception:
                 render_error = 'This template has a syntax error; fix it in Settings, Email Templates.'
         return {
@@ -9698,6 +9780,9 @@ class CustomerEmailView(LoginRequiredMixin, View):
             return render(request, self.template_name, ctx)
         subject = (request.POST.get('subject') or '').strip()
         body = request.POST.get('body') or ''
+        if _email_text_too_large(request, ('The subject', subject), ('The body', body),
+                                 outcome='Nothing was sent.'):
+            return render(request, self.template_name, ctx)
         from django.utils.html import strip_tags
         if not subject or not strip_tags(body).strip():
             # The editor posts markup; an empty document is still markup.
@@ -9746,16 +9831,22 @@ class EmailTemplateCreateView(SettingsAdminMixin, View):
         if not name:
             messages.error(request, 'Give the template a name.')
             return redirect(f"{reverse('core:settings')}?tab=email_templates")
-        from .email_html import sanitize, text_to_html
+        if _email_text_too_large(request, ('The subject', request.POST.get('subject_template', '')),
+                                 ('The body', request.POST.get('body_template', ''))):
+            return redirect(f"{reverse('core:settings')}?tab=email_templates")
+        from .email_html import text_to_html
         sig_id = request.POST.get('signature')
-        body = sanitize((request.POST.get('body_template') or '').strip())
-        EmailTemplate.objects.create(
+        body = _clean_body_or_refuse(request, request.POST.get('body_template'), 'The body')
+        if body is None:
+            return redirect(f"{reverse('core:settings')}?tab=email_templates")
+        tmpl = EmailTemplate.objects.create(
             name=name,
             subject_template=(request.POST.get('subject_template') or '').strip() or '{{ site_name }}: a note about your recent service',
             body_template=body or text_to_html('Hi {{ customer_name }},\n\n\n\nThank you,\n{{ tech_name }}'),
             signature_id=int(sig_id) if sig_id else None, is_active=True,
             quick_send=request.POST.get('quick_send') == '1',
         )
+        _template_save_warnings(request, tmpl, request.POST.get('body_template'))
         messages.success(request, f'Email template "{name}" added.')
         return redirect(f"{reverse('core:settings')}?tab=email_templates")
 
@@ -9807,15 +9898,27 @@ class EmailTemplateTestSendView(SettingsAdminMixin, View):
             'status': 'In Progress',
             'site_name': site.company_name or "Murphy's Bench",
         }
+        from .email_html import EmailTextTooLarge
         try:
             subject, body = render_email_template(tmpl, ctx)
+        except EmailTextTooLarge as exc:
+            EmailSendLog.objects.create(ticket=None, to_email=to_email, trigger='test:template',
+                                        status='failed', reason='send_error', detail=str(exc))
+            messages.error(request, f'Test not sent: {exc}')
+            return back
         except Exception:
             messages.error(request, f'"{tmpl.label}" has a syntax error; fix the template and try again.')
             return back
         sig_obj = tmpl.signature or EmailSignature.objects.filter(is_default=True).first()
         sig_body, sig_is_html = _rendered_signature(sig_obj)
-        email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
-            body, tmpl.body_format == 'html', sig_body, sig_is_html, site)
+        try:
+            email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
+                body, tmpl.body_format == 'html', sig_body, sig_is_html, site)
+        except EmailTextTooLarge as exc:
+            EmailSendLog.objects.create(ticket=None, to_email=to_email, trigger='test:template',
+                                        status='failed', reason='send_error', detail=str(exc))
+            messages.error(request, f'Test not sent: {exc}')
+            return back
         html_body, logo_data, logo_mime = _build_html_email(
             email_body, sig_email, subject, None, site,
             body_is_html=body_is_html, signature_is_html=sig_is_html)

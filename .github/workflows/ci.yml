@@ -19,6 +19,11 @@ on:
   pull_request:
     branches: [ main ]
 
+# Read-only token, declared rather than inherited from the repo setting, so
+# flipping that setting can never hand these jobs write access.
+permissions:
+  contents: read
+
 jobs:
   lint:
     # Fast and separate: a dead-import or undefined-name problem shouldn't wait on

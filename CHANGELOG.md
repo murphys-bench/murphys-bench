@@ -13,6 +13,20 @@ the Unreleased entries move under that version and prod gets a single update.
 ### Security
 
 - urllib3 2.7.0 to 2.8.0 (PYSEC-2026-4175, 4176, 4177). It comes in through requests and the backup tools.
+- Email templates can use only the values listed under Template variables. They can no longer reach other fields on a record, such as a device password.
+- Subject lines get the same template-tag rules as the body. Saving a template names anything that will show blank or as typed.
+- Forms that return you to a previous page only return to pages inside MB.
+- Pasting a long run of unclosed `{{` or `{%` into an email body no longer ties up the server.
+- Email text (template subjects and bodies, signatures, edited compose bodies) is limited to 100 KB. Longer text is refused, not cut short.
+- A malformed inbound HTML email can no longer stall the mail fetch.
+
+### Changed
+
+- Anything written with a dot after a value in a template, such as `{{ ticket.subject.upper }}` or `{{ ticket.subject.0 }}`, now shows blank. The `|upper`, `|first` and other allowed filters work as before.
+
+### Fixed
+
+- The weekly dependency audit can now open its GitHub issue when it fails.
 
 ## v0.16.3 — 2026-09-26
 

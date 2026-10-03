@@ -153,7 +153,10 @@ def _html_to_text(html):
     except Exception:
         # Fall back to a crude tag strip rather than dumping raw markup.
         logger.exception('HTML-to-text parse failed; falling back to tag strip.')
-        stripped = unescape(re.sub(r'<[^>]+>', ' ', html))
+        # [^<>], not [^>]: a run of '<' with no '>' made [^>]+ rescan to the
+        # end from every '<' (CodeQL polynomial-redos, Oct 3 2026). Inbound
+        # mail is anyone on the internet.
+        stripped = unescape(re.sub(r'<[^<>]+>', ' ', html))
         lines = [re.sub(r'[ \t]+', ' ', ln).strip() for ln in stripped.splitlines()]
     # Drop runs of blank lines down to a single separator.
     out = []
