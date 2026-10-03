@@ -8778,14 +8778,14 @@ def _template_save_warnings(request, tmpl, posted_body=None):
     outside the allowed set (shows as literal text) in the subject or in the
     body as posted, and any name templates cannot reach (shows blank). The
     template still saves."""
-    from .email_html import guard_plain, refused_tokens
+    from .email_html import refused_tokens
     from .email_utils import unavailable_variables
     refused = refused_tokens(tmpl.subject_template) + refused_tokens(posted_body or '')
     if refused:
         messages.warning(request, 'Not allowed in a template, so it will show as typed: '
                                   f'{_first_few(refused)}.')
     names = []
-    for source in (guard_plain(tmpl.subject_template), tmpl.body_template):
+    for source in (tmpl.subject_template, tmpl.body_template):
         names += [n for n in unavailable_variables(source) if n not in names]
     if names:
         messages.warning(request, f'Templates cannot use {_first_few(names)}, so it will show blank. '
@@ -8800,13 +8800,13 @@ class EmailTemplateUpdateView(SettingsAdminMixin, View):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         tmpl = get_object_or_404(EmailTemplate, pk=pk)
-        # The subject this save will keep: the posted one, or the stored one
-        # when the form leaves it out (review round 3: checking only the posted
-        # value let an old oversized subject ride a partial save, then raise
-        # after the row was written).
+        # The subject and body this save will keep: the posted ones, or the
+        # stored ones when the form leaves them out (review rounds 3 and 4:
+        # checking only posted values let an old oversized row ride a partial
+        # save, then be parsed after the row was written).
         if _email_text_too_large(request,
                                  ('The subject', request.POST.get('subject_template', tmpl.subject_template)),
-                                 ('The body', request.POST.get('body_template', ''))):
+                                 ('The body', request.POST.get('body_template', tmpl.body_template))):
             return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
         cleaned_body = None
         if 'body_template' in request.POST:

@@ -334,8 +334,19 @@ def unavailable_variables(source):
     ({% if ticket %}, {% if work_order.device %}); printing one shows nothing,
     so as a printed value it is reported. Names a template makes for itself
     (loop variables, {% now ... as year %}) are its own. A syntax error
-    returns nothing here; rendering reports it."""
+    returns nothing here; rendering reports it.
+
+    The source goes through email_html.guard_plain before Django parses it:
+    the size limit, and unclosed {{ {% {# neutralized, because Django's lexer
+    is length-squared on those and a stored body (an old or imported row)
+    may never have been through sanitize (review round 4). The stored text
+    is not changed; only this parse sees the guarded copy."""
     from django.template import Template, TemplateSyntaxError
+    from .email_html import EmailTextTooLarge, guard_plain
+    try:
+        source = guard_plain(source)
+    except EmailTextTooLarge:
+        return []  # refused before any save; there is nothing to name
     from django.template.base import Node, Variable, VariableNode
     from django.template.defaulttags import ForNode, IfNode, TemplateLiteral
     try:

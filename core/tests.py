@@ -17056,11 +17056,17 @@ def test_warning_check_is_not_quadratic_in_distinct_names():
     unavailable names cost names-squared (30k names: 2 s; 150k: past 40 s)."""
     import time
     from core.email_utils import unavailable_variables
-    source = ''.join('{{ v%d }}' % i for i in range(60000))
+    # Since round 4 the checker refuses input over the size limit itself, so
+    # the 150k-name case from the review can no longer reach it at all...
+    huge = ''.join('{{ v%d }}' % i for i in range(60000))
     start = time.monotonic()
+    assert unavailable_variables(huge) == []
+    # ...and the most names that fit under the limit are all found, quickly.
+    source = ''.join('{{ v%d }}' % i for i in range(9000))
+    assert len(source) < 100 * 1024
     names = unavailable_variables(source)
     assert time.monotonic() - start < 5
-    assert len(names) == 60000 and names[:2] == ['v0', 'v1']
+    assert len(names) == 9000 and names[:2] == ['v0', 'v1']
 
 
 @pytest.mark.parametrize('text', [
@@ -17407,3 +17413,41 @@ def test_template_test_send_logs_an_oversized_template(client, admin_user, monke
     assert resp.status_code == 302 and sent == []
     log = EmailSendLog.objects.get(trigger='test:template')
     assert log.status == 'failed' and '100 KB' in log.detail
+
+
+# ── CodeQL fixes, outside review round 4 (Oct 3 2026) ──────────────────────
+
+@pytest.mark.django_db
+def test_partial_save_checks_the_body_it_keeps(client, admin_user):
+    """Round 4: a POST without body_template keeps the stored body; an old
+    oversized one is refused before the row changes."""
+    from django.contrib.messages import get_messages
+    client.force_login(admin_user)
+    t = EmailTemplate.objects.create(name='Old', subject_template='s', is_active=False,
+                                     body_template='<div>' + 'x' * 102401 + '</div>')
+    resp = client.post(reverse('core:email_template_update', args=[t.pk]),
+                       {'name': 'Renamed', 'subject_template': 's', 'is_active': '1'})
+    assert resp.status_code == 302
+    assert any('100 KB' in str(m) for m in get_messages(resp.wsgi_request))
+    t.refresh_from_db()
+    assert (t.name, t.is_active) == ('Old', False)
+
+
+@pytest.mark.django_db
+def test_partial_save_parses_a_retained_body_safely(client, admin_user):
+    """Round 4: a stored body under the limit but full of unclosed {{ (never
+    through sanitize: an old or imported row) reached Django's lexer raw from
+    the save warnings (40k chars: 2.7 s; 200k: past 20 s)."""
+    import time
+    from core.email_utils import unavailable_variables
+    stored = '{{ client.email }}' + '{{' * 40000  # 80 KB, under the limit
+    client.force_login(admin_user)
+    t = EmailTemplate.objects.create(name='Old', subject_template='s', is_active=False, body_template=stored)
+    start = time.monotonic()
+    resp = client.post(reverse('core:email_template_update', args=[t.pk]),
+                       {'name': 'Old', 'subject_template': 's', 'is_active': '1'})
+    assert time.monotonic() - start < 3
+    assert resp.status_code == 302
+    t.refresh_from_db()
+    assert t.is_active is True and t.body_template == stored, 'the stored body is not rewritten'
+    assert unavailable_variables(stored) == ['client.email'], 'names are still found in a guarded copy'
