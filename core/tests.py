@@ -17067,6 +17067,9 @@ def test_warning_check_is_not_quadratic_in_distinct_names():
     '<div>MBTOKEN0NEKOTBM</div>',
     '<div>MBTOKEN0NEKOTBM {{ site_name }} MBTOKEN7NEKOTBM</div>',
     '<div><a href="https://x.example/MBTOKEN0NEKOTBM">MBTOKEN0NEKOTBM</a> {{ site_name }}</div>',
+    # The current placeholder shape (marker, then x<n>x) typed literally.
+    '<div>MBTOKENx0x {{ site_name }} MBTOKENx9x</div>',
+    '<div>MBTOKENx0x</div>',
 ])
 def test_marker_shaped_text_survives_sanitize(text):
     """Round 1 finding 2: a fixed placeholder made literal 'MBTOKEN0NEKOTBM'
@@ -17229,6 +17232,8 @@ def test_inbound_fallback_tag_strip_is_linear(monkeypatch):
         raise ValueError('parser failed')
     monkeypatch.setattr(fie._HTMLToText, 'feed', boom)
     start = time.monotonic()
-    out = fie._html_to_text('<' * 200000 + '<b>bold</b> text')
+    # The run comes LAST: with a '>' after it, the old regex matched in one
+    # pass; it was the run with nothing to close it that rescanned.
+    out = fie._html_to_text('<b>bold</b> text' + '<' * 200000)
     assert time.monotonic() - start < 5
     assert 'bold' in out and 'text' in out
