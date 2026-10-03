@@ -69,14 +69,19 @@ class Fields(dict):
 
 
 class Text(str):
-    """An allowed value. An attribute it does not have reads as an empty
-    Fields (blank), for the same reason as Fields.__missing__; its own string
-    methods still work."""
+    """An allowed value. A dotted name after it ({{ ticket.subject.x }})
+    reads as an empty Fields (blank), for the same reason as
+    Fields.__missing__. Done through item lookup, which Django tries first,
+    and NOT through attributes: round 2 found that answering every attribute
+    made Python's own attribute checks lie, and the date filter crashed.
+    Cost (Mike, Oct 3 2026): string methods written with a dot
+    ({{ ticket.subject.upper }}) are blank too; the |upper filter and the
+    rest of the allowed filters work as before."""
 
-    def __getattr__(self, name):
-        if name.startswith('__'):
-            raise AttributeError(name)
-        return Fields()
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            return Fields()
+        return super().__getitem__(key)
 
 
 class BlankingContext(Context):

@@ -17237,3 +17237,134 @@ def test_inbound_fallback_tag_strip_is_linear(monkeypatch):
     out = fie._html_to_text('<b>bold</b> text' + '<' * 200000)
     assert time.monotonic() - start < 5
     assert 'bold' in out and 'text' in out
+
+
+# ── CodeQL fixes, outside review round 2 (Oct 3 2026) ──────────────────────
+
+_FILTER_SAMPLES = [
+    'date:"Y"', 'time:"H"', 'timesince', 'timeuntil', 'default:"x"', 'default_if_none:"x"',
+    'yesno:"a,b"', 'pluralize', 'upper', 'lower', 'title', 'capfirst', 'truncatechars:5',
+    'truncatewords:2', 'wordcount', 'length', 'floatformat:2', 'add:"1"', 'cut:" "', 'first',
+    'last', 'join:","', 'linebreaksbr',
+]
+
+
+@pytest.mark.parametrize('value', ['A ticket', '', '2026-10-03', '12', 'Ünïcode words here'])
+def test_every_allowed_filter_treats_a_text_value_like_plain_text(value):
+    """Round 2 finding 1: answering every attribute on Text made the date
+    filter crash. Each allowed filter must give the same result (or the same
+    error) on a Text value as on the plain string it wraps."""
+    from django.template import Context, Template
+    from core.email_html import ALLOWED_VAR_FILTERS, BlankingContext, Text, render_body
+    assert {f.split(':')[0] for f in _FILTER_SAMPLES} == ALLOWED_VAR_FILTERS, 'sample every allowed filter'
+
+    def outcome(render):
+        # Same result, or the same error: timesince/timeuntil raise on any
+        # string, Text or not, exactly as they did before Text existed.
+        try:
+            return render()
+        except Exception as exc:
+            return type(exc).__name__
+    for f in _FILTER_SAMPLES:
+        source = '{{ v|%s }}' % f
+        assert outcome(lambda: Template(source).render(BlankingContext({'v': Text(value)}))) == \
+            outcome(lambda: Template(source).render(Context({'v': value}))), f
+        assert outcome(lambda: render_body(f'<div>{source}</div>', {'v': Text(value)})) == \
+            outcome(lambda: render_body(f'<div>{source}</div>', {'v': value})), f
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('body_format', ['html', 'text'])
+def test_date_filter_on_an_allowed_value_still_sends(client_obj, admin_user, monkeypatch, body_format):
+    from core import email_utils
+    from core.email_utils import render_email_template, send_ticket_email
+    from core.models import EmailSendLog
+    ctx, ticket, _wo = _template_world(client_obj, admin_user)
+    source = '{{ ticket.subject|date:"Y" }}[{{ ticket.subject.upper }}]{{ ticket.subject|upper }}'
+    t = EmailTemplate(subject_template=source, body_template=f'<div>{source}</div>', body_format=body_format)
+    subject, body = render_email_template(t, ctx)
+    assert subject == '[]SLOW PC', 'dot-form string methods are blank; the filter works'
+    assert '[]SLOW PC' in body
+    _email_on()
+    EmailTemplate.objects.update_or_create(trigger='ticket_created', defaults={
+        'is_active': True, 'subject_template': source, 'body_template': t.body_template, 'body_format': body_format})
+    sent = []
+    monkeypatch.setattr(email_utils, '_smtp_send', lambda *a, **k: sent.append(a) or ('sent', '', ''))
+    send_ticket_email('ticket_created', ticket)
+    assert sent and EmailSendLog.objects.filter(status='sent').exists()
+
+
+@pytest.mark.django_db
+def test_plain_formats_get_the_same_size_limits(client_obj, monkeypatch):
+    """Round 2 finding 2: a legacy plain body had no filled-in ceiling and a
+    plain signature was never size-checked."""
+    from core import email_utils
+    from core.email_html import EmailTextTooLarge
+    from core.email_utils import render_email_template, send_ticket_email
+    from core.models import Contact, EmailSendLog, EmailSignature
+    with pytest.raises(EmailTextTooLarge):
+        render_email_template(EmailTemplate(subject_template='s', body_template='{{ reply.content }}',
+                                            body_format='text'), {'reply': type('R', (), {'content': 'a' * 409601})()})
+    _email_on()
+    Contact.objects.create(client=client_obj, first_name='Pat', last_name='Q', email='pat@example.com', is_primary=True)
+    sent = []
+    monkeypatch.setattr(email_utils, '_smtp_send', lambda *a, **k: sent.append(a) or ('sent', '', ''))
+    EmailTemplate.objects.update_or_create(trigger='ticket_created', defaults={
+        'is_active': True, 'subject_template': 's', 'body_template': 'ok', 'body_format': 'text'})
+    EmailSignature.objects.create(name='Big', body='x' * 102401, body_format='text', is_default=True)
+    send_ticket_email('ticket_created', Ticket.objects.create(client=client_obj, subject='S', description='D'))
+    assert sent == []
+    assert EmailSendLog.objects.filter(status='failed', detail__contains='100 KB').exists()
+
+
+@pytest.mark.django_db
+def test_template_test_send_refuses_an_oversized_signature(client, admin_user, monkeypatch):
+    """Round 2 finding 3: the fourth caller of _compose_email_bodies had no
+    handler, so an oversized stored signature was a 500."""
+    from core import email_utils
+    from core.models import EmailSendLog, EmailSignature
+    _email_on()
+    admin_user.email = 'admin@example.com'
+    admin_user.save()
+    sig = EmailSignature.objects.create(name='Big', body='<div>' + 'x' * 102401 + '</div>', body_format='html')
+    t = EmailTemplate.objects.create(name='Note', subject_template='s', body_template='<div>b</div>',
+                                     is_active=True, signature=sig)
+    sent = []
+    monkeypatch.setattr(email_utils, '_smtp_send', lambda *a, **k: sent.append(a) or ('sent', '', ''))
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:email_template_test_send', args=[t.pk]))
+    assert resp.status_code == 302
+    assert sent == []
+    assert EmailSendLog.objects.filter(trigger='test:template', status='failed').exists()
+
+
+_AMPERSANDS = '<div>' + '& ' * 20000 + '</div>'  # 40 KB posted, 120 KB once & becomes &amp;
+
+
+@pytest.mark.django_db
+def test_save_checks_the_stored_form_not_only_what_was_posted(client, admin_user):
+    """Round 2 finding 4: a body under the limit as posted grew past it when
+    cleaned, saved with a success message, then failed every send."""
+    from django.contrib.messages import get_messages
+    from core.models import EmailSignature
+    assert len(_AMPERSANDS) < 100 * 1024
+    client.force_login(admin_user)
+    t = EmailTemplate.objects.create(name='Note', subject_template='s', body_template='<div>b</div>', is_active=True)
+    sig = EmailSignature.objects.create(name='Sig', body='<div>me</div>')
+    posts = [
+        (reverse('core:email_template_update', args=[t.pk]), {'name': 'Note', 'subject_template': 'new', 'body_template': _AMPERSANDS}),
+        (reverse('core:email_template_create'), {'name': 'Big', 'subject_template': 's', 'body_template': _AMPERSANDS}),
+        (reverse('core:email_sig_create'), {'name': 'Big', 'body': _AMPERSANDS}),
+        (reverse('core:email_sig_update', args=[sig.pk]), {'name': 'Renamed', 'body': _AMPERSANDS}),
+    ]
+    for url, data in posts:
+        resp = client.post(url, data)
+        assert resp.status_code == 302, url
+        text = ' '.join(str(m) for m in get_messages(resp.wsgi_request))
+        assert 'once cleaned' in text and 'Nothing was saved' in text, url
+    t.refresh_from_db()
+    sig.refresh_from_db()
+    assert (t.subject_template, t.body_template) == ('s', '<div>b</div>'), 'nothing on the row changed'
+    assert (sig.name, sig.body) == ('Sig', '<div>me</div>')
+    assert not EmailTemplate.objects.filter(name='Big').exists()
+    assert not EmailSignature.objects.filter(name='Big').exists()

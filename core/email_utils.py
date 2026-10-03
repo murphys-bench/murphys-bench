@@ -401,11 +401,16 @@ def render_email_template(template, ctx):
     ctx = safe_template_context(ctx)
     subject = Template(email_html.guard_plain(template.subject_template)).render(
         email_html.BlankingContext(ctx, autoescape=False)).strip()
+    email_html.check_email_text_size(subject, 'The subject, with its values filled in,',
+                                     email_html.MAX_RENDERED_BYTES)
     if template.body_format == 'html':
         body = email_html.render_body(template.body_template, ctx)
     else:
         body = Template(email_html.guard_plain(template.body_template)).render(
             email_html.BlankingContext(ctx, autoescape=False))
+        # The same ceiling as render_body: every format, not only HTML.
+        email_html.check_email_text_size(body, 'The email, with its values filled in,',
+                                         email_html.MAX_RENDERED_BYTES)
     return subject, body
 
 
@@ -419,8 +424,11 @@ def _rendered_signature(sig_obj):
 def _compose_email_bodies(body, body_is_html, sig_body, sig_is_html, site):
     """Bridge body + signature, each possibly HTML or legacy text, into what
     _smtp_send needs: (html_for_wrapper, html_flag, sig_for_wrapper,
-    sig_flag, plain_text_body)."""
+    sig_flag, plain_text_body). A signature over the size limit raises
+    EmailTextTooLarge whatever its format; callers turn that into a failed,
+    logged send."""
     from . import email_html
+    email_html.check_email_text_size(sig_body, 'The signature')
     if body_is_html:
         email_body, body_plain = email_html.finish_for_email(body, site)
     else:

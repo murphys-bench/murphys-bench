@@ -8753,6 +8753,21 @@ def _email_text_too_large(request, *texts, outcome='Nothing was saved.'):
     return False
 
 
+def _clean_body_or_refuse(request, posted, what):
+    """The posted HTML as it will be stored (sanitized), or None after
+    telling the user why not. Cleaning can grow text (each & becomes &amp;),
+    so the size check is on the stored form: a save that succeeds must not
+    leave something every send then refuses (review round 2)."""
+    from .email_html import EmailTextTooLarge, check_email_text_size, sanitize
+    try:
+        cleaned = sanitize((posted or '').strip())
+        check_email_text_size(cleaned, f'{what}, as stored once cleaned,')
+    except EmailTextTooLarge as exc:
+        messages.error(request, f'{exc} Nothing was saved.')
+        return None
+    return cleaned
+
+
 def _first_few(items, limit=10):
     shown = ', '.join(items[:limit])
     return shown if len(items) <= limit else f'{shown} and {len(items) - limit} more'
@@ -8788,14 +8803,18 @@ class EmailTemplateUpdateView(SettingsAdminMixin, View):
         if _email_text_too_large(request, ('The subject', request.POST.get('subject_template', '')),
                                  ('The body', request.POST.get('body_template', ''))):
             return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
+        cleaned_body = None
+        if 'body_template' in request.POST:
+            cleaned_body = _clean_body_or_refuse(request, request.POST['body_template'], 'The body')
+            if cleaned_body is None:
+                return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
         if tmpl.is_custom and (request.POST.get('name') or '').strip():
             tmpl.name = request.POST.get('name').strip()
         if tmpl.is_custom:
             tmpl.quick_send = request.POST.get('quick_send') == '1'
-        from .email_html import sanitize
         tmpl.subject_template = request.POST.get('subject_template', tmpl.subject_template).strip()
-        if 'body_template' in request.POST:
-            tmpl.body_template = sanitize(request.POST['body_template'].strip())
+        if cleaned_body is not None:
+            tmpl.body_template = cleaned_body
             tmpl.body_format = 'html'
         tmpl.is_active = request.POST.get('is_active') == '1'
         sig_id = request.POST.get('signature')
@@ -8828,9 +8847,10 @@ class EmailSignatureCreateView(SettingsAdminMixin, View):
             raise PermissionDenied
         if _email_text_too_large(request, ('The signature', request.POST.get('body', ''))):
             return redirect(_sig_redirect())
-        from .email_html import sanitize
         name = request.POST.get('name', '').strip()
-        body = sanitize(request.POST.get('body', '').strip())
+        body = _clean_body_or_refuse(request, request.POST.get('body'), 'The signature')
+        if body is None:
+            return redirect(_sig_redirect())
         is_default = request.POST.get('is_default') == '1'
         if name and body:
             sig = EmailSignature(name=name, body=body, is_default=is_default)
@@ -8844,13 +8864,15 @@ class EmailSignatureUpdateView(SettingsAdminMixin, View):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
-        from .email_html import sanitize
         sig = get_object_or_404(EmailSignature, pk=pk)
         if _email_text_too_large(request, ('The signature', request.POST.get('body', ''))):
             return redirect(_sig_redirect())
         sig.name = request.POST.get('name', sig.name).strip()
         if 'body' in request.POST:
-            sig.body = sanitize(request.POST['body'].strip())
+            cleaned = _clean_body_or_refuse(request, request.POST['body'], 'The signature')
+            if cleaned is None:
+                return redirect(_sig_redirect())
+            sig.body = cleaned
             sig.body_format = 'html'
         sig.is_default = request.POST.get('is_default') == '1'
         sig.save()
@@ -9807,9 +9829,11 @@ class EmailTemplateCreateView(SettingsAdminMixin, View):
         if _email_text_too_large(request, ('The subject', request.POST.get('subject_template', '')),
                                  ('The body', request.POST.get('body_template', ''))):
             return redirect(f"{reverse('core:settings')}?tab=email_templates")
-        from .email_html import sanitize, text_to_html
+        from .email_html import text_to_html
         sig_id = request.POST.get('signature')
-        body = sanitize((request.POST.get('body_template') or '').strip())
+        body = _clean_body_or_refuse(request, request.POST.get('body_template'), 'The body')
+        if body is None:
+            return redirect(f"{reverse('core:settings')}?tab=email_templates")
         tmpl = EmailTemplate.objects.create(
             name=name,
             subject_template=(request.POST.get('subject_template') or '').strip() or '{{ site_name }}: a note about your recent service',
@@ -9869,15 +9893,25 @@ class EmailTemplateTestSendView(SettingsAdminMixin, View):
             'status': 'In Progress',
             'site_name': site.company_name or "Murphy's Bench",
         }
+        from .email_html import EmailTextTooLarge
         try:
             subject, body = render_email_template(tmpl, ctx)
+        except EmailTextTooLarge as exc:
+            messages.error(request, f'Test not sent: {exc}')
+            return back
         except Exception:
             messages.error(request, f'"{tmpl.label}" has a syntax error; fix the template and try again.')
             return back
         sig_obj = tmpl.signature or EmailSignature.objects.filter(is_default=True).first()
         sig_body, sig_is_html = _rendered_signature(sig_obj)
-        email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
-            body, tmpl.body_format == 'html', sig_body, sig_is_html, site)
+        try:
+            email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
+                body, tmpl.body_format == 'html', sig_body, sig_is_html, site)
+        except EmailTextTooLarge as exc:
+            EmailSendLog.objects.create(ticket=None, to_email=to_email, trigger='test:template',
+                                        status='failed', reason='send_error', detail=str(exc))
+            messages.error(request, f'Test not sent: {exc}')
+            return back
         html_body, logo_data, logo_mime = _build_html_email(
             email_body, sig_email, subject, None, site,
             body_is_html=body_is_html, signature_is_html=sig_is_html)
