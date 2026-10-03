@@ -17368,3 +17368,42 @@ def test_save_checks_the_stored_form_not_only_what_was_posted(client, admin_user
     assert (sig.name, sig.body) == ('Sig', '<div>me</div>')
     assert not EmailTemplate.objects.filter(name='Big').exists()
     assert not EmailSignature.objects.filter(name='Big').exists()
+
+
+# ── CodeQL fixes, outside review round 3 (Oct 3 2026) ──────────────────────
+
+@pytest.mark.django_db
+def test_partial_save_checks_the_subject_it_keeps(client, admin_user):
+    """Round 3 P3 1: a POST without subject_template keeps the stored subject;
+    an old oversized one must be refused before the row changes, not raise
+    after it was saved."""
+    from django.contrib.messages import get_messages
+    client.force_login(admin_user)
+    t = EmailTemplate.objects.create(name='Old', subject_template='s' * 102401,
+                                     body_template='<div>old</div>', is_active=False)
+    resp = client.post(reverse('core:email_template_update', args=[t.pk]),
+                       {'body_template': '<div>new</div>', 'is_active': '1'})
+    assert resp.status_code == 302
+    assert any('100 KB' in str(m) for m in get_messages(resp.wsgi_request))
+    t.refresh_from_db()
+    assert t.body_template == '<div>old</div>' and t.is_active is False
+
+
+@pytest.mark.django_db
+def test_template_test_send_logs_an_oversized_template(client, admin_user, monkeypatch):
+    """Round 3 P3 2: a size refusal while rendering the template is logged
+    like the signature refusal already was."""
+    from core import email_utils
+    from core.models import EmailSendLog
+    _email_on()
+    admin_user.email = 'admin@example.com'
+    admin_user.save()
+    t = EmailTemplate.objects.create(name='Big', subject_template='s', is_active=True,
+                                     body_template='<div>' + 'x' * 102401 + '</div>', body_format='html')
+    sent = []
+    monkeypatch.setattr(email_utils, '_smtp_send', lambda *a, **k: sent.append(a) or ('sent', '', ''))
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:email_template_test_send', args=[t.pk]))
+    assert resp.status_code == 302 and sent == []
+    log = EmailSendLog.objects.get(trigger='test:template')
+    assert log.status == 'failed' and '100 KB' in log.detail

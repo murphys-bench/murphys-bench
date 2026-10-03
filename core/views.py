@@ -8800,7 +8800,12 @@ class EmailTemplateUpdateView(SettingsAdminMixin, View):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         tmpl = get_object_or_404(EmailTemplate, pk=pk)
-        if _email_text_too_large(request, ('The subject', request.POST.get('subject_template', '')),
+        # The subject this save will keep: the posted one, or the stored one
+        # when the form leaves it out (review round 3: checking only the posted
+        # value let an old oversized subject ride a partial save, then raise
+        # after the row was written).
+        if _email_text_too_large(request,
+                                 ('The subject', request.POST.get('subject_template', tmpl.subject_template)),
                                  ('The body', request.POST.get('body_template', ''))):
             return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
         cleaned_body = None
@@ -9897,6 +9902,8 @@ class EmailTemplateTestSendView(SettingsAdminMixin, View):
         try:
             subject, body = render_email_template(tmpl, ctx)
         except EmailTextTooLarge as exc:
+            EmailSendLog.objects.create(ticket=None, to_email=to_email, trigger='test:template',
+                                        status='failed', reason='send_error', detail=str(exc))
             messages.error(request, f'Test not sent: {exc}')
             return back
         except Exception:

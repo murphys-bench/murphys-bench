@@ -22,7 +22,7 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ### Changed
 
-- A text method written with a dot in a template, such as `{{ ticket.subject.upper }}`, now shows blank. The `|upper` filter and the other allowed filters work as before.
+- Anything written with a dot after a value in a template, such as `{{ ticket.subject.upper }}` or `{{ ticket.subject.0 }}`, now shows blank. The `|upper`, `|first` and other allowed filters work as before.
 
 ### Fixed
 
