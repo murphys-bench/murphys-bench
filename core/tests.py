@@ -108,8 +108,12 @@ def test_work_order_number_collision_is_retried(client_obj):
 # ── Bug 4: a broken email template is logged, not silently swallowed ─────────
 
 @pytest.mark.django_db
-def test_bad_email_template_is_logged(client_obj, caplog):
+def test_bad_email_template_is_logged(client_obj, caplog, monkeypatch):
+    from core import email_utils
     from core.email_utils import send_ticket_email
+    from core.models import EmailSendLog
+    smtp_calls = []
+    monkeypatch.setattr(email_utils, '_smtp_send', lambda *a, **k: smtp_calls.append(a) or ('sent', '', ''))
 
     site = SiteSettings.get()
     site.email_enabled = True
@@ -135,6 +139,8 @@ def test_bad_email_template_is_logged(client_obj, caplog):
 
     assert any('template' in r.message.lower() for r in caplog.records), \
         'A template render failure should be logged on the core logger.'
+    assert EmailSendLog.objects.filter(status='failed', detail='template render error').exists()
+    assert smtp_calls == [], 'a template that cannot render must not send anything'
 
 
 # ── Email greeting name: residential → first name, business → company ───────
@@ -16991,26 +16997,29 @@ def test_unclosed_template_openers_do_not_stall_rendering(opener):
     neutralize stray openers before Django sees the text. At this size the old
     code took well over 30 seconds; what remains is bleach's own pass."""
     import time
-    from core import email_html
-    text = opener * 50000
-    start = time.monotonic()
-    html = email_html.render_body(email_html.sanitize(text), {})
-    plain = email_html.guard_plain(text)
     from django.template import Template, Context
+    from core import email_html
+    text = opener * 50000  # 100,000 characters, just under the size limit
+    start = time.monotonic()
+    html = email_html.sanitize(text)
+    Template(html)
+    plain = email_html.guard_plain(text)
     rendered_plain = Template(plain).render(Context({}))
     assert time.monotonic() - start < 10
     assert rendered_plain == text, 'stray openers still read as the characters typed'
-    assert '&#123;' in html or '{' in html
+    from html import unescape
+    assert unescape(html) == text, 'the cleaned body still reads as the characters typed'
 
 
-def test_split_tokens_matches_the_old_regex():
-    """_split_tokens replaced re.compile(r'({{.*?}}|{%.*?%})', re.S).split for
-    speed; it must split every text the same way."""
+def test_split_tokens_matches_the_regex_it_replaced():
+    """_split_tokens is a linear-time version of a non-greedy regex over the
+    three token kinds; it must split every text the same way. (The original
+    regex had only {{ }} and {% %}; comments joined in review round 1.)"""
     import random
     from core.email_html import _split_tokens
-    old = re.compile(r'({{.*?}}|{%.*?%})', re.S)
+    old = re.compile(r'({{.*?}}|{%.*?%}|{#.*?#})', re.S)
     rng = random.Random(20261003)
-    alphabet = ['{', '}', '%', '#', 'a', ' ', '\n', '{{', '}}', '{%', '%}']
+    alphabet = ['{', '}', '%', '#', 'a', ' ', '\n', '{{', '}}', '{%', '%}', '{#', '#}']
     for _ in range(5000):
         text = ''.join(rng.choice(alphabet) for _ in range(rng.randint(0, 14)))
         assert _split_tokens(text) == old.split(text), repr(text)
@@ -17021,11 +17030,11 @@ def test_many_small_tokens_sanitize_in_one_pass():
     """The token restore was one str.replace per token: tokens x length."""
     import time
     from core.email_html import sanitize
-    text = '<div>' + '{{ site_name }} ' * 40000 + '</div>'
+    text = '<div>' + '{{ site_name }} ' * 6000 + '</div>'  # under the size limit
     start = time.monotonic()
     out = sanitize(text)
     assert time.monotonic() - start < 10
-    assert out.count('{{ site_name }}') == 40000
+    assert out.count('{{ site_name }}') == 6000
 
 
 def test_scheduled_audit_can_open_its_failure_issue():
@@ -17038,3 +17047,188 @@ def test_scheduled_audit_can_open_its_failure_issue():
     assert 'issues.create' in audit and re.search(r'^permissions:\n(  .+\n)*  issues: write$', audit, re.M)
     for name in ('ci.yml', 'clean-room.yml'):
         assert re.search(r'^permissions:\n  contents: read$', (wf / name).read_text(), re.M), name
+
+
+# ── CodeQL fixes, outside review round 1 (Oct 3 2026) ──────────────────────
+
+def test_warning_check_is_not_quadratic_in_distinct_names():
+    """Round 1 finding 1: `path not in found` over a list made many distinct
+    unavailable names cost names-squared (30k names: 2 s; 150k: past 40 s)."""
+    import time
+    from core.email_utils import unavailable_variables
+    source = ''.join('{{ v%d }}' % i for i in range(60000))
+    start = time.monotonic()
+    names = unavailable_variables(source)
+    assert time.monotonic() - start < 5
+    assert len(names) == 60000 and names[:2] == ['v0', 'v1']
+
+
+@pytest.mark.parametrize('text', [
+    '<div>MBTOKEN0NEKOTBM</div>',
+    '<div>MBTOKEN0NEKOTBM {{ site_name }} MBTOKEN7NEKOTBM</div>',
+    '<div><a href="https://x.example/MBTOKEN0NEKOTBM">MBTOKEN0NEKOTBM</a> {{ site_name }}</div>',
+])
+def test_marker_shaped_text_survives_sanitize(text):
+    """Round 1 finding 2: a fixed placeholder made literal 'MBTOKEN0NEKOTBM'
+    an IndexError (or, with real tokens, another token's text)."""
+    from core.email_html import sanitize
+    assert sanitize(text) == text
+
+
+@pytest.mark.django_db
+def test_name_outside_the_list_in_a_filter_argument_is_blank_not_a_failed_send(client_obj, admin_user, monkeypatch):
+    """Round 1 finding 3: Django raises on a missing filter argument, so the
+    whole email failed where the promise was 'shows blank'."""
+    from core import email_utils
+    from core.email_utils import render_email_template, send_ticket_email
+    from core.models import EmailSendLog
+    ctx, ticket, _wo = _template_world(client_obj, admin_user)
+    t = EmailTemplate(subject_template='{{ nothing|default:ticket.created_by.get_full_name }}x',
+                      body_template='<div>{{ tech_name|default:ticket.created_by.get_full_name }}|'
+                                    '{{ missing|default:no.such.thing }}|{{ ticket.subject.nope }}|'
+                                    '{% if ticket.created_by.is_superuser %}LEAK{% endif %}</div>',
+                      body_format='html')
+    subject, body = render_email_template(t, ctx)
+    assert subject == 'x'
+    assert '|||' in body and 'LEAK' not in body
+    # Through the automatic send path: it goes out.
+    _email_on()
+    EmailTemplate.objects.update_or_create(trigger='ticket_created', defaults={
+        'is_active': True, 'subject_template': t.subject_template, 'body_template': t.body_template})
+    sent = []
+    monkeypatch.setattr(email_utils, '_smtp_send', lambda *a, **k: sent.append(a) or ('sent', '', ''))
+    send_ticket_email('ticket_created', ticket)
+    assert sent and EmailSendLog.objects.filter(status='sent').exists()
+
+
+@pytest.mark.django_db
+def test_template_comments_stay_hidden(client_obj, admin_user):
+    """Round 1 finding 4: one-line {# comments #} were hidden at the base and
+    became customer-visible text. A comment can hold an internal note."""
+    from core.email_html import finish_for_email, sanitize
+    from core.email_utils import render_email_template
+    ctx, _ticket, _wo = _template_world(client_obj, admin_user)
+    note = '{# INTERNAL: do not offer this customer a refund #}'
+    t = EmailTemplate(subject_template=f'Hi {note}there', body_format='html',
+                      body_template=f'{note}<div>Hello</div>')
+    subject, body = render_email_template(t, ctx)
+    html, plain = finish_for_email(body, SiteSettings.get())
+    for out in (subject, body, html, plain):
+        assert 'INTERNAL' not in out and 'refund' not in out
+    assert subject == 'Hi there' and 'Hello' in body
+    # A "comment" spanning lines was never a comment to Django: still text.
+    assert 'two' in render_email_template(EmailTemplate(
+        subject_template='s', body_format='html', body_template='<div>{# one\ntwo #}</div>'), ctx)[1]
+    assert sanitize(f'{note}<div>Hello</div>').startswith(note)
+
+
+@pytest.mark.parametrize('source, expected', [
+    ('{% if ticket %}{{ ticket.ticket_number }}{% endif %}', []),
+    ('{% if work_order.device %}{{ work_order.device.name }}{% endif %}', []),
+    ('{% if reply %}x{% endif %}', []),
+    ('{% now "Y" as year %}{{ year }}', []),
+    ('{{ ticket }}', ['ticket']),
+    ('{{ site_name|default:ticket }}', ['ticket']),
+    ('{% if ticket.created_by %}x{% endif %}', ['ticket.created_by']),
+])
+def test_save_warning_knows_records_from_values(db, source, expected):
+    """Round 1 finding 5: {% if ticket %} was reported as unusable."""
+    from core.email_utils import unavailable_variables
+    assert unavailable_variables(source) == expected
+
+
+_OVER_LIMIT = '<div>' + 'a' * (100 * 1024) + '</div>'
+
+
+@pytest.mark.django_db
+def test_oversized_email_text_is_refused_at_every_save(client, admin_user):
+    """Mike, Oct 3 2026: 100 KB. Refused, never cut short, before any parsing."""
+    from django.contrib.messages import get_messages
+    from core.models import EmailSignature
+    client.force_login(admin_user)
+    t = EmailTemplate.objects.create(name='Note', subject_template='s', body_template='<div>b</div>', is_active=True)
+    sig = EmailSignature.objects.create(name='Sig', body='<div>me</div>')
+    posts = [
+        (reverse('core:email_template_update', args=[t.pk]), {'name': 'Note', 'subject_template': 's', 'body_template': _OVER_LIMIT}),
+        (reverse('core:email_template_update', args=[t.pk]), {'name': 'Note', 'subject_template': 'x' * 110000, 'body_template': 'b'}),
+        (reverse('core:email_template_create'), {'name': 'Big', 'subject_template': 's', 'body_template': _OVER_LIMIT}),
+        (reverse('core:email_sig_create'), {'name': 'Big', 'body': _OVER_LIMIT}),
+        (reverse('core:email_sig_update', args=[sig.pk]), {'name': 'Sig', 'body': _OVER_LIMIT}),
+    ]
+    for url, data in posts:
+        resp = client.post(url, data)
+        assert resp.status_code == 302, url
+        assert any('100 KB' in str(m) for m in get_messages(resp.wsgi_request)), url
+    t.refresh_from_db()
+    sig.refresh_from_db()
+    assert t.body_template == '<div>b</div>' and t.subject_template == 's'
+    assert sig.body == '<div>me</div>'
+    assert not EmailTemplate.objects.filter(name='Big').exists()
+    assert not EmailSignature.objects.filter(name='Big').exists()
+
+
+@pytest.mark.django_db
+def test_oversized_compose_body_is_refused_and_nothing_sends(client, admin_user, client_obj, monkeypatch):
+    from core import email_utils
+    from core.models import Contact
+    _email_on()
+    Contact.objects.create(client=client_obj, first_name='Pat', last_name='Q', email='pat@example.com', is_primary=True)
+    t = EmailTemplate.objects.create(name='Note', subject_template='s', body_template='<div>b</div>', is_active=True)
+    sent = []
+    monkeypatch.setattr(email_utils, '_smtp_send', lambda *a, **k: sent.append(a) or ('sent', '', ''))
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:customer_email') + f'?client={client_obj.pk}', {
+        'client': client_obj.pk, 'template': t.pk, 'subject': 'Hi', 'body': _OVER_LIMIT,
+        'custom_email': 'pat@example.com'})
+    assert resp.status_code == 200 and b'100 KB' in resp.content
+    assert sent == []
+
+
+@pytest.mark.django_db
+def test_oversized_stored_text_fails_the_send_loudly(client_obj, admin_user, monkeypatch):
+    """Text saved before the limit existed is refused at send: a failed log
+    row, no SMTP, no crash in the view that triggered it."""
+    from core import email_utils
+    from core.models import EmailSendLog, EmailSignature
+    from core.email_utils import send_ticket_email
+    _email_on()
+    from core.models import Contact
+    Contact.objects.create(client=client_obj, first_name='Pat', last_name='Q', email='pat@example.com', is_primary=True)
+    sent = []
+    monkeypatch.setattr(email_utils, '_smtp_send', lambda *a, **k: sent.append(a) or ('sent', '', ''))
+    ticket = Ticket.objects.create(client=client_obj, subject='S', description='D')
+    tmpl, _ = EmailTemplate.objects.update_or_create(trigger='ticket_created', defaults={
+        'is_active': True, 'subject_template': 's', 'body_template': _OVER_LIMIT, 'body_format': 'html'})
+    send_ticket_email('ticket_created', ticket)
+    # An oversized signature, with a body that is fine.
+    tmpl.body_template = '<div>ok</div>'
+    tmpl.save()
+    EmailSignature.objects.create(name='Big', body=_OVER_LIMIT, body_format='html', is_default=True)
+    send_ticket_email('ticket_created', ticket)
+    assert sent == []
+    assert EmailSendLog.objects.filter(status='failed').count() == 2
+
+
+def test_rendered_output_is_bounded_before_bleach():
+    """A small template can expand: a loop repeats its markup once per
+    character of a value. The filled-in body is size-checked before bleach."""
+    from core.email_html import EmailTextTooLarge, render_body
+    with pytest.raises(EmailTextTooLarge):
+        render_body('{% for c in reply.content %}<div>xx</div>{% endfor %}',
+                    {'reply': {'content': 'a' * 50000}})
+
+
+def test_inbound_fallback_tag_strip_is_linear(monkeypatch):
+    """CodeQL polynomial-redos (#15): the fallback strip, used when the HTML
+    parser fails, rescanned to the end from every '<'. Inbound mail is
+    anyone on the internet."""
+    import time
+    from core.management.commands import fetch_inbound_email as fie
+
+    def boom(self, data):
+        raise ValueError('parser failed')
+    monkeypatch.setattr(fie._HTMLToText, 'feed', boom)
+    start = time.monotonic()
+    out = fie._html_to_text('<' * 200000 + '<b>bold</b> text')
+    assert time.monotonic() - start < 5
+    assert 'bold' in out and 'text' in out

@@ -8740,21 +8740,40 @@ class DeviceCredentialUpdateView(LoginRequiredMixin, View):
 
 # --- Email Template Manager ---
 
-def _template_save_warnings(request, tmpl):
-    """Say what in a just-saved template will not work as written: a subject
-    token outside the allowed set (shows as literal text), and any name
-    templates cannot reach (shows blank). The template still saves."""
+def _email_text_too_large(request, *texts, outcome='Nothing was saved.'):
+    """Refuse email text over the size limit (email_html.MAX_EMAIL_TEXT_BYTES)
+    before any of it is parsed. True when refused; the message says why."""
+    from .email_html import EmailTextTooLarge, check_email_text_size
+    try:
+        for what, text in texts:
+            check_email_text_size(text, what)
+    except EmailTextTooLarge as exc:
+        messages.error(request, f'{exc} {outcome}')
+        return True
+    return False
+
+
+def _first_few(items, limit=10):
+    shown = ', '.join(items[:limit])
+    return shown if len(items) <= limit else f'{shown} and {len(items) - limit} more'
+
+
+def _template_save_warnings(request, tmpl, posted_body=None):
+    """Say what in a just-saved template will not work as written: a token
+    outside the allowed set (shows as literal text) in the subject or in the
+    body as posted, and any name templates cannot reach (shows blank). The
+    template still saves."""
     from .email_html import guard_plain, refused_tokens
     from .email_utils import unavailable_variables
-    refused = refused_tokens(tmpl.subject_template)
+    refused = refused_tokens(tmpl.subject_template) + refused_tokens(posted_body or '')
     if refused:
-        messages.warning(request, 'Not allowed in a subject, so it will show as typed: '
-                                  f'{", ".join(refused)}.')
+        messages.warning(request, 'Not allowed in a template, so it will show as typed: '
+                                  f'{_first_few(refused)}.')
     names = []
     for source in (guard_plain(tmpl.subject_template), tmpl.body_template):
         names += [n for n in unavailable_variables(source) if n not in names]
     if names:
-        messages.warning(request, f'Templates cannot use {", ".join(names)}, so it will show blank. '
+        messages.warning(request, f'Templates cannot use {_first_few(names)}, so it will show blank. '
                                   'What they can use is listed under Template variables.')
 
 
@@ -8766,6 +8785,9 @@ class EmailTemplateUpdateView(SettingsAdminMixin, View):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         tmpl = get_object_or_404(EmailTemplate, pk=pk)
+        if _email_text_too_large(request, ('The subject', request.POST.get('subject_template', '')),
+                                 ('The body', request.POST.get('body_template', ''))):
+            return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
         if tmpl.is_custom and (request.POST.get('name') or '').strip():
             tmpl.name = request.POST.get('name').strip()
         if tmpl.is_custom:
@@ -8788,7 +8810,7 @@ class EmailTemplateUpdateView(SettingsAdminMixin, View):
             refused = {f.name for f in files} - {a.original_filename for a in saved}
             if refused:
                 messages.warning(request, f'Not attached (blocked type or too large): {", ".join(sorted(refused))}.')
-        _template_save_warnings(request, tmpl)
+        _template_save_warnings(request, tmpl, request.POST.get('body_template'))
         messages.success(request, f'Email template "{tmpl.label}" saved.')
         return redirect(reverse_lazy('core:settings') + '?tab=email_templates')
 
@@ -8804,6 +8826,8 @@ class EmailSignatureCreateView(SettingsAdminMixin, View):
         if not _is_admin(request.user):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
+        if _email_text_too_large(request, ('The signature', request.POST.get('body', ''))):
+            return redirect(_sig_redirect())
         from .email_html import sanitize
         name = request.POST.get('name', '').strip()
         body = sanitize(request.POST.get('body', '').strip())
@@ -8822,6 +8846,8 @@ class EmailSignatureUpdateView(SettingsAdminMixin, View):
             raise PermissionDenied
         from .email_html import sanitize
         sig = get_object_or_404(EmailSignature, pk=pk)
+        if _email_text_too_large(request, ('The signature', request.POST.get('body', ''))):
+            return redirect(_sig_redirect())
         sig.name = request.POST.get('name', sig.name).strip()
         if 'body' in request.POST:
             sig.body = sanitize(request.POST['body'].strip())
@@ -9653,6 +9679,7 @@ class CustomerEmailView(LoginRequiredMixin, View):
     template_name = 'core/customer_email.html'
 
     def _context(self, request):
+        from .email_html import EmailTextTooLarge
         from .email_utils import email_context, render_email_template
         src = request.POST if request.method == 'POST' else request.GET
         who = _resolve_desk_context(request)  # raises _ConflictingContext; get/post turn it into a 400
@@ -9681,6 +9708,8 @@ class CustomerEmailView(LoginRequiredMixin, View):
                     # needs HTML, so convert what it is handed.
                     from .email_html import text_to_html
                     body = text_to_html(body)
+            except EmailTextTooLarge as exc:
+                render_error = f'{exc} Shorten it in Settings, Email Templates.'
             except Exception:
                 render_error = 'This template has a syntax error; fix it in Settings, Email Templates.'
         return {
@@ -9724,6 +9753,9 @@ class CustomerEmailView(LoginRequiredMixin, View):
             return render(request, self.template_name, ctx)
         subject = (request.POST.get('subject') or '').strip()
         body = request.POST.get('body') or ''
+        if _email_text_too_large(request, ('The subject', subject), ('The body', body),
+                                 outcome='Nothing was sent.'):
+            return render(request, self.template_name, ctx)
         from django.utils.html import strip_tags
         if not subject or not strip_tags(body).strip():
             # The editor posts markup; an empty document is still markup.
@@ -9772,6 +9804,9 @@ class EmailTemplateCreateView(SettingsAdminMixin, View):
         if not name:
             messages.error(request, 'Give the template a name.')
             return redirect(f"{reverse('core:settings')}?tab=email_templates")
+        if _email_text_too_large(request, ('The subject', request.POST.get('subject_template', '')),
+                                 ('The body', request.POST.get('body_template', ''))):
+            return redirect(f"{reverse('core:settings')}?tab=email_templates")
         from .email_html import sanitize, text_to_html
         sig_id = request.POST.get('signature')
         body = sanitize((request.POST.get('body_template') or '').strip())
@@ -9782,7 +9817,7 @@ class EmailTemplateCreateView(SettingsAdminMixin, View):
             signature_id=int(sig_id) if sig_id else None, is_active=True,
             quick_send=request.POST.get('quick_send') == '1',
         )
-        _template_save_warnings(request, tmpl)
+        _template_save_warnings(request, tmpl, request.POST.get('body_template'))
         messages.success(request, f'Email template "{name}" added.')
         return redirect(f"{reverse('core:settings')}?tab=email_templates")
 

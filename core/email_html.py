@@ -25,9 +25,68 @@ to subject lines. What a variable can REACH is limited separately, by the
 plain-values context in email_utils (TEMPLATE_VARIABLES).
 """
 import re
+import secrets
 import unicodedata
 
+from django.template import Context
 from django.utils.html import escape
+
+#: The most email text MB will take: a template subject or body, a signature,
+#: an edited compose body (Mike, Oct 3 2026: 100 KB). Over it the text is
+#: refused, never cut short. bleach's cost grows faster than its input on
+#: hostile text (a 2.5 MB POST of '<' ran past 40 s in review), so the check
+#: comes before any parsing, at save AND at send.
+MAX_EMAIL_TEXT_BYTES = 100 * 1024
+
+#: The most a body may grow to once its variables are filled in, checked
+#: before the post-render bleach pass. A customer's reply is escaped text,
+#: which bleach handles quickly; this bounds what a template's own markup,
+#: repeated by a loop, can hand it.
+MAX_RENDERED_BYTES = 4 * MAX_EMAIL_TEXT_BYTES
+
+
+class EmailTextTooLarge(ValueError):
+    """Email text over a size limit. The message is fit to show a person."""
+
+
+def check_email_text_size(text, what='Email text', limit=MAX_EMAIL_TEXT_BYTES):
+    if text and (len(text) > limit or len(text.encode('utf-8')) > limit):
+        raise EmailTextTooLarge(f'{what} is over the {limit // 1024} KB limit for email text.')
+
+
+class Fields(dict):
+    """A record's allowed values in a template context. A name it does not
+    hold reads as another empty Fields, so a lookup outside the allowed list
+    renders blank wherever it appears, a filter argument included (Django
+    raises on a missing filter argument rather than blanking it). Prints as
+    nothing, so {{ ticket }} alone is blank, not a dump of the fields."""
+
+    def __missing__(self, key):
+        return Fields()
+
+    def __str__(self):
+        return ''
+
+
+class Text(str):
+    """An allowed value. An attribute it does not have reads as an empty
+    Fields (blank), for the same reason as Fields.__missing__; its own string
+    methods still work."""
+
+    def __getattr__(self, name):
+        if name.startswith('__'):
+            raise AttributeError(name)
+        return Fields()
+
+
+class BlankingContext(Context):
+    """A Context in which an unknown top-level name is blank, not an error."""
+
+    def __getitem__(self, key):
+        try:
+            return super().__getitem__(key)
+        except KeyError:
+            return Fields()
 
 #: What the editor can produce and email can render. Anything else is
 #: stripped on save and again at send.
@@ -42,7 +101,7 @@ _BUTTON_TAG = r'(mb-button(?:-center|-right)?)'
 ALLOWED_ATTRS = {'a': ['href']}
 ALLOWED_PROTOCOLS = ['http', 'https', 'mailto']
 
-_TOKEN_CLOSERS = {'{{': '}}', '{%': '%}'}
+_TOKEN_CLOSERS = {'{{': '}}', '{%': '%}', '{#': '#}'}
 
 #: A token longer than this is refused (shown as literal text). Real ones are
 #: a variable and a filter or two; the cap keeps every per-token parse small.
@@ -58,8 +117,8 @@ _STRAY_OPENER = re.compile(r'{(?=[{%#])')
 
 def _split_tokens(text):
     """Split text into [text, token, text, token, ..., text], a token being
-    {{ ... }} or {% ... %} up to its FIRST closer (what the old non-greedy
-    regex matched). In linear time: once an opener kind has no closer left
+    {{ ... }}, {% ... %} or a {# comment #} up to its FIRST closer (what a
+    non-greedy regex over the three would match). In linear time: once an opener kind has no closer left
     in the text, no later opener of that kind can have one either, so the
     search for it stops instead of rescanning the rest of the text from
     every opener."""
@@ -147,6 +206,13 @@ def _variable_token_allowed(token):
 
 
 def _token_allowed(token):
+    if token.startswith('{#'):
+        # A one-line comment is one Django hides, at any length (its lexer
+        # matches it in one pass). Hidden before this guard existed, so hidden
+        # still: a comment can hold an internal note never meant for the
+        # customer. One spanning lines is not a comment to Django and always
+        # showed as text; refusing it shows the same text.
+        return '\n' not in token
     if len(token) > MAX_TOKEN_LENGTH:
         return False
     if token.startswith('{{'):
@@ -176,9 +242,16 @@ def sanitize(html):
     operators inside them; a token outside the allowed construct set (see
     _token_allowed) is escaped into visible literal text instead of stashed,
     so it can never execute."""
+    check_email_text_size(html)
     tokens = []
 
     neutralized_any = False
+    # A marker that does not occur in this text, so literal text shaped like
+    # a marker is never mistaken for one (review round 1: a fixed marker
+    # made 'MBTOKEN0NEKOTBM' typed in a body an IndexError).
+    marker = 'MBTOKEN' + secrets.token_hex(8)
+    while marker in (html or ''):
+        marker = 'MBTOKEN' + secrets.token_hex(8)
 
     def _stash(token):
         nonlocal neutralized_any
@@ -186,7 +259,7 @@ def sanitize(html):
             neutralized_any = True
             return _neutralize(token)
         tokens.append(token)
-        return f'MBTOKEN{len(tokens) - 1}NEKOTBM'
+        return f'{marker}x{len(tokens) - 1}x'
 
     parts = _split_tokens(html or '')
     protected = ''.join(_stash(part) if i % 2 else _STRAY_OPENER.sub('&#123;', part)
@@ -194,7 +267,7 @@ def sanitize(html):
     cleaned = _bleach_clean(protected)
     # One pass, not one replace() per token: a body of many small tokens
     # would otherwise cost tokens x length.
-    cleaned = re.sub(r'MBTOKEN(\d+)NEKOTBM', lambda m: tokens[int(m.group(1))], cleaned)
+    cleaned = re.sub(marker + r'x(\d+)x', lambda m: tokens[int(m.group(1))], cleaned)
     if neutralized_any:
         # A refused block tag can leave its partner dangling — an {% endfor %}
         # whose {% for %} was neutralized no longer compiles. When anything
@@ -223,6 +296,8 @@ def guard_plain(text):
     and any stray opener, renders as the literal characters typed (through
     {% templatetag %}, since entities would show as entities in plain text).
     Applied at render, so a value saved before this guard existed is covered."""
+    check_email_text_size(text)
+
     def literal(s):
         return ''.join('{% templatetag openbrace %}' if c == '{'
                        else '{% templatetag closebrace %}' if c == '}' else c for c in s)
@@ -242,7 +317,7 @@ def guard_plain(text):
             Template(guarded)
         except TemplateSyntaxError:
             guarded = ''.join(
-                (part if part.startswith('{{') and _token_allowed(part) else literal(part)) if i % 2
+                (part if part.startswith(('{{', '{#')) and _token_allowed(part) else literal(part)) if i % 2
                 else stray(part) for i, part in enumerate(parts))
     return guarded
 
@@ -289,8 +364,9 @@ def render_body(body_html, ctx):
     inside variable values come out as <br> (author-typed line structure is
     already <br>/<div> markup, so any literal newline left after rendering
     came from a variable or is insignificant whitespace)."""
-    from django.template import Template, Context
-    rendered = Template(sanitize(body_html)).render(Context(ctx, autoescape=True))
+    from django.template import Template
+    rendered = Template(sanitize(body_html)).render(BlankingContext(ctx, autoescape=True))
+    check_email_text_size(rendered, 'The email, with its values filled in,', MAX_RENDERED_BYTES)
     # The guarantee (review round 3): rendering can INTRODUCE markup the
     # pre-render pass never saw — Django marks literal filter arguments
     # safe, so |default:"<img …>" emits its argument raw. Cleaning the

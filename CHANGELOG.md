@@ -16,6 +16,8 @@ the Unreleased entries move under that version and prod gets a single update.
 - Subject lines get the same template-tag rules as the body. Saving a template names anything that will show blank or as typed.
 - Forms that return you to a previous page only return to pages inside MB.
 - Pasting a long run of unclosed `{{` or `{%` into an email body no longer ties up the server.
+- Email text (template subjects and bodies, signatures, edited compose bodies) is limited to 100 KB. Longer text is refused, not cut short.
+- A malformed inbound HTML email can no longer stall the mail fetch.
 
 ### Fixed
 

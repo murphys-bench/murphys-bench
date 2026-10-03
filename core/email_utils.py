@@ -1,6 +1,8 @@
 import logging
 from fnmatch import fnmatch
 
+from .email_html import EmailTextTooLarge
+
 logger = logging.getLogger('core')
 
 
@@ -284,7 +286,8 @@ def _smtp_send(site, subject, plain_body, html_body, logo_data, logo_mime_type, 
 #: live records, so anyone who could edit one could email any linked field,
 #: a device's decrypted password or a tech's password hash included, from an
 #: automatic send nobody reviews. Now they get plain copies of exactly these
-#: values; any other name renders blank, and the editor names it on save.
+#: values; any other name renders blank (a filter argument too: see
+#: email_html.Fields), and the editor names it on save.
 #: Grow this list one field at a time, never by handing over a record.
 TEMPLATE_VARIABLES = (
     'ticket.ticket_number', 'ticket.subject', 'ticket.get_status_display', 'ticket.device.name',
@@ -295,18 +298,11 @@ TEMPLATE_VARIABLES = (
 )
 
 
-class _Fields(dict):
-    """A record's allowed fields. Prints as nothing, so {{ ticket }} alone is
-    blank like any other unavailable name, not a dump of the fields."""
-
-    def __str__(self):
-        return ''
-
-
 def safe_template_context(ctx):
     """Plain strings for exactly TEMPLATE_VARIABLES, read out of ctx. A record
     that is absent (no work order, no device) is left out entirely, so
     {% if work_order %} still means what it says."""
+    from .email_html import Fields, Text
     out = {}
     for path in TEMPLATE_VARIABLES:
         keys = path.split('.')
@@ -325,39 +321,49 @@ def safe_template_context(ctx):
                 value = value()
         node = out
         for key in keys[:-1]:
-            node = node.setdefault(key, _Fields())
-        node[keys[-1]] = '' if value is None else str(value)
+            node = node.setdefault(key, Fields())
+        node[keys[-1]] = Text('' if value is None else value)
     return out
 
 
 def unavailable_variables(source):
     """Names a template uses that are not in TEMPLATE_VARIABLES (they render
     blank), in order of first use. Read from Django's own parse, so a branch
-    of an {% if %} that a test send does not take is still checked. A syntax
-    error returns nothing here; rendering reports it."""
+    of an {% if %} that a test send does not take is still checked. A
+    condition or loop may also name a record that holds listed values
+    ({% if ticket %}, {% if work_order.device %}); printing one shows nothing,
+    so as a printed value it is reported. Names a template makes for itself
+    (loop variables, {% now ... as year %}) are its own. A syntax error
+    returns nothing here; rendering reports it."""
     from django.template import Template, TemplateSyntaxError
-    from django.template.base import Variable, VariableNode
+    from django.template.base import Node, Variable, VariableNode
     from django.template.defaulttags import ForNode, IfNode, TemplateLiteral
     try:
         nodelist = Template(source or '').nodelist
     except TemplateSyntaxError:
         return []
-    allowed = set(TEMPLATE_VARIABLES)
-    found = []
+    printable = set(TEMPLATE_VARIABLES)
+    records = {p.rsplit('.', i)[0] for p in TEMPLATE_VARIABLES for i in range(1, p.count('.') + 1)}
+    made_here = {getattr(n, 'asvar', None) for n in nodelist.get_nodes_by_type(Node)} - {None}
+    found, seen = [], set()  # seen: membership in constant time; found keeps the order
 
-    def check(expr, local):
-        names = [expr.var] + [arg for _f, args in expr.filters for is_var, arg in args if is_var]
-        for var in names:
+    def check(expr, local, as_condition=False):
+        names = [(expr.var, as_condition)] + [
+            (arg, False) for _f, args in expr.filters for is_var, arg in args if is_var]
+        for var, tested in names:
             if isinstance(var, Variable) and var.lookups:
                 path = '.'.join(var.lookups)
-                if var.lookups[0] not in local and path not in allowed and path not in found:
-                    found.append(path)
+                if (var.lookups[0] in local or var.lookups[0] in made_here or path in printable
+                        or (tested and path in records) or path in seen):
+                    continue
+                seen.add(path)
+                found.append(path)
 
     def condition(cond, local):
         if cond is None:
             return
         if isinstance(cond, TemplateLiteral):
-            check(cond.value, local)
+            check(cond.value, local, as_condition=True)
             return
         condition(getattr(cond, 'first', None), local)
         condition(getattr(cond, 'second', None), local)
@@ -371,7 +377,7 @@ def unavailable_variables(source):
                     condition(cond, local)
                     walk(inner, local)
             elif isinstance(node, ForNode):
-                check(node.sequence, local)
+                check(node.sequence, local, as_condition=True)
                 walk(node.nodelist_loop, local | set(node.loopvars) | {'forloop'})
                 walk(node.nodelist_empty, local)
             else:
@@ -390,16 +396,16 @@ def render_email_template(template, ctx):
     content is words, never markup — and comes back as HTML, not yet
     email-safe-transformed. Raises on a syntax error so the caller can
     report it."""
-    from django.template import Template, Context
+    from django.template import Template
     from . import email_html
     ctx = safe_template_context(ctx)
     subject = Template(email_html.guard_plain(template.subject_template)).render(
-        Context(ctx, autoescape=False)).strip()
+        email_html.BlankingContext(ctx, autoescape=False)).strip()
     if template.body_format == 'html':
         body = email_html.render_body(template.body_template, ctx)
     else:
         body = Template(email_html.guard_plain(template.body_template)).render(
-            Context(ctx, autoescape=False))
+            email_html.BlankingContext(ctx, autoescape=False))
     return subject, body
 
 
@@ -515,7 +521,10 @@ def send_custom_email(template, *, to_email, client, contact=None, ticket=None,
         # The compose screen posts the editor's HTML, variables already
         # substituted. Sanitized here regardless of what the browser sent.
         from . import email_html
-        body = email_html.sanitize(body)
+        try:
+            body = email_html.sanitize(body)
+        except email_html.EmailTextTooLarge as exc:
+            return _log('failed', 'send_error', str(exc))
         body_is_html = True
 
     attachments, missing = template_attachments(template)
@@ -523,8 +532,11 @@ def send_custom_email(template, *, to_email, client, contact=None, ticket=None,
 
     sig_obj = template.signature or EmailSignature.objects.filter(is_default=True).first()
     sig_body, sig_is_html = _rendered_signature(sig_obj)
-    email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
-        body, body_is_html, sig_body, sig_is_html, site)
+    try:
+        email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
+            body, body_is_html, sig_body, sig_is_html, site)
+    except EmailTextTooLarge as exc:
+        return _log('failed', 'send_error', str(exc))
     html_body, logo_data, logo_mime_type = _build_html_email(
         email_body, sig_email, subject, ticket, site,
         embed_logo=not attachments,
@@ -613,8 +625,13 @@ def send_ticket_email(trigger, ticket, extra_context=None, cc=None, bcc=None):
         return
 
     attachments, missing = template_attachments(template)
-    email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
-        body, template.body_format == 'html', sig_body, sig_is_html, site)
+    try:
+        email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
+            body, template.body_format == 'html', sig_body, sig_is_html, site)
+    except EmailTextTooLarge as exc:
+        EmailSendLog.objects.create(ticket=ticket, to_email=to_email, trigger=trigger,
+                                    status='failed', reason='send_error', detail=str(exc))
+        return
     html_body, logo_data, logo_mime_type = _build_html_email(
         email_body, sig_email, subject, ticket, site,
         embed_logo=not attachments,
@@ -677,8 +694,11 @@ def send_document_email(to_email, subject, cover_body, *, kind,
     # other send, or its tags show as literal text. (Review round 1 finding.)
     sig_obj = EmailSignature.objects.filter(is_default=True).first()
     sig_body, sig_is_html = _rendered_signature(sig_obj)
-    email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
-        cover_body, False, sig_body, sig_is_html, site)
+    try:
+        email_body, body_is_html, sig_email, sig_is_html, plain_body = _compose_email_bodies(
+            cover_body, False, sig_body, sig_is_html, site)
+    except EmailTextTooLarge as exc:
+        return _log('failed', 'send_error', str(exc))
     html_body, _logo, _mime = _build_html_email(
         email_body, sig_email, subject, None, site, embed_logo=False,
         body_is_html=body_is_html, signature_is_html=sig_is_html,
