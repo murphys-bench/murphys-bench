@@ -1268,8 +1268,11 @@ class MileageDistanceView(LoginRequiredMixin, View):
         try:
             with urllib.request.urlopen(url, timeout=10) as resp:
                 result = json.loads(resp.read())
-        except Exception as e:
-            return JsonResponse({'error': f'Distance Matrix request failed: {e}'}, status=502)
+        except Exception:
+            # The details go to the log, not the page (CodeQL stack-trace-exposure).
+            logger.warning('Google Distance Matrix request failed.', exc_info=True)
+            return JsonResponse({'error': 'Could not reach Google Maps. Try again in a moment; '
+                                          'the details are in the application log.'}, status=502)
 
         try:
             element = result['rows'][0]['elements'][0]

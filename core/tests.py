@@ -17451,3 +17451,59 @@ def test_partial_save_parses_a_retained_body_safely(client, admin_user):
     t.refresh_from_db()
     assert t.is_active is True and t.body_template == stored, 'the stored body is not rewritten'
     assert unavailable_variables(stored) == ['client.email'], 'names are still found in a guarded copy'
+
+
+# ── CodeQL #33 and #10 (Oct 3 2026) ────────────────────────────────────────
+
+def test_backup_secret_files_are_owner_only_from_the_first_byte(tmp_path):
+    """CodeQL clear-text-storage (#33) / Sep 28 review S3: the file was
+    written with the umask's permissions, then chmodded, and a failed chmod
+    was swallowed."""
+    import os
+    import stat
+    from core.backup_ops import _write_600
+    old_umask = os.umask(0o022)  # the usual default: new files 0644
+    try:
+        new = tmp_path / '.rclone.conf'
+        _write_600(new, 'secret_access_key = s1\n')
+        assert stat.S_IMODE(new.stat().st_mode) == 0o600
+        existing = tmp_path / 'backup-config.env'
+        existing.write_text('old')
+        existing.chmod(0o644)
+        _write_600(existing, 'new')
+        assert stat.S_IMODE(existing.stat().st_mode) == 0o600 and existing.read_text() == 'new'
+    finally:
+        os.umask(old_umask)
+
+
+def test_backup_secret_file_that_cannot_be_locked_fails_loud(tmp_path, monkeypatch):
+    import os
+    from core import backup_ops
+
+    def refuse(fd, mode):
+        raise PermissionError('not permitted')
+    monkeypatch.setattr(os, 'fchmod', refuse)
+    with pytest.raises(backup_ops.BackupConfigError, match='owner-only'):
+        backup_ops._write_600(tmp_path / '.rclone.conf', 'secret_access_key = s1\n')
+
+
+@pytest.mark.django_db
+def test_mileage_lookup_failure_shows_no_raw_error(client, admin_user, monkeypatch, caplog):
+    """CodeQL stack-trace-exposure (#10): the raw exception text reached the
+    page. It goes to the log; the page gets a plain message."""
+    import urllib.request
+    site = SiteSettings.get()
+    site.google_maps_api_key = 'KEY-abc123'
+    site.save()
+
+    def boom(*a, **k):
+        raise OSError('connect to maps.googleapis.com?key=KEY-abc123 failed: internal detail')
+    monkeypatch.setattr(urllib.request, 'urlopen', boom)
+    client.force_login(admin_user)
+    with caplog.at_level(logging.WARNING, logger='core'):
+        resp = client.post(reverse('core:mileage_calculate'), data=json.dumps(
+            {'origin': 'A', 'destination': 'B'}), content_type='application/json')
+    assert resp.status_code == 502
+    assert 'internal detail' not in resp.content.decode() and 'KEY-abc123' not in resp.content.decode()
+    assert 'Google Maps' in resp.json()['error']
+    assert any('Distance Matrix' in r.message for r in caplog.records)

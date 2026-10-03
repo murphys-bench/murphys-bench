@@ -70,13 +70,21 @@ def rclone_bin() -> Path:
 
 
 def _write_600(path: Path, text: str) -> None:
-    """Write a (possibly secret-bearing) file with owner-only permissions."""
-    path.write_text(text)
+    """Write a (possibly secret-bearing) file readable by its owner only, from
+    the first byte. A new file is created 0600 (umask can only remove bits);
+    an existing one is truncated, re-locked, then written, so its secrets are
+    never readable by others. A file that cannot be locked is not written:
+    BackupConfigError, never a silent pass (CodeQL clear-text-storage and the
+    Sep 28 outside review: the old write-then-chmod left a window and
+    swallowed a failed chmod)."""
     try:
-        os.chmod(path, 0o600)
-    except OSError:
-        # Non-POSIX or permission quirk — content is written; perms are best-effort.
-        pass
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w') as f:
+            os.fchmod(f.fileno(), 0o600)  # O_CREAT's mode applies only on creation
+            f.write(text)
+    except OSError as exc:
+        raise BackupConfigError(
+            f'Could not write {path.name} with owner-only permissions: {exc}') from exc
 
 
 def rclone_remote_target(site) -> str:
