@@ -8,6 +8,19 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Security
+
+- Email templates can use only the values listed under Template variables. They can no longer reach other fields on a record, such as a device password.
+- Subject lines get the same template-tag rules as the body. Saving a template names anything that will show blank or as typed.
+- Forms that return you to a previous page only return to pages inside MB.
+- Pasting a long run of unclosed `{{` or `{%` into an email body no longer ties up the server.
+
+### Fixed
+
+- The weekly dependency audit can now open its GitHub issue when it fails.
+
 ## v0.16.3 — 2026-09-26
 
 Cleanup. The retired CSS-build stub and a build tool committed by mistake are gone, and the docs describe today's front end.
