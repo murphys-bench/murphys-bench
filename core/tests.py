@@ -16871,11 +16871,16 @@ def test_every_next_honoring_view_refuses_an_offsite_next(client, client_obj, ad
     client.force_login(admin_user)
     sale = Sale.objects.create(client=client_obj)
     fu = FollowUp.objects.create(client=client_obj, kind='planned', due_on=timezone.localdate())
+    quick = EmailTemplate.objects.create(name='Thanks', subject_template='s', body_template='b',
+                                         is_active=True, quick_send=True)
+    open_ticket = Ticket.objects.create(client=client_obj, subject='S', description='D', status='open')
     posts = [
         (reverse('core:sale_check_in', args=[sale.pk]), {}),
         (reverse('core:device_create'), {'client': client_obj.pk, 'name': 'Next Laptop', 'device_type': 'laptop'}),
         (reverse('core:follow_up_delete', args=[fu.pk]), {}),
         (reverse('core:follow_up_quick_send'), {'template': '999999'}),
+        # Past the template check, to the refusal that uses next_url.
+        (reverse('core:follow_up_quick_send'), {'template': quick.pk, 'ticket': open_ticket.pk}),
     ]
     for url, data in posts:
         resp = client.post(url, {**data, 'next': _OFFSITE})
