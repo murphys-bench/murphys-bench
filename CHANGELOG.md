@@ -8,6 +8,12 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Security
+
+- urllib3 2.7.0 to 2.8.0 (PYSEC-2026-4175, 4176, 4177). It comes in through requests and the backup tools.
+
 ## v0.16.3 — 2026-09-26
 
 Cleanup. The retired CSS-build stub and a build tool committed by mistake are gone, and the docs describe today's front end.
