@@ -19,6 +19,8 @@ the Unreleased entries move under that version and prod gets a single update.
 - Pasting a long run of unclosed `{{` or `{%` into an email body no longer ties up the server.
 - Email text (template subjects and bodies, signatures, edited compose bodies) is limited to 100 KB. Longer text is refused, not cut short.
 - A malformed inbound HTML email can no longer stall the mail fetch.
+- Backup settings files holding passwords are owner-only from the moment they are created; if that cannot be done, the save fails and says so.
+- A failed Google Maps mileage lookup no longer shows the raw error on the page; the details go to the application log.
 
 ### Changed
 

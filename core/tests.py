@@ -17451,3 +17451,169 @@ def test_partial_save_parses_a_retained_body_safely(client, admin_user):
     t.refresh_from_db()
     assert t.is_active is True and t.body_template == stored, 'the stored body is not rewritten'
     assert unavailable_variables(stored) == ['client.email'], 'names are still found in a guarded copy'
+
+
+# ── CodeQL #33 and #10 (Oct 3 2026) ────────────────────────────────────────
+
+def test_backup_secret_files_are_owner_only_from_the_first_byte(tmp_path, monkeypatch):
+    """CodeQL clear-text-storage (#33) / Sep 28 review S3: the file was
+    written with the umask's permissions, then chmodded, and a failed chmod
+    was swallowed. Every byte now goes into a file created 0600."""
+    import os
+    import stat
+    from core import backup_ops
+    opened = []
+    real_open = os.open
+    monkeypatch.setattr(os, 'open', lambda p, flags, mode=0o777, *a: opened.append(mode) or real_open(p, flags, mode, *a))
+    old_umask = os.umask(0o022)  # the usual default: new files 0644
+    try:
+        existing = tmp_path / 'backup-config.env'
+        existing.write_text('old')
+        existing.chmod(0o644)
+        conf = tmp_path / '.rclone.conf'
+        backup_ops._publish_600({conf: 'secret_access_key = s1\n', existing: 'new'})
+    finally:
+        os.umask(old_umask)
+    assert opened == [0o600, 0o600], 'each file is created owner-only, never widened later'
+    for path, text in ((conf, 'secret_access_key = s1\n'), (existing, 'new')):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600 and path.read_text() == text
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['.rclone.conf', 'backup-config.env'], 'no temp files left'
+
+
+def _working_backup_config(client, admin_user, settings, tmp_path, monkeypatch):
+    settings.BASE_DIR = tmp_path
+    from core import backup_ops
+    monkeypatch.setattr(backup_ops, '_obscure', lambda binary, plaintext: 'obscured-placeholder')
+    client.force_login(admin_user)
+    client.post(reverse('core:settings'), _backup_post(offsite=True))
+    conf, manifest = backup_ops.rclone_conf_path(), backup_ops.manifest_path()
+    before = (conf.read_text(), manifest.read_text())
+    assert 'secret123' in before[0] and 'BACKUP_OFFSITE_ENABLED="1"' in before[1]
+    return backup_ops, conf, manifest, before
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('fail_on_call', [1, 2])
+def test_backup_lock_failure_leaves_the_working_config_untouched(
+        client, admin_user, settings, tmp_path, monkeypatch, fail_on_call):
+    """Review of PR #109: truncating, then failing to lock, emptied the working
+    file while the page said the last good config was kept. A lock failure on
+    either file now changes nothing on disk, through the real settings route."""
+    import os
+    from django.contrib.messages import get_messages
+    backup_ops, conf, manifest, before = _working_backup_config(client, admin_user, settings, tmp_path, monkeypatch)
+    calls = []
+    real_fchmod = os.fchmod
+
+    def flaky(fd, mode):
+        calls.append(fd)
+        if len(calls) == fail_on_call:
+            raise PermissionError('not permitted')
+        return real_fchmod(fd, mode)
+    monkeypatch.setattr(os, 'fchmod', flaky)
+    resp = client.post(reverse('core:settings'), _backup_post(
+        offsite=True, **{'backups-backup_s3_secret_key': 'newsecret'}))
+    assert resp.status_code == 302
+    text = ' '.join(str(m) for m in get_messages(resp.wsgi_request))
+    assert 'Nothing on disk was changed' in text
+    assert (conf.read_text(), manifest.read_text()) == before
+    assert not list(tmp_path.glob('.*.tmp')), 'no staged files left behind'
+
+
+@pytest.mark.django_db
+def test_backup_swap_failure_says_the_config_may_be_partly_updated(
+        client, admin_user, settings, tmp_path, monkeypatch):
+    import os
+    from django.contrib.messages import get_messages
+    backup_ops, conf, manifest, before = _working_backup_config(client, admin_user, settings, tmp_path, monkeypatch)
+    calls = []
+    real_replace = os.replace
+
+    def flaky(src, dst):
+        calls.append(dst)
+        if len(calls) == 2:
+            raise OSError('rename failed')
+        return real_replace(src, dst)
+    monkeypatch.setattr(os, 'replace', flaky)
+    resp = client.post(reverse('core:settings'), _backup_post(
+        offsite=True, **{'backups-backup_s3_secret_key': 'newsecret'}))
+    text = ' '.join(str(m) for m in get_messages(resp.wsgi_request))
+    assert 'may be partly updated' in text and 'Nothing on disk was changed' not in text
+    assert not list(tmp_path.glob('.*.tmp'))
+
+
+@pytest.mark.django_db
+def test_mileage_lookup_failure_shows_no_raw_error(client, admin_user, monkeypatch, caplog):
+    """CodeQL stack-trace-exposure (#10): the raw exception text reached the
+    page. It goes to the log; the page gets a plain message."""
+    import urllib.request
+    site = SiteSettings.get()
+    site.google_maps_api_key = 'KEY-abc123'
+    site.save()
+
+    def boom(*a, **k):
+        raise OSError('connect to maps.googleapis.com?key=KEY-abc123 failed: internal detail')
+    monkeypatch.setattr(urllib.request, 'urlopen', boom)
+    client.force_login(admin_user)
+    with caplog.at_level(logging.WARNING, logger='core'):
+        resp = client.post(reverse('core:mileage_calculate'), data=json.dumps(
+            {'origin': 'A', 'destination': 'B'}), content_type='application/json')
+    assert resp.status_code == 502
+    assert 'internal detail' not in resp.content.decode() and 'KEY-abc123' not in resp.content.decode()
+    assert 'Google Maps' in resp.json()['error']
+    assert any('Distance Matrix' in r.getMessage() for r in caplog.records)
+    # Review of PR #109: the log file is not owner-only, so the formatted log
+    # output, traceback included, must not carry the key or the detail either.
+    assert 'KEY-abc123' not in caplog.text and 'internal detail' not in caplog.text
+    assert all(r.exc_info is None for r in caplog.records)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('phase', ['staging', 'swap'])
+def test_backup_cleanup_failure_never_hides_the_disk_outcome(
+        client, admin_user, settings, tmp_path, monkeypatch, phase):
+    """Review round 2 of PR #109: when removing a staged copy also failed, the
+    raw cleanup error replaced the explanation (a 500 from Settings) and
+    cleanup stopped. Every copy is now tried, a leftover is named, and the
+    disk-outcome message survives."""
+    import os
+    from pathlib import Path
+    from django.contrib.messages import get_messages
+    backup_ops, conf, manifest, before = _working_backup_config(client, admin_user, settings, tmp_path, monkeypatch)
+    if phase == 'staging':
+        calls = []
+        real_fchmod = os.fchmod
+
+        def flaky_fchmod(fd, mode):
+            calls.append(fd)
+            if len(calls) == 2:
+                raise PermissionError('not permitted')
+            return real_fchmod(fd, mode)
+        monkeypatch.setattr(os, 'fchmod', flaky_fchmod)
+    else:
+        replaced = []
+        real_replace = os.replace
+
+        def flaky_replace(src, dst):
+            replaced.append(dst)
+            if len(replaced) == 2:
+                raise OSError('rename failed')
+            return real_replace(src, dst)
+        monkeypatch.setattr(os, 'replace', flaky_replace)
+    real_unlink = Path.unlink
+
+    def no_unlink(self, missing_ok=False):
+        if self.name.endswith('.tmp'):
+            raise PermissionError('read-only')
+        return real_unlink(self, missing_ok=missing_ok)
+    monkeypatch.setattr(Path, 'unlink', no_unlink)
+    resp = client.post(reverse('core:settings'), _backup_post(
+        offsite=True, **{'backups-backup_s3_secret_key': 'newsecret'}))
+    assert resp.status_code == 302, 'a refusal with a message, not a 500'
+    text = ' '.join(str(m) for m in get_messages(resp.wsgi_request))
+    expected = 'Nothing on disk was changed' if phase == 'staging' else 'may be partly updated'
+    assert expected in text and 'could not be removed' in text
+    leftovers = list(tmp_path.glob('.*.tmp'))
+    assert leftovers and all(oct(p.stat().st_mode & 0o777) == '0o600' for p in leftovers)
+    if phase == 'staging':
+        assert (conf.read_text(), manifest.read_text()) == before

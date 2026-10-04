@@ -1268,8 +1268,16 @@ class MileageDistanceView(LoginRequiredMixin, View):
         try:
             with urllib.request.urlopen(url, timeout=10) as resp:
                 result = json.loads(resp.read())
-        except Exception as e:
-            return JsonResponse({'error': f'Distance Matrix request failed: {e}'}, status=502)
+        except Exception as exc:
+            # Neither the page nor the log gets the exception text or traceback:
+            # either can carry the request URL, which holds the API key and the
+            # trip addresses, and the log file is not owner-only (review of PR
+            # #109). The kind of failure and Google's status code are enough.
+            code = getattr(exc, 'code', None)
+            logger.warning('Google Distance Matrix request failed: %s%s', type(exc).__name__,
+                           f' (HTTP {code})' if isinstance(code, int) else '')
+            return JsonResponse({'error': 'Could not reach Google Maps. Try again in a moment; '
+                                          'the details are in the application log.'}, status=502)
 
         try:
             element = result['rows'][0]['elements'][0]
@@ -7976,8 +7984,7 @@ class SettingsView(SettingsAdminMixin, View):
                     messages.error(
                         request,
                         f'Backup settings saved, but the destination config could not be '
-                        f'regenerated: {exc}. Onsite/offsite backups will use the last good '
-                        f'config until this is fixed and settings are saved again.',
+                        f'regenerated: {exc}.',
                     )
                 return redirect(f"{request.path}?tab=maintenance")
             if tab == 'outbound' and not SendingAddress.objects.exists():

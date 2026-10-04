@@ -23,12 +23,16 @@ Secret-bearing files (``.rclone.conf`` holds the S3 secret + the onsite password
 are written 0600.
 """
 import json
+import logging
 import os
+import secrets
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
 from django.conf import settings
+
+logger = logging.getLogger('core')
 
 # rclone remote names rendered into .rclone.conf and referenced from the
 # manifest. Fixed — there is exactly one configurable onsite + one offsite dest.
@@ -69,14 +73,77 @@ def rclone_bin() -> Path:
     return _base_dir() / 'bin' / 'rclone'
 
 
-def _write_600(path: Path, text: str) -> None:
-    """Write a (possibly secret-bearing) file with owner-only permissions."""
-    path.write_text(text)
+def _discard(tmps) -> list:
+    """Remove staged copies, best effort: every one is tried, and one that
+    cannot be removed is logged and returned by name, never raised, so a
+    cleanup failure cannot replace the error that explains the disk state
+    (review round 2 of PR #109). A leftover is owner-only and holds no more
+    than the file it was staged for."""
+    left = []
+    for tmp in tmps:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.error('Could not remove staged backup file %s: %s', tmp.name, type(exc).__name__)
+            left.append(tmp.name)
+    return left
+
+
+def _left_note(left) -> str:
+    return f'. A temporary copy could not be removed: {", ".join(left)}' if left else ''
+
+
+def _stage_600(path: Path, text: str) -> Path:
+    """Write text to a new file beside path, readable by its owner only from
+    creation (0600; umask can only remove bits), and return that file's path.
+    Nothing at `path` is touched."""
+    tmp = path.with_name(f'.{path.name}.{secrets.token_hex(6)}.tmp')
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
-        os.chmod(path, 0o600)
-    except OSError:
-        # Non-POSIX or permission quirk — content is written; perms are best-effort.
-        pass
+        with os.fdopen(fd, 'w') as f:
+            os.fchmod(f.fileno(), 0o600)
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+    except BaseException:
+        _discard([tmp])
+        raise
+    return tmp
+
+
+def _publish_600(files: dict) -> None:
+    """Replace the backup files together, each owner-only ({path: text}; text
+    None removes the file). Every replacement is staged and locked before any
+    working file is touched, then swapped in with os.replace (which replaces
+    a link rather than following it). So a write or lock failure leaves every
+    old file exactly as it was, and the error says nothing on disk changed
+    (review of PR #109: the first version truncated the working file, then
+    failed to lock it, while the page said the last good config was kept).
+
+    A failure while swapping (a rename in the same directory) is the one case
+    that can leave the pair half updated; the error says so."""
+    staged = {}
+    try:
+        for path, text in files.items():
+            if text is not None:
+                staged[path] = _stage_600(path, text)
+    except OSError as exc:
+        left = _discard(staged.values())
+        raise BackupConfigError(
+            f'could not write {path.name} with owner-only permissions ({exc}). '
+            f'Nothing on disk was changed{_left_note(left)}') from exc
+    try:
+        for path, text in files.items():
+            if text is None:
+                path.unlink(missing_ok=True)
+            else:
+                os.replace(staged[path], path)
+                del staged[path]  # only once it is in place; a failed swap still cleans up
+    except OSError as exc:
+        left = _discard(staged.values())
+        raise BackupConfigError(
+            f'could not put {path.name} in place ({exc}). The backup config on disk may be '
+            f'partly updated; save the Backups settings again{_left_note(left)}') from exc
 
 
 def rclone_remote_target(site) -> str:
@@ -123,10 +190,12 @@ def _obscure(binary: Path, plaintext: str) -> str:
             capture_output=True, text=True, timeout=10,
         )
     except Exception as exc:
-        raise BackupConfigError(f'rclone obscure failed to run ({binary}): {exc}') from exc
+        raise BackupConfigError(f'rclone obscure failed to run ({binary}): {exc}. '
+                                f'Nothing on disk was changed') from exc
     if out.returncode != 0:
         raise BackupConfigError(
-            f'rclone obscure exited {out.returncode}: {out.stderr.strip() or "no error output"}'
+            f'rclone obscure exited {out.returncode}: {out.stderr.strip() or "no error output"}. '
+            f'Nothing on disk was changed'
         )
     return out.stdout.strip()
 
@@ -184,14 +253,9 @@ def render_config(site) -> None:
         )
     onsite_target = onsite_remote_target(site)
 
-    if stanzas:
-        _write_600(rclone_conf_path(), '\n'.join(stanzas))
-    else:
-        # Don't leave a stale remote+secret lying around when both are off.
-        try:
-            rclone_conf_path().unlink()
-        except FileNotFoundError:
-            pass
+    # With both destinations off, the remote file is removed rather than left
+    # holding a stale secret (None below).
+    rclone_conf = '\n'.join(stanzas) if stanzas else None
 
     manifest = (
         '# Generated by Murphy\'s Bench (Settings → Maintenance → Backups). Do not edit by hand.\n'
@@ -208,8 +272,10 @@ def render_config(site) -> None:
         f'BACKUP_OFFSITE_SCHEDULE_DAYS="{site.backup_offsite_schedule_days or "daily"}"\n'
         f'BACKUP_OFFSITE_SCHEDULE_TIMES="{site.backup_offsite_schedule_times or "02:00"}"\n'
     )
-    # The manifest itself carries no secrets, but keep it owner-only for consistency.
-    _write_600(manifest_path(), manifest)
+    # The manifest itself carries no secrets, but keep it owner-only for
+    # consistency. Both replacements are staged before either is published;
+    # see _publish_600 for the one case that can leave them mixed.
+    _publish_600({rclone_conf_path(): rclone_conf, manifest_path(): manifest})
 
 
 def read_status() -> dict:
