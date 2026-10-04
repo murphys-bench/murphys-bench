@@ -17617,3 +17617,109 @@ def test_backup_cleanup_failure_never_hides_the_disk_outcome(
     assert leftovers and all(oct(p.stat().st_mode & 0o777) == '0o600' for p in leftovers)
     if phase == 'staging':
         assert (conf.read_text(), manifest.read_text()) == before
+
+
+# ── prior_replies in templates (Oct 3 2026 prod template check) ────────────
+
+_PROD_REPLY_SUBJECT = 'Re: [{{ ticket.ticket_number }}] {{ ticket.subject }}'
+_PROD_REPLY_BODY = (
+    '<div>Hi {{ customer_name }},<br><br><br><br>{{ reply.content }}<br>{% if prior_replies %}<br><br>'
+    '--- Previous messages ---<br>{% for r in prior_replies %}<br>{{ r.created_at|date:"N j, Y g:i A" }}'
+    ' — {{ r.created_by.get_full_name }}:<br>{{ r.content }}<br>{% endfor %}{% endif %}<br><br>Thanks,<br>'
+    '{{ site_name }}</div>')
+
+
+def _reply_thread(client_obj, admin_user):
+    from core.models import Contact, TicketReply
+    Contact.objects.create(client=client_obj, first_name='Pat', last_name='Q', email='pat@example.com', is_primary=True)
+    admin_user.first_name, admin_user.last_name = 'Mike', 'McCall'
+    admin_user.save()
+    ticket = Ticket.objects.create(client=client_obj, subject='Laptop', description='D', created_by=admin_user)
+    customer = TicketReply.objects.create(ticket=ticket, reply_type='customer_visible',
+                                          content='Dropped it off today.', created_by=None)
+    staff = TicketReply.objects.create(ticket=ticket, reply_type='customer_visible',
+                                       content='Diagnosing now.', created_by=admin_user)
+    TicketReply.objects.create(ticket=ticket, reply_type='internal', content='INTERNAL NOTE', created_by=admin_user)
+    return ticket, customer, staff
+
+
+@pytest.mark.django_db
+def test_prod_reply_template_renders_the_history_exactly_as_before(client_obj, admin_user):
+    """Prod's Reply Added template loops over prior_replies. Rendered against
+    the plain copies it must produce exactly what it produced against the live
+    records (the behavior before the fixed list existed)."""
+    from types import SimpleNamespace
+    from core import email_html
+    from core.email_utils import render_email_template
+    ticket, customer, staff = _reply_thread(client_obj, admin_user)
+    newest = SimpleNamespace(content='Ready for pickup.')
+    live = {'customer_name': 'Pat', 'reply': newest, 'prior_replies': [customer, staff], 'site_name': 'SCS',
+            'ticket': ticket}
+    before = email_html.render_body(_PROD_REPLY_BODY, live)
+    _subject, after = render_email_template(EmailTemplate(
+        subject_template=_PROD_REPLY_SUBJECT, body_template=_PROD_REPLY_BODY, body_format='html'), live)
+    assert after == before
+    assert '--- Previous messages ---' in after and 'Dropped it off today.' in after and 'Mike McCall' in after
+
+
+@pytest.mark.django_db
+def test_reply_email_through_the_view_keeps_the_history(client, client_obj, admin_user, monkeypatch):
+    from core import email_utils
+    _email_on()
+    EmailTemplate.objects.update_or_create(trigger='reply_added', defaults={
+        'is_active': True, 'subject_template': _PROD_REPLY_SUBJECT, 'body_template': _PROD_REPLY_BODY,
+        'body_format': 'html'})
+    ticket, customer, staff = _reply_thread(client_obj, admin_user)
+    sent = []
+    monkeypatch.setattr(email_utils, '_smtp_send', lambda *a, **k: sent.append(a) or ('sent', '', ''))
+    client.force_login(admin_user)
+    client.post(reverse('core:ticket_reply_add', args=[ticket.pk]),
+                {'reply_type': 'customer_visible', 'content': 'Ready for pickup.'})
+    assert len(sent) == 1
+    html, plain = sent[0][3], sent[0][2]
+    for out in (html, plain):
+        assert 'Ready for pickup.' in out and '--- Previous messages ---' in out
+        assert 'Dropped it off today.' in out and 'Diagnosing now.' in out and 'Mike McCall' in out
+        assert 'INTERNAL NOTE' not in out
+
+
+@pytest.mark.django_db
+def test_prior_replies_items_hold_only_their_three_values(client_obj, admin_user):
+    from core.email_utils import render_email_template
+    ticket, customer, staff = _reply_thread(client_obj, admin_user)
+    t = EmailTemplate(subject_template='s', body_format='html', body_template=(
+        '<div>{% for r in prior_replies %}[{{ r.created_by.password }}|{{ r.created_by.email }}|'
+        '{{ r.ticket.client.name }}|{{ r.reply_type }}|{{ r.created_by.is_superuser }}]{% endfor %}'
+        '{{ prior_replies }}#{{ prior_replies|length }}</div>'))
+    _s, body = render_email_template(t, {'prior_replies': [customer, staff]})
+    assert '[||||][||||]#2' in body
+
+
+@pytest.mark.parametrize('source, expected', [
+    (_PROD_REPLY_BODY, []),
+    ('{% if prior_replies %}{{ prior_replies|length }}{% endif %}', []),
+    ('{% for r in prior_replies %}{% if r.created_by %}{{ r.created_by.get_full_name }}{% endif %}{% endfor %}', []),
+    ('{% for r in prior_replies %}{{ r.created_by.email }}{{ r }}{% endfor %}{{ prior_replies }}',
+     ['r.created_by.email', 'r', 'prior_replies']),
+    ('{% for c in ticket.subject %}{{ c }}{% endfor %}', []),
+])
+def test_save_warning_knows_what_a_prior_reply_holds(db, source, expected):
+    from core.email_utils import unavailable_variables
+    assert unavailable_variables(source) == expected
+
+
+def test_prior_replies_values_are_documented():
+    from pathlib import Path
+    from django.conf import settings
+    from core.email_utils import TEMPLATE_LISTS
+    help_table = (Path(settings.BASE_DIR) / 'core/templates/core/settings/email_templates.html').read_text()
+    for name, paths in TEMPLATE_LISTS.items():
+        assert '{%% for r in %s %%}' % name in help_table
+        for p in paths:
+            assert '{{ r.%s }}' % p in help_table, p
+
+
+def test_a_filter_does_not_excuse_printing_a_record(db):
+    """Only a list prints something real through a filter; a record does not."""
+    from core.email_utils import unavailable_variables
+    assert unavailable_variables('{{ client|upper }}{{ prior_replies|length }}') == ['client']

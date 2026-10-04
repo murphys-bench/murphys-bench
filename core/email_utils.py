@@ -297,12 +297,46 @@ TEMPLATE_VARIABLES = (
     'reply.content', 'old_status',
 )
 
+#: Lists a template can loop over, and the only values each item holds
+#: (Oct 3 2026: prod's Reply Added template shows the earlier conversation
+#: with {% for r in prior_replies %}; dropping it would have silently emptied
+#: that section). The reply views fill prior_replies with customer-visible
+#: replies only. A date stays a date, so |date formatting keeps working.
+TEMPLATE_LISTS = {
+    'prior_replies': ('created_at', 'created_by.get_full_name', 'content'),
+}
+
+
+def _copy_values(obj, paths):
+    """A Fields holding plain copies of exactly `paths` read from obj; a
+    missing step leaves that value out. Dates stay dates; everything else is
+    Text."""
+    from datetime import date
+    from .email_html import Fields, Text
+    out = Fields()
+    for path in paths:
+        keys = path.split('.')
+        value = obj
+        for attr in keys:
+            value = getattr(value, attr, None)
+            if value is None:
+                break
+        if value is None:
+            continue
+        if callable(value):
+            value = value()
+        node = out
+        for key in keys[:-1]:
+            node = node.setdefault(key, Fields())
+        node[keys[-1]] = value if isinstance(value, date) else Text('' if value is None else value)
+    return out
+
 
 def safe_template_context(ctx):
     """Plain strings for exactly TEMPLATE_VARIABLES, read out of ctx. A record
     that is absent (no work order, no device) is left out entirely, so
     {% if work_order %} still means what it says."""
-    from .email_html import Fields, Text
+    from .email_html import Fields, Items, Text
     out = {}
     for path in TEMPLATE_VARIABLES:
         keys = path.split('.')
@@ -323,6 +357,10 @@ def safe_template_context(ctx):
         for key in keys[:-1]:
             node = node.setdefault(key, Fields())
         node[keys[-1]] = Text('' if value is None else value)
+    for name, paths in TEMPLATE_LISTS.items():
+        items = ctx.get(name)
+        if items is not None:
+            out[name] = Items(_copy_values(item, paths) for item in items)
     return out
 
 
@@ -333,8 +371,10 @@ def unavailable_variables(source):
     condition or loop may also name a record that holds listed values
     ({% if ticket %}, {% if work_order.device %}); printing one shows nothing,
     so as a printed value it is reported. Names a template makes for itself
-    (loop variables, {% now ... as year %}) are its own. A syntax error
-    returns nothing here; rendering reports it.
+    (loop variables, {% now ... as year %}) are its own, except that the
+    variable of a loop over a TEMPLATE_LISTS list holds only that list's
+    values, so {{ r.created_by.email }} inside {% for r in prior_replies %}
+    is reported. A syntax error returns nothing here; rendering reports it.
 
     The source goes through email_html.guard_plain before Django parses it:
     the size limit, and unclosed {{ {% {# neutralized, because Django's lexer
@@ -353,19 +393,33 @@ def unavailable_variables(source):
         nodelist = Template(source or '').nodelist
     except TemplateSyntaxError:
         return []
+    def prefixes(paths):
+        return {p.rsplit('.', i)[0] for p in paths for i in range(1, p.count('.') + 1)}
+
     printable = set(TEMPLATE_VARIABLES)
-    records = {p.rsplit('.', i)[0] for p in TEMPLATE_VARIABLES for i in range(1, p.count('.') + 1)}
+    records = prefixes(TEMPLATE_VARIABLES) | set(TEMPLATE_LISTS)
     made_here = {getattr(n, 'asvar', None) for n in nodelist.get_nodes_by_type(Node)} - {None}
     found, seen = [], set()  # seen: membership in constant time; found keeps the order
 
     def check(expr, local, as_condition=False):
+        # local: loop variable -> the values it holds (an item of a
+        # TEMPLATE_LISTS list), or None for a loop over anything else, whose
+        # variable is the template's own.
         names = [(expr.var, as_condition)] + [
             (arg, False) for _f, args in expr.filters for is_var, arg in args if is_var]
         for var, tested in names:
             if isinstance(var, Variable) and var.lookups:
                 path = '.'.join(var.lookups)
-                if (var.lookups[0] in local or var.lookups[0] in made_here or path in printable
-                        or (tested and path in records) or path in seen):
+                head, rest = var.lookups[0], '.'.join(var.lookups[1:])
+                if head in local:
+                    item = local[head]
+                    if item is None or rest in item or (tested and (not rest or rest in prefixes(item))):
+                        continue
+                elif (head in made_here or path in printable or (tested and path in records)
+                      # A list through a filter prints something real ({{ prior_replies|length }}).
+                      or (var is expr.var and expr.filters and path in TEMPLATE_LISTS)):
+                    continue
+                if path in seen:
                     continue
                 seen.add(path)
                 found.append(path)
@@ -389,13 +443,18 @@ def unavailable_variables(source):
                     walk(inner, local)
             elif isinstance(node, ForNode):
                 check(node.sequence, local, as_condition=True)
-                walk(node.nodelist_loop, local | set(node.loopvars) | {'forloop'})
+                seq = node.sequence.var
+                listed = (TEMPLATE_LISTS.get('.'.join(seq.lookups))
+                          if isinstance(seq, Variable) and seq.lookups and not node.sequence.filters
+                          and len(node.loopvars) == 1 else None)
+                loop_local = {v: (set(listed) if listed else None) for v in node.loopvars}
+                walk(node.nodelist_loop, {**local, **loop_local, 'forloop': None})
                 walk(node.nodelist_empty, local)
             else:
                 for attr in getattr(node, 'child_nodelists', ()):
                     walk(getattr(node, attr, None) or [], local)
 
-    walk(nodelist, frozenset())
+    walk(nodelist, {})
     return found
 
 
