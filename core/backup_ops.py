@@ -23,6 +23,7 @@ Secret-bearing files (``.rclone.conf`` holds the S3 secret + the onsite password
 are written 0600.
 """
 import json
+import logging
 import os
 import secrets
 import subprocess
@@ -30,6 +31,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from django.conf import settings
+
+logger = logging.getLogger('core')
 
 # rclone remote names rendered into .rclone.conf and referenced from the
 # manifest. Fixed — there is exactly one configurable onsite + one offsite dest.
@@ -70,6 +73,26 @@ def rclone_bin() -> Path:
     return _base_dir() / 'bin' / 'rclone'
 
 
+def _discard(tmps) -> list:
+    """Remove staged copies, best effort: every one is tried, and one that
+    cannot be removed is logged and returned by name, never raised, so a
+    cleanup failure cannot replace the error that explains the disk state
+    (review round 2 of PR #109). A leftover is owner-only and holds no more
+    than the file it was staged for."""
+    left = []
+    for tmp in tmps:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.error('Could not remove staged backup file %s: %s', tmp.name, type(exc).__name__)
+            left.append(tmp.name)
+    return left
+
+
+def _left_note(left) -> str:
+    return f'. A temporary copy could not be removed: {", ".join(left)}' if left else ''
+
+
 def _stage_600(path: Path, text: str) -> Path:
     """Write text to a new file beside path, readable by its owner only from
     creation (0600; umask can only remove bits), and return that file's path.
@@ -83,7 +106,7 @@ def _stage_600(path: Path, text: str) -> Path:
             f.flush()
             os.fsync(f.fileno())
     except BaseException:
-        tmp.unlink(missing_ok=True)
+        _discard([tmp])
         raise
     return tmp
 
@@ -105,11 +128,10 @@ def _publish_600(files: dict) -> None:
             if text is not None:
                 staged[path] = _stage_600(path, text)
     except OSError as exc:
-        for tmp in staged.values():
-            tmp.unlink(missing_ok=True)
+        left = _discard(staged.values())
         raise BackupConfigError(
             f'could not write {path.name} with owner-only permissions ({exc}). '
-            f'Nothing on disk was changed') from exc
+            f'Nothing on disk was changed{_left_note(left)}') from exc
     try:
         for path, text in files.items():
             if text is None:
@@ -118,11 +140,10 @@ def _publish_600(files: dict) -> None:
                 os.replace(staged[path], path)
                 del staged[path]  # only once it is in place; a failed swap still cleans up
     except OSError as exc:
-        for tmp in staged.values():
-            tmp.unlink(missing_ok=True)
+        left = _discard(staged.values())
         raise BackupConfigError(
             f'could not put {path.name} in place ({exc}). The backup config on disk may be '
-            f'partly updated; save the Backups settings again') from exc
+            f'partly updated; save the Backups settings again{_left_note(left)}') from exc
 
 
 def rclone_remote_target(site) -> str:
@@ -252,7 +273,8 @@ def render_config(site) -> None:
         f'BACKUP_OFFSITE_SCHEDULE_TIMES="{site.backup_offsite_schedule_times or "02:00"}"\n'
     )
     # The manifest itself carries no secrets, but keep it owner-only for
-    # consistency. Both files change together or not at all.
+    # consistency. Both replacements are staged before either is published;
+    # see _publish_600 for the one case that can leave them mixed.
     _publish_600({rclone_conf_path(): rclone_conf, manifest_path(): manifest})
 
 

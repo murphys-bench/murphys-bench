@@ -17566,3 +17566,54 @@ def test_mileage_lookup_failure_shows_no_raw_error(client, admin_user, monkeypat
     # output, traceback included, must not carry the key or the detail either.
     assert 'KEY-abc123' not in caplog.text and 'internal detail' not in caplog.text
     assert all(r.exc_info is None for r in caplog.records)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('phase', ['staging', 'swap'])
+def test_backup_cleanup_failure_never_hides_the_disk_outcome(
+        client, admin_user, settings, tmp_path, monkeypatch, phase):
+    """Review round 2 of PR #109: when removing a staged copy also failed, the
+    raw cleanup error replaced the explanation (a 500 from Settings) and
+    cleanup stopped. Every copy is now tried, a leftover is named, and the
+    disk-outcome message survives."""
+    import os
+    from pathlib import Path
+    from django.contrib.messages import get_messages
+    backup_ops, conf, manifest, before = _working_backup_config(client, admin_user, settings, tmp_path, monkeypatch)
+    if phase == 'staging':
+        calls = []
+        real_fchmod = os.fchmod
+
+        def flaky_fchmod(fd, mode):
+            calls.append(fd)
+            if len(calls) == 2:
+                raise PermissionError('not permitted')
+            return real_fchmod(fd, mode)
+        monkeypatch.setattr(os, 'fchmod', flaky_fchmod)
+    else:
+        replaced = []
+        real_replace = os.replace
+
+        def flaky_replace(src, dst):
+            replaced.append(dst)
+            if len(replaced) == 2:
+                raise OSError('rename failed')
+            return real_replace(src, dst)
+        monkeypatch.setattr(os, 'replace', flaky_replace)
+    real_unlink = Path.unlink
+
+    def no_unlink(self, missing_ok=False):
+        if self.name.endswith('.tmp'):
+            raise PermissionError('read-only')
+        return real_unlink(self, missing_ok=missing_ok)
+    monkeypatch.setattr(Path, 'unlink', no_unlink)
+    resp = client.post(reverse('core:settings'), _backup_post(
+        offsite=True, **{'backups-backup_s3_secret_key': 'newsecret'}))
+    assert resp.status_code == 302, 'a refusal with a message, not a 500'
+    text = ' '.join(str(m) for m in get_messages(resp.wsgi_request))
+    expected = 'Nothing on disk was changed' if phase == 'staging' else 'may be partly updated'
+    assert expected in text and 'could not be removed' in text
+    leftovers = list(tmp_path.glob('.*.tmp'))
+    assert leftovers and all(oct(p.stat().st_mode & 0o777) == '0o600' for p in leftovers)
+    if phase == 'staging':
+        assert (conf.read_text(), manifest.read_text()) == before
