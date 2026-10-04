@@ -68,6 +68,14 @@ class Fields(dict):
         return ''
 
 
+class Items(list):
+    """A list of allowed records (prior_replies). Prints as nothing, like
+    Fields, so {{ prior_replies }} alone is blank, not a dump of its items."""
+
+    def __str__(self):
+        return ''
+
+
 class Text(str):
     """An allowed value. A dotted name after it ({{ ticket.subject.x }})
     reads as an empty Fields (blank), for the same reason as
