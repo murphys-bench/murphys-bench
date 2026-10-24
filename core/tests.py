@@ -16324,6 +16324,12 @@ def _chart_png_variant(kind):
                + chunk(b'tEXt', b'note\x00chart', crc=good ^ 1) + chunk(b'IEND', iend))
     elif kind == 'cut_after_length':
         out = raw[:-8]
+    elif kind in ('huge_ihdr', 'wide_ihdr'):
+        # The header claims 16000 x 16000 (Pillow's own limit refuses it) or
+        # 4001 x 4 (just over MB's 4000-pixel side); the bytes stay tiny.
+        w, h = (16000, 16000) if kind == 'huge_ihdr' else (4001, 4)
+        out = (sig + chunk(b'IHDR', struct.pack('>II', w, h) + ihdr[8:]) + chunk(b'IDAT', idat)
+               + chunk(b'IEND', iend))
     return 'data:image/png;base64,' + base64.b64encode(out).decode()
 
 
@@ -16382,6 +16388,42 @@ def test_reports_pdf_refuses_a_damaged_chart_png_instead_of_crashing(client, adm
         return
     assert r.status_code == 400
     assert r.content.decode() == 'Chart picture refused: unreadable PNG.'
+    assert _stub_report_pdf == []
+
+
+@pytest.mark.parametrize('lenient', [False, True])
+@pytest.mark.parametrize('kind', ['huge_ihdr', 'wide_ihdr'])
+@pytest.mark.django_db
+def test_reports_pdf_refuses_a_chart_claiming_too_many_pixels(client, admin_user, monkeypatch, _stub_report_pdf, kind, lenient):
+    """Review P115-1: a tiny PNG whose header claims 16000 x 16000 made
+    Pillow raise DecompressionBombError inside Image.open, before MB's own
+    size check, and the route returned 500. It is refused like any picture
+    over MB's 4000-pixel side, which the 4001 x 4 case pins."""
+    from PIL import ImageFile
+    monkeypatch.setattr(ImageFile, 'LOAD_TRUNCATED_IMAGES', lenient)
+    client.force_login(admin_user)
+    r = client.post(reverse('core:reports_pdf'), {
+        'domain': 'workorders', 'start_date': '2026-08-01', 'end_date': '2026-08-21',
+        'section': 'wostatus', 'chart_chartWoStatus': _chart_png_variant(kind)})
+    assert r.status_code == 400
+    assert r.content.decode() == 'Chart picture refused: bad dimensions.'
+    assert _stub_report_pdf == []
+
+
+@pytest.mark.django_db
+def test_reports_pdf_chart_check_does_not_hide_other_errors(client, admin_user, monkeypatch, _stub_report_pdf):
+    """The chart check names the errors it turns into a refusal; anything
+    else (a programming error, say) still surfaces instead of becoming 400."""
+    import PIL.Image
+
+    def broken_open(*a, **k):
+        raise TypeError('a bug, not a bad picture')
+    monkeypatch.setattr(PIL.Image, 'open', broken_open)
+    client.force_login(admin_user)
+    with pytest.raises(TypeError):
+        client.post(reverse('core:reports_pdf'), {
+            'domain': 'workorders', 'start_date': '2026-08-01', 'end_date': '2026-08-21',
+            'section': 'wostatus', 'chart_chartWoStatus': _chart_png_variant('good')})
     assert _stub_report_pdf == []
 
 

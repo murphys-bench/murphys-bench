@@ -10240,6 +10240,10 @@ def _decode_chart_png(value):
             if w > _CHART_MAX_SIDE or h > _CHART_MAX_SIDE or w < 1 or h < 1:
                 raise _BadChartImage('bad dimensions')
             im.verify()
+    # A header declaring an enormous picture is refused by Pillow inside
+    # Image.open, before the size check above runs. It is the same refusal.
+    except Image.DecompressionBombError:
+        raise _BadChartImage('bad dimensions')
     # Pillow reports a broken PNG (bad chunk checksum, damaged chunk header)
     # as SyntaxError, and in lenient mode a file cut off right after a chunk
     # length as IndexError. Either is a refused chart, not a 500.
