@@ -19235,6 +19235,334 @@ def test_migration_0121_keeps_existing_links_and_starts_with_no_requests():
         MigrationExecutor(connection).migrate(MigrationExecutor(connection).loader.graph.leaf_nodes())
 
 
+# Round 3 review (Oct 24 2026): M1-M8 and decisions C and D. Each mirrors the
+# outside reviewer's probe (mb-docs review-artifacts/PR-112-round3-probes.py)
+# and asserts the safe outcome where the probe demonstrated the unsafe one.
+
+def _payment_payload(ref='ORIGINAL', day=None):
+    from django.utils import timezone
+    return {'payment': {'client_id': 'cl1', 'amount': 95.0,
+                        'invoices': [{'invoice_id': 'inv1', 'amount': 95.0}],
+                        'transaction_reference': ref, 'private_notes': 'Cash',
+                        'date': (day or timezone.localdate()).isoformat()},
+            'amount': '95', 'method': 'cash', 'method_label': 'Cash', 'reference': ref}
+
+
+@pytest.mark.django_db
+def test_a_takeover_judged_on_a_stale_read_does_not_take_a_renewed_request(client_obj):
+    """M1: the contender read the row as stale; the owner renewed before the
+    contender's write. The owner keeps it."""
+    from datetime import timedelta
+    from django.utils import timezone
+    from core import invoice_ninja
+    from core.models import InvoiceNinjaRequest as R
+    wo = _priced_wo(client_obj)
+    owner = _in_request(wo, 'invoice', 'sending', active_at=timezone.now() - timedelta(minutes=1),
+                        payload={'invoice': {'line_items': []}})
+    stale_read = R.objects.get(pk=owner.pk)
+    invoice_ninja._touch(owner)
+    taken, refusal = invoice_ninja._take_over(stale_read, 'invoice', 'contender', timezone.now())
+    assert taken is None and refusal is None
+    assert R.objects.get(pk=owner.pk).token == owner.token
+
+
+@pytest.mark.django_db
+def test_clearing_from_a_stale_read_leaves_a_taken_over_request_alone(client_obj, admin_user):
+    """M1: a person's 'I checked' was judged on the request before another
+    request took it over and resumed it; nothing is cleared."""
+    from datetime import timedelta
+    from django.utils import timezone
+    from core import invoice_ninja
+    from core.models import InvoiceNinjaRequest as R
+    wo = _priced_wo(client_obj)
+    owner = _in_request(wo, 'payment', 'sending', base_invoice_id='inv1',
+                        active_at=timezone.now() - timedelta(minutes=1), payload=_payment_payload())
+    stale_read = R.objects.get(pk=owner.pk)
+    taken, _ = invoice_ninja._take_over(R.objects.get(pk=owner.pk), 'payment', 'resumed', timezone.now())
+    invoice_ninja._touch(taken)
+    assert not invoice_ninja.resolve_request(stale_read, admin_user, 'checked')
+    owner.refresh_from_db()
+    assert owner.state == R.SENDING and owner.token == 'resumed'
+
+
+@pytest.mark.django_db
+def test_clearing_needs_the_generation_the_person_was_shown(client, admin_user, client_obj):
+    from datetime import timedelta
+    from django.utils import timezone
+    wo = _priced_wo(client_obj)
+    req = _in_request(wo, 'payment', 'unknown', base_invoice_id='inv1', payload=_payment_payload(),
+                      started_at=timezone.now() - timedelta(minutes=5), generation=2)
+    client.force_login(admin_user)
+    url = reverse('core:in_hold', args=['wo', wo.pk, 'resolve'])
+    client.post(url, {'request': req.pk, 'generation': 1})
+    req.refresh_from_db()
+    assert req.state == 'unknown'
+    client.post(url, {'request': req.pk, 'generation': 2})
+    req.refresh_from_db()
+    assert req.state == 'cleared'
+
+
+@pytest.mark.django_db
+def test_a_charge_that_renewed_before_the_vanished_check_wrote_is_not_held(client_obj, monkeypatch):
+    """M1: the vanished-charge check read the charge as stale; the owner
+    renewed before the check's write. The charge is not held."""
+    from datetime import timedelta
+    from django.db.models.query import QuerySet
+    from django.utils import timezone
+    from core import invoice_ninja
+    from core.models import InvoiceNinjaRequest as R
+    wo = _priced_wo(client_obj)
+    owner = _in_request(wo, 'charge', 'sending', active_at=timezone.now() - timedelta(minutes=1))
+    original = QuerySet.update
+    renewed = []
+
+    def interleaved(qs, **fields):
+        if qs.model is R and fields.get('state') == R.HELD and not renewed:
+            renewed.append(True)
+            invoice_ninja._touch(owner)
+        return original(qs, **fields)
+    monkeypatch.setattr(QuerySet, 'update', interleaved)
+    invoice_ninja._hold_vanished_charges(wo)
+    owner.refresh_from_db()
+    assert renewed and owner.state == R.SENDING
+
+
+@pytest.mark.django_db
+def test_a_lost_invoice_create_is_never_sent_twice_even_after_its_owner_goes_quiet(client_obj, monkeypatch):
+    """M5 / decision C: request A's create is still running at IN when B,
+    31 seconds later, takes the request over. B looks, does not find it, and
+    sends nothing. A's invoice lands late; the next try links it."""
+    from datetime import timedelta
+    from django.utils import timezone
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _priced_wo(client_obj)
+    fake = _FakeIN(invoice_ninja)
+    moment = [timezone.now()]
+    monkeypatch.setattr(invoice_ninja.timezone, 'now', lambda: moment[0])
+    posts, seen = [], {}
+
+    def server(method, path, **kwargs):
+        if (method, path) == ('POST', '/invoices'):
+            posts.append(kwargs['json'])
+            if len(posts) == 1:
+                moment[0] += timedelta(seconds=31)
+                other = WorkOrder.objects.get(pk=wo.pk)
+                with pytest.raises(invoice_ninja.InvoiceNinjaOutcomeUnknown) as exc:
+                    invoice_ninja.push_host_invoice(other, po_number=other.work_order_number, client=client_obj)
+                seen['b'] = str(exc.value)
+                return fake(method, path, **kwargs)      # A's invoice lands late
+        return fake(method, path, **kwargs)
+    monkeypatch.setattr(invoice_ninja, '_request', server)
+    with pytest.raises(invoice_ninja.InvoiceNinjaRefused):
+        invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
+    assert len(posts) == 1 and 'will not send it again on its own' in seen['b']
+    invoice_ninja.push_host_invoice(WorkOrder.objects.get(pk=wo.pk), po_number=wo.work_order_number, client=client_obj)
+    assert len(posts) == 1 and WorkOrder.objects.get(pk=wo.pk).invoice_ninja_id == 'inv1'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('sequence', ['same_call', 'later_retry'])
+def test_a_refused_retry_keeps_an_unanswered_payment_open_with_its_key(client_obj, monkeypatch, sequence):
+    """M2: a refusal answers only that attempt. The earlier unanswered one may
+    have landed, so the payment stays open and the next try uses its key."""
+    from core import invoice_ninja
+    wo = _priced_wo(client_obj)
+    keys = []
+    outcomes = [invoice_ninja.InvoiceNinjaOutcomeUnknown('first may still be processing'),
+                invoice_ninja.InvoiceNinjaError('Invoice Ninja returned 429: rate limited')]
+
+    def server(method, path, **kwargs):
+        if method == 'GET':
+            return {'data': {'status_id': '1'}}
+        keys.append(kwargs['json']['idempotency_key'])
+        if outcomes:
+            raise outcomes.pop(0)
+        return {'data': {'id': 'pay-1'}}
+    monkeypatch.setattr(invoice_ninja, '_request', server)
+    if sequence == 'later_retry':
+        outcomes[1] = invoice_ninja.InvoiceNinjaOutcomeUnknown('second answer also lost')
+        with pytest.raises(invoice_ninja.InvoiceNinjaOutcomeUnknown):
+            invoice_ninja.post_payment(wo, 'inv1', 'cl1', amount=95, method='cash', method_label='Cash')
+        outcomes[:] = [invoice_ninja.InvoiceNinjaError('Invoice Ninja returned 403: token refused')]
+    with pytest.raises(invoice_ninja.InvoiceNinjaOutcomeUnknown):
+        invoice_ninja.post_payment(wo, 'inv1', 'cl1', amount=95, method='cash', method_label='Cash')
+    req = _active(wo, 'payment')
+    assert req.state == 'unknown'
+    assert invoice_ninja.blocking_request(wo) == req
+    done = invoice_ninja.post_payment(wo, 'inv1', 'cl1', amount=95, method='check', method_label='Check')
+    assert done.pk == req.pk and done.state == 'done' and set(keys) == {req.key}
+
+
+@pytest.mark.django_db
+def test_paid_after_an_unanswered_payment_attempt_is_held_not_claimed_or_denied(client_obj, monkeypatch):
+    """M2: the invoice reads Paid after this payment's earlier attempt got no
+    answer. It may be this payment; a person checks."""
+    from core import invoice_ninja
+    wo = _priced_wo(client_obj)
+    outcomes = [invoice_ninja.InvoiceNinjaOutcomeUnknown('lost'),
+                invoice_ninja.InvoiceNinjaError('Invoice Ninja returned 422: invalid')]
+
+    def server(method, path, **kwargs):
+        if method == 'GET':
+            return {'data': {'status_id': '4'}}
+        raise outcomes.pop(0)
+    monkeypatch.setattr(invoice_ninja, '_request', server)
+    with pytest.raises(invoice_ninja.InvoiceNinjaOutcomeUnknown):
+        invoice_ninja.post_payment(wo, 'inv1', 'cl1', amount=95, method='cash', method_label='Cash')
+    assert _active(wo, 'payment').state == 'held'
+
+
+@pytest.mark.django_db
+def test_a_hold_written_just_before_the_charge_claim_stops_the_charge(client_obj, monkeypatch):
+    """M3: a hold lands after the first hold check but before the money
+    claim. The claim's own check, in the same transaction, refuses."""
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _priced_wo(client_obj)
+    WorkOrder.objects.filter(pk=wo.pk).update(invoice_ninja_id='inv1')
+    wo.refresh_from_db()
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    real_claim = invoice_ninja._claim
+
+    def hold_first(host, kind, payload, **kwargs):
+        _in_request(host, 'invoice', 'held', reason='Recovered amount differs.')
+        return real_claim(host, kind, payload, **kwargs)
+    monkeypatch.setattr(invoice_ninja, '_claim', hold_first)
+    with pytest.raises(invoice_ninja.InvoiceNinjaRefused):
+        invoice_ninja.charge_on_file(wo)
+    assert not [c for c in fake.calls if c[:2] == ('POST', '/invoices/bulk')]
+    assert _active(wo, 'charge') is None
+
+
+@pytest.mark.django_db
+def test_invoice_ninja_paid_does_not_mark_a_held_work_order_paid(client, admin_user, client_obj, monkeypatch):
+    """M3 / decision D: a hold lands while the Register reads Invoice Ninja's
+    Paid. MB records what Invoice Ninja says; its own record stays unpaid."""
+    from core import invoice_ninja
+    from core.models import Invoice
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _priced_wo(client_obj)
+    WorkOrder.objects.filter(pk=wo.pk).update(invoice_ninja_id='inv1')
+
+    def paid_after_hold(method, path, **kwargs):
+        assert (method, path) == ('GET', '/invoices/inv1')
+        _in_request(wo, 'invoice', 'held', reason='Recovered amount differs.')
+        return {'data': {'status_id': '4'}}
+    monkeypatch.setattr(invoice_ninja, '_request', paid_after_hold)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'pay', 'payment_method': 'cash'}, follow=True)
+    inv = Invoice.objects.get(work_order=wo)
+    assert inv.billing_status != 'paid' and inv.in_status == 'Paid'
+    assert b'stays unpaid until the hold is cleared' in resp.content
+
+
+@pytest.mark.django_db
+def test_carried_on_payment_keeps_the_day_it_was_taken(client, admin_user, client_obj, monkeypatch):
+    """M8: finishing yesterday's unanswered payment records yesterday."""
+    from datetime import timedelta
+    from django.utils import timezone
+    from core import invoice_ninja
+    from core.models import Invoice
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _priced_wo(client_obj)
+    WorkOrder.objects.filter(pk=wo.pk).update(invoice_ninja_id='inv1')
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    yesterday = timezone.localdate() - timedelta(days=1)
+    req = _in_request(wo, 'payment', 'unknown', base_invoice_id='inv1',
+                      payload=_payment_payload(day=yesterday), started_at=timezone.now() - timedelta(days=1))
+    client.force_login(admin_user)
+    client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'pay', 'payment_method': 'check', 'reference': 'NEW'})
+    inv = Invoice.objects.get(work_order=wo)
+    assert inv.billing_status == 'paid' and inv.reference == 'ORIGINAL'
+    assert inv.paid_date == yesterday and inv.paid_at == req.started_at
+
+
+@pytest.mark.django_db
+def test_paid_on_a_replacement_invoice_leaves_the_old_invoices_charge_held(client, admin_user, client_obj, monkeypatch):
+    """M4: an unconfirmed charge on invoice A; the sale is re-sent as B and B
+    reads Paid. A's charge stays held, and charging stays blocked."""
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    sale = _pushed_recurring_sale(client_obj)
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    old = _in_request(sale, 'charge', 'held', base_invoice_id='42', reason='Old charge outcome unknown.')
+    client.force_login(admin_user)
+    client.post(reverse('core:sale_send_draft', args=[sale.pk]), {'confirm_resend': '1'})
+    sale.refresh_from_db()
+    assert sale.invoice_ninja_id not in ('', '42')
+    fake.paid.add(sale.invoice_ninja_id)
+    client.post(reverse('core:sale_check_in', args=[sale.pk]))
+    old.refresh_from_db()
+    assert old.state == 'held'
+    client.post(reverse('core:sale_charge', args=[sale.pk]))
+    assert not [c for c in fake.calls if c[:2] == ('POST', '/invoices/bulk')]
+
+
+@pytest.mark.django_db
+def test_a_recovered_invoice_for_the_previous_client_is_held_not_charged(client, admin_user, client_obj, monkeypatch):
+    """M6: the work order moved to another client after its invoice answer was
+    lost; the totals still match. The recovered invoice is held."""
+    from core import invoice_ninja
+    from core.models import Client
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _priced_wo(client_obj)
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    _lose_invoice(wo, client_obj, fake, monkeypatch)
+    other = Client.objects.create(name='Different customer', invoice_ninja_id='cl2')
+    WorkOrder.objects.filter(pk=wo.pk).update(client=other)
+    client.force_login(admin_user)
+    client.post(reverse('core:pos_wo_charge', args=[wo.pk]))
+    hold = _active(wo, 'invoice')
+    assert hold.state == 'held' and 'different client' in hold.reason
+    assert not [c for c in fake.calls if c[:2] == ('POST', '/invoices/bulk')]
+
+
+@pytest.mark.django_db
+def test_a_lost_client_create_is_looked_for_by_the_email_it_sent_and_not_resent(client, admin_user, client_obj, monkeypatch):
+    """M7 / decision C: the create for original@ got no answer, then the
+    client's email changed. MB looks for original@, sends nothing new, and
+    only after a person says it is not there does a new create go."""
+    from core import invoice_ninja
+    client_obj.email = 'original@acme.test'; client_obj.save()
+    posts, lookups = [], []
+
+    def server(method, path, *, params=None, json=None):
+        if method == 'GET':
+            lookups.append(params['email'])
+            return {'data': []}
+        posts.append(json)
+        if len(posts) == 1:
+            raise invoice_ninja.InvoiceNinjaOutcomeUnknown('client may still land')
+        return {'data': {'id': 'cl-new'}}
+    monkeypatch.setattr(invoice_ninja, '_request', server)
+    with pytest.raises(invoice_ninja.InvoiceNinjaOutcomeUnknown):
+        invoice_ninja.find_or_create_client(client_obj)
+    client_obj.email = 'changed@acme.test'; client_obj.save()
+    lookups.clear()
+    with pytest.raises(invoice_ninja.InvoiceNinjaOutcomeUnknown):
+        invoice_ninja.find_or_create_client(client_obj)
+    assert len(posts) == 1 and lookups == ['original@acme.test']
+    req = _active(client_obj, 'client')
+    client.force_login(admin_user)
+    page = client.get(reverse('core:client_detail', args=[client_obj.pk]))
+    assert b'the client is not there' in page.content
+    client.post(reverse('core:in_hold', args=['client', client_obj.pk, 'resolve']),
+                {'request': req.pk, 'generation': req.generation})
+    assert invoice_ninja.find_or_create_client(client_obj) == 'cl-new'
+    assert posts[1]['contacts'][0]['email'] == 'changed@acme.test'
+
+
 # ── Email logo under Pillow 13 (PR #113 and #114 reviews, Oct 23 2026) ──
 # Pillow 13 stopped writing 32-bit integer ("I" mode) images as PNG. The resize
 # used to fall back to the original file without a word and label it by its
