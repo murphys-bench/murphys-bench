@@ -3288,12 +3288,19 @@ class InvoiceNinjaHoldView(LoginRequiredMixin, View):
         obj = get_object_or_404(model, pk=pk)
         if host in ('wo', 'sale') and not _can_view_sales(request.user):
             raise PermissionDenied
+        # A person's word applies only to the request they were shown, as it
+        # was then: both must come with the form, or nothing is cleared.
+        request_id = _int_or_none(request.POST.get('request'))
+        generation = _int_or_none(request.POST.get('generation'))
+        if request_id is None or generation is None:
+            messages.error(request, 'That page is out of date, so nothing was cleared. Reload it and check again.')
+            return redirect(_safe_next(request, self._back(host, obj)))
         if action == 'resolve':
-            req = get_object_or_404(invoice_ninja.requests_for(obj), pk=request.POST.get('request') or 0)
+            req = get_object_or_404(invoice_ninja.requests_for(obj), pk=request_id)
             if req.kind in ('charge', 'payment') and not _can_process_payments(request.user):
                 raise PermissionDenied
             if invoice_ninja.resolve_request(req, request.user, 'checked Invoice Ninja and cleared it',
-                                             generation=_int_or_none(request.POST.get('generation'))):
+                                             generation=generation):
                 messages.success(request, 'Cleared. MB recorded who cleared it and when.')
             else:
                 messages.info(request, 'That changed since the page was shown, so nothing was cleared. '
@@ -3301,7 +3308,7 @@ class InvoiceNinjaHoldView(LoginRequiredMixin, View):
         elif host != 'client':
             try:
                 found = invoice_ninja.clear_pending_send(
-                    obj, request.user, generation=_int_or_none(request.POST.get('generation')))
+                    obj, request.user, request_id=request_id, generation=generation)
             except invoice_ninja.InvoiceNinjaError as e:
                 messages.error(request, str(e))
             else:
@@ -6893,7 +6900,6 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
         })
 
     def post(self, request, pk):
-        from decimal import Decimal
         from . import invoice_ninja
         wo = get_object_or_404(WorkOrder.objects.select_related('client', 'invoice'), pk=pk)
         if wo.status not in POS_SETTLE_STATUSES:
@@ -7075,17 +7081,19 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
             # it: after a lost answer that is the earlier payment, not this form.
             sent = payment.payload
             invoice = wo.invoice
-            invoice.billing_status = 'paid'
-            invoice.in_status = 'Paid'
-            invoice.amount = Decimal(sent['amount'])
-            invoice.payment_method = sent.get('method') or ''
-            invoice.reference = sent.get('reference') or ''
-            # The payment's own business date and when it was first sent: a
-            # finished earlier payment keeps its day, not the retry's.
-            invoice.paid_date = date.fromisoformat(sent['payment']['date'])
-            invoice.paid_at = payment.started_at
-            invoice.invoice_ninja_id = wo.invoice_ninja_id
-            invoice.save()
+            # A hold can land while the payment is at Invoice Ninja. The payment
+            # stays recorded on its request; MB's own record is marked paid only
+            # if nothing is held, checked in the same transaction as the write.
+            blocker = invoice_ninja.guarded(wo, lambda: _record_payment(invoice, payment, wo.invoice_ninja_id))
+            if blocker is not None:
+                Invoice.objects.filter(pk=invoice.pk).update(in_status='Paid', invoice_ninja_id=wo.invoice_ninja_id)
+                messages.warning(
+                    request,
+                    f'Invoice Ninja recorded the payment (${sent["amount"]}), but {wo.work_order_number} '
+                    f'is held: {invoice_ninja._busy_message(blocker)} MB\'s own record stays unpaid '
+                    'until the hold is cleared; then Pay again records it without a second payment.'
+                )
+                return redirect('core:pos_wo_settle', pk=pk)
             if payment.carried_on:
                 # Back to the Register, where messages show, not the receipt:
                 # the operator must see that this form was not what was paid.
@@ -7112,8 +7120,17 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
     def _already_paid(request, wo):
         from . import invoice_ninja
         inv = wo.invoice
+        # Invoice Ninja reads Paid. If it is MB's own payment on this invoice,
+        # confirmed earlier (its local write waited for a hold to clear), record
+        # its details; otherwise record Paid with none of a form's details.
+        own = (invoice_ninja.requests_for(wo)
+               .filter(kind='payment', state='done', base_invoice_id=wo.invoice_ninja_id)
+               .order_by('-finished_at').first())
 
         def record_paid():
+            if own is not None:
+                _record_payment(inv, own, wo.invoice_ninja_id)
+                return
             inv.billing_status = 'paid'
             inv.in_status = 'Paid'
             inv.save(update_fields=['billing_status', 'in_status'])
@@ -7136,6 +7153,23 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
             'recorded here, no second payment posted.'
         )
         return redirect('core:pos_wo_settle', pk=wo.pk)
+
+
+def _record_payment(invoice, payment, invoice_ninja_id):
+    """Mark MB's own Invoice paid with the payment Invoice Ninja recorded, as
+    its request sent it: amount, method, reference, its business date and
+    when it was first sent."""
+    from decimal import Decimal
+    sent = payment.payload
+    invoice.billing_status = 'paid'
+    invoice.in_status = 'Paid'
+    invoice.amount = Decimal(sent['amount'])
+    invoice.payment_method = sent.get('method') or ''
+    invoice.reference = sent.get('reference') or ''
+    invoice.paid_date = date.fromisoformat(sent['payment']['date'])
+    invoice.paid_at = payment.started_at
+    invoice.invoice_ninja_id = invoice_ninja_id
+    invoice.save()
 
 
 def _wo_receipt_context(work_order, site):

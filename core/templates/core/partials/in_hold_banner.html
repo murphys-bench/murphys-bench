@@ -20,6 +20,7 @@ or Client) and `in_host` ('wo', 'sale' or 'client').
     {% elif req.kind == 'invoice' and req.looks_lost %}
         <div class="mb-2">A send to Invoice Ninja on {{ req.started_at|date:"M j, g:i A" }} did not get an answer. MB looks for that invoice before sending again. If Invoice Ninja does not have it, clear it here so a new send can go.</div>
         <form method="post" action="{% url 'core:in_hold' in_host obj.pk 'clear-send' %}">{% csrf_token %}
+            <input type="hidden" name="request" value="{{ req.pk }}">
             <input type="hidden" name="generation" value="{{ req.generation }}">
             <button type="submit" class="btn btn-sm">I checked Invoice Ninja: the invoice is not there</button>
         </form>

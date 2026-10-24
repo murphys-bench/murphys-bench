@@ -483,10 +483,13 @@ def resolve_request(req, user, note, *, generation=None):
 
 def _settle_on_paid(host, label, invoice_id):
     """Paid on invoice `invoice_id` settles a started or unconfirmed charge ON
-    THAT INVOICE: there is nothing left to charge there. A request on another
-    invoice (one this record was re-sent from) is not touched. Paid does not
-    show WHOSE payment it was, so an unanswered payment on that invoice is
-    closed without recording any of its details. Unpaid proves nothing (the
+    THAT INVOICE: there is nothing left to charge (Mike, Oct 23 2026: an
+    unconfirmed charge clears on Check IN Paid or by a person). A request on
+    another invoice (one this record was re-sent from) is not touched.
+
+    Paid does not show WHOSE payment it was, so it never settles a payment:
+    an unanswered payment on that invoice becomes held, and a held one stays
+    held, until a person has checked (decision B). Unpaid proves nothing (the
     charge may still be queued)."""
     if label != 'Paid' or not invoice_id:
         return
@@ -495,10 +498,14 @@ def _settle_on_paid(host, label, invoice_id):
     mine = requests_for(host).filter(base_invoice_id=invoice_id)
     mine.filter(kind=R.KIND_CHARGE, state__in=(R.QUEUED, R.HELD, R.UNKNOWN)).update(
         state=R.DONE, finished_at=now, resolved_at=now, resolved_note='Check IN read Paid')
-    mine.filter(kind=R.KIND_PAYMENT, state__in=(R.HELD, R.UNKNOWN)).update(
-        state=R.CLEARED, finished_at=now, resolved_at=now,
-        resolved_note='Check IN read Paid. MB cannot tell whether it was this payment, so it '
-                      'recorded none of its details.')
+    for req in mine.filter(kind=R.KIND_PAYMENT, state=R.UNKNOWN):
+        p = req.payload
+        R.objects.filter(pk=req.pk, token=req.token, state=R.UNKNOWN, active_at=req.active_at).update(
+            state=R.HELD, reason=(
+                f'Invoice Ninja shows this invoice Paid, and a payment of ${p.get("amount")} '
+                f'({p.get("method_label") or "unspecified"}) sent {_when(req.started_at)} got no '
+                'answer, so MB cannot tell whether that payment is the one recorded. Check '
+                'Invoice Ninja, then clear this hold.'))
 
 
 def _usable_id(obj):
@@ -563,7 +570,9 @@ def _recovered_problem(req, host, invoice):
     problems = []
     sent_client = str((req.payload.get('invoice') or {}).get('client_id') or '')
     in_client = str(invoice.get('client_id') or '')
-    if in_client and in_client != sent_client:
+    if not in_client:
+        problems.append('Invoice Ninja did not say which client it belongs to')
+    elif in_client != sent_client:
         problems.append('it belongs to a different Invoice Ninja client than MB sent it for')
     if _current_in_client(host) != sent_client:
         problems.append('this record now belongs to a different client than the one it was made for')
@@ -699,22 +708,24 @@ def _create_invoice(host, payload, *, resend=False, host_fields=None, user=None)
     return _finish_invoice(req, host, invoice, recovered=False)
 
 
-def clear_pending_send(host, user, *, generation=None):
-    """A person has checked IN for an invoice whose answer was lost. MB looks
+def clear_pending_send(host, user, *, request_id, generation):
+    """A person has checked IN for the invoice of ONE lost send: request
+    `request_id`, as it was at `generation` when they were shown it. MB looks
     once more: if it finds the invoice, it is linked exactly as an automatic
-    recovery would link it (totals checked, the sale's payment still owed);
-    otherwise the send is cleared so a new one can go, recording who said so
-    and whether MB's own lookup worked. Returns the linked invoice, or None."""
+    recovery would link it (totals and client checked, the sale's payment
+    still owed); otherwise that send is cleared so a new one can go,
+    recording who said so and whether MB's own lookup worked. Any other
+    send, or this one since changed, is left alone. Returns the linked
+    invoice, or None."""
     R = _req_model()
-    req = requests_for(host).filter(lane='invoice', state__in=(R.UNKNOWN, R.SENDING)).first()
-    if req is None:
-        return None
+    req = requests_for(host).filter(pk=request_id, lane='invoice', state__in=(R.UNKNOWN, R.SENDING)).first()
+    if req is None or req.generation != generation:
+        raise InvoiceNinjaRefused('That send changed since the page was shown. Reload it and check again.')
     token = secrets.token_hex(16)
     if req.state == R.SENDING and timezone.now() - req.active_at < IN_FLIGHT:
         raise InvoiceNinjaRefused(_IN_PROGRESS_MSG)
-    same = R.objects.filter(pk=req.pk, token=req.token, state=req.state, active_at=req.active_at)
-    if generation is not None:
-        same = same.filter(generation=generation)
+    same = R.objects.filter(pk=req.pk, token=req.token, state=req.state, active_at=req.active_at,
+                            generation=generation)
     if not same.update(token=token, state=R.SENDING, active_at=timezone.now(), generation=F('generation') + 1):
         raise InvoiceNinjaRefused('That send changed since the page was shown. Reload it and check again.')
     req.refresh_from_db()

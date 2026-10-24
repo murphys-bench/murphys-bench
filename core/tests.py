@@ -18006,6 +18006,13 @@ def _active(host, kind):
     return invoice_ninja.requests_for(host).filter(kind=kind, state__in=R.ACTIVE).first()
 
 
+def _shown(req):
+    """What the page's "I checked" form posts for `req`: its id and the
+    generation it is at now."""
+    req.refresh_from_db()
+    return {'request': req.pk, 'generation': req.generation}
+
+
 def _last(host, kind):
     from core import invoice_ninja
     return invoice_ninja.requests_for(host).filter(kind=kind).order_by('-pk').first()
@@ -18145,7 +18152,7 @@ def test_a_send_that_vanished_is_looked_for_and_never_resent_on_its_own(client, 
     assert fake.creates() == [] and _active(wo, 'invoice').state == 'unknown'
 
     client.force_login(admin_user)
-    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'clear-send']))
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'clear-send']), _shown(_active(wo, 'invoice')))
     invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
     assert len(fake.creates()) == 1
     assert fake.creates()[0][3][invoice_ninja.MB_KEY_FIELD] != 'mb-inv-work-x-1'
@@ -18288,7 +18295,7 @@ def test_recovered_invoice_whose_total_changed_is_held_not_paid(client, admin_us
     page = client.get(reverse('core:pos_wo_settle', args=[wo.pk]))
     assert b'Invoice Ninja and MB match' in page.content
 
-    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'resolve']), {'request': hold.pk})
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'resolve']), _shown(hold))
     hold.refresh_from_db()
     assert hold.state == 'cleared' and hold.resolved_by == admin_user
     assert invoice_ninja.blocking_request(wo) is None
@@ -18562,7 +18569,7 @@ def test_lost_client_create_without_email_holds_instead_of_guessing_by_name(clie
     client.force_login(admin_user)
     page = client.get(reverse('core:client_detail', args=[client_obj.pk]))
     assert b'Client may already exist in Invoice Ninja' in page.content
-    client.post(reverse('core:in_hold', args=['client', client_obj.pk, 'resolve']), {'request': hold.pk})
+    client.post(reverse('core:in_hold', args=['client', client_obj.pk, 'resolve']), _shown(hold))
     hold.refresh_from_db()
     assert hold.state == 'cleared' and hold.resolved_by == admin_user
 
@@ -18611,7 +18618,7 @@ def test_unconfirmed_charge_holds_until_someone_clears_it(client, admin_user, cl
     page = client.get(reverse('core:sale_detail', args=[sale.pk]))
     assert b'the charge did not go through' in page.content
 
-    client.post(reverse('core:in_hold', args=['sale', sale.pk, 'resolve']), {'request': hold.pk})
+    client.post(reverse('core:in_hold', args=['sale', sale.pk, 'resolve']), _shown(hold))
     hold.refresh_from_db()
     assert hold.state == 'cleared' and hold.resolved_by == admin_user
 
@@ -18635,7 +18642,7 @@ def test_clearing_a_charge_hold_needs_payment_permission(client, client_obj):
     sale = _pushed_recurring_sale(client_obj)
     hold = _in_request(sale, 'charge', 'held', reason='unconfirmed')
     client.force_login(user)
-    resp = client.post(reverse('core:in_hold', args=['sale', sale.pk, 'resolve']), {'request': hold.pk})
+    resp = client.post(reverse('core:in_hold', args=['sale', sale.pk, 'resolve']), _shown(hold))
     assert resp.status_code == 403
     hold.refresh_from_db()
     assert hold.state == 'held'
@@ -18695,14 +18702,14 @@ def test_clearing_a_lost_send_links_it_if_found_or_allows_sending_again(client, 
     fake = _FakeIN(invoice_ninja)
     monkeypatch.setattr(invoice_ninja, '_request', fake)
     client.force_login(admin_user)
-    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'clear-send']))
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'clear-send']), _shown(_active(wo, 'invoice')))
     req.refresh_from_db()
     assert req.state == 'sending'                       # too soon: still in flight
 
     type(req).objects.filter(pk=req.pk).update(active_at=timezone.now() - IN_FLIGHT_PAST)
     page = client.get(reverse('core:pos_wo_settle', args=[wo.pk]))
     assert b'the invoice is not there' in page.content
-    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'clear-send']))
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'clear-send']), _shown(_active(wo, 'invoice')))
     req.refresh_from_db()
     assert req.state == 'cleared' and req.resolved_by == admin_user
     assert 'is not there' in req.resolved_note and _active(wo, 'invoice') is None
@@ -18740,7 +18747,7 @@ def test_i_checked_button_finding_the_invoice_still_checks_its_total(client, adm
     _lose_invoice(wo, client_obj, fake, monkeypatch)
     wo.line_items.update(unit_price=Decimal('200'))
     client.force_login(admin_user)
-    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'clear-send']))
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'clear-send']), _shown(_active(wo, 'invoice')))
     wo.refresh_from_db()
     hold = _active(wo, 'invoice')
     assert wo.invoice_ninja_id == 'inv1' and hold.state == 'held'
@@ -18763,7 +18770,7 @@ def test_i_checked_button_finding_a_paid_sale_invoice_keeps_its_payment_owed(cli
     monkeypatch.setattr(invoice_ninja, '_request', fake)
     _lose_invoice(sale, client_obj, fake, monkeypatch)
     client.force_login(admin_user)
-    client.post(reverse('core:in_hold', args=['sale', sale.pk, 'clear-send']))
+    client.post(reverse('core:in_hold', args=['sale', sale.pk, 'clear-send']), _shown(_active(sale, 'invoice')))
     sale.refresh_from_db()
     assert sale.invoice_ninja_id == 'inv1' and sale.in_payment_pending
     client.post(reverse('core:sale_send_in', args=[sale.pk]))
@@ -18989,7 +18996,7 @@ def test_nothing_marks_a_held_work_order_paid(client, admin_user, client_obj):
         client.post(billing, {'billing_status': status, 'full_edit': '1', 'amount': '95'})
         assert billing_status() == 'uninvoiced'
     assert Invoice.objects.get(work_order=wo).reference != 'WHILE-HELD'
-    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'resolve']), {'request': hold.pk})
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'resolve']), _shown(hold))
     client.post(settle, {'action': 'pay', 'payment_method': 'cash', 'reference': 'AFTER'})
     assert WorkOrder.objects.get(pk=wo.pk).invoice.billing_status == 'paid'
 
@@ -19025,20 +19032,22 @@ def test_a_started_charge_blocks_a_register_payment_until_its_cooldown(client, a
 
 
 @pytest.mark.django_db
-def test_check_in_paid_closes_an_unanswered_payment_without_its_details(client_obj, monkeypatch):
+def test_check_in_paid_holds_an_unanswered_payment_instead_of_settling_it(client_obj, monkeypatch):
+    """R4-3: Paid does not show whose payment landed. An unanswered payment
+    on that invoice is held for a person, with none of its details recorded."""
     from core import invoice_ninja
     _enable_in()
     wo = _priced_wo(client_obj)
     WorkOrder.objects.filter(pk=wo.pk).update(invoice_ninja_id='inv1')
     wo.refresh_from_db()
     req = _in_request(wo, 'payment', 'unknown', base_invoice_id='inv1',
-                      payload={'amount': '95', 'method': 'cash', 'reference': 'X'})
+                      payload={'amount': '95', 'method': 'cash', 'method_label': 'Cash', 'reference': 'X'})
     monkeypatch.setattr(invoice_ninja, '_request', lambda *a, **k: {'data': {'status_id': '4'}})
     invoice_ninja.check_invoice_status(wo)
     req.refresh_from_db()
     inv = WorkOrder.objects.get(pk=wo.pk).invoice
-    assert req.state == 'cleared' and 'cannot tell' in req.resolved_note
-    assert inv.reference == '' and inv.payment_method in ('', None)
+    assert req.state == 'held' and 'cannot tell' in req.reason and req.resolved_by is None
+    assert inv.billing_status != 'paid' and inv.reference == '' and inv.payment_method in ('', None)
 
 
 @pytest.mark.django_db
@@ -19180,7 +19189,7 @@ def test_i_checked_with_a_failing_lookup_says_so_on_the_record(client, admin_use
         raise invoice_ninja.InvoiceNinjaError('Could not reach Invoice Ninja.')
     monkeypatch.setattr(invoice_ninja, '_request', down)
     client.force_login(admin_user)
-    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'clear-send']))
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'clear-send']), _shown(_active(wo, 'invoice')))
     req.refresh_from_db()
     assert req.state == 'cleared' and 'could not look for it itself' in req.resolved_note
 
@@ -19191,9 +19200,9 @@ def test_each_hold_keeps_its_own_resolution(client, admin_user, client_obj):
     wo = _priced_wo(client_obj)
     first = _in_request(wo, 'invoice', 'held', reason='first')
     client.force_login(admin_user)
-    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'resolve']), {'request': first.pk})
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'resolve']), _shown(first))
     second = _in_request(wo, 'invoice', 'held', reason='second')
-    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'resolve']), {'request': second.pk})
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'resolve']), _shown(second))
     first.refresh_from_db(); second.refresh_from_db()
     assert first.state == second.state == 'cleared'
     assert first.resolved_at < second.resolved_at
@@ -19583,6 +19592,129 @@ def test_a_lost_client_create_is_looked_for_by_the_email_it_sent_and_not_resent(
                 {'request': req.pk, 'generation': req.generation})
     assert invoice_ninja.find_or_create_client(client_obj) == 'cl-new'
     assert posts[1]['contacts'][0]['email'] == 'changed@acme.test'
+
+
+# Round 4 review (Oct 24 2026): R4-1 to R4-4. Each mirrors the outside
+# reviewer's probe (mb-docs review-artifacts/PR-112-round4-probes.py) and
+# asserts the safe outcome.
+
+@pytest.mark.django_db
+def test_an_old_not_there_form_cannot_clear_a_different_send(client, admin_user, client_obj, monkeypatch):
+    """R4-1: a person cleared send A; A's old form is posted again after send
+    B went unanswered. B is not cleared, and no third invoice goes."""
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _priced_wo(client_obj)
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    a = _in_request(wo, 'invoice', 'unknown', key='mb-a',
+                    payload={'invoice': {'client_id': 'cl1', 'line_items': [{'cost': 95.0, 'quantity': 1.0}]}})
+    old_form = _shown(a)
+    client.force_login(admin_user)
+    url = reverse('core:in_hold', args=['wo', wo.pk, 'clear-send'])
+    client.post(url, old_form)
+    a.refresh_from_db()
+    assert a.state == 'cleared'
+    _lose_invoice(wo, client_obj, fake, monkeypatch)                     # send B: lost and not found
+    b = _active(wo, 'invoice')
+    assert b.state == 'unknown' and b.generation == old_form['generation']
+    client.post(url, old_form)
+    b.refresh_from_db()
+    assert b.state == 'unknown'
+    # B's invoice did land: the next send finds and links it, and no third goes.
+    invoice_ninja.push_host_invoice(WorkOrder.objects.get(pk=wo.pk), po_number=wo.work_order_number, client=client_obj)
+    assert len(fake.creates()) == 1 and WorkOrder.objects.get(pk=wo.pk).invoice_ninja_id == 'inv1'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('generation', [None, 'not-a-number'])
+def test_a_clear_without_the_shown_generation_clears_nothing(client, admin_user, client_obj, generation):
+    """R4-1: a page from before generations existed, or a mangled one."""
+    wo = _priced_wo(client_obj)
+    req = _in_request(wo, 'payment', 'unknown', base_invoice_id='inv1', payload=_payment_payload(), generation=3)
+    client.force_login(admin_user)
+    data = {'request': req.pk}
+    if generation is not None:
+        data['generation'] = generation
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'resolve']), data)
+    req.refresh_from_db()
+    assert req.state == 'unknown'
+
+
+@pytest.mark.django_db
+def test_a_hold_that_lands_during_a_successful_payment_keeps_the_work_order_unpaid(client, admin_user, client_obj, monkeypatch):
+    """R4-2: the payment succeeds at Invoice Ninja, but a hold landed while it
+    was there. The payment stays recorded on its request; MB's record waits.
+    After the hold is cleared, Pay records it with its own details and sends
+    nothing new."""
+    from core import invoice_ninja
+    from core.models import Invoice
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _priced_wo(client_obj)
+    WorkOrder.objects.filter(pk=wo.pk).update(invoice_ninja_id='inv1')
+    fake = _FakeIN(invoice_ninja)
+    held = {}
+
+    def hold_during_payment(method, path, **kwargs):
+        if (method, path) == ('POST', '/payments') and not held:
+            held['req'] = _in_request(wo, 'invoice', 'held', reason='Recovered amount differs.')
+        return fake(method, path, **kwargs)
+    monkeypatch.setattr(invoice_ninja, '_request', hold_during_payment)
+    client.force_login(admin_user)
+    url = reverse('core:pos_wo_settle', args=[wo.pk])
+    resp = client.post(url, {'action': 'pay', 'payment_method': 'check', 'reference': 'CHK-1'}, follow=True)
+    inv = Invoice.objects.get(work_order=wo)
+    assert inv.billing_status != 'paid' and inv.in_status == 'Paid'
+    assert _last(wo, 'payment').state == 'done'
+    assert b'stays unpaid until the hold is cleared' in resp.content
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'resolve']), _shown(held['req']))
+    client.post(url, {'action': 'pay', 'payment_method': 'cash', 'reference': 'OTHER'})
+    inv = Invoice.objects.get(work_order=wo)
+    assert inv.billing_status == 'paid' and inv.payment_method == 'check' and inv.reference == 'CHK-1'
+    assert len(fake.payments()) == 1
+
+
+@pytest.mark.django_db
+def test_check_in_paid_leaves_a_held_payment_for_a_person(client, admin_user, client_obj, monkeypatch):
+    """R4-3: a payment held because Paid could not show whose payment it was
+    stays held through Check IN; the Register cannot mark the job paid."""
+    from core import invoice_ninja
+    from core.models import Invoice
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _priced_wo(client_obj)
+    WorkOrder.objects.filter(pk=wo.pk).update(invoice_ninja_id='inv1')
+    hold = _in_request(wo, 'payment', 'held', base_invoice_id='inv1', reason='Cannot tell whose payment.',
+                       payload=_payment_payload())
+    fake = _FakeIN(invoice_ninja); fake.paid.add('inv1')
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    client.force_login(admin_user)
+    client.post(reverse('core:wo_billing_check_in', args=[wo.pk]))
+    hold.refresh_from_db()
+    assert hold.state == 'held'
+    client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'pay', 'payment_method': 'cash'})
+    assert Invoice.objects.get(work_order=wo).billing_status != 'paid'
+
+
+@pytest.mark.django_db
+def test_a_recovered_invoice_that_does_not_name_its_client_is_held(client, admin_user, client_obj, monkeypatch):
+    """R4-4: equal totals, same client, but the found invoice carries no
+    client: identity is not established, so it is held and not charged."""
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _priced_wo(client_obj)
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    _lose_invoice(wo, client_obj, fake, monkeypatch)
+    fake.invoices[0].pop('client_id')
+    client.force_login(admin_user)
+    client.post(reverse('core:pos_wo_charge', args=[wo.pk]))
+    hold = _active(wo, 'invoice')
+    assert hold.state == 'held' and 'did not say which client' in hold.reason
+    assert not [c for c in fake.calls if c[:2] == ('POST', '/invoices/bulk')]
 
 
 # ── Email logo under Pillow 13 (PR #113 and #114 reviews, Oct 23 2026) ──
