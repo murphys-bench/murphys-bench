@@ -18829,6 +18829,7 @@ def test_a_second_payment_form_cannot_overlap_the_first(client, admin_user, clie
 
     def at_in(method, path, **kwargs):
         if (method, path) == ('POST', '/payments') and not seen:
+            seen['started'] = True
             seen['b'] = client.post(url, {'action': 'pay', 'payment_method': 'check', 'reference': 'B-FORM'}, follow=True)
         return fake(method, path, **kwargs)
     monkeypatch.setattr(invoice_ninja, '_request', at_in)
@@ -18958,18 +18959,26 @@ def test_nothing_marks_a_held_work_order_paid(client, admin_user, client_obj):
     wo = _priced_wo(client_obj)
     hold = _in_request(wo, 'charge', 'held', reason='Charge outcome is unknown.')
     site = SiteSettings.get(); site.invoice_ninja_enabled = False; site.save()
+    from core.models import Invoice
     client.force_login(admin_user)
+
+    def billing_status():
+        return Invoice.objects.get(work_order=wo).billing_status
+
     settle = reverse('core:pos_wo_settle', args=[wo.pk])
     client.post(settle, {'action': 'pay', 'payment_method': 'cash', 'reference': 'WHILE-HELD'})
+    assert billing_status() == 'uninvoiced'
     client.post(settle, {'action': 'no_charge'})
+    assert billing_status() == 'uninvoiced'
     billing = reverse('core:wo_billing_update', args=[wo.pk])
-    wo.invoice.amount = 95; wo.invoice.save()
+    Invoice.objects.filter(work_order=wo).update(amount=95)
     for status in ('paid', 'paid_direct'):
         resp = client.post(billing, {'billing_status': status})
         assert b'Charge outcome is unknown' in resp.content
+        assert billing_status() == 'uninvoiced'
         client.post(billing, {'billing_status': status, 'full_edit': '1', 'amount': '95'})
-    inv = WorkOrder.objects.get(pk=wo.pk).invoice
-    assert inv.billing_status not in ('paid', 'paid_direct') and inv.reference != 'WHILE-HELD'
+        assert billing_status() == 'uninvoiced'
+    assert Invoice.objects.get(work_order=wo).reference != 'WHILE-HELD'
     client.post(reverse('core:in_hold', args=['wo', wo.pk, 'resolve']), {'request': hold.pk})
     client.post(settle, {'action': 'pay', 'payment_method': 'cash', 'reference': 'AFTER'})
     assert WorkOrder.objects.get(pk=wo.pk).invoice.billing_status == 'paid'
