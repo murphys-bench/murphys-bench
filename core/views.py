@@ -2954,14 +2954,14 @@ class SaleChargeView(SaleAccessMixin, View):
             return redirect('core:sale_detail', pk=pk)
 
         recent = PaymentChargeAttempt.objects.filter(
-            sale=sale, result='success',
+            sale=sale, result__in=('success', 'unknown'),
             initiated_at__gte=timezone.now() - self._CHARGE_COOLDOWN,
         ).exists()
         if recent:
             messages.warning(
                 request,
-                f'{sale.sale_number} was charged moments ago. Use "Check IN" to confirm '
-                'it posted before charging again.'
+                f'{sale.sale_number} had a charge started moments ago. Use "Check IN" to '
+                'confirm it posted before charging again.'
             )
             return redirect('core:sale_detail', pk=pk)
 
@@ -2979,11 +2979,16 @@ class SaleChargeView(SaleAccessMixin, View):
                 'asynchronously, so use "Check IN" in a moment to confirm it posted.'
             )
         except invoice_ninja.InvoiceNinjaError as e:
+            unconfirmed = isinstance(e, invoice_ninja.InvoiceNinjaOutcomeUnknown)
             PaymentChargeAttempt.objects.create(
                 sale=sale, invoice_ninja_id=sale.invoice_ninja_id, amount=amount,
-                initiated_by=request.user, result='failed', error_message=str(e),
+                initiated_by=request.user, result='unknown' if unconfirmed else 'failed',
+                error_message=str(e),
             )
-            messages.error(request, f'Charging the card on file failed: {e}')
+            if unconfirmed:
+                messages.warning(request, f'Invoice Ninja did not confirm the charge: {e}')
+            else:
+                messages.error(request, f'Charging the card on file failed: {e}')
         return redirect('core:sale_detail', pk=pk)
 
 
@@ -3227,7 +3232,9 @@ class SaleSendINView(SaleAccessMixin, View):
             messages.error(request, 'Only a completed sale can be sent to Invoice Ninja.')
             return redirect('core:sale_detail', pk=pk)
         # Duplicate guard: already pushed and not an explicit confirmed re-send.
-        if sale.invoice_ninja_id and request.POST.get('confirm_resend') != '1':
+        # A push whose invoice landed but whose payment did not (in_status still
+        # blank) is not a re-send: push_sale finishes it on the same invoice.
+        if sale.invoice_ninja_id and sale.in_status and request.POST.get('confirm_resend') != '1':
             messages.warning(
                 request,
                 f'{sale.sale_number} was already sent to Invoice Ninja '
@@ -7088,14 +7095,14 @@ class POSWorkOrderChargeView(POSAccessMixin, View):
             return bail
 
         recent = PaymentChargeAttempt.objects.filter(
-            work_order=wo, result='success',
+            work_order=wo, result__in=('success', 'unknown'),
             initiated_at__gte=timezone.now() - self._CHARGE_COOLDOWN,
         ).exists()
         if recent:
             messages.warning(
                 request,
-                f'{wo.work_order_number} was charged moments ago. Use "Check IN" to confirm '
-                'it posted before charging again.'
+                f'{wo.work_order_number} had a charge started moments ago. Use "Check IN" to '
+                'confirm it posted before charging again.'
             )
             return redirect('core:pos_wo_settle', pk=pk)
 
@@ -7132,11 +7139,16 @@ class POSWorkOrderChargeView(POSAccessMixin, View):
                 'asynchronously, so use "Check IN" in a moment to confirm it posted.'
             )
         except invoice_ninja.InvoiceNinjaError as e:
+            unconfirmed = isinstance(e, invoice_ninja.InvoiceNinjaOutcomeUnknown)
             PaymentChargeAttempt.objects.create(
                 work_order=wo, invoice_ninja_id=wo.invoice_ninja_id, amount=amount,
-                initiated_by=request.user, result='failed', error_message=str(e),
+                initiated_by=request.user, result='unknown' if unconfirmed else 'failed',
+                error_message=str(e),
             )
-            messages.error(request, f'Charging the card on file failed: {e}')
+            if unconfirmed:
+                messages.warning(request, f'Invoice Ninja did not confirm the charge: {e}')
+            else:
+                messages.error(request, f'Charging the card on file failed: {e}')
         return redirect('core:pos_wo_settle', pk=pk)
 
 

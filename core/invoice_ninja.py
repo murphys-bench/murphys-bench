@@ -10,18 +10,40 @@ Everything here fails LOUD: a problem raises InvoiceNinjaError with a readable
 message that the (user-triggered) view surfaces, rather than silently swallowing.
 """
 import logging
+import secrets
+from datetime import timedelta
 
 import requests
+from urllib3.exceptions import NewConnectionError
 
 logger = logging.getLogger('core')
 
 # IN v5 REST API. Token auth via header; XMLHttpRequest header required by IN.
 API_PREFIX = '/api/v1'
-TIMEOUT = 20
+# (connect, read) seconds. Connecting is fast or hopeless; IN answers in well
+# under a second when healthy (tested Oct 2 2026: 25-180 ms), so a page never
+# needs to hang 20 seconds waiting on an IN that is down.
+TIMEOUT = (5, 15)
+
+# The invoice custom field MB writes its own reference into, so an invoice whose
+# answer was lost can be found again before anything is resent. IN ignores
+# idempotency keys on invoices (tested Oct 2 2026), so this is MB's only reliable
+# handle. SCS confirmed custom field 4 is unused (Oct 23 2026).
+MB_KEY_FIELD = 'custom_value4'
+
+# How long a send that has not finished counts as still in progress. A second
+# click inside this window is refused instead of racing the first.
+IN_FLIGHT = timedelta(seconds=30)
 
 
 class InvoiceNinjaError(Exception):
     """Any failure talking to Invoice Ninja. Carries a user-readable message."""
+
+
+class InvoiceNinjaOutcomeUnknown(InvoiceNinjaError):
+    """The request may have reached IN, but no answer came back, so whether IN
+    acted on it is unknown. Callers that create things must look before they
+    send again; never read this as "nothing happened"."""
 
 
 def _config():
@@ -44,31 +66,114 @@ def _headers(token):
     }
 
 
+def _never_connected(exc):
+    """True when a requests ConnectionError happened before anything was sent
+    (refused, no route, bad name, TLS handshake). Anything else, such as the
+    connection dropping while waiting for the answer, may have been acted on."""
+    if isinstance(exc, requests.exceptions.SSLError):
+        return True
+    reason = getattr(exc.args[0], 'reason', None) if exc.args else None
+    return isinstance(reason, NewConnectionError)
+
+
+def _in_message(resp):
+    """IN's own error text from a JSON error body, or '' when the body is not
+    IN's JSON (a proxy's HTML error page, say)."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return ''
+    if not isinstance(body, dict):
+        return ''
+    msg = str(body.get('message') or '')
+    errors = body.get('errors')
+    if isinstance(errors, dict):
+        # A 422's useful part is the first field error, not "The given data was invalid."
+        for field_errors in errors.values():
+            first = field_errors[0] if isinstance(field_errors, list) and field_errors else field_errors
+            if first:
+                return f'{msg} {first}'.strip()
+    return msg
+
+
+def _http_error(resp):
+    """Turn an IN error response into the exception the user should see."""
+    code = resp.status_code
+    msg = _in_message(resp)
+    if code in (401, 403):
+        # IN answers a wrong, deleted or archived token with 403 "Invalid token"
+        # (tested Oct 2 2026), not 401.
+        return InvoiceNinjaError(
+            f'Invoice Ninja refused the API token ({code}{": " + msg if msg else ""}). '
+            'Check the token in Settings: it may be mistyped, deleted or archived in '
+            'Invoice Ninja, or its user may not have permission.'
+        )
+    if code == 429:
+        if 'duplicate' in msg.lower():
+            # IN's one-second guard: an identical request arrived just before this
+            # one. That earlier request may have done the work.
+            return InvoiceNinjaOutcomeUnknown(
+                'Invoice Ninja is still handling the same request sent a moment ago.'
+            )
+        # IN sends no "try again in" time with this (tested Oct 2 2026); a
+        # minute cleared it.
+        return InvoiceNinjaError(
+            'Invoice Ninja is limiting requests right now (too many in a short time). '
+            'Wait a minute and try again.'
+        )
+    if not msg:
+        logger.warning('Invoice Ninja error page %s: %s', code, resp.text[:300])
+        text = (
+            f'Invoice Ninja returned an error page ({code}). It may be down, restarting '
+            'or overloaded; try again shortly.'
+        )
+        # A gateway error means the proxy gave up waiting, not that IN refused:
+        # IN may still have done the work.
+        if code in (502, 504):
+            return InvoiceNinjaOutcomeUnknown(text)
+        return InvoiceNinjaError(text)
+    return InvoiceNinjaError(f'Invoice Ninja returned {code}: {msg}')
+
+
 def _request(method, path, *, params=None, json=None):
-    """Make an IN API call. Raises InvoiceNinjaError on any transport/HTTP error."""
+    """Make an IN API call. Raises InvoiceNinjaError on any transport/HTTP error,
+    and its subclass InvoiceNinjaOutcomeUnknown when the request may have been
+    acted on without MB hearing back."""
     base, token = _config()
     url = f'{base}{API_PREFIX}{path}'
     try:
         resp = requests.request(
             method, url, headers=_headers(token), params=params, json=json, timeout=TIMEOUT,
         )
+    except requests.ConnectTimeout as e:
+        logger.warning('Invoice Ninja request failed: %s %s — %s', method, path, e)
+        raise InvoiceNinjaError(
+            f'Could not reach Invoice Ninja (no connection within {TIMEOUT[0]} seconds). '
+            'Check the URL in Settings and that Invoice Ninja is running.'
+        )
+    except requests.ConnectionError as e:
+        logger.warning('Invoice Ninja request failed: %s %s — %s', method, path, e)
+        if _never_connected(e):
+            raise InvoiceNinjaError(
+                'Could not reach Invoice Ninja. Check the URL in Settings and that '
+                'Invoice Ninja is running.'
+            )
+        raise InvoiceNinjaOutcomeUnknown('The connection to Invoice Ninja dropped before it answered.')
+    except requests.Timeout as e:
+        logger.warning('Invoice Ninja request failed: %s %s — %s', method, path, e)
+        raise InvoiceNinjaOutcomeUnknown(f'Invoice Ninja did not answer within {TIMEOUT[1]} seconds.')
     except requests.RequestException as e:
         logger.warning('Invoice Ninja request failed: %s %s — %s', method, path, e)
         raise InvoiceNinjaError(f'Could not reach Invoice Ninja: {e}')
-    if resp.status_code == 401:
-        raise InvoiceNinjaError('Invoice Ninja rejected the API token (401). Check the token in Settings.')
     if resp.status_code >= 400:
-        # Surface IN's message if present; otherwise the status.
-        detail = ''
-        try:
-            detail = resp.json().get('message', '')
-        except ValueError:
-            detail = resp.text[:200]
-        raise InvoiceNinjaError(f'Invoice Ninja returned {resp.status_code}: {detail or "error"}')
+        raise _http_error(resp)
     try:
         return resp.json()
     except ValueError:
-        raise InvoiceNinjaError('Invoice Ninja returned a non-JSON response.')
+        raise InvoiceNinjaError(
+            'Invoice Ninja answered with a web page instead of API data. Check the URL '
+            'in Settings: it should be the API address (Cloud: https://invoicing.co).'
+        )
 
 
 def test_connection():
@@ -76,6 +181,147 @@ def test_connection():
     Returns a short success string or raises InvoiceNinjaError."""
     _request('GET', '/clients', params={'per_page': 1})
     return 'Connected to Invoice Ninja successfully.'
+
+
+# ---------------------------------------------------------------------------
+# Creating things in IN at most once. A lost answer (tested Oct 2 2026) leaves
+# MB not knowing whether IN created the record, and a plain retry then makes a
+# second one. Every create below records what it is about to send, sends it, and
+# when the answer is lost, looks for the record before anyone can send again.
+# ---------------------------------------------------------------------------
+
+_IN_PROGRESS_MSG = 'This is already being sent to Invoice Ninja. Wait a few seconds and try again.'
+
+
+def _find_invoice_by_key(key):
+    """The IN invoice carrying MB's reference `key`, or None. Deleted invoices
+    don't count. Each row's field is checked too, so an IN that ignored the
+    filter could not hand back somebody else's invoice."""
+    data = _request('GET', '/invoices', params={
+        MB_KEY_FIELD: key, 'status': 'active,archived', 'per_page': 5,
+    })
+    for row in (data.get('data') or []):
+        if str(row.get(MB_KEY_FIELD) or '') == key and not row.get('is_deleted'):
+            return row
+    return None
+
+
+def _store_pushed_invoice(host, invoice):
+    """Record IN's invoice on the host and release its pending send, in one
+    write, so the host is never left both pushed and pending."""
+    host.invoice_ninja_id = str(invoice['id'])
+    host.invoice_ninja_ref = str(invoice.get('number') or '')
+    host.in_push_key = ''
+    host.in_push_started_at = None
+    host.save(update_fields=['invoice_ninja_id', 'invoice_ninja_ref', 'in_push_key', 'in_push_started_at'])
+
+
+def _release_push(host):
+    type(host).objects.filter(pk=host.pk).update(in_push_key='', in_push_started_at=None)
+    host.in_push_key = ''
+    host.in_push_started_at = None
+
+
+def _claim_push(host):
+    """Mark `host` as being sent and return the reference key to send with.
+    The claim is a conditional UPDATE, so of two clicks at once only one wins
+    (SQLite serializes the writes); the other is told to wait. Returns
+    (key, existing_invoice): when an earlier send whose answer was lost turns
+    out to have landed, existing_invoice is that invoice and nothing is sent."""
+    from django.utils import timezone
+    model = type(host)
+    now = timezone.now()
+    host.refresh_from_db(fields=['in_push_key', 'in_push_started_at'])
+    key = host.in_push_key
+    if not key:
+        key = f'mb-{model._meta.model_name}-{host.pk}-{secrets.token_hex(4)}'
+        if not model.objects.filter(pk=host.pk, in_push_key='').update(in_push_key=key, in_push_started_at=now):
+            raise InvoiceNinjaError(_IN_PROGRESS_MSG)
+    else:
+        found = _find_invoice_by_key(key)
+        if found:
+            return key, found
+        started = host.in_push_started_at
+        if started and now - started < IN_FLIGHT:
+            raise InvoiceNinjaError(_IN_PROGRESS_MSG)
+        # The earlier send never landed. Take it over, keeping its key so a late
+        # arrival would still be recognized.
+        if not model.objects.filter(pk=host.pk, in_push_key=key, in_push_started_at=started).update(in_push_started_at=now):
+            raise InvoiceNinjaError(_IN_PROGRESS_MSG)
+    host.in_push_key = key
+    host.in_push_started_at = now
+    return key, None
+
+
+def _create_invoice(host, payload):
+    """POST `payload` as a new IN invoice for `host` (a WorkOrder or Sale) at
+    most once, store IN's id and number on the host, and return IN's invoice.
+
+    IN ignores idempotency keys on invoices, so MB writes its own key into the
+    invoice (MB_KEY_FIELD) and keeps it on the host until IN's answer is in.
+    """
+    key, existing = _claim_push(host)
+    if existing:
+        _store_pushed_invoice(host, existing)
+        return existing
+    try:
+        data = _request('POST', '/invoices', json={**payload, MB_KEY_FIELD: key})
+    except InvoiceNinjaOutcomeUnknown as e:
+        try:
+            found = _find_invoice_by_key(key)
+        except InvoiceNinjaError:
+            found = None
+        if found:
+            _store_pushed_invoice(host, found)
+            return found
+        # Keep the key: the next attempt looks for this invoice before sending.
+        raise InvoiceNinjaOutcomeUnknown(
+            f'{e} It may or may not have created the invoice. MB will look for it '
+            'before sending again, so it is safe to try again in a minute.'
+        )
+    except InvoiceNinjaError:
+        # IN answered with a refusal, or was never reached: nothing was created.
+        _release_push(host)
+        raise
+    invoice = data['data']
+    _store_pushed_invoice(host, invoice)
+    return invoice
+
+
+def _invoice_label(invoice_id):
+    data = _request('GET', f'/invoices/{invoice_id}')
+    return status_label((data.get('data') or {}).get('status_id'))
+
+
+def _create_payment(payload, *, key):
+    """POST a payment once. IN honours idempotency_key on payments (tested
+    Oct 2 2026), and `key` is derived from the invoice, so a retry
+    after a lost answer is refused by IN rather than recorded twice. A refusal
+    on a retry (key already used, or the invoice already paid) is settled by
+    asking IN whether the invoice is now Paid."""
+    invoice_id = payload['invoices'][0]['invoice_id']
+    try:
+        _request('POST', '/payments', json={**payload, 'idempotency_key': key})
+        return
+    except InvoiceNinjaError as e:
+        try:
+            paid = _invoice_label(invoice_id) == 'Paid'
+        except InvoiceNinjaError:
+            paid = False
+        if paid:
+            logger.info('Invoice Ninja payment %s: invoice %s already Paid (%s)', key, invoice_id, e)
+            return
+        if isinstance(e, InvoiceNinjaOutcomeUnknown):
+            raise InvoiceNinjaOutcomeUnknown(
+                f'{e} The payment may or may not have been recorded. Trying again is '
+                'safe: Invoice Ninja refuses the same payment twice.'
+            )
+        raise
+
+
+def _payment_key(invoice_id):
+    # MB pays an IN invoice in full, once, so the invoice id is the payment's identity.
+    return f'mb-pay-{invoice_id}'
 
 
 def in_client_name(client):
@@ -128,6 +374,7 @@ def find_or_create_client(client):
     Link once, don't sync: if we already stored an IN id, use it. Else match by
     the primary contact's email; else create. Saves the id back on the MB Client.
     """
+    from django.utils import timezone
     if client.invoice_ninja_id:
         return client.invoice_ninja_id
 
@@ -142,11 +389,47 @@ def find_or_create_client(client):
             client.save(update_fields=['invoice_ninja_id'])
             return in_id
 
-    data = _request('POST', '/clients', json=_client_payload(client))
-    in_id = str(data['data']['id'])
+    payload = _client_payload(client)
+    started = timezone.now()
+    try:
+        data = _request('POST', '/clients', json=payload)
+        in_id = str(data['data']['id'])
+    except InvoiceNinjaOutcomeUnknown as e:
+        try:
+            in_id = _find_new_client(email, payload['name'], started)
+        except InvoiceNinjaError:
+            in_id = None
+        if not in_id:
+            if email:
+                raise InvoiceNinjaOutcomeUnknown(
+                    f'{e} It may or may not have created the client. MB looks for the '
+                    'client by email first, so it is safe to try again in a minute.'
+                )
+            raise InvoiceNinjaOutcomeUnknown(
+                f'{e} It may or may not have created the client "{payload["name"]}". '
+                'This client has no email for MB to find it by, so check the Invoice '
+                'Ninja client list before trying again, or a second copy could be made.'
+            )
     client.invoice_ninja_id = in_id
     client.save(update_fields=['invoice_ninja_id'])
     return in_id
+
+
+def _find_new_client(email, name, since):
+    """After a lost answer on a client create: the IN client it made, or None.
+    By email when there is one (the same lookup the next attempt makes anyway);
+    otherwise by exact name, and only among clients IN created since the attempt
+    began (a minute's grace for clock drift), so an older client of the same
+    name is never adopted."""
+    if email:
+        rows = _request('GET', '/clients', params={'email': email}).get('data') or []
+        return str(rows[0]['id']) if rows else None
+    rows = _request('GET', '/clients', params={'filter': name}).get('data') or []
+    floor = since.timestamp() - 60
+    for row in rows:
+        if (row.get('name') or '').strip() == name and (row.get('created_at') or 0) >= floor:
+            return str(row['id'])
+    return None
 
 
 def _line_items_payload(host):
@@ -213,7 +496,9 @@ def push_work_order(work_order):
     IN assigns the invoice number (we omit it) and owns assembly. We stamp the
     WO number into po_number for traceability and store the returned IN invoice
     id + number on the WO. Raises InvoiceNinjaError (fail loud) on any problem;
-    on failure nothing is saved on the WO, so the button stays a clean 'Send'.
+    on a refusal nothing is saved on the WO, so the button stays a clean 'Send'.
+    When IN's answer is lost, the WO keeps a pending key and the next attempt
+    finds the invoice instead of creating a second one.
     """
     line_items = _line_items_payload(work_order)
     if not line_items:
@@ -233,11 +518,7 @@ def push_work_order(work_order):
         # No 'number' → IN auto-assigns from its own sequence (no POS collision).
         # No email action → created as a draft for the human to assemble in IN.
     }
-    data = _request('POST', '/invoices', json=payload)
-    invoice = data['data']
-    work_order.invoice_ninja_id = str(invoice['id'])
-    work_order.invoice_ninja_ref = str(invoice.get('number') or '')
-    work_order.save(update_fields=['invoice_ninja_id', 'invoice_ninja_ref'])
+    _create_invoice(work_order, payload)
     return work_order.invoice_ninja_ref or work_order.invoice_ninja_id
 
 
@@ -274,7 +555,14 @@ def find_or_create_walkin_client():
             s.save(update_fields=['invoice_ninja_walkin_client_id'])
             return in_id
 
-    data = _request('POST', '/clients', json={'name': WALKIN_CLIENT_NAME})
+    try:
+        data = _request('POST', '/clients', json={'name': WALKIN_CLIENT_NAME})
+    except InvoiceNinjaOutcomeUnknown as e:
+        # The name lookup above finds it next time, so a retry cannot duplicate it.
+        raise InvoiceNinjaOutcomeUnknown(
+            f'{e} It may or may not have created the Walk-In client. MB looks for '
+            'it by name first, so it is safe to try again in a minute.'
+        )
     in_id = str(data['data']['id'])
     s.invoice_ninja_walkin_client_id = in_id
     s.save(update_fields=['invoice_ninja_walkin_client_id'])
@@ -313,23 +601,23 @@ def push_sale(sale, draft=False):
     else:
         in_client_id = find_or_create_walkin_client()
 
-    invoice_data = _request('POST', '/invoices', json={
-        'client_id': in_client_id,
-        'po_number': sale.sale_number,  # SALE# for bank→IN→MB traceability
-        'line_items': line_items,
-    })
-    invoice = invoice_data['data']
-    invoice_id = str(invoice['id'])
-    sale.invoice_ninja_id = invoice_id
-    sale.invoice_ninja_ref = str(invoice.get('number') or '')
+    # A paid send whose invoice landed but whose payment did not (in_status is
+    # only set once the whole send finished) resumes with the payment instead
+    # of making a second invoice.
+    resume = not draft and bool(sale.invoice_ninja_id) and not sale.in_status
+    if not resume:
+        _create_invoice(sale, {
+            'client_id': in_client_id,
+            'po_number': sale.sale_number,  # SALE# for bank→IN→MB traceability
+            'line_items': line_items,
+        })
+    invoice_id = sale.invoice_ninja_id
 
     if draft:
         # No payment posted — the invoice stays an unpaid Draft in IN.
         sale.in_status = 'Draft'
         sale.in_status_checked_at = timezone.now()
-        sale.save(update_fields=[
-            'invoice_ninja_id', 'invoice_ninja_ref', 'in_status', 'in_status_checked_at',
-        ])
+        sale.save(update_fields=['in_status', 'in_status_checked_at'])
         return sale.invoice_ninja_ref or sale.invoice_ninja_id
 
     # Post the payment → IN marks the invoice Paid (not Draft).
@@ -345,13 +633,18 @@ def push_sale(sale, draft=False):
     type_id = _IN_PAYMENT_TYPE_IDS.get(sale.payment_method)
     if type_id is not None:
         payment_payload['type_id'] = type_id
-    _request('POST', '/payments', json=payment_payload)
+    try:
+        _create_payment(payment_payload, key=_payment_key(invoice_id))
+    except InvoiceNinjaError as e:
+        raise type(e)(
+            f'Invoice #{sale.invoice_ninja_ref or invoice_id} is in Invoice Ninja, but '
+            f'its payment was not confirmed: {e} Retrying adds the payment to that '
+            'same invoice.'
+        )
 
     sale.in_status = 'Paid'
     sale.in_status_checked_at = timezone.now()
-    sale.save(update_fields=[
-        'invoice_ninja_id', 'invoice_ninja_ref', 'in_status', 'in_status_checked_at',
-    ])
+    sale.save(update_fields=['in_status', 'in_status_checked_at'])
     return sale.invoice_ninja_ref or sale.invoice_ninja_id
 
 
@@ -464,7 +757,13 @@ def charge_on_file(host):
     if current.strip().lower() == 'paid':
         raise InvoiceNinjaError(f'This {noun} is already marked Paid in Invoice Ninja — refusing to charge again.')
 
-    _request('POST', '/invoices/bulk', json={'action': 'auto_bill', 'ids': [in_id]})
+    try:
+        _request('POST', '/invoices/bulk', json={'action': 'auto_bill', 'ids': [in_id]})
+    except InvoiceNinjaOutcomeUnknown as e:
+        raise InvoiceNinjaOutcomeUnknown(
+            f'{e} The charge may have started. Use "Check IN" in a minute to see '
+            'whether it went through before charging again.'
+        )
 
     # Best-effort immediate read-back — the async job may not have run yet, so
     # this often still reports the pre-charge status. That's expected; the
@@ -498,8 +797,9 @@ def charge_sale_on_file(sale):
 
 def push_host_invoice(host, *, po_number, client=None, is_walkin=False):
     """Create a DRAFT invoice in IN from any host exposing a `line_items`
-    GenericRelation (WorkOrder or Sale). Does not mutate host — returns
-    (invoice_id, invoice_ref, in_client_id) for the caller to store.
+    GenericRelation (WorkOrder or Sale). Stores IN's id and number on the host
+    (the create-once guard needs them there) and returns
+    (invoice_id, invoice_ref, in_client_id).
 
     Raises InvoiceNinjaError if there are no priced lines or on any API failure.
     """
@@ -509,12 +809,11 @@ def push_host_invoice(host, *, po_number, client=None, is_walkin=False):
             'This has no priced line items to send. Add a price to at least one line first.'
         )
     in_client_id = find_or_create_walkin_client() if is_walkin else find_or_create_client(client)
-    data = _request('POST', '/invoices', json={
+    invoice = _create_invoice(host, {
         'client_id': in_client_id,
         'po_number': po_number,
         'line_items': line_items,
     })
-    invoice = data['data']
     return str(invoice['id']), str(invoice.get('number') or ''), in_client_id
 
 
@@ -534,4 +833,4 @@ def post_payment(invoice_id, in_client_id, *, amount, method_label, reference=''
         'private_notes': method_label or '',
         'date': timezone.localdate().isoformat(),
     }
-    _request('POST', '/payments', json=payload)
+    _create_payment(payload, key=_payment_key(invoice_id))

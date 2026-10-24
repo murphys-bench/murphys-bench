@@ -6178,8 +6178,10 @@ def test_push_sale_blocks_when_no_priced_lines(client_obj):
 def test_sale_send_in_duplicate_guard(client, admin_user, client_obj, monkeypatch):
     from core import invoice_ninja
     _enable_in()
+    # A finished send: pushed AND its status recorded. (A pushed sale with no
+    # status is a stranded payment, which retries without a confirm.)
     sale = Sale.objects.create(client=client_obj, status='completed',
-                               invoice_ninja_id='123', invoice_ninja_ref='INV-1')
+                               invoice_ninja_id='123', invoice_ninja_ref='INV-1', in_status='Paid')
     calls = []
     monkeypatch.setattr(invoice_ninja, 'push_sale', lambda s: calls.append(s))
     client.force_login(admin_user)
@@ -17723,3 +17725,456 @@ def test_a_filter_does_not_excuse_printing_a_record(db):
     """Only a list prints something real through a filter; a record does not."""
     from core.email_utils import unavailable_variables
     assert unavailable_variables('{{ client|upper }}{{ prior_replies|length }}') == ['client']
+
+
+# ── Invoice Ninja: lost answers, double clicks and clear errors (Oct 2026) ──
+# The Oct 2 2026 IN connection test (mb-docs in-connection-test/RESULTS.md)
+# showed IN creates an invoice even when its answer is lost, ignores
+# idempotency keys on invoices, honours them on payments, answers a bad token
+# with 403, and sits behind proxies that return HTML error pages.
+
+class _Resp:
+    def __init__(self, status, body=None, text=None):
+        self.status_code = status
+        self._body = body
+        self.text = text if text is not None else json.dumps(body)
+
+    def json(self):
+        if self._body is None:
+            raise ValueError('not json')
+        return self._body
+
+
+def _raw_in(monkeypatch, outcome):
+    """Make requests.request return `outcome` (a _Resp) or raise it."""
+    from core import invoice_ninja
+
+    def fake(*a, **k):
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+    monkeypatch.setattr(invoice_ninja.requests, 'request', fake)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('status', [401, 403])
+def test_in_bad_token_gets_the_token_message(monkeypatch, status):
+    from core import invoice_ninja
+    _enable_in()
+    _raw_in(monkeypatch, _Resp(status, {'message': 'Invalid token'}))
+    with pytest.raises(invoice_ninja.InvoiceNinjaError) as exc:
+        invoice_ninja.test_connection()
+    assert 'refused the API token' in str(exc.value)
+    assert 'Invalid token' in str(exc.value)
+    assert not isinstance(exc.value, invoice_ninja.InvoiceNinjaOutcomeUnknown)
+
+
+@pytest.mark.django_db
+def test_in_429_duplicate_is_outcome_unknown_and_rate_limit_says_wait(monkeypatch):
+    from core import invoice_ninja
+    _enable_in()
+    _raw_in(monkeypatch, _Resp(429, {'message': 'Duplicate request'}))
+    with pytest.raises(invoice_ninja.InvoiceNinjaOutcomeUnknown):
+        invoice_ninja.test_connection()
+    _raw_in(monkeypatch, _Resp(429, {'message': 'Too many requests'}))
+    with pytest.raises(invoice_ninja.InvoiceNinjaError) as exc:
+        invoice_ninja.test_connection()
+    assert not isinstance(exc.value, invoice_ninja.InvoiceNinjaOutcomeUnknown)
+    assert 'Wait a minute' in str(exc.value)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('status,unknown', [(500, False), (502, True), (503, False), (504, True)])
+def test_in_html_error_page_never_reaches_the_user(monkeypatch, status, unknown):
+    from core import invoice_ninja
+    _enable_in()
+    _raw_in(monkeypatch, _Resp(status, None, text='<html><body><h1>Bad Gateway</h1></body></html>'))
+    with pytest.raises(invoice_ninja.InvoiceNinjaError) as exc:
+        invoice_ninja.test_connection()
+    assert '<' not in str(exc.value)
+    assert f'error page ({status})' in str(exc.value)
+    assert isinstance(exc.value, invoice_ninja.InvoiceNinjaOutcomeUnknown) is unknown
+
+
+@pytest.mark.django_db
+def test_in_422_shows_the_field_error(monkeypatch):
+    from core import invoice_ninja
+    _enable_in()
+    _raw_in(monkeypatch, _Resp(422, {'message': 'The given data was invalid.',
+                                     'errors': {'invoices': ['One or more of these invoices have been paid']}}))
+    with pytest.raises(invoice_ninja.InvoiceNinjaError) as exc:
+        invoice_ninja.test_connection()
+    assert 'have been paid' in str(exc.value)
+
+
+@pytest.mark.django_db
+def test_in_transport_failures_split_never_sent_from_maybe_sent(monkeypatch):
+    import requests
+    from urllib3.exceptions import MaxRetryError, NewConnectionError, ProtocolError
+    from core import invoice_ninja
+    _enable_in()
+    never = [
+        requests.ConnectTimeout('connect timed out'),
+        requests.ConnectionError(MaxRetryError(None, '/', NewConnectionError(None, 'refused'))),
+        requests.exceptions.SSLError('handshake failed'),
+    ]
+    maybe = [
+        requests.ReadTimeout('read timed out'),
+        requests.ConnectionError(ProtocolError('Connection aborted.', ConnectionResetError())),
+    ]
+    for e in never:
+        _raw_in(monkeypatch, e)
+        with pytest.raises(invoice_ninja.InvoiceNinjaError) as exc:
+            invoice_ninja.test_connection()
+        assert not isinstance(exc.value, invoice_ninja.InvoiceNinjaOutcomeUnknown), e
+    for e in maybe:
+        _raw_in(monkeypatch, e)
+        with pytest.raises(invoice_ninja.InvoiceNinjaOutcomeUnknown):
+            invoice_ninja.test_connection()
+
+
+@pytest.mark.django_db
+def test_in_web_page_instead_of_api_points_at_the_url(monkeypatch):
+    from core import invoice_ninja
+    _enable_in()
+    _raw_in(monkeypatch, _Resp(200, None, text='<html>Invoice Ninja login</html>'))
+    with pytest.raises(invoice_ninja.InvoiceNinjaError) as exc:
+        invoice_ninja.test_connection()
+    assert 'Check the URL' in str(exc.value)
+
+
+def test_in_requests_never_wait_twenty_seconds():
+    from core import invoice_ninja
+    assert invoice_ninja.TIMEOUT == (5, 15)
+
+
+class _FakeIN:
+    """Stands in for invoice_ninja._request. Keeps the invoices IN 'has', and
+    lets a test lose the answer to the next N invoice creates."""
+
+    def __init__(self, invoice_ninja):
+        self.inj = invoice_ninja
+        self.invoices = []
+        self.calls = []
+        self.lose_creates = 0
+        self.refuse_creates = None
+        self.payment_outcomes = []
+        self.paid = set()
+
+    def __call__(self, method, path, *, params=None, json=None):
+        self.calls.append((method, path, params, json))
+        if method == 'POST' and path == '/invoices':
+            if self.refuse_creates:
+                raise self.inj.InvoiceNinjaError(self.refuse_creates)
+            n = len(self.invoices) + 1
+            inv = {'id': f'inv{n}', 'number': f'000{n}', **json}
+            self.invoices.append(inv)
+            if self.lose_creates:
+                self.lose_creates -= 1
+                raise self.inj.InvoiceNinjaOutcomeUnknown('Invoice Ninja did not answer within 15 seconds.')
+            return {'data': inv}
+        if method == 'GET' and path == '/invoices':
+            key = (params or {}).get(self.inj.MB_KEY_FIELD)
+            return {'data': [i for i in self.invoices if i.get(self.inj.MB_KEY_FIELD) == key]}
+        if method == 'GET' and path.startswith('/invoices/'):
+            iid = path.rsplit('/', 1)[1]
+            return {'data': {'id': iid, 'status_id': '4' if iid in self.paid else '1'}}
+        if method == 'POST' and path == '/payments':
+            outcome = self.payment_outcomes.pop(0) if self.payment_outcomes else 'ok'
+            if outcome == 'lost':
+                self.paid.add(json['invoices'][0]['invoice_id'])
+                raise self.inj.InvoiceNinjaOutcomeUnknown('Invoice Ninja did not answer within 15 seconds.')
+            if isinstance(outcome, Exception):
+                raise outcome
+            self.paid.add(json['invoices'][0]['invoice_id'])
+            return {'data': {'id': 'pay1'}}
+        if path == '/clients':
+            return {'data': {'id': 'cl1'}} if method == 'POST' else {'data': []}
+        raise AssertionError(f'unexpected IN call {method} {path}')
+
+    def creates(self):
+        return [c for c in self.calls if c[:2] == ('POST', '/invoices')]
+
+
+def _priced_wo(client_obj):
+    from decimal import Decimal
+    from core.models import LineItem
+    wo = WorkOrder.objects.create(client=client_obj, reported_problem='x')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Labor',
+                            quantity=1, unit_price=Decimal('95.00'))
+    return wo
+
+
+@pytest.mark.django_db
+def test_invoice_carries_mb_key_and_releases_it_on_success(client_obj, monkeypatch):
+    from core import invoice_ninja
+    _enable_in()
+    client_obj.invoice_ninja_id = 'cl1'; client_obj.save()
+    wo = _priced_wo(client_obj)
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
+    sent = fake.creates()[0][3]
+    assert sent[invoice_ninja.MB_KEY_FIELD].startswith(f'mb-workorder-{wo.pk}-')
+    wo.refresh_from_db()
+    assert wo.invoice_ninja_id == 'inv1' and wo.invoice_ninja_ref == '0001'
+    assert wo.in_push_key == '' and wo.in_push_started_at is None
+
+
+@pytest.mark.django_db
+def test_lost_answer_finds_the_invoice_instead_of_reporting_failure(client_obj, monkeypatch):
+    """IN created it but the answer was lost: MB finds it by its key right away."""
+    from core import invoice_ninja
+    _enable_in()
+    client_obj.invoice_ninja_id = 'cl1'; client_obj.save()
+    wo = _priced_wo(client_obj)
+    fake = _FakeIN(invoice_ninja)
+    fake.lose_creates = 1
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    in_id, ref, _ = invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
+    assert (in_id, ref) == ('inv1', '0001')
+    assert len(fake.creates()) == 1
+    wo.refresh_from_db()
+    assert wo.invoice_ninja_id == 'inv1' and wo.in_push_key == ''
+
+
+@pytest.mark.django_db
+def test_lost_answer_not_found_yet_never_creates_a_second_invoice(client_obj, monkeypatch):
+    """IN created it but MB can't see it yet (or the lookup failed): MB keeps
+    its key, and the next try adopts the invoice instead of making another."""
+    from core import invoice_ninja
+    _enable_in()
+    client_obj.invoice_ninja_id = 'cl1'; client_obj.save()
+    wo = _priced_wo(client_obj)
+    fake = _FakeIN(invoice_ninja)
+    fake.lose_creates = 1
+    real_find = invoice_ninja._find_invoice_by_key
+    misses = {'n': 1}
+
+    def slow_find(key):
+        if misses['n']:
+            misses['n'] -= 1
+            return None
+        return real_find(key)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    monkeypatch.setattr(invoice_ninja, '_find_invoice_by_key', slow_find)
+
+    with pytest.raises(invoice_ninja.InvoiceNinjaOutcomeUnknown) as exc:
+        invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
+    assert 'safe to try again' in str(exc.value)
+    wo.refresh_from_db()
+    assert wo.invoice_ninja_id == '' and wo.in_push_key
+    key = wo.in_push_key
+
+    # The retry finds the first invoice and makes no second one.
+    in_id, _, _ = invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
+    assert in_id == 'inv1'
+    assert len(fake.creates()) == 1
+    assert len(fake.invoices) == 1
+    wo.refresh_from_db()
+    assert wo.invoice_ninja_id == 'inv1' and wo.in_push_key == ''
+    assert fake.invoices[0][invoice_ninja.MB_KEY_FIELD] == key
+
+
+@pytest.mark.django_db
+def test_send_that_never_landed_resends_with_the_same_key_after_the_wait(client_obj, monkeypatch):
+    from datetime import timedelta
+    from django.utils import timezone
+    from core import invoice_ninja
+    _enable_in()
+    client_obj.invoice_ninja_id = 'cl1'; client_obj.save()
+    wo = _priced_wo(client_obj)
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    # A send whose answer was lost and which IN never received.
+    WorkOrder.objects.filter(pk=wo.pk).update(in_push_key='mb-workorder-x-1', in_push_started_at=timezone.now())
+
+    with pytest.raises(invoice_ninja.InvoiceNinjaError) as exc:       # still in flight
+        invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
+    assert 'already being sent' in str(exc.value)
+    assert fake.creates() == []
+
+    WorkOrder.objects.filter(pk=wo.pk).update(in_push_started_at=timezone.now() - timedelta(minutes=1))
+    invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
+    assert len(fake.creates()) == 1
+    assert fake.creates()[0][3][invoice_ninja.MB_KEY_FIELD] == 'mb-workorder-x-1'
+
+
+@pytest.mark.django_db
+def test_second_click_while_a_send_is_running_is_refused(client_obj, monkeypatch):
+    """The claim is taken before the request, so a second click mid-send
+    cannot race it into a second invoice."""
+    from core import invoice_ninja
+    _enable_in()
+    client_obj.invoice_ninja_id = 'cl1'; client_obj.save()
+    wo = _priced_wo(client_obj)
+    fake = _FakeIN(invoice_ninja)
+    seen = {}
+
+    def first_click_in_flight(method, path, **kw):
+        if (method, path) == ('POST', '/invoices') and not seen:
+            seen['x'] = True
+            other = WorkOrder.objects.get(pk=wo.pk)
+            with pytest.raises(invoice_ninja.InvoiceNinjaError) as exc:
+                invoice_ninja.push_host_invoice(other, po_number=other.work_order_number, client=client_obj)
+            seen['msg'] = str(exc.value)
+        return fake(method, path, **kw)
+    monkeypatch.setattr(invoice_ninja, '_request', first_click_in_flight)
+    invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
+    assert 'already being sent' in seen['msg']
+    assert len(fake.invoices) == 1
+
+
+@pytest.mark.django_db
+def test_refused_send_releases_the_claim(client_obj, monkeypatch):
+    from core import invoice_ninja
+    _enable_in()
+    client_obj.invoice_ninja_id = 'cl1'; client_obj.save()
+    wo = _priced_wo(client_obj)
+    fake = _FakeIN(invoice_ninja)
+    fake.refuse_creates = 'Invoice Ninja returned 422: bad client'
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    with pytest.raises(invoice_ninja.InvoiceNinjaError):
+        invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
+    wo.refresh_from_db()
+    assert wo.in_push_key == '' and wo.invoice_ninja_id == ''
+
+
+@pytest.mark.django_db
+def test_key_lookup_ignores_deleted_and_mismatched_rows(monkeypatch):
+    from core import invoice_ninja
+    rows = [{'id': 'a', invoice_ninja.MB_KEY_FIELD: 'other'},
+            {'id': 'b', invoice_ninja.MB_KEY_FIELD: 'k1', 'is_deleted': True}]
+    monkeypatch.setattr(invoice_ninja, '_request', lambda *a, **k: {'data': rows})
+    assert invoice_ninja._find_invoice_by_key('k1') is None
+    rows.append({'id': 'c', invoice_ninja.MB_KEY_FIELD: 'k1'})
+    assert invoice_ninja._find_invoice_by_key('k1')['id'] == 'c'
+
+
+@pytest.mark.django_db
+def test_payment_sends_an_idempotency_key_and_survives_a_lost_answer(monkeypatch):
+    from core import invoice_ninja
+    fake = _FakeIN(invoice_ninja)
+    fake.payment_outcomes = ['lost']
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    invoice_ninja.post_payment('inv9', 'cl1', amount=60, method_label='Cash')  # IN shows Paid → fine
+    pay = [c for c in fake.calls if c[:2] == ('POST', '/payments')]
+    assert len(pay) == 1 and pay[0][3]['idempotency_key'] == 'mb-pay-inv9'
+
+
+@pytest.mark.django_db
+def test_payment_refusal_on_an_unpaid_invoice_still_fails_loud(monkeypatch):
+    from core import invoice_ninja
+    fake = _FakeIN(invoice_ninja)
+    fake.payment_outcomes = [invoice_ninja.InvoiceNinjaError('Invoice Ninja returned 422: amount invalid')]
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    with pytest.raises(invoice_ninja.InvoiceNinjaError) as exc:
+        invoice_ninja.post_payment('inv9', 'cl1', amount=60, method_label='Cash')
+    assert 'amount invalid' in str(exc.value)
+
+
+@pytest.mark.django_db
+def test_payment_lost_and_not_paid_is_outcome_unknown(monkeypatch):
+    from core import invoice_ninja
+    fake = _FakeIN(invoice_ninja)
+    fake.payment_outcomes = [invoice_ninja.InvoiceNinjaOutcomeUnknown('dropped')]
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    with pytest.raises(invoice_ninja.InvoiceNinjaOutcomeUnknown) as exc:
+        invoice_ninja.post_payment('inv9', 'cl1', amount=60, method_label='Cash')
+    assert 'refuses the same payment twice' in str(exc.value)
+
+
+@pytest.mark.django_db
+def test_paid_sale_whose_payment_failed_resumes_on_the_same_invoice(client, admin_user, client_obj, monkeypatch):
+    """Invoice landed, payment did not: the sale keeps the invoice, the card
+    offers to record the payment, and the retry posts only the payment."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    _enable_in()
+    client_obj.invoice_ninja_id = 'cl1'; client_obj.save()
+    sale = Sale.objects.create(client=client_obj, status='completed', amount=Decimal('60.00'))
+    LineItem.objects.create(content_object=sale, kind='labor', description='Service',
+                            quantity=1, unit_price=Decimal('60.00'))
+    fake = _FakeIN(invoice_ninja)
+    fake.payment_outcomes = [invoice_ninja.InvoiceNinjaError('Invoice Ninja returned 500: oops')]
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    with pytest.raises(invoice_ninja.InvoiceNinjaError) as exc:
+        invoice_ninja.push_sale(sale)
+    assert 'is in Invoice Ninja, but its payment was not confirmed' in str(exc.value)
+    sale.refresh_from_db()
+    assert sale.invoice_ninja_id == 'inv1' and sale.in_status == ''
+
+    client.force_login(admin_user)
+    page = client.get(reverse('core:pos_sale_settle', args=[sale.pk]))
+    assert b'Record the payment in Invoice Ninja' in page.content
+    client.post(reverse('core:sale_send_in', args=[sale.pk]))         # no confirm needed
+    sale.refresh_from_db()
+    assert sale.in_status == 'Paid'
+    assert len(fake.creates()) == 1                                   # still one invoice
+    assert len([c for c in fake.calls if c[:2] == ('POST', '/payments')]) == 2
+
+
+@pytest.mark.django_db
+def test_lost_client_create_with_email_is_found_by_email(client_obj, monkeypatch):
+    from core import invoice_ninja
+    client_obj.email = 'owner@acme.test'; client_obj.save()
+    lookups = {'n': 0}
+
+    def fake(method, path, *, params=None, json=None):
+        if (method, path) == ('POST', '/clients'):
+            raise invoice_ninja.InvoiceNinjaOutcomeUnknown('dropped')
+        lookups['n'] += 1
+        return {'data': [] if lookups['n'] == 1 else [{'id': 'cl7'}]}   # 1st = pre-create lookup
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    assert invoice_ninja.find_or_create_client(client_obj) == 'cl7'
+    client_obj.refresh_from_db()
+    assert client_obj.invoice_ninja_id == 'cl7'
+
+
+@pytest.mark.django_db
+def test_lost_client_create_without_email_adopts_only_a_brand_new_exact_name(client_obj, monkeypatch):
+    import time
+    from core import invoice_ninja
+    rows = [{'id': 'old', 'name': 'Acme Co', 'created_at': int(time.time()) - 86400}]
+
+    def fake(method, path, *, params=None, json=None):
+        if (method, path) == ('POST', '/clients'):
+            raise invoice_ninja.InvoiceNinjaOutcomeUnknown('dropped')
+        return {'data': rows}
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    with pytest.raises(invoice_ninja.InvoiceNinjaOutcomeUnknown) as exc:
+        invoice_ninja.find_or_create_client(client_obj)                # yesterday's same-name client: not ours
+    assert 'check the Invoice Ninja client list' in str(exc.value)
+    client_obj.refresh_from_db()
+    assert client_obj.invoice_ninja_id == ''
+
+    rows.append({'id': 'new', 'name': 'Acme Co', 'created_at': int(time.time())})
+    assert invoice_ninja.find_or_create_client(client_obj) == 'new'
+
+
+@pytest.mark.django_db
+def test_unconfirmed_charge_is_recorded_and_blocks_a_quick_second_charge(client, admin_user, client_obj, monkeypatch):
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import LineItem
+    _enable_in()
+    sale = Sale.objects.create(client=client_obj, is_recurring=True, invoice_ninja_id='42')
+    LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
+                            quantity=1, unit_price=Decimal('60.00'))
+    fired = []
+
+    def lost(method, path, *, params=None, json=None):
+        if path == '/invoices/42':
+            return {'data': {'status_id': '2'}}
+        fired.append(path)
+        raise invoice_ninja.InvoiceNinjaOutcomeUnknown('Invoice Ninja did not answer within 15 seconds.')
+    monkeypatch.setattr(invoice_ninja, '_request', lost)
+    client.force_login(admin_user)
+    client.post(reverse('core:sale_charge', args=[sale.pk]))
+    attempt = PaymentChargeAttempt.objects.get(sale=sale)
+    assert attempt.result == 'unknown'
+    assert 'Check IN' in attempt.error_message
+    client.post(reverse('core:sale_charge', args=[sale.pk]))
+    assert fired == ['/invoices/bulk']                                  # no second trigger
+    assert PaymentChargeAttempt.objects.filter(sale=sale).count() == 1

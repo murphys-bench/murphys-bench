@@ -20,7 +20,13 @@ re-send. The view swaps this card out-of-band after line-item changes.
             </div>
         </div>
         <div class="card-footer">
-            {% if sale.invoice_ninja_id %}
+            {% if sale.invoice_ninja_id and not sale.in_status %}
+                {# The invoice landed but its payment did not: retrying finishes the same invoice. #}
+                <div class="text-warning mb-2">Invoice Ninja #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }} was created, but its payment is not recorded there yet.</div>
+                {% if invoice_ninja_enabled %}
+                <form method="post" action="{% url 'core:sale_send_in' sale.pk %}">{% csrf_token %}<button type="submit" class="btn">Record the payment in Invoice Ninja</button></form>
+                {% endif %}
+            {% elif sale.invoice_ninja_id %}
                 <div class="d-flex flex-wrap align-items-center gap-2">
                     <span class="badge bg-green-lt">Invoice Ninja #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }}{% if sale.in_status %} &middot; {{ sale.in_status }}{% endif %}</span>
                     {% if not sale.client_id %}<span class="text-secondary small">billed to Walk-In</span>{% endif %}

@@ -8,6 +8,17 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Fixed
+
+- When Invoice Ninja's answer is lost, MB finds the invoice it created instead of saying "could not reach" and making a second one on the next click. MB writes its own reference into invoice custom field 4 to do this; if your Invoice Ninja uses that field, tell us before updating.
+- Two clicks at once can no longer send the same invoice twice. Payments carry a key Invoice Ninja uses to refuse a duplicate.
+- A sale whose invoice reached Invoice Ninja but whose payment did not now offers to record the payment on that same invoice.
+- A card charge Invoice Ninja did not confirm is recorded as unconfirmed and blocks another charge for 5 minutes.
+- A wrong, deleted or archived API token gets the "check the token" message (Invoice Ninja answers 403, not 401). Rate limits say to wait a minute, and an error page from a proxy no longer shows its raw HTML.
+- MB waits at most 5 seconds to connect to Invoice Ninja and 15 for an answer, down from 20 per request.
+
 ## v0.17.0 — 2026-10-03
 
 Security release from GitHub's code scan and two outside reviews. Email templates are restricted to a fixed list of values, so skim the Changed section before updating if you have custom templates.

@@ -1173,6 +1173,11 @@ class WorkOrder(models.Model):
     invoice_ninja_ref = models.CharField(max_length=100, blank=True, help_text='Invoice Ninja invoice number (editable — record where the work actually landed if a draft was merged in IN)')
     # IN invoice id returned by the push — the duplicate-guard key. Set = pushed.
     invoice_ninja_id = models.CharField(max_length=64, blank=True, default='')
+    # A send to IN in progress, or one whose answer was lost: the reference MB
+    # wrote into the invoice, kept until IN's answer is in so a retry finds the
+    # invoice instead of creating a second one. See invoice_ninja._create_invoice.
+    in_push_key = models.CharField(max_length=64, blank=True, default='')
+    in_push_started_at = models.DateTimeField(null=True, blank=True)
     # NOTE: device credentials used to live here as well as on Device. That split meant the
     # WO card and the device page read different stores and could never agree. Retired in
     # mig 0099 — the Device is the single source of truth. See plan
@@ -1604,6 +1609,9 @@ class Sale(models.Model):
     invoice_ninja_ref = models.CharField(max_length=100, blank=True, help_text='Invoice Ninja invoice number (for display).')
     in_status = models.CharField(max_length=50, blank=True)
     in_status_checked_at = models.DateTimeField(null=True, blank=True)
+    # Pending-send reference, as on WorkOrder (see invoice_ninja._create_invoice).
+    in_push_key = models.CharField(max_length=64, blank=True, default='')
+    in_push_started_at = models.DateTimeField(null=True, blank=True)
 
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='sales_created')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1873,6 +1881,9 @@ class PaymentChargeAttempt(models.Model):
     RESULT_CHOICES = [
         ('success', 'Trigger Succeeded'),
         ('failed', 'Trigger Failed'),
+        # The trigger may have reached IN but no answer came back: treated like
+        # a success for the double-charge cooldown.
+        ('unknown', 'Trigger Unconfirmed'),
     ]
 
     sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name='charge_attempts', null=True, blank=True)
