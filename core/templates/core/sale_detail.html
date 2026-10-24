@@ -1,5 +1,5 @@
 {% extends "core/base_tabler.html" %}
-{% load mb_tabler %}
+{% load mb_tabler mb_icons %}
 
 {% block title %}{{ sale.sale_number }} - Murphy's Bench{% endblock %}
 {% block room %}register{% endblock %}
@@ -49,7 +49,8 @@
                     <div class="fw-medium">Paid</div>
                     <div class="text-secondary">{{ sale.get_payment_method_display|default:"" }}, ${{ sale.amount|default:"0.00" }}{% if sale.paid_at %}, {{ sale.paid_at|date:"M j, Y g:i A" }}{% endif %}{% if sale.reference %}, ref {{ sale.reference }}{% endif %}</div>
                     {% if sale.invoice_ninja_id %}<div class="mt-2"><span class="badge bg-green-lt">Invoice Ninja #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }}{% if sale.in_status %} &middot; {{ sale.in_status }}{% endif %}</span></div>{% endif %}
-                    {% if invoice_ninja_enabled and sale.in_payment_pending or invoice_ninja_enabled and sale.in_hold_kind or invoice_ninja_enabled and sale.in_push_key or invoice_ninja_enabled and not sale.invoice_ninja_id %}
+                    {% in_attention sale as sale_in_reqs %}
+                    {% if invoice_ninja_enabled and sale.in_payment_pending or invoice_ninja_enabled and sale_in_reqs or invoice_ninja_enabled and not sale.invoice_ninja_id %}
                     {# Anything left to finish with Invoice Ninja is done at the Register. #}
                     <a href="{% url 'core:pos_sale_settle' sale.pk %}" class="btn mt-3">Open at the Register</a>
                     {% endif %}

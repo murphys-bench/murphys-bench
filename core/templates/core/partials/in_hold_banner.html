@@ -1,21 +1,36 @@
+{% load mb_icons %}
 {% comment %}
-Shows a record's Invoice Ninja hold or lost-answer send, with the button a
-person presses after checking Invoice Ninja. Pass `obj` (WorkOrder, Sale or
-Client) and `in_host` ('wo', 'sale' or 'client').
+Shows a record's Invoice Ninja requests that need a person or are still
+running: a hold, a send or payment that got no answer, a card charge Invoice
+Ninja has not finished. Each hold has the button a person presses after
+checking Invoice Ninja, recorded on that request. Pass `obj` (WorkOrder, Sale
+or Client) and `in_host` ('wo', 'sale' or 'client').
 {% endcomment %}
-{% if obj.in_hold_kind %}
+{% in_attention obj as in_reqs %}
+{% for req in in_reqs %}
 <div class="alert alert-warning" role="alert">
-    <div class="fw-medium mb-1">{{ obj.get_in_hold_kind_display }}</div>
-    <div class="mb-2">{{ obj.in_hold_reason }}</div>
-    <form method="post" action="{% url 'core:in_hold' in_host obj.pk 'resolve' %}">{% csrf_token %}
-        <button type="submit" class="btn btn-sm">{% if obj.in_hold_kind == 'charge' %}I checked Invoice Ninja: the charge did not go through{% elif obj.in_hold_kind == 'amount' %}I checked Invoice Ninja: the invoice is right{% else %}I checked Invoice Ninja: clear this hold{% endif %}</button>
-    </form>
+    {% if req.state == 'held' %}
+        <div class="fw-medium mb-1">{% if req.kind == 'charge' %}Card charge not confirmed{% elif req.kind == 'payment' %}Payment not confirmed{% elif req.kind == 'client' %}Client may already exist in Invoice Ninja{% else %}Invoice needs checking{% endif %}</div>
+        <div class="mb-2">{{ req.reason }}</div>
+        <form method="post" action="{% url 'core:in_hold' in_host obj.pk 'resolve' %}">{% csrf_token %}
+            <input type="hidden" name="request" value="{{ req.pk }}">
+            <button type="submit" class="btn btn-sm">{% if req.kind == 'charge' %}I checked Invoice Ninja: the charge did not go through{% elif req.kind == 'payment' %}I checked Invoice Ninja: the payment is not there{% elif req.kind == 'invoice' %}I checked: Invoice Ninja and MB match{% else %}I checked Invoice Ninja: clear this hold{% endif %}</button>
+        </form>
+    {% elif req.kind == 'invoice' and req.looks_lost %}
+        <div class="mb-2">A send to Invoice Ninja on {{ req.started_at|date:"M j, g:i A" }} did not get an answer. MB looks for that invoice before sending again. If Invoice Ninja does not have it, clear it here so a new send can go.</div>
+        <form method="post" action="{% url 'core:in_hold' in_host obj.pk 'clear-send' %}">{% csrf_token %}
+            <button type="submit" class="btn btn-sm">I checked Invoice Ninja: the invoice is not there</button>
+        </form>
+    {% elif req.kind == 'payment' and req.looks_lost %}
+        <div class="mb-2">A payment of ${{ req.payload.amount }} ({{ req.payload.method_label|default:"unspecified" }}{% if req.payload.reference %}, ref {{ req.payload.reference }}{% endif %}) sent on {{ req.started_at|date:"M j, g:i A" }} got no answer from Invoice Ninja. Paying again finishes that same payment; Invoice Ninja refuses it twice. If Invoice Ninja does not have it, clear it here.</div>
+        <form method="post" action="{% url 'core:in_hold' in_host obj.pk 'resolve' %}">{% csrf_token %}
+            <input type="hidden" name="request" value="{{ req.pk }}">
+            <button type="submit" class="btn btn-sm">I checked Invoice Ninja: the payment is not there</button>
+        </form>
+    {% elif req.kind == 'charge' and req.state == 'queued' %}
+        <div>A card charge was started {{ req.started_at|date:"M j, g:i A" }}. Invoice Ninja runs it on its side: use "Check IN" to see whether it posted.</div>
+    {% else %}
+        <div>Being sent to Invoice Ninja right now ({{ req.get_kind_display|lower }}). Reload in a few seconds.</div>
+    {% endif %}
 </div>
-{% elif obj.in_push_key %}
-<div class="alert alert-warning" role="alert">
-    <div class="mb-2">A send to Invoice Ninja did not get an answer. MB looks for that invoice before sending again. If Invoice Ninja does not have it, clear it here so a new send can go.</div>
-    <form method="post" action="{% url 'core:in_hold' in_host obj.pk 'clear-send' %}">{% csrf_token %}
-        <button type="submit" class="btn btn-sm">I checked Invoice Ninja: the invoice is not there</button>
-    </form>
-</div>
-{% endif %}
+{% endfor %}

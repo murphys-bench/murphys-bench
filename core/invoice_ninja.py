@@ -14,6 +14,8 @@ import secrets
 from datetime import timedelta
 
 import requests
+from django.db import IntegrityError, transaction
+from django.utils import timezone
 from urllib3.exceptions import NewConnectionError
 
 logger = logging.getLogger('core')
@@ -31,9 +33,15 @@ TIMEOUT = (5, 20)
 # handle. SCS confirmed custom field 4 is unused (Oct 23 2026).
 MB_KEY_FIELD = 'custom_value4'
 
-# How long a send that has not finished counts as still in progress. A second
-# click inside this window is refused instead of racing the first.
+# How long a request that has not finished counts as still in progress. Longer
+# than the most one call can take (TIMEOUT: 5 + 20 seconds), so a request that
+# is still alive never loses its claim; past it, the owner is gone and another
+# request may take over (looking first, with the same key).
 IN_FLIGHT = timedelta(seconds=30)
+
+# A card charge IN accepted runs later, on IN's side. Until Check IN reads Paid
+# or this long has passed, another charge or payment on the record is refused.
+CHARGE_COOLDOWN = timedelta(minutes=5)
 
 
 class InvoiceNinjaError(Exception):
@@ -44,6 +52,11 @@ class InvoiceNinjaOutcomeUnknown(InvoiceNinjaError):
     """The request may have reached IN, but no answer came back, so whether IN
     acted on it is unknown. Callers that create things must look before they
     send again; never read this as "nothing happened"."""
+
+
+class InvoiceNinjaRefused(InvoiceNinjaError):
+    """MB did not send anything: another request on this record is in progress,
+    or it is held until a person has checked. Not an attempt at IN."""
 
 
 def _config():
@@ -144,12 +157,23 @@ def _request(method, path, *, params=None, json=None):
     never opened, or a 4xx refusal, counts as "nothing happened"."""
     base, token = _config()
     url = f'{base}{API_PREFIX}{path}'
+    mutation = method != 'GET'
     try:
+        # A mutation never follows a redirect: requests would replay it as a GET
+        # to wherever it points, and a failure on that second hop would hide
+        # that the first one reached IN.
         resp = requests.request(
             method, url, headers=_headers(token), params=params, json=json, timeout=TIMEOUT,
+            allow_redirects=not mutation,
         )
         if resp.status_code >= 400:
             raise _http_error(resp)
+        if mutation and 300 <= resp.status_code < 400:
+            raise InvoiceNinjaOutcomeUnknown(
+                f'Invoice Ninja answered with a redirect ({resp.status_code}) to '
+                f'{resp.headers.get("Location") or "another address"}. Check the URL in Settings '
+                '(it may need https://).'
+            )
         return resp.json()
     except InvoiceNinjaError:
         raise
@@ -194,148 +218,245 @@ def test_connection():
 
 
 # ---------------------------------------------------------------------------
-# Holds. When MB cannot tell what IN did with a money action, it holds the
-# record until a person has looked (see models.InvoiceNinjaHold). Pay and
-# charge refuse while held; resolve_hold records who cleared it and when.
-# ---------------------------------------------------------------------------
-
-def set_hold(host, kind, reason):
-    from django.utils import timezone
-    host.in_hold_kind = kind
-    host.in_hold_reason = reason
-    host.in_hold_at = timezone.now()
-    host.save(update_fields=['in_hold_kind', 'in_hold_reason', 'in_hold_at'])
-
-
-def _release_hold(host, kind):
-    """Drop a hold MB itself placed, without recording a person's decision."""
-    type(host).objects.filter(pk=host.pk, in_hold_kind=kind).update(
-        in_hold_kind='', in_hold_reason='', in_hold_at=None,
-    )
-    if host.in_hold_kind == kind:
-        host.in_hold_kind, host.in_hold_reason, host.in_hold_at = '', '', None
-
-
-def _record_resolution(host, user, label, note, *, clear_hold):
-    from django.utils import timezone
-    host.in_hold_resolved_by = user
-    host.in_hold_resolved_at = timezone.now()
-    host.in_hold_resolved_note = f'{label}: {note}'
-    fields = ['in_hold_resolved_by', 'in_hold_resolved_at', 'in_hold_resolved_note']
-    if clear_hold:
-        host.in_hold_kind, host.in_hold_reason, host.in_hold_at = '', '', None
-        fields += ['in_hold_kind', 'in_hold_reason', 'in_hold_at']
-    host.save(update_fields=fields)
-    logger.info('Invoice Ninja %s on %s %s by %s: %s',
-                label, type(host).__name__, host.pk, user or 'Check IN', note)
-
-
-def resolve_hold(host, user, note):
-    """A person (or, with user=None, a Check IN that read Paid) has looked and
-    clears the hold. What was cleared, by whom and when, stays on the record."""
-    if not host.in_hold_kind:
-        return
-    _record_resolution(host, user, f'Hold cleared ({host.get_in_hold_kind_display()})', note, clear_hold=True)
-
-
-def require_no_hold(host):
-    host.refresh_from_db(fields=['in_hold_kind', 'in_hold_reason'])
-    if host.in_hold_kind:
-        raise InvoiceNinjaError(f'{host.in_hold_reason} MB will not take a payment or charge until this is cleared.')
-
-
-# ---------------------------------------------------------------------------
-# Creating things in IN at most once. A lost answer (tested Oct 2 2026) leaves
-# MB not knowing whether IN created the record, and a plain retry then makes a
-# second one. Every create below claims the record first, sends with MB's own
-# key, and when the answer is lost, looks for the record before anyone can
-# send again.
+# Request records. Everything MB asks IN to do is an InvoiceNinjaRequest row,
+# written before the call. The row is the claim (one active request per record
+# and lane, enforced by the database), it carries exactly what was sent, and
+# only the request holding its token can move it on. A request MB cannot
+# settle by looking is `held` until a person has checked: that is a hold.
+# See models.InvoiceNinjaRequest and mb-docs DESIGN-in-request-records.md.
 # ---------------------------------------------------------------------------
 
 _IN_PROGRESS_MSG = 'This is already being sent to Invoice Ninja. Wait a few seconds and try again.'
 
 
+def _req_model():
+    from .models import InvoiceNinjaRequest
+    return InvoiceNinjaRequest
+
+
+def _host_field(host):
+    from .models import Client, Sale, WorkOrder
+    if isinstance(host, WorkOrder):
+        return 'work_order'
+    if isinstance(host, Sale):
+        return 'sale'
+    if isinstance(host, Client):
+        return 'client'
+    raise TypeError(f'{type(host).__name__} cannot hold Invoice Ninja requests')
+
+
+def requests_for(host):
+    return _req_model().objects.filter(**{_host_field(host): host})
+
+
+def _when(dt):
+    return timezone.localtime(dt).strftime('%b %-d at %-I:%M %p')
+
+
+def _move(req, state, *, from_states=None, **fields):
+    """Move `req` to `state` only if it is still ours (token) and still in one
+    of `from_states` (default: its current state). Returns False when another
+    request finished it or took it over first."""
+    R = _req_model()
+    from_states = from_states or (req.state,)
+    if state not in R.ACTIVE:
+        fields.setdefault('finished_at', timezone.now())
+    moved = R.objects.filter(pk=req.pk, token=req.token, state__in=from_states).update(state=state, **fields)
+    if moved:
+        req.state = state
+        for name, value in fields.items():
+            setattr(req, name, value)
+    return bool(moved)
+
+
+def _held_message(req):
+    return f'{req.reason} MB will not do this until a person has checked and cleared it.'
+
+
+def _busy_message(req):
+    R = _req_model()
+    if req.state == R.HELD:
+        return _held_message(req)
+    if req.kind == R.KIND_CHARGE and req.state == R.QUEUED:
+        return (f'A card charge was started {_when(req.started_at)}. Invoice Ninja runs it on its '
+                'side, so use "Check IN" to see whether it posted before doing anything else.')
+    if req.kind == R.KIND_CHARGE:
+        return 'A card charge is being sent to Invoice Ninja right now.'
+    if req.kind == R.KIND_PAYMENT and req.looks_lost:
+        p = req.payload
+        return (f'A payment of ${p.get("amount")} ({p.get("method_label") or "unspecified"}) sent '
+                f'{_when(req.started_at)} got no answer from Invoice Ninja. Pay again to finish that '
+                'same payment, or use "Check IN".')
+    if req.kind == R.KIND_PAYMENT:
+        return 'A payment is being recorded in Invoice Ninja right now. Wait a few seconds and try again.'
+    return _IN_PROGRESS_MSG
+
+
+def _take_over(active, kind, token, now):
+    """Decide what a new request does about the active one in its lane.
+    Returns the active request, now ours, when this request may carry it on
+    (same key, same payload); None when the lane was freed and the caller
+    should claim again; raises InvoiceNinjaRefused otherwise."""
+    R = _req_model()
+    if active.state == R.QUEUED:
+        if now - active.started_at < CHARGE_COOLDOWN:
+            raise InvoiceNinjaRefused(_busy_message(active))
+        _move(active, R.LAPSED, from_states=(R.QUEUED,))
+        return None
+    if active.state == R.HELD:
+        raise InvoiceNinjaRefused(_held_message(active))
+    if active.kind != kind:
+        raise InvoiceNinjaRefused(_busy_message(active))
+    if active.state == R.SENDING and now - active.started_at < IN_FLIGHT:
+        raise InvoiceNinjaRefused(_busy_message(active))
+    if kind == R.KIND_CHARGE:
+        # A charge is never re-sent blind: its owner vanished mid-call, so the
+        # card may have been charged. A person checks.
+        _move(active, R.HELD, from_states=(R.SENDING, R.UNKNOWN), reason=(
+            f'A card charge started {_when(active.started_at)} never finished, so the card may '
+            'have been charged. Use "Check IN": if it shows Paid this clears by itself. If '
+            'Invoice Ninja shows no charge, clear this hold to allow charging again.'))
+        raise InvoiceNinjaRefused(_held_message(active))
+    taken = R.objects.filter(pk=active.pk, token=active.token, state=active.state).update(
+        token=token, state=R.SENDING, started_at=now)
+    if not taken:
+        return None
+    active.token, active.state, active.started_at = token, R.SENDING, now
+    return active
+
+
+def _claim(host, kind, payload, *, base_invoice_id='', user=None):
+    """Claim the record's lane for one request and return (request,
+    carried_on). `carried_on` is True when an earlier request whose answer was
+    lost is being carried on: its key and payload are the ones to use, and it
+    must look before it sends."""
+    R = _req_model()
+    field = _host_field(host)
+    lane = R.LANES[kind]
+    token = secrets.token_hex(16)
+    for _ in range(4):
+        now = timezone.now()
+        active = requests_for(host).filter(lane=lane, state__in=R.ACTIVE).first()
+        if active is not None:
+            taken = _take_over(active, kind, token, now)
+            if taken is not None:
+                return taken, True
+            continue
+        try:
+            with transaction.atomic():
+                req = R.objects.create(
+                    **{field: host}, kind=kind, lane=lane, state=R.SENDING,
+                    key=f'mb-{kind[:3]}-{type(host)._meta.model_name[:4]}-{host.pk}-{secrets.token_hex(6)}',
+                    token=token, payload=payload, base_invoice_id=base_invoice_id or '',
+                    started_by=user, started_at=now,
+                )
+            return req, False
+        except IntegrityError:
+            continue  # another request claimed the lane first; look again
+    raise InvoiceNinjaRefused(_IN_PROGRESS_MSG)
+
+
+def blocking_request(host, *, finishing=None):
+    """The request that stops MB marking `host` paid or charging it: anything
+    held, or a money request still in progress (a started charge counts until
+    its cooldown passes). `finishing` names a kind whose own unanswered request
+    the caller is about to carry on (a payment retry), so it does not block."""
+    R = _req_model()
+    now = timezone.now()
+    for req in requests_for(host).filter(state__in=R.ACTIVE).order_by('started_at'):
+        if req.state == R.HELD:
+            return req
+        if req.lane != 'money':
+            continue
+        if req.state == R.QUEUED and now - req.started_at >= CHARGE_COOLDOWN:
+            continue
+        if req.kind == finishing and req.looks_lost:
+            continue
+        return req
+    return None
+
+
+def require_no_hold(host, *, finishing=None):
+    req = blocking_request(host, finishing=finishing)
+    if req is not None:
+        raise InvoiceNinjaRefused(
+            f'{_busy_message(req)} MB will not take a payment or charge until this is settled.')
+
+
+def attention_requests(host):
+    """The requests a person should see on the record's page: held, unanswered,
+    or a charge still running."""
+    R = _req_model()
+    return list(requests_for(host).filter(state__in=(R.HELD, R.UNKNOWN, R.QUEUED, R.SENDING)).order_by('started_at'))
+
+
+def resolve_request(req, user, note):
+    """A person has checked IN and clears a held request, or an unanswered
+    payment they found is not there. Recorded on that request: who, when, what."""
+    R = _req_model()
+    if not (req.state == R.HELD or (req.kind == R.KIND_PAYMENT and req.looks_lost)):
+        return False
+    moved = R.objects.filter(pk=req.pk, state=req.state).update(
+        state=R.CLEARED, finished_at=timezone.now(), resolved_by=user,
+        resolved_at=timezone.now(), resolved_note=note,
+    )
+    if moved:
+        logger.info('Invoice Ninja %s request %s on %s cleared by %s: %s',
+                    req.kind, req.pk, req.host, user, note)
+    return bool(moved)
+
+
+def _settle_on_paid(host, label):
+    """Paid is the one read-back that settles a started or unconfirmed charge:
+    there is nothing left to charge. It does not show WHOSE payment it was, so
+    an unanswered payment is closed without recording any of its details.
+    Unpaid proves nothing (the charge may still be queued)."""
+    if label != 'Paid':
+        return
+    R = _req_model()
+    now = timezone.now()
+    requests_for(host).filter(kind=R.KIND_CHARGE, state__in=(R.QUEUED, R.HELD, R.UNKNOWN)).update(
+        state=R.DONE, finished_at=now, resolved_at=now, resolved_note='Check IN read Paid')
+    requests_for(host).filter(kind=R.KIND_PAYMENT, state__in=(R.HELD, R.UNKNOWN)).update(
+        state=R.CLEARED, finished_at=now, resolved_at=now,
+        resolved_note='Check IN read Paid. MB cannot tell whether it was this payment, so it '
+                      'recorded none of its details.')
+
+
+def _usable_id(obj):
+    """IN's id for what it created, or ValueError when the answer has none MB
+    can use (missing, null, empty): that is "no usable answer", never success."""
+    value = obj['id']
+    text = '' if value is None else str(value).strip()
+    if not text or text == 'None':
+        raise ValueError('no usable id')
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Invoices. IN ignores idempotency keys on invoices (tested Oct 2 2026), so MB
+# writes the request's key into the invoice (MB_KEY_FIELD) and, after a lost
+# answer, looks for it before anything is sent again. Every way an invoice is
+# linked (a normal answer, an automatic recovery, a person's "I checked")
+# goes through _finish_invoice.
+# ---------------------------------------------------------------------------
+
 def _find_invoice_by_key(key):
     """The IN invoice carrying MB's reference `key`, or None. Deleted invoices
-    don't count. Each row's field is checked too, so an IN that ignored the
-    filter could not hand back somebody else's invoice."""
+    and rows without a usable id don't count. Each row's field is checked too,
+    so an IN that ignored the filter could not hand back somebody else's."""
     data = _request('GET', '/invoices', params={
         MB_KEY_FIELD: key, 'status': 'active,archived', 'per_page': 5,
     })
     for row in (data.get('data') or []):
-        if str(row.get(MB_KEY_FIELD) or '') == key and not row.get('is_deleted'):
-            return row
+        if str(row.get(MB_KEY_FIELD) or '') != key or row.get('is_deleted'):
+            continue
+        try:
+            _usable_id(row)
+        except (KeyError, ValueError):
+            continue
+        return row
     return None
-
-
-def _store_pushed_invoice(host, invoice, extra=None):
-    """Record IN's invoice on the host and release its pending send, in one
-    write, so the host is never left both pushed and pending. `extra` fields
-    (a sale's payment-pending flag, say) are saved in the same write."""
-    host.invoice_ninja_id = str(invoice['id'])
-    host.invoice_ninja_ref = str(invoice.get('number') or '')
-    host.in_push_key = ''
-    host.in_push_started_at = None
-    fields = ['invoice_ninja_id', 'invoice_ninja_ref', 'in_push_key', 'in_push_started_at']
-    for name, value in (extra or {}).items():
-        setattr(host, name, value)
-        fields.append(name)
-    host.save(update_fields=fields)
-
-
-def _release_push(host):
-    type(host).objects.filter(pk=host.pk).update(in_push_key='', in_push_started_at=None)
-    host.in_push_key = ''
-    host.in_push_started_at = None
-
-
-def _refuse_stale(host):
-    """A claim lost because the record changed under this request: say what
-    happened rather than "try again"."""
-    current = type(host).objects.filter(pk=host.pk).values_list('invoice_ninja_id', 'invoice_ninja_ref').first()
-    if current and current[0] and current[0] != (host.invoice_ninja_id or ''):
-        raise InvoiceNinjaError(
-            f'This was just sent to Invoice Ninja as invoice #{current[1] or current[0]}. '
-            'Reload the page before doing anything else with it.'
-        )
-    raise InvoiceNinjaError(_IN_PROGRESS_MSG)
-
-
-def _claim_push(host):
-    """Mark `host` as being sent and return the reference key to send with.
-
-    The claim is one conditional UPDATE that also requires the stored IN
-    invoice id to be the one this request loaded, so a second click that
-    loaded the page before the first send finished loses, and so does a
-    re-send racing another re-send (SQLite serializes the writes). Returns
-    (key, existing_invoice): when an earlier send whose answer was lost turns
-    out to have landed, existing_invoice is that invoice and nothing is sent."""
-    from django.utils import timezone
-    model = type(host)
-    now = timezone.now()
-    seen_id = host.invoice_ninja_id or ''
-    host.refresh_from_db(fields=['in_push_key', 'in_push_started_at'])
-    key = host.in_push_key
-    if not key:
-        key = f'mb-{model._meta.model_name}-{host.pk}-{secrets.token_hex(4)}'
-        if not model.objects.filter(pk=host.pk, in_push_key='', invoice_ninja_id=seen_id).update(
-                in_push_key=key, in_push_started_at=now):
-            _refuse_stale(host)
-    else:
-        found = _find_invoice_by_key(key)
-        if found:
-            return key, found
-        started = host.in_push_started_at
-        if started and now - started < IN_FLIGHT:
-            raise InvoiceNinjaError(_IN_PROGRESS_MSG)
-        # The earlier send never landed. Take it over, keeping its key so a late
-        # arrival would still be recognized.
-        if not model.objects.filter(pk=host.pk, in_push_key=key, in_push_started_at=started,
-                                    invoice_ninja_id=seen_id).update(in_push_started_at=now):
-            _refuse_stale(host)
-    host.in_push_key = key
-    host.in_push_started_at = now
-    return key, None
 
 
 def _payload_total(payload):
@@ -344,158 +465,206 @@ def _payload_total(payload):
                 for li in payload.get('line_items') or []), Decimal('0')).quantize(Decimal('0.01'))
 
 
-def _check_recovered_total(host, invoice, payload):
-    """An invoice found after a lost answer was built from the lines as they
-    were then. If they have changed since, MB keeps the link but holds the
-    record: nobody should pay or charge until a person has compared them."""
+def _recovered_total_problem(req, host, invoice):
+    """An invoice found after a lost answer must match what MB sent and what
+    the record's lines total now. Returns the hold reason when it does not."""
     from decimal import Decimal, InvalidOperation
-    from .models import InvoiceNinjaHold
     try:
         in_total = Decimal(str(invoice.get('amount'))).quantize(Decimal('0.01'))
     except (InvalidOperation, TypeError, ValueError):
         in_total = None
-    mb_total = _payload_total(payload)
-    if in_total is not None and in_total == mb_total:
-        return
+    sent = _payload_total(req.payload.get('invoice') or {})
+    now_total = _payload_total({'line_items': _line_items_payload(host)})
+    if in_total is not None and in_total == sent == now_total:
+        return ''
     ref = invoice.get('number') or invoice.get('id')
-    reason = (
-        f'Invoice #{ref} was created in Invoice Ninja before its answer was lost, for '
-        f'{"$" + str(in_total) if in_total is not None else "an amount MB could not read"}. '
-        f'MB\'s lines now total ${mb_total}. Make them match in Invoice Ninja or MB, '
-        'then clear this hold.'
+    shown = f'${in_total}' if in_total is not None else 'an amount MB could not read'
+    return (
+        f'Invoice #{ref} was created in Invoice Ninja before its answer was lost, for {shown}. '
+        f'MB sent ${sent}; this record\'s lines now total ${now_total}. Make Invoice Ninja and MB '
+        'match, then clear this hold.'
     )
-    set_hold(host, InvoiceNinjaHold.HOLD_AMOUNT, reason)
-    raise InvoiceNinjaError(reason)
 
 
-def _create_invoice(host, payload, *, resend=False, extra=None):
-    """POST `payload` as a new IN invoice for `host` (a WorkOrder or Sale) at
-    most once, store IN's id and number on the host (with `extra` fields in
-    the same write), and return (invoice, recovered). `recovered` is True when
-    the invoice came from an earlier send whose answer was lost.
+def _finish_invoice(req, host, invoice, *, recovered):
+    """Link IN's invoice to the record, once. The link is written only if the
+    record still points where it did when this request began, and the request
+    only moves on if it is still ours: a late or stale request changes nothing.
+    A recovered invoice that does not match is linked and held."""
+    R = _req_model()
+    in_id = _usable_id(invoice)
+    number = str(invoice.get('number') or '')
+    hold = _recovered_total_problem(req, host, invoice) if recovered else ''
+    fields = {'invoice_ninja_id': in_id, 'invoice_ninja_ref': number}
+    for name, value in (req.payload.get('host_fields') or {}).items():
+        fields[name] = timezone.now() if value == '__now__' else value
+    with transaction.atomic():
+        linked = type(host).objects.filter(pk=host.pk, invoice_ninja_id=req.base_invoice_id).update(**fields)
+        if not linked:
+            current = type(host).objects.filter(pk=host.pk).values_list('invoice_ninja_ref', 'invoice_ninja_id').first()
+            hold = (
+                f'Invoice #{number or in_id} was created in Invoice Ninja, but this record was linked '
+                f'to invoice #{(current and (current[0] or current[1])) or "?"} meanwhile. Check '
+                'Invoice Ninja for an extra invoice, then clear this hold.'
+            )
+        if not _move(req, R.HELD if hold else R.DONE, in_id=in_id, in_number=number, reason=hold):
+            raise InvoiceNinjaRefused(
+                'Another request finished this send first. Reload the page before doing anything else.')
+    if linked:
+        for name, value in fields.items():
+            setattr(host, name, value)
+    if hold:
+        raise InvoiceNinjaError(hold)
+    return invoice, recovered
 
-    IN ignores idempotency keys on invoices, so MB writes its own key into the
-    invoice (MB_KEY_FIELD) and keeps it on the host until IN's answer is in.
-    `resend` must be True to create another invoice for a host that already
-    has one; otherwise that is refused.
-    """
-    if host.invoice_ninja_id and not resend:
-        raise InvoiceNinjaError(
-            f'This is already in Invoice Ninja as invoice #{host.invoice_ninja_ref or host.invoice_ninja_id}.'
-        )
-    key, existing = _claim_push(host)
-    if existing:
-        _store_pushed_invoice(host, existing, extra)
-        _check_recovered_total(host, existing, payload)
-        return existing, True
+
+def _recover_invoice(req, host, why):
     try:
-        data = _request('POST', '/invoices', json={**payload, MB_KEY_FIELD: key})
-        invoice = data['data']
-        str(invoice['id'])
-    except InvoiceNinjaOutcomeUnknown as e:
-        return _recover_invoice(host, key, payload, extra, str(e))
-    except InvoiceNinjaError:
-        # IN refused it, or was never reached: nothing was created.
-        _release_push(host)
-        raise
-    except (KeyError, TypeError):
-        # Accepted, but the answer does not say what was created.
-        return _recover_invoice(host, key, payload, extra, 'Invoice Ninja\'s answer did not include the invoice.')
-    _store_pushed_invoice(host, invoice, extra)
-    return invoice, False
-
-
-def _recover_invoice(host, key, payload, extra, why):
-    try:
-        found = _find_invoice_by_key(key)
+        found = _find_invoice_by_key(req.key)
     except InvoiceNinjaError:
         found = None
     if found:
-        _store_pushed_invoice(host, found, extra)
-        _check_recovered_total(host, found, payload)
-        return found, True
-    # Keep the key: the next attempt looks for this invoice before sending.
+        return _finish_invoice(req, host, found, recovered=True)
+    # Keep the request: the next attempt looks for this invoice before sending.
+    _move(req, _req_model().UNKNOWN, error=why)
     raise InvoiceNinjaOutcomeUnknown(
         f'{why} It may or may not have created the invoice. MB will look for it '
         'before sending again, so it is safe to try again in a minute.'
     )
 
 
-def clear_pending_send(host, user):
-    """A person has checked IN for an invoice whose answer was lost. If MB can
-    now find it, it is linked; otherwise the pending send is cleared so a new
-    one can go. Returns the linked invoice, or None."""
-    from django.utils import timezone
-    host.refresh_from_db(fields=['in_push_key', 'in_push_started_at'])
-    if not host.in_push_key:
-        return None
-    if host.in_push_started_at and timezone.now() - host.in_push_started_at < IN_FLIGHT:
-        raise InvoiceNinjaError(_IN_PROGRESS_MSG)
-    found = None
+def _create_invoice(host, payload, *, resend=False, host_fields=None, user=None):
+    """Create IN's invoice for `host` (a WorkOrder or Sale) at most once and
+    return (invoice, recovered). `recovered` is True when the invoice came from
+    an earlier send whose answer was lost. `host_fields` are saved on the host
+    in the same write as the link. `resend` must be True to create another
+    invoice for a host that already has one."""
+    R = _req_model()
+    if host.invoice_ninja_id and not resend:
+        raise InvoiceNinjaError(
+            f'This is already in Invoice Ninja as invoice #{host.invoice_ninja_ref or host.invoice_ninja_id}.'
+        )
+    base = host.invoice_ninja_id or ''
+    req, carried_on = _claim(host, R.KIND_INVOICE, {'invoice': payload, 'host_fields': host_fields or {}},
+                             base_invoice_id=base, user=user)
+    if not carried_on:
+        current = type(host).objects.filter(pk=host.pk).values_list('invoice_ninja_id', 'invoice_ninja_ref').first()
+        if current and (current[0] or '') != base:
+            _move(req, R.FAILED, error='record changed before sending')
+            raise InvoiceNinjaRefused(
+                f'This was just sent to Invoice Ninja as invoice #{current[1] or current[0]}. '
+                'Reload the page before doing anything else with it.'
+            )
+    else:
+        # An earlier send of this record never got its answer: look for it,
+        # with its own key, before sending anything.
+        try:
+            found = _find_invoice_by_key(req.key)
+        except InvoiceNinjaError as e:
+            _move(req, R.UNKNOWN, error=str(e))
+            raise InvoiceNinjaOutcomeUnknown(
+                f'An earlier send got no answer, and MB could not check Invoice Ninja for it: {e} '
+                'Nothing new was sent. Try again in a minute.'
+            )
+        if found:
+            return _finish_invoice(req, host, found, recovered=True)
     try:
-        found = _find_invoice_by_key(host.in_push_key)
+        data = _request('POST', '/invoices', json={**req.payload['invoice'], MB_KEY_FIELD: req.key})
+        invoice = data['data']
+        _usable_id(invoice)
+    except InvoiceNinjaOutcomeUnknown as e:
+        return _recover_invoice(req, host, str(e))
     except InvoiceNinjaError as e:
+        # IN refused it, or was never reached: nothing was created.
+        _move(req, R.FAILED, error=str(e))
+        raise
+    except (KeyError, TypeError, ValueError):
+        # Accepted, but the answer does not say what was created.
+        return _recover_invoice(req, host, 'Invoice Ninja\'s answer did not include the invoice.')
+    return _finish_invoice(req, host, invoice, recovered=False)
+
+
+def clear_pending_send(host, user):
+    """A person has checked IN for an invoice whose answer was lost. MB looks
+    once more: if it finds the invoice, it is linked exactly as an automatic
+    recovery would link it (totals checked, the sale's payment still owed);
+    otherwise the send is cleared so a new one can go, recording who said so
+    and whether MB's own lookup worked. Returns the linked invoice, or None."""
+    R = _req_model()
+    req = requests_for(host).filter(lane='invoice', state__in=(R.UNKNOWN, R.SENDING)).first()
+    if req is None:
+        return None
+    token = secrets.token_hex(16)
+    if req.state == R.SENDING and timezone.now() - req.started_at < IN_FLIGHT:
+        raise InvoiceNinjaRefused(_IN_PROGRESS_MSG)
+    if not R.objects.filter(pk=req.pk, token=req.token, state=req.state).update(
+            token=token, state=R.SENDING, started_at=timezone.now()):
+        raise InvoiceNinjaRefused(_IN_PROGRESS_MSG)
+    req.token, req.state = token, R.SENDING
+    lookup_error = ''
+    try:
+        found = _find_invoice_by_key(req.key)
+    except InvoiceNinjaError as e:
+        found, lookup_error = None, str(e)
         logger.warning('Pending-send lookup failed for %s %s: %s', type(host).__name__, host.pk, e)
     if found:
-        _store_pushed_invoice(host, found)
+        _finish_invoice(req, host, found, recovered=True)
         return found
-    _release_push(host)
-    _record_resolution(host, user, 'Pending send cleared',
-                       'checked Invoice Ninja, the invoice from the lost send is not there', clear_hold=False)
+    note = 'Checked Invoice Ninja: the invoice from the lost send is not there.'
+    if lookup_error:
+        note += f' MB could not look for it itself ({lookup_error}), so this rests on that check.'
+    _move(req, R.CLEARED, resolved_by=user, resolved_at=timezone.now(), resolved_note=note)
+    logger.info('Pending send on %s %s cleared by %s: %s', type(host).__name__, host.pk, user, note)
     return None
 
+
+# ---------------------------------------------------------------------------
+# Payments. IN honours idempotency_key on payments (tested Oct 2 2026). Each
+# payment request has its own key and keeps the payment it sent; a retry after
+# a lost answer resends that same payment, and MB records its details, never
+# those of a later form. A refusal counts as "already recorded" only when IN
+# says that key was already used.
+# ---------------------------------------------------------------------------
 
 class InvoiceNinjaAlreadyPaid(InvoiceNinjaError):
     """IN refused MB's payment because the invoice is already paid, and nothing
     shows it was MB's own payment. MB must not record its payment details."""
 
 
-def _create_payment(payload, *, key):
-    """POST a payment once and return only when MB's own payment is recorded.
-
-    IN honours idempotency_key on payments (tested Oct 2 2026), and `key` is
-    derived from the invoice. After a lost answer the same payment is sent
-    once more with the same key: IN either records it (the first never
-    landed) or refuses the key as used (the first did land, so it is ours).
-    A refusal because the invoice is already paid, without that key evidence,
-    means someone else paid it: InvoiceNinjaAlreadyPaid.
-    """
+def _key_already_used(e):
+    import json
     try:
-        _request('POST', '/payments', json={**payload, 'idempotency_key': key})
-        return
-    except InvoiceNinjaOutcomeUnknown as first:
-        try:
-            _request('POST', '/payments', json={**payload, 'idempotency_key': key})
-            return
-        except InvoiceNinjaOutcomeUnknown:
-            raise InvoiceNinjaOutcomeUnknown(
-                f'{first} The payment may or may not have been recorded. Trying again is '
-                'safe: Invoice Ninja refuses the same payment twice.'
-            )
-        except InvoiceNinjaError as e:
-            _classify_payment_refusal(e, payload, key)
-    except InvoiceNinjaError as e:
-        _classify_payment_refusal(e, payload, key)
+        body = json.loads(getattr(e, 'body', '') or '')
+    except ValueError:
+        return False
+    errors = body.get('errors') if isinstance(body, dict) else None
+    messages = errors.get('idempotency_key') if isinstance(errors, dict) else None
+    if isinstance(messages, str):
+        messages = [messages]
+    return any('already' in str(m).lower() for m in (messages or []))
 
 
-def _classify_payment_refusal(e, payload, key):
+def _classify_payment_refusal(req, e):
+    R = _req_model()
+    if _key_already_used(e):
+        # IN has this request's own payment: it is the one recorded.
+        logger.info('Invoice Ninja payment %s already recorded (%s)', req.key, e)
+        _move(req, R.DONE, resolved_note='Invoice Ninja had already recorded this payment.')
+        return req
     body = (getattr(e, 'body', '') or '').lower()
-    if 'idempotency' in body:
-        # IN has seen this exact key: MB's payment is the one recorded.
-        logger.info('Invoice Ninja payment %s already recorded (%s)', key, e)
-        return
-    invoice_id = payload['invoices'][0]['invoice_id']
     paid = 'have been paid' in body
     if not paid:
         try:
-            paid = _invoice_label(invoice_id) == 'Paid'
+            paid = _invoice_label(req.base_invoice_id) == 'Paid'
         except InvoiceNinjaError:
             paid = False
     if paid:
+        _move(req, R.FAILED, error='Invoice already paid in Invoice Ninja by something else.')
         raise InvoiceNinjaAlreadyPaid(
             'Invoice Ninja already shows this invoice as Paid, and not by this payment. '
             'MB did not post a payment there. Check Invoice Ninja for how it was paid.'
         )
+    _move(req, R.FAILED, error=str(e))
     raise e
 
 
@@ -504,9 +673,59 @@ def _invoice_label(invoice_id):
     return status_label((data.get('data') or {}).get('status_id'))
 
 
-def _payment_key(invoice_id):
-    # MB pays an IN invoice in full, once, so the invoice id is the payment's identity.
-    return f'mb-pay-{invoice_id}'
+def post_payment(host, invoice_id, in_client_id, *, amount, method='', method_label='', reference='',
+                 type_id=None, user=None):
+    """Record a payment against IN invoice `invoice_id` for `host`, once, and
+    return the request. Its payload holds the payment MB sent; record THOSE
+    details (`request.carried_on` is True when an earlier unanswered payment
+    was finished instead of this form's). Raises InvoiceNinjaAlreadyPaid when
+    IN shows the invoice paid by something else."""
+    R = _req_model()
+    payment = {
+        'client_id': in_client_id,
+        'amount': float(amount),
+        'invoices': [{'invoice_id': invoice_id, 'amount': float(amount)}],
+        'transaction_reference': reference or '',
+        'private_notes': method_label or '',
+        'date': timezone.localdate().isoformat(),
+    }
+    if type_id is not None:
+        payment['type_id'] = type_id
+    payload = {'payment': payment, 'amount': str(amount), 'method': method,
+               'method_label': method_label, 'reference': reference or ''}
+    # Nothing is paid against a held record, whatever lane the hold is in; this
+    # record's own unanswered payment is the one exception (it is finished).
+    require_no_hold(host, finishing=R.KIND_PAYMENT)
+    req, carried_on = _claim(host, R.KIND_PAYMENT, payload, base_invoice_id=invoice_id, user=user)
+    req.carried_on = carried_on
+    if carried_on and req.base_invoice_id != invoice_id:
+        _move(req, R.HELD, reason=(
+            f'A payment sent {_when(req.started_at)} to an earlier Invoice Ninja invoice got no answer. '
+            'Check that invoice in Invoice Ninja, then clear this hold.'))
+        raise InvoiceNinjaRefused(_held_message(req))
+    send = {**req.payload['payment'], 'idempotency_key': req.key}
+    try:
+        try:
+            data = _request('POST', '/payments', json=send)
+        except InvoiceNinjaOutcomeUnknown:
+            # Once more with the same key: IN records it (the first never
+            # landed) or refuses the key as used (it did, and it is this one).
+            data = _request('POST', '/payments', json=send)
+    except InvoiceNinjaOutcomeUnknown as e:
+        _move(req, R.UNKNOWN, error=str(e))
+        raise InvoiceNinjaOutcomeUnknown(
+            f'{e} The payment may or may not have been recorded. Trying again sends this same '
+            f'payment (${req.payload["amount"]}, {req.payload["method_label"] or "unspecified"}): '
+            'Invoice Ninja refuses the same payment twice.'
+        )
+    except InvoiceNinjaError as e:
+        return _classify_payment_refusal(req, e)
+    try:
+        in_id = _usable_id((data or {}).get('data') or {})
+    except (KeyError, TypeError, ValueError, AttributeError):
+        in_id = ''
+    _move(req, R.DONE, in_id=in_id)
+    return req
 
 
 def in_client_name(client):
@@ -566,11 +785,15 @@ def _client_payload(client):
 
 
 def _find_client_by_email(email):
-    rows = _request('GET', '/clients', params={'email': email}).get('data') or []
-    return str(rows[0]['id']) if rows else None
+    for row in _request('GET', '/clients', params={'email': email}).get('data') or []:
+        try:
+            return _usable_id(row)
+        except (KeyError, ValueError):
+            continue
+    return None
 
 
-def find_or_create_client(client):
+def find_or_create_client(client, user=None):
     """Return the IN client id for an MB Client, creating it if needed.
 
     Link once, don't sync: if we already stored an IN id, use it. Else match by
@@ -579,78 +802,80 @@ def find_or_create_client(client):
 
     A create whose answer is lost is found again by that email. A client with
     no email has nothing that identifies it, so MB does not guess (a same-name
-    match can be another company): it holds the client until a person checks.
+    match can be another company): the create is held until a person checks.
     """
-    from django.utils import timezone
-    from .models import Client
+    R = _req_model()
     if client.invoice_ninja_id:
         return client.invoice_ninja_id
-    client.refresh_from_db(fields=['in_hold_kind', 'in_hold_reason', 'in_create_started_at'])
-    if client.in_hold_kind:
-        raise InvoiceNinjaError(client.in_hold_reason)
+    held = requests_for(client).filter(state=R.HELD).first()
+    if held is not None:
+        raise InvoiceNinjaRefused(_held_message(held))
 
     email = _client_email(client)
     if email:
         in_id = _find_client_by_email(email)
         if in_id:
-            _store_client_link(client, in_id)
-            return in_id
-
-    now = timezone.now()
-    started = client.in_create_started_at
-    if started and now - started < IN_FLIGHT:
-        raise InvoiceNinjaError(_IN_PROGRESS_MSG)
-    # Claim the create, so two requests cannot both send it.
-    if not Client.objects.filter(pk=client.pk, invoice_ninja_id='', in_create_started_at=started).update(
-            in_create_started_at=now):
-        raise InvoiceNinjaError(_IN_PROGRESS_MSG)
-    client.in_create_started_at = now
+            return _link_client(client, in_id)
 
     payload = _client_payload(client)
+    req, carried_on = _claim(client, R.KIND_CLIENT, payload, user=user)
+    if carried_on and not email:
+        # An earlier create of this client got no answer and there is no email
+        # to look it up by: sending again could make a second one.
+        _move(req, R.HELD, reason=_no_email_reason(req.payload.get('name') or client.name))
+        raise InvoiceNinjaOutcomeUnknown(_held_message(req))
+    # Carried on with an email: the lookup above found nothing, so the earlier
+    # create never landed and this one goes, with the client as it is now.
     try:
         data = _request('POST', '/clients', json=payload)
-        in_id = str(data['data']['id'])
+        in_id = _usable_id(data['data'])
     except InvoiceNinjaOutcomeUnknown as e:
-        return _recover_client(client, email, payload['name'], str(e))
-    except InvoiceNinjaError:
-        Client.objects.filter(pk=client.pk).update(in_create_started_at=None)
-        client.in_create_started_at = None
+        return _recover_client(req, client, email, payload['name'], str(e))
+    except InvoiceNinjaError as e:
+        _move(req, R.FAILED, error=str(e))
         raise
-    except (KeyError, TypeError):
-        return _recover_client(client, email, payload['name'], 'Invoice Ninja\'s answer did not include the client.')
-    _store_client_link(client, in_id)
-    return in_id
+    except (KeyError, TypeError, ValueError):
+        return _recover_client(req, client, email, payload['name'], 'Invoice Ninja\'s answer did not include the client.')
+    _move(req, R.DONE, in_id=in_id)
+    return _link_client(client, in_id)
 
 
-def _store_client_link(client, in_id):
-    client.invoice_ninja_id = in_id
-    client.in_create_started_at = None
-    client.save(update_fields=['invoice_ninja_id', 'in_create_started_at'])
+def _link_client(client, in_id):
+    """Store IN's id on the client unless another request linked one first,
+    and return whichever id the client now has."""
+    from .models import Client
+    Client.objects.filter(pk=client.pk, invoice_ninja_id='').update(invoice_ninja_id=in_id)
+    client.invoice_ninja_id = Client.objects.filter(pk=client.pk).values_list('invoice_ninja_id', flat=True).first() or in_id
+    return client.invoice_ninja_id
 
 
-def _recover_client(client, email, name, why):
-    from .models import InvoiceNinjaHold
-    if email:
-        try:
-            in_id = _find_client_by_email(email)
-        except InvoiceNinjaError:
-            in_id = None
-        if in_id:
-            _store_client_link(client, in_id)
-            return in_id
-        raise InvoiceNinjaOutcomeUnknown(
-            f'{why} It may or may not have created the client. MB looks for the '
-            'client by email first, so it is safe to try again in a minute.'
-        )
-    reason = (
+def _no_email_reason(name):
+    return (
         f'Invoice Ninja may have created the client "{name}" (no answer came back), and '
         'this client has no email for MB to find it by. Check the Invoice Ninja client '
         'list. If it is not there, clear this hold. If it is, add the same email to '
         'this client in MB and to that client in Invoice Ninja, then clear this hold: '
         'MB will find it by email.'
     )
-    set_hold(client, InvoiceNinjaHold.HOLD_CLIENT, reason)
-    raise InvoiceNinjaOutcomeUnknown(f'{why} {reason}')
+
+
+def _recover_client(req, client, email, name, why):
+    R = _req_model()
+    if email:
+        try:
+            in_id = _find_client_by_email(email)
+        except InvoiceNinjaError:
+            in_id = None
+        if in_id:
+            _move(req, R.DONE, in_id=in_id)
+            return _link_client(client, in_id)
+        _move(req, R.UNKNOWN, error=why)
+        raise InvoiceNinjaOutcomeUnknown(
+            f'{why} It may or may not have created the client. MB looks for the '
+            'client by email first, so it is safe to try again in a minute.'
+        )
+    _move(req, R.HELD, reason=_no_email_reason(name), error=why)
+    raise InvoiceNinjaOutcomeUnknown(f'{why} {_no_email_reason(name)}')
 
 
 def _line_items_payload(host):
@@ -708,17 +933,8 @@ def check_invoice_status(work_order):
     invoice.in_status_checked_at = timezone.now()
     invoice.save(update_fields=['invoice_ninja_id', 'in_status', 'in_status_checked_at'])
 
-    _paid_clears_charge_hold(work_order, label)
+    _settle_on_paid(work_order, label)
     return label
-
-
-def _paid_clears_charge_hold(host, label):
-    """Paid is the one read-back that settles an unconfirmed charge: there is
-    nothing left to charge. Unpaid proves nothing (the job may still be queued)."""
-    from .models import InvoiceNinjaHold
-    host.refresh_from_db(fields=['in_hold_kind'])
-    if label == 'Paid' and host.in_hold_kind == InvoiceNinjaHold.HOLD_CHARGE:
-        resolve_hold(host, None, 'Check IN read Paid')
 
 
 def push_work_order(work_order):
@@ -800,7 +1016,7 @@ def find_or_create_walkin_client():
     return in_id
 
 
-def push_sale(sale, draft=False, resend=False):
+def push_sale(sale, draft=False, resend=False, user=None):
     """Create an invoice in IN from a sale's priced lines.
 
     ``draft=False`` (counter lane, Lane B): after creating the invoice we post a
@@ -824,8 +1040,6 @@ def push_sale(sale, draft=False, resend=False):
     invoice Paid by something else, raises InvoiceNinjaAlreadyPaid after marking
     the sale's IN status Paid.
     """
-    from django.utils import timezone
-
     line_items = _line_items_payload(sale)
     if not line_items:
         raise InvoiceNinjaError(
@@ -833,26 +1047,28 @@ def push_sale(sale, draft=False, resend=False):
             'one line first.'
         )
     if not draft:
-        require_no_hold(sale)
+        require_no_hold(sale, finishing=_req_model().KIND_PAYMENT)
 
     if sale.client_id:
-        in_client_id = find_or_create_client(sale.client)
+        in_client_id = find_or_create_client(sale.client, user=user)
     else:
         in_client_id = find_or_create_walkin_client()
 
     resume = not draft and not resend and bool(sale.invoice_ninja_id) and sale.in_payment_pending
     if not resume:
         if draft:
-            extra = {'in_status': 'Draft', 'in_status_checked_at': timezone.now(), 'in_payment_pending': False}
+            host_fields = {'in_status': 'Draft', 'in_status_checked_at': '__now__', 'in_payment_pending': False}
         else:
             # The old status belongs to the old invoice; until this payment is
-            # confirmed the sale is pending, not Paid.
-            extra = {'in_status': '', 'in_payment_pending': True}
+            # confirmed the sale is pending, not Paid. Saved with the link, so
+            # however the invoice is found (answer, recovery, a person's
+            # check), the payment is still owed.
+            host_fields = {'in_status': '', 'in_payment_pending': True}
         _create_invoice(sale, {
             'client_id': in_client_id,
             'po_number': sale.sale_number,  # SALE# for bank→IN→MB traceability
             'line_items': line_items,
-        }, resend=resend, extra=extra)
+        }, resend=resend, host_fields=host_fields, user=user)
     invoice_id = sale.invoice_ninja_id
 
     if draft:
@@ -860,20 +1076,13 @@ def push_sale(sale, draft=False, resend=False):
         return sale.invoice_ninja_ref or sale.invoice_ninja_id
 
     # Post the payment → IN marks the invoice Paid (not Draft).
-    amount = float(sale.amount if sale.amount is not None else sale.line_items_total)
-    payment_payload = {
-        'client_id': in_client_id,
-        'amount': amount,
-        'invoices': [{'invoice_id': invoice_id, 'amount': amount}],
-        'transaction_reference': sale.reference or '',
-        'private_notes': f'Counter sale {sale.sale_number} — {sale.get_payment_method_display() or sale.payment_method or "unspecified"}',
-        'date': timezone.localdate().isoformat(),
-    }
-    type_id = _IN_PAYMENT_TYPE_IDS.get(sale.payment_method)
-    if type_id is not None:
-        payment_payload['type_id'] = type_id
+    amount = sale.amount if sale.amount is not None else sale.line_items_total
     try:
-        _create_payment(payment_payload, key=_payment_key(invoice_id))
+        post_payment(
+            sale, invoice_id, in_client_id, amount=amount, method=sale.payment_method,
+            method_label=f'Counter sale {sale.sale_number} — {sale.get_payment_method_display() or sale.payment_method or "unspecified"}',
+            reference=sale.reference or '', type_id=_IN_PAYMENT_TYPE_IDS.get(sale.payment_method), user=user,
+        )
     except InvoiceNinjaAlreadyPaid as e:
         _mark_sale_paid(sale)
         raise InvoiceNinjaAlreadyPaid(f'Invoice #{sale.invoice_ninja_ref or invoice_id}: {e}')
@@ -920,7 +1129,7 @@ def check_sale_status(sale):
         sale.in_payment_pending = False
         fields.append('in_payment_pending')
     sale.save(update_fields=fields)
-    _paid_clears_charge_hold(sale, label)
+    _settle_on_paid(sale, label)
     return label
 
 
@@ -964,7 +1173,7 @@ def status_label(status_id):
 # already-pushed invoice, IN charges the client's stored Square token, and MB
 # reads the result back. See memory project_mb_card_payment_security.
 
-def charge_on_file(host):
+def charge_on_file(host, user=None):
     """Trigger Invoice Ninja to charge the client's card on file for `host`'s
     already-pushed invoice, via IN's bulk 'auto_bill' action (confirmed against
     IN v5-stable source: POST /invoices/bulk {action:'auto_bill', ids:[...]}
@@ -1003,30 +1212,38 @@ def charge_on_file(host):
     if not in_id:
         raise InvoiceNinjaError(f'This {noun} has not been pushed to Invoice Ninja yet — send it as a draft first.')
 
-    _claim_charge(host)
+    # The claim is a request row, written before anything is sent and kept
+    # active (queued) after IN accepts the trigger, so a second charge is
+    # refused until Check IN reads Paid or CHARGE_COOLDOWN passes.
+    R = _req_model()
+    # Nothing is charged on a held record, whatever lane the hold is in.
+    require_no_hold(host)
+    req, _ = _claim(host, R.KIND_CHARGE, {'invoice_id': in_id}, base_invoice_id=in_id, user=user)
     try:
         # Fresh status from IN (updates the host's stored status) — not the
         # possibly-stale stored value. Fails loud if IN is unreachable, so no
         # charge fires blind.
         current = check_status(host)
-        if current.strip().lower() == 'paid':
-            raise InvoiceNinjaError(f'This {noun} is already marked Paid in Invoice Ninja — refusing to charge again.')
+    except InvoiceNinjaError as e:
+        _move(req, R.FAILED, error=f'Status check before charging failed: {e}')
+        raise InvoiceNinjaError(f'MB could not check Invoice Ninja before charging, so nothing was charged: {e}')
+    if current.strip().lower() == 'paid':
+        _move(req, R.FAILED, error='Already Paid in Invoice Ninja.')
+        raise InvoiceNinjaError(f'This {noun} is already marked Paid in Invoice Ninja — refusing to charge again.')
+    try:
         _request('POST', '/invoices/bulk', json={'action': 'auto_bill', 'ids': [in_id]})
     except InvoiceNinjaOutcomeUnknown as e:
-        from django.utils import timezone
         reason = (
-            f'A card charge sent {timezone.localtime().strftime("%b %-d at %-I:%M %p")} was not '
-            'confirmed by Invoice Ninja, so the card may have been charged. Use "Check IN": '
-            'if it shows Paid this clears by itself. If Invoice Ninja shows no charge, clear '
-            'this hold to allow charging again.'
+            f'A card charge sent {_when(req.started_at)} was not confirmed by Invoice Ninja, so the '
+            'card may have been charged. Use "Check IN": if it shows Paid this clears by itself. If '
+            'Invoice Ninja shows no charge, clear this hold to allow charging again.'
         )
-        from .models import InvoiceNinjaHold
-        set_hold(host, InvoiceNinjaHold.HOLD_CHARGE, reason)
+        _move(req, R.HELD, reason=reason, error=str(e))
         raise InvoiceNinjaOutcomeUnknown(f'{e} {reason}')
-    except Exception:
-        _release_hold(host, _CHARGING)
+    except InvoiceNinjaError as e:
+        _move(req, R.FAILED, error=str(e))
         raise
-    _release_hold(host, _CHARGING)
+    _move(req, R.QUEUED)
 
     # Best-effort immediate read-back — the async job may not have run yet, so
     # this often still reports the pre-charge status. That's expected; the
@@ -1039,43 +1256,24 @@ def charge_on_file(host):
         return stored_label() or 'Unknown'
 
 
-_CHARGING = 'charge'
-
-
-def _claim_charge(host):
-    """Claim the record for one charge before calling IN: a conditional UPDATE,
-    so of two charge clicks at once only one reaches IN. A held record (an
-    unconfirmed earlier charge, a total that does not match) refuses."""
-    from django.utils import timezone
-    model = type(host)
-    if not model.objects.filter(pk=host.pk, in_hold_kind='').update(
-            in_hold_kind=_CHARGING, in_hold_reason='A card charge is being sent to Invoice Ninja right now.',
-            in_hold_at=timezone.now()):
-        host.refresh_from_db(fields=['in_hold_kind', 'in_hold_reason'])
-        raise InvoiceNinjaError(f'{host.in_hold_reason} MB will not charge again until this is cleared.')
-    host.in_hold_kind = _CHARGING
-
-
-def charge_sale_on_file(sale):
+def charge_sale_on_file(sale, user=None):
     """Back-compat alias — the Sale-only entry point kept so any external
     reference (or a stale import) doesn't break. New code should call
     charge_on_file() directly."""
-    return charge_on_file(sale)
+    return charge_on_file(sale, user=user)
 
 
 # ---------------------------------------------------------------------------
 # Light POS — host-agnostic settlement primitives (WorkOrder or Sale). Neither
 # push_sale() nor push_work_order() above are touched by this — they remain the
-# tested, working paths for their existing callers. These two functions are
-# new, additive building blocks the POS uses to settle a WorkOrder (which had
-# no paid-push before) without duplicating push_sale's Sale-specific field
-# writes. Both take already-resolved values and return raw results; the caller
-# (the POS view) is responsible for writing fields onto its own host, since a
-# WorkOrder and a Sale disagree on where payment fields live (Sale stores them
-# on itself; WorkOrder stores them on its related Invoice row).
+# tested, working paths for their existing callers. These are additive building
+# blocks the POS uses to settle a WorkOrder without duplicating push_sale's
+# Sale-specific field writes. The caller (the POS view) writes the payment
+# fields onto its own host, since a WorkOrder and a Sale disagree on where
+# payment fields live (Sale stores them on itself; WorkOrder on its Invoice).
 # ---------------------------------------------------------------------------
 
-def push_host_invoice(host, *, po_number, client=None, is_walkin=False):
+def push_host_invoice(host, *, po_number, client=None, is_walkin=False, user=None):
     """Create a DRAFT invoice in IN from any host exposing a `line_items`
     GenericRelation (WorkOrder or Sale). Stores IN's id and number on the host
     (the create-once guard needs them there) and returns
@@ -1090,31 +1288,10 @@ def push_host_invoice(host, *, po_number, client=None, is_walkin=False):
         raise InvoiceNinjaError(
             'This has no priced line items to send. Add a price to at least one line first.'
         )
-    in_client_id = find_or_create_walkin_client() if is_walkin else find_or_create_client(client)
+    in_client_id = find_or_create_walkin_client() if is_walkin else find_or_create_client(client, user=user)
     invoice, recovered = _create_invoice(host, {
         'client_id': in_client_id,
         'po_number': po_number,
         'line_items': line_items,
-    })
+    }, user=user)
     return str(invoice['id']), str(invoice.get('number') or ''), in_client_id, recovered
-
-
-def post_payment(invoice_id, in_client_id, *, amount, method_label, reference=''):
-    """Post a payment against an existing IN invoice, marking it Paid.
-
-    A thin, host-agnostic version of the payment-posting half of push_sale() —
-    used by the POS to settle a WorkOrder (or a Sale reached through the POS)
-    against an invoice that may have just been created or may already exist.
-    Raises InvoiceNinjaAlreadyPaid when IN shows the invoice paid by something
-    other than this payment.
-    """
-    from django.utils import timezone
-    payload = {
-        'client_id': in_client_id,
-        'amount': float(amount),
-        'invoices': [{'invoice_id': invoice_id, 'amount': float(amount)}],
-        'transaction_reference': reference or '',
-        'private_notes': method_label or '',
-        'date': timezone.localdate().isoformat(),
-    }
-    _create_payment(payload, key=_payment_key(invoice_id))

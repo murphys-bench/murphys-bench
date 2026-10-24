@@ -2024,6 +2024,18 @@ def _enable_in(monkeypatch=None):
     return s
 
 
+def _in_request(host, kind, state, **fields):
+    """An Invoice Ninja request row on `host`, as invoice_ninja would leave it."""
+    import secrets
+    from django.utils import timezone
+    from core.models import InvoiceNinjaRequest as R
+    field = {'WorkOrder': 'work_order', 'Sale': 'sale', 'Client': 'client'}[type(host).__name__]
+    fields.setdefault('started_at', timezone.now())
+    fields.setdefault('key', f'mb-test-{secrets.token_hex(6)}')
+    fields.setdefault('token', secrets.token_hex(8))
+    return R.objects.create(**{field: host}, kind=kind, lane=R.LANES[kind], state=state, **fields)
+
+
 @pytest.mark.django_db
 def test_in_client_name_is_type_aware():
     from core import invoice_ninja
@@ -2112,7 +2124,7 @@ def test_push_work_order_still_used_directly(client_obj, monkeypatch):
                             quantity=1, unit_price=40)
     monkeypatch.setattr(invoice_ninja, '_request',
                         lambda method, path, **kw: {'data': {'id': 9, 'number': 'INV-9'}})
-    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c, **kw: 'inclient-1')
     ref = invoice_ninja.push_work_order(wo)
     assert ref == 'INV-9'
 
@@ -6060,7 +6072,7 @@ def test_sale_checkout_pushes_when_in_enabled(client, admin_user, client_obj, mo
     _enable_in()
     sale = _priced_draft_sale(client_obj)
     calls = []
-    monkeypatch.setattr(invoice_ninja, 'push_sale', lambda s: calls.append(s) or 'INV-5')
+    monkeypatch.setattr(invoice_ninja, 'push_sale', lambda s, **kw: calls.append(s) or 'INV-5')
     client.force_login(admin_user)
     client.post(reverse('core:sale_checkout', args=[sale.pk]), {
         'payment_method': 'card', 'amount': '30.00', 'reference': 'AUTH123',
@@ -6077,7 +6089,7 @@ def test_sale_checkout_push_failure_completes_locally(client, admin_user, client
     _enable_in()
     sale = _priced_draft_sale(client_obj)
 
-    def boom(s):
+    def boom(s, **kw):
         raise invoice_ninja.InvoiceNinjaError('IN down')
     monkeypatch.setattr(invoice_ninja, 'push_sale', boom)
     client.force_login(admin_user)
@@ -6187,7 +6199,7 @@ def test_sale_send_in_duplicate_guard(client, admin_user, client_obj, monkeypatc
     assert calls == []
     client.post(reverse('core:sale_send_in', args=[sale.pk]), {'confirm_resend': '1'})
     assert len(calls) == 1
-    assert calls[0][1] == {'resend': True}   # a confirmed re-send, said so explicitly
+    assert calls[0][1]['resend'] is True   # a confirmed re-send, said so explicitly
 
 
 @pytest.mark.django_db
@@ -6575,7 +6587,7 @@ def test_push_sale_draft_creates_invoice_without_payment(client_obj, monkeypatch
             return {'data': {'id': 987, 'number': 'INV-987'}}
         raise AssertionError(f'Unexpected IN call in draft mode: {method} {path}')
     monkeypatch.setattr(invoice_ninja, '_request', fake_request)
-    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c, **kw: 'inclient-1')
 
     ref = invoice_ninja.push_sale(sale, draft=True)
     sale.refresh_from_db()
@@ -6602,7 +6614,7 @@ def test_push_sale_paid_still_posts_payment(client_obj, monkeypatch):
             return {'data': {'id': 5, 'number': 'INV-5'}}
         return {'data': {'id': 1}}
     monkeypatch.setattr(invoice_ninja, '_request', fake_request)
-    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c, **kw: 'inclient-1')
 
     invoice_ninja.push_sale(sale, draft=False)
     sale.refresh_from_db()
@@ -6633,7 +6645,7 @@ def test_send_draft_view_pushes_draft(client, admin_user, client_obj, monkeypatc
     LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
                             quantity=1, unit_price=Decimal('60.00'))
     captured = {}
-    def fake_push(s, draft=False, resend=False):
+    def fake_push(s, draft=False, resend=False, **kw):
         captured['draft'] = draft
         s.invoice_ninja_id = '111'; s.in_status = 'Draft'
         s.save(update_fields=['invoice_ninja_id', 'in_status'])
@@ -6702,7 +6714,7 @@ def test_batch_send_post_pushes_drafts(client, admin_user, client_obj, monkeypat
     LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
                             quantity=1, unit_price=Decimal('125.00'))
     modes = []
-    def fake_push(s, draft=False, resend=False):
+    def fake_push(s, draft=False, resend=False, **kw):
         modes.append(draft)
         s.invoice_ninja_id = '222'; s.save(update_fields=['invoice_ninja_id'])
         return 'INV-222'
@@ -7113,7 +7125,7 @@ def test_sale_charge_view_success_records_attempt_and_message(client, admin_user
     LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
                             quantity=1, unit_price=Decimal('60.00'))
 
-    def fake_charge(s):
+    def fake_charge(s, **kw):
         s.in_status = 'Sent'  # async — still not Paid right after triggering
         s.save(update_fields=['in_status'])
         return 'Sent'
@@ -7143,11 +7155,12 @@ def test_sale_charge_view_cooldown_blocks_rapid_second_charge(client, admin_user
     sale = Sale.objects.create(client=client_obj, is_recurring=True, invoice_ninja_id='42')
     LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
                             quantity=1, unit_price=Decimal('60.00'))
-    # A prior successful trigger exists moments ago.
+    # A prior trigger IN accepted moments ago: its request is still queued.
     PaymentChargeAttempt.objects.create(sale=sale, invoice_ninja_id='42',
                                         amount=Decimal('60.00'), result='success')
+    _in_request(sale, 'charge', 'queued')
 
-    def must_not_charge(s):
+    def must_not_charge(s, **kw):
         raise AssertionError('Must not fire a charge during the cooldown window')
     monkeypatch.setattr(invoice_ninja, 'charge_sale_on_file', must_not_charge)
 
@@ -7170,7 +7183,7 @@ def test_sale_charge_view_failure_records_attempt_and_error(client, admin_user, 
     LineItem.objects.create(content_object=sale, kind='labor', description='Monthly Service',
                             quantity=1, unit_price=Decimal('60.00'))
 
-    def fake_charge(s):
+    def fake_charge(s, **kw):
         raise invoice_ninja.InvoiceNinjaError('Invoice Ninja returned 422: no payment method on file')
     monkeypatch.setattr(invoice_ninja, 'charge_sale_on_file', fake_charge)
 
@@ -7330,7 +7343,7 @@ def test_pos_wo_charge_view_success_records_attempt_on_work_order(client, admin_
     LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
                             quantity=1, unit_price=Decimal('65.00'))
 
-    def fake_charge(host):
+    def fake_charge(host, **kw):
         inv.in_status = 'Sent'
         inv.save(update_fields=['in_status'])
         return 'Sent'
@@ -7360,8 +7373,9 @@ def test_pos_wo_charge_view_cooldown_blocks_rapid_second_charge(client, admin_us
                             quantity=1, unit_price=Decimal('65.00'))
     PaymentChargeAttempt.objects.create(work_order=wo, invoice_ninja_id='77',
                                         amount=Decimal('65.00'), result='success')
+    _in_request(wo, 'charge', 'queued')
 
-    def must_not_charge(host):
+    def must_not_charge(host, **kw):
         raise AssertionError('Must not fire a charge during the cooldown window')
     monkeypatch.setattr(invoice_ninja, 'charge_on_file', must_not_charge)
 
@@ -7381,7 +7395,7 @@ def test_pos_wo_charge_view_failure_records_attempt_and_error(client, admin_user
     LineItem.objects.create(content_object=wo, kind='labor', description='Bench work',
                             quantity=1, unit_price=Decimal('65.00'))
 
-    def fake_charge(host):
+    def fake_charge(host, **kw):
         raise invoice_ninja.InvoiceNinjaError('Invoice Ninja returned 422: no payment method on file')
     monkeypatch.setattr(invoice_ninja, 'charge_on_file', fake_charge)
 
@@ -7486,7 +7500,7 @@ def test_pos_wo_charge_pushes_draft_then_charges_when_unpushed(client, admin_use
         host.invoice_ninja_id, host.invoice_ninja_ref = '900', 'INV-900'
         host.save(update_fields=['invoice_ninja_id', 'invoice_ninja_ref'])
         return ('900', 'INV-900', 'inclient-1', False)
-    def fake_charge(host):
+    def fake_charge(host, **kw):
         assert host.invoice_ninja_id == '900'  # push ran first
         return 'Sent'
     monkeypatch.setattr(invoice_ninja, 'push_host_invoice', fake_push)
@@ -7519,7 +7533,7 @@ def test_pos_wo_charge_push_failure_not_recorded_as_charge_attempt(client, admin
 
     def fake_push(host, **kwargs):
         raise invoice_ninja.InvoiceNinjaError('IN unreachable')
-    def must_not_charge(host):
+    def must_not_charge(host, **kw):
         raise AssertionError('Charge must not fire when the push failed')
     monkeypatch.setattr(invoice_ninja, 'push_host_invoice', fake_push)
     monkeypatch.setattr(invoice_ninja, 'charge_on_file', must_not_charge)
@@ -7710,7 +7724,7 @@ def test_pos_wo_settle_pushes_and_pays_in_one_invoice(client, admin_user, client
             return {'data': {'id': 1}}
         raise AssertionError(f'Unexpected call {method} {path}')
     monkeypatch.setattr(invoice_ninja, '_request', fake_request)
-    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c, **kw: 'inclient-1')
 
     client.force_login(admin_user)
     resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {
@@ -7748,7 +7762,7 @@ def test_pos_wo_settle_draft_does_not_mark_paid(client, admin_user, client_obj, 
             return {'data': {'id': 601, 'number': 'INV-601'}}
         raise AssertionError(f'Draft must not post a payment: {method} {path}')
     monkeypatch.setattr(invoice_ninja, '_request', fake_request)
-    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c, **kw: 'inclient-1')
 
     client.force_login(admin_user)
     resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'draft'})
@@ -7777,7 +7791,7 @@ def test_pos_wo_settle_draft_records_invoiced_on_mbs_own_invoice(client, admin_u
 
     monkeypatch.setattr(invoice_ninja, '_request',
                         lambda method, path, **kw: {'data': {'id': 931, 'number': '1931'}})
-    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c, **kw: 'inclient-1')
 
     client.force_login(admin_user)
     resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'draft'})
@@ -8094,7 +8108,7 @@ def test_pos_wo_settle_reuses_existing_invoice_never_double_pushes(client, admin
             return {'data': {'id': 1}}
         raise AssertionError(f'Unexpected call {method} {path}')
     monkeypatch.setattr(invoice_ninja, '_request', fake_request)
-    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c, **kw: 'inclient-1')
 
     client.force_login(admin_user)
     resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {
@@ -8217,7 +8231,7 @@ def test_pos_wo_settle_amount_is_server_computed_not_from_post(client, admin_use
             return {'data': {'id': 1}}
         raise AssertionError(f'Unexpected call {method} {path}')
     monkeypatch.setattr(invoice_ninja, '_request', fake_request)
-    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c: 'inclient-1')
+    monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c, **kw: 'inclient-1')
 
     client.force_login(admin_user)
     client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {
@@ -17984,6 +17998,18 @@ def _linked_client(client_obj):
     return client_obj
 
 
+def _active(host, kind):
+    """The record's active Invoice Ninja request of `kind`, or None."""
+    from core import invoice_ninja
+    from core.models import InvoiceNinjaRequest as R
+    return invoice_ninja.requests_for(host).filter(kind=kind, state__in=R.ACTIVE).first()
+
+
+def _last(host, kind):
+    from core import invoice_ninja
+    return invoice_ninja.requests_for(host).filter(kind=kind).order_by('-pk').first()
+
+
 @pytest.mark.django_db
 def test_invoice_carries_mb_key_and_releases_it_on_success(client_obj, monkeypatch):
     from core import invoice_ninja
@@ -17995,10 +18021,11 @@ def test_invoice_carries_mb_key_and_releases_it_on_success(client_obj, monkeypat
     _, _, _, recovered = invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
     assert recovered is False
     sent = fake.creates()[0][3]
-    assert sent[invoice_ninja.MB_KEY_FIELD].startswith(f'mb-workorder-{wo.pk}-')
+    req = _last(wo, 'invoice')
+    assert sent[invoice_ninja.MB_KEY_FIELD] == req.key and req.key.startswith(f'mb-inv-work-{wo.pk}-')
     wo.refresh_from_db()
     assert wo.invoice_ninja_id == 'inv1' and wo.invoice_ninja_ref == '0001'
-    assert wo.in_push_key == '' and wo.in_push_started_at is None
+    assert req.state == 'done' and req.in_id == 'inv1' and _active(wo, 'invoice') is None
 
 
 @pytest.mark.django_db
@@ -18015,7 +18042,8 @@ def test_lost_answer_finds_the_invoice_instead_of_reporting_failure(client_obj, 
     assert (in_id, ref, recovered) == ('inv1', '0001', True)
     assert len(fake.creates()) == 1
     wo.refresh_from_db()
-    assert wo.invoice_ninja_id == 'inv1' and wo.in_push_key == '' and wo.in_hold_kind == ''
+    assert wo.invoice_ninja_id == 'inv1' and _last(wo, 'invoice').state == 'done'
+    assert invoice_ninja.blocking_request(wo) is None
 
 
 @pytest.mark.django_db
@@ -18043,14 +18071,15 @@ def test_lost_answer_not_found_yet_never_creates_a_second_invoice(client_obj, mo
         invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
     assert 'safe to try again' in str(exc.value)
     wo.refresh_from_db()
-    assert wo.invoice_ninja_id == '' and wo.in_push_key
-    key = wo.in_push_key
+    req = _active(wo, 'invoice')
+    assert wo.invoice_ninja_id == '' and req.state == 'unknown'
+    key = req.key
 
     in_id, _, _, recovered = invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
     assert (in_id, recovered) == ('inv1', True)
     assert len(fake.creates()) == 1 and len(fake.invoices) == 1
     wo.refresh_from_db()
-    assert wo.invoice_ninja_id == 'inv1' and wo.in_push_key == ''
+    assert wo.invoice_ninja_id == 'inv1' and _active(wo, 'invoice') is None
     assert fake.invoices[0][invoice_ninja.MB_KEY_FIELD] == key
 
 
@@ -18079,11 +18108,9 @@ def test_every_maybe_done_answer_keeps_the_key(client_obj, monkeypatch, lost):
     monkeypatch.setattr(invoice_ninja, '_find_invoice_by_key', lambda key: None)
     with pytest.raises(invoice_ninja.InvoiceNinjaOutcomeUnknown):
         invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
-    wo.refresh_from_db()
-    assert wo.in_push_key, 'the key must survive a maybe-done answer'
+    assert _active(wo, 'invoice').state == 'unknown', 'the request must survive a maybe-done answer'
     monkeypatch.undo()
     monkeypatch.setattr(invoice_ninja, '_request', fake)
-    WorkOrder.objects.filter(pk=wo.pk).update(in_push_started_at=wo.in_push_started_at - IN_FLIGHT_PAST)
     invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
     assert len(fake.invoices) == 1
 
@@ -18100,17 +18127,18 @@ def test_send_that_never_landed_resends_with_the_same_key_after_the_wait(client_
     wo = _priced_wo(client_obj)
     fake = _FakeIN(invoice_ninja)
     monkeypatch.setattr(invoice_ninja, '_request', fake)
-    WorkOrder.objects.filter(pk=wo.pk).update(in_push_key='mb-workorder-x-1', in_push_started_at=timezone.now())
+    req = _in_request(wo, 'invoice', 'sending', key='mb-inv-work-x-1',
+                      payload={'invoice': {'client_id': 'cl1', 'line_items': [{'cost': 95.0, 'quantity': 1.0}]}})
 
     with pytest.raises(invoice_ninja.InvoiceNinjaError) as exc:       # still in flight
         invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
     assert 'already being sent' in str(exc.value)
     assert fake.creates() == []
 
-    WorkOrder.objects.filter(pk=wo.pk).update(in_push_started_at=timezone.now() - IN_FLIGHT_PAST)
+    type(req).objects.filter(pk=req.pk).update(started_at=timezone.now() - IN_FLIGHT_PAST)
     invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
     assert len(fake.creates()) == 1
-    assert fake.creates()[0][3][invoice_ninja.MB_KEY_FIELD] == 'mb-workorder-x-1'
+    assert fake.creates()[0][3][invoice_ninja.MB_KEY_FIELD] == 'mb-inv-work-x-1'
 
 
 @pytest.mark.django_db
@@ -18199,7 +18227,8 @@ def test_refused_send_releases_the_claim(client_obj, monkeypatch):
     with pytest.raises(invoice_ninja.InvoiceNinjaError):
         invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
     wo.refresh_from_db()
-    assert wo.in_push_key == '' and wo.invoice_ninja_id == ''
+    assert _active(wo, 'invoice') is None and wo.invoice_ninja_id == ''
+    assert _last(wo, 'invoice').state == 'failed'
 
 
 @pytest.mark.django_db
@@ -18234,25 +18263,25 @@ def test_recovered_invoice_whose_total_changed_is_held_not_paid(client, admin_us
     monkeypatch.undo()
     monkeypatch.setattr(invoice_ninja, '_request', fake)
     line = wo.line_items.get(); line.unit_price = Decimal('200.00'); line.save()
-    WorkOrder.objects.filter(pk=wo.pk).update(in_push_started_at=wo.__class__.objects.get(pk=wo.pk).in_push_started_at - IN_FLIGHT_PAST)
 
     client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'pay', 'payment_method': 'cash'})
     wo.refresh_from_db()
     assert wo.invoice_ninja_id == 'inv1' and len(fake.invoices) == 1
-    assert wo.in_hold_kind == 'amount'
-    assert '$95.00' in wo.in_hold_reason and '$200.00' in wo.in_hold_reason
+    hold = _active(wo, 'invoice')
+    assert hold.state == 'held'
+    assert '$95.00' in hold.reason and '$200.00' in hold.reason
     assert fake.payments() == []
     assert wo.invoice.amount is None and wo.invoice.billing_status != 'paid'
 
     client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'pay', 'payment_method': 'cash'})
     assert fake.payments() == []                                   # still held
     page = client.get(reverse('core:pos_wo_settle', args=[wo.pk]))
-    assert b'the invoice is right' in page.content
+    assert b'Invoice Ninja and MB match' in page.content
 
-    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'resolve']))
-    wo.refresh_from_db()
-    assert wo.in_hold_kind == '' and wo.in_hold_resolved_by == admin_user
-    assert 'Invoice total does not match' in wo.in_hold_resolved_note
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'resolve']), {'request': hold.pk})
+    hold.refresh_from_db()
+    assert hold.state == 'cleared' and hold.resolved_by == admin_user
+    assert invoice_ninja.blocking_request(wo) is None
 
 
 @pytest.mark.django_db
@@ -18274,46 +18303,52 @@ def test_recovered_invoice_with_the_same_total_is_read_back_before_paying(client
 # Payments: only evidence of MB's own payment counts (review F1).
 
 @pytest.mark.django_db
-def test_payment_sends_an_idempotency_key_and_a_lost_answer_is_settled_by_the_key(monkeypatch):
+def test_payment_sends_an_idempotency_key_and_a_lost_answer_is_settled_by_the_key(client_obj, monkeypatch):
     from core import invoice_ninja
+    wo = _priced_wo(client_obj)
     fake = _FakeIN(invoice_ninja)
     fake.payment_outcomes = ['lost']
     monkeypatch.setattr(invoice_ninja, '_request', fake)
-    invoice_ninja.post_payment('inv9', 'cl1', amount=60, method_label='Cash')
+    req = invoice_ninja.post_payment(wo, 'inv9', 'cl1', amount=60, method='cash', method_label='Cash')
     keys = [c[3]['idempotency_key'] for c in fake.payments()]
-    assert keys == ['mb-pay-inv9', 'mb-pay-inv9']      # resent once; IN says the key is used: ours
+    assert keys == [req.key, req.key] and req.key.startswith('mb-pay-')   # resent once; IN: key used, ours
+    assert req.state == 'done'
 
 
 @pytest.mark.django_db
-def test_payment_lost_twice_is_outcome_unknown(monkeypatch):
+def test_payment_lost_twice_is_outcome_unknown(client_obj, monkeypatch):
     from core import invoice_ninja
+    wo = _priced_wo(client_obj)
     fake = _FakeIN(invoice_ninja)
     fake.payment_outcomes = [invoice_ninja.InvoiceNinjaOutcomeUnknown('dropped'),
                              invoice_ninja.InvoiceNinjaOutcomeUnknown('dropped')]
     monkeypatch.setattr(invoice_ninja, '_request', fake)
     with pytest.raises(invoice_ninja.InvoiceNinjaOutcomeUnknown) as exc:
-        invoice_ninja.post_payment('inv9', 'cl1', amount=60, method_label='Cash')
+        invoice_ninja.post_payment(wo, 'inv9', 'cl1', amount=60, method='cash', method_label='Cash')
     assert 'refuses the same payment twice' in str(exc.value)
+    assert _active(wo, 'payment').state == 'unknown'
 
 
 @pytest.mark.django_db
-def test_payment_lost_then_accepted_on_the_resend(monkeypatch):
+def test_payment_lost_then_accepted_on_the_resend(client_obj, monkeypatch):
     from core import invoice_ninja
+    wo = _priced_wo(client_obj)
     fake = _FakeIN(invoice_ninja)
     fake.payment_outcomes = [invoice_ninja.InvoiceNinjaOutcomeUnknown('dropped before IN saw it')]
     monkeypatch.setattr(invoice_ninja, '_request', fake)
-    invoice_ninja.post_payment('inv9', 'cl1', amount=60, method_label='Cash')
+    invoice_ninja.post_payment(wo, 'inv9', 'cl1', amount=60, method='cash', method_label='Cash')
     assert 'inv9' in fake.paid
 
 
 @pytest.mark.django_db
-def test_payment_refusal_on_an_unpaid_invoice_still_fails_loud(monkeypatch):
+def test_payment_refusal_on_an_unpaid_invoice_still_fails_loud(client_obj, monkeypatch):
     from core import invoice_ninja
+    wo = _priced_wo(client_obj)
     fake = _FakeIN(invoice_ninja)
     fake.payment_outcomes = [invoice_ninja.InvoiceNinjaError('Invoice Ninja returned 422: amount invalid')]
     monkeypatch.setattr(invoice_ninja, '_request', fake)
     with pytest.raises(invoice_ninja.InvoiceNinjaError) as exc:
-        invoice_ninja.post_payment('inv9', 'cl1', amount=60, method_label='Cash')
+        invoice_ninja.post_payment(wo, 'inv9', 'cl1', amount=60, method='cash', method_label='Cash')
     assert 'amount invalid' in str(exc.value)
     assert not isinstance(exc.value, invoice_ninja.InvoiceNinjaAlreadyPaid)
 
@@ -18486,7 +18521,7 @@ def test_lost_client_create_with_email_is_found_by_the_email_it_sent(client_obj,
     monkeypatch.setattr(invoice_ninja, '_request', fake)
     assert invoice_ninja.find_or_create_client(client_obj) == 'cl7'
     client_obj.refresh_from_db()
-    assert client_obj.invoice_ninja_id == 'cl7' and client_obj.in_create_started_at is None
+    assert client_obj.invoice_ninja_id == 'cl7' and _last(client_obj, 'client').state == 'done'
     assert len(created) == 1
 
 
@@ -18508,7 +18543,8 @@ def test_lost_client_create_without_email_holds_instead_of_guessing_by_name(clie
         invoice_ninja.find_or_create_client(client_obj)
     assert 'no email for MB to find it by' in str(exc.value)
     client_obj.refresh_from_db()
-    assert client_obj.invoice_ninja_id == '' and client_obj.in_hold_kind == 'client_create'
+    hold = _active(client_obj, 'client')
+    assert client_obj.invoice_ninja_id == '' and hold.state == 'held'
     with pytest.raises(invoice_ninja.InvoiceNinjaError):
         invoice_ninja.find_or_create_client(client_obj)
     assert len(posts) == 1                                  # held: no second create
@@ -18516,9 +18552,9 @@ def test_lost_client_create_without_email_holds_instead_of_guessing_by_name(clie
     client.force_login(admin_user)
     page = client.get(reverse('core:client_detail', args=[client_obj.pk]))
     assert b'Client may already exist in Invoice Ninja' in page.content
-    client.post(reverse('core:in_hold', args=['client', client_obj.pk, 'resolve']))
-    client_obj.refresh_from_db()
-    assert client_obj.in_hold_kind == '' and client_obj.in_hold_resolved_by == admin_user
+    client.post(reverse('core:in_hold', args=['client', client_obj.pk, 'resolve']), {'request': hold.pk})
+    hold.refresh_from_db()
+    assert hold.state == 'cleared' and hold.resolved_by == admin_user
 
 
 # Charges (review R2/R3, decision D2).
@@ -18551,51 +18587,48 @@ def test_unconfirmed_charge_holds_until_someone_clears_it(client, admin_user, cl
     client.post(reverse('core:sale_charge', args=[sale.pk]))
     attempt = PaymentChargeAttempt.objects.get(sale=sale)
     assert attempt.result == 'unknown'
-    sale.refresh_from_db()
-    assert sale.in_hold_kind == 'charge'
+    hold = _active(sale, 'charge')
+    assert hold.state == 'held'
 
-    # Past the 5-minute cooldown, the hold still blocks.
-    PaymentChargeAttempt.objects.filter(pk=attempt.pk).update(initiated_at=timezone.now() - timedelta(hours=1))
+    # However long ago, the hold still blocks.
+    type(hold).objects.filter(pk=hold.pk).update(started_at=timezone.now() - timedelta(days=2))
     client.post(reverse('core:sale_charge', args=[sale.pk]))
     assert fired == ['/invoices/bulk']
     # An unpaid Check IN proves nothing and keeps the hold.
     invoice_ninja.check_sale_status(sale)
-    sale.refresh_from_db()
-    assert sale.in_hold_kind == 'charge'
+    hold.refresh_from_db()
+    assert hold.state == 'held'
     page = client.get(reverse('core:sale_detail', args=[sale.pk]))
     assert b'the charge did not go through' in page.content
 
-    client.post(reverse('core:in_hold', args=['sale', sale.pk, 'resolve']))
-    sale.refresh_from_db()
-    assert sale.in_hold_kind == '' and sale.in_hold_resolved_by == admin_user
+    client.post(reverse('core:in_hold', args=['sale', sale.pk, 'resolve']), {'request': hold.pk})
+    hold.refresh_from_db()
+    assert hold.state == 'cleared' and hold.resolved_by == admin_user
 
 
 @pytest.mark.django_db
 def test_check_in_paid_clears_an_unconfirmed_charge(client_obj, monkeypatch):
     from core import invoice_ninja
-    from core.models import InvoiceNinjaHold
     _enable_in()
     sale = _pushed_recurring_sale(client_obj)
-    invoice_ninja.set_hold(sale, InvoiceNinjaHold.HOLD_CHARGE, 'unconfirmed')
+    hold = _in_request(sale, 'charge', 'held', reason='unconfirmed')
     monkeypatch.setattr(invoice_ninja, '_request', lambda *a, **k: {'data': {'status_id': '4'}})
     invoice_ninja.check_sale_status(sale)
-    sale.refresh_from_db()
-    assert sale.in_hold_kind == '' and 'Check IN read Paid' in sale.in_hold_resolved_note
+    hold.refresh_from_db()
+    assert hold.state == 'done' and 'Check IN read Paid' in hold.resolved_note
 
 
 @pytest.mark.django_db
 def test_clearing_a_charge_hold_needs_payment_permission(client, client_obj):
-    from core import invoice_ninja
-    from core.models import InvoiceNinjaHold
     role = Role.objects.create(name='Counter', can_view_sales=True)
     user = User.objects.create_user(username='counter', password='x', role_obj=role)
     sale = _pushed_recurring_sale(client_obj)
-    invoice_ninja.set_hold(sale, InvoiceNinjaHold.HOLD_CHARGE, 'unconfirmed')
+    hold = _in_request(sale, 'charge', 'held', reason='unconfirmed')
     client.force_login(user)
-    resp = client.post(reverse('core:in_hold', args=['sale', sale.pk, 'resolve']))
+    resp = client.post(reverse('core:in_hold', args=['sale', sale.pk, 'resolve']), {'request': hold.pk})
     assert resp.status_code == 403
-    sale.refresh_from_db()
-    assert sale.in_hold_kind == 'charge'
+    hold.refresh_from_db()
+    assert hold.state == 'held'
 
 
 @pytest.mark.django_db
@@ -18617,20 +18650,20 @@ def test_two_charges_at_once_reach_invoice_ninja_once(client_obj, monkeypatch):
     invoice_ninja.charge_on_file(sale)
     assert len([c for c in fake.calls if c[1] == '/invoices/bulk']) == 1
     assert 'being sent' in seen['msg']
-    sale.refresh_from_db()
-    assert sale.in_hold_kind == ''                      # a confirmed trigger releases the claim
+    # A trigger IN accepted stays claimed (queued) until Check IN reads Paid
+    # or the cooldown passes, so a second charge cannot follow it.
+    assert _active(sale, 'charge').state == 'queued'
 
 
 @pytest.mark.django_db
 def test_no_payment_or_charge_while_held(client, admin_user, client_obj, monkeypatch):
     from core import invoice_ninja
-    from core.models import InvoiceNinjaHold
     _enable_in()
     _linked_client(client_obj)
     wo = _priced_wo(client_obj)
     WorkOrder.objects.filter(pk=wo.pk).update(invoice_ninja_id='inv1')
     wo.refresh_from_db()
-    invoice_ninja.set_hold(wo, InvoiceNinjaHold.HOLD_AMOUNT, 'Totals differ.')
+    _in_request(wo, 'invoice', 'held', reason='Totals differ.', in_id='inv1')
     fake = _FakeIN(invoice_ninja)
     monkeypatch.setattr(invoice_ninja, '_request', fake)
     client.force_login(admin_user)
@@ -18648,21 +18681,21 @@ def test_clearing_a_lost_send_links_it_if_found_or_allows_sending_again(client, 
     from core import invoice_ninja
     _enable_in()
     wo = _priced_wo(client_obj)
-    WorkOrder.objects.filter(pk=wo.pk).update(in_push_key='k1', in_push_started_at=timezone.now())
+    req = _in_request(wo, 'invoice', 'sending', key='k1')
     fake = _FakeIN(invoice_ninja)
     monkeypatch.setattr(invoice_ninja, '_request', fake)
     client.force_login(admin_user)
     client.post(reverse('core:in_hold', args=['wo', wo.pk, 'clear-send']))
-    wo.refresh_from_db()
-    assert wo.in_push_key == 'k1'                       # too soon: still in flight
+    req.refresh_from_db()
+    assert req.state == 'sending'                       # too soon: still in flight
 
-    WorkOrder.objects.filter(pk=wo.pk).update(in_push_started_at=timezone.now() - IN_FLIGHT_PAST)
+    type(req).objects.filter(pk=req.pk).update(started_at=timezone.now() - IN_FLIGHT_PAST)
     page = client.get(reverse('core:pos_wo_settle', args=[wo.pk]))
     assert b'the invoice is not there' in page.content
     client.post(reverse('core:in_hold', args=['wo', wo.pk, 'clear-send']))
-    wo.refresh_from_db()
-    assert wo.in_push_key == '' and wo.in_hold_resolved_by == admin_user
-    assert 'Pending send cleared' in wo.in_hold_resolved_note
+    req.refresh_from_db()
+    assert req.state == 'cleared' and req.resolved_by == admin_user
+    assert 'is not there' in req.resolved_note and _active(wo, 'invoice') is None
 
 
 # ── Email logo under Pillow 13 (PR #113 and #114 reviews, Oct 23 2026) ──
