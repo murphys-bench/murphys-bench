@@ -18663,3 +18663,173 @@ def test_clearing_a_lost_send_links_it_if_found_or_allows_sending_again(client, 
     wo.refresh_from_db()
     assert wo.in_push_key == '' and wo.in_hold_resolved_by == admin_user
     assert 'Pending send cleared' in wo.in_hold_resolved_note
+
+
+# ── Email logo under Pillow 13 (PR #113 and #114 reviews, Oct 23 2026) ──
+# Pillow 13 stopped writing 32-bit integer ("I" mode) images as PNG. The resize
+# used to fall back to the original file without a word and label it by its
+# filename. These check the image that actually goes out: its format, size,
+# pixels and label, with the label coming from the content, not the name.
+
+def _logo_file(tmp_path, name, mode, fmt, size=(1200, 400)):
+    from PIL import Image
+    img = Image.new(mode, size, 200 if mode in ('L', 'I') else (10, 120, 60) if mode == 'RGB' else (10, 120, 60, 128))
+    path = tmp_path / name
+    img.save(path, format=fmt)
+    return str(path)
+
+
+def _logo_16bit_tiff(tmp_path, mode):
+    """1200 x 400, four vertical bands at 0 / 1024 / 32768 / 65535."""
+    import struct
+    from PIL import Image
+    order = '<' if mode == 'I;16' else '>'
+    row = b''.join(struct.pack(order + 'H', (0, 1024, 32768, 65535)[x // 300]) for x in range(1200))
+    path = tmp_path / 'logo16.tiff'
+    Image.frombytes(mode, (1200, 400), row * 400).save(path, format='TIFF')
+    return str(path)
+
+
+def _decoded(data):
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(data))
+    im.load()                                   # the whole pixel stream, not just the header
+    return im.format, im.size
+
+
+@pytest.mark.parametrize('name,mode,fmt,out_fmt,out_mime', [
+    ('logo.png', 'RGBA', 'PNG', 'PNG', 'image/png'),
+    ('logo.jpg', 'RGB', 'JPEG', 'JPEG', 'image/jpeg'),
+    ('logo.png', 'L', 'PNG', 'PNG', 'image/png'),
+    ('logo.tiff', 'I', 'TIFF', 'PNG', 'image/png'),
+    ('logo.tiff', 'RGBA', 'TIFF', 'PNG', 'image/png'),
+    ('logo.jpg', 'RGBA', 'PNG', 'PNG', 'image/png'),       # named .jpg, really a PNG
+    ('logo.png', 'RGB', 'JPEG', 'JPEG', 'image/jpeg'),     # named .png, really a JPEG
+])
+def test_email_logo_is_really_resized_and_labelled_by_its_content(tmp_path, name, mode, fmt, out_fmt, out_mime):
+    from core.email_utils import _load_logo_resized
+    data, got_mime = _load_logo_resized(_logo_file(tmp_path, name, mode, fmt))
+    assert _decoded(data) == (out_fmt, (480, 160))
+    assert got_mime == out_mime
+
+
+@pytest.mark.parametrize('mode', ['I;16', 'I;16B'])
+def test_email_logo_16bit_grayscale_keeps_its_values(tmp_path, mode):
+    """Review N1: a mode the PNG writer takes is never converted, so 16-bit
+    values above 255 survive instead of being clipped to white."""
+    import io
+    from PIL import Image
+    from core.email_utils import _load_logo_resized
+    data, mime = _load_logo_resized(_logo_16bit_tiff(tmp_path, mode))
+    out = Image.open(io.BytesIO(data))
+    assert mime == 'image/png' and out.size == (480, 160)
+    assert [out.getpixel((x, 10)) for x in (60, 180, 300, 420)] == [0, 1024, 32768, 65535]
+
+
+def _undecodable_png(tmp_path, name):
+    """A PNG whose chunks and CRCs are intact but whose pixel data is not a
+    valid stream: it opens (and passes upload checks), but resizing fails."""
+    import io
+    import struct
+    import zlib
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.effect_noise((1200, 400), 64).convert('RGB').save(buf, format='PNG')
+    b, out, i = buf.getvalue(), buf.getvalue()[:8], 8
+    while i < len(b):
+        n = struct.unpack('>I', b[i:i + 4])[0]
+        kind, data = b[i + 4:i + 8], b[i + 8:i + 8 + n]
+        if kind == b'IDAT':
+            data = b'\x78\x9c' + b'\xff' * (len(data) - 2)
+        out += struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+        i += 12 + n
+    path = tmp_path / name
+    path.write_bytes(out)
+    return path
+
+
+# WeasyPrint sets PIL.ImageFile.LOAD_TRUNCATED_IMAGES = True when its image
+# module is imported, process-wide, so in a worker that has made a PDF Pillow
+# decodes broken pixel data instead of raising. The logo must be labelled by
+# what it really is either way.
+
+@pytest.mark.parametrize('lenient', [False, True])
+def test_email_logo_that_cannot_be_resized_is_labelled_by_content(tmp_path, caplog, monkeypatch, lenient):
+    """Review N2: a PNG named .jpg whose pixel data is broken goes out labelled
+    image/png, whether Pillow refuses it (sent as itself, logged) or decodes
+    it leniently (re-encoded)."""
+    from PIL import ImageFile
+    from core.email_utils import _load_logo_resized
+    monkeypatch.setattr(ImageFile, 'LOAD_TRUNCATED_IMAGES', lenient)
+    path = _undecodable_png(tmp_path, 'logo.jpg')
+    with caplog.at_level(logging.WARNING, logger='core'):
+        data, mime = _load_logo_resized(str(path))
+    assert mime == 'image/png' and data.startswith(b'\x89PNG')
+    if not lenient:
+        assert data == path.read_bytes()
+        assert 'could not be resized' in caplog.text
+
+
+@pytest.mark.parametrize('name,content', [
+    ('logo.png', b'\x89PNG\r\n\x1a\n not really a png'),
+    ('logo.tiff', b'II*\x00 broken tiff'),
+])
+def test_email_logo_with_unidentifiable_content_is_left_out(tmp_path, caplog, name, content):
+    from core.email_utils import _load_logo_resized
+    path = tmp_path / name
+    path.write_bytes(content)
+    with caplog.at_level(logging.WARNING, logger='core'):
+        assert _load_logo_resized(str(path)) == (None, None)
+    assert 'without it' in caplog.text
+
+
+@pytest.mark.django_db
+def test_email_wrapper_sends_an_integer_tiff_logo_as_a_real_480px_png(tmp_path):
+    """The case the #113 review reproduced: an accepted integer-mode TIFF email logo."""
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from core.email_utils import _build_html_email
+    site = SiteSettings.get()
+    src = _logo_file(tmp_path, 'logo.tiff', 'I', 'TIFF')
+    with open(src, 'rb') as f:
+        site.email_logo.save('logo.tiff', SimpleUploadedFile('logo.tiff', f.read(), content_type='image/tiff'))
+    html, data, mime = _build_html_email('Hello', '', 'Subject', None, site)
+    assert mime == 'image/png'
+    assert _decoded(data) == ('PNG', (480, 160))
+    assert 'cid:logo' in html
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('lenient', [False, True])
+def test_email_sent_with_a_misnamed_unresizable_logo_carries_the_real_type(tmp_path, monkeypatch, lenient):
+    """Review N2 through the real send: the image part's Content-Type matches
+    its bytes."""
+    from PIL import ImageFile
+    monkeypatch.setattr(ImageFile, 'LOAD_TRUNCATED_IMAGES', lenient)
+    from django.core import mail
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from core import email_utils
+    from core.email_utils import _build_html_email, _smtp_send
+    # In-memory mail backend: no SMTP server is contacted.
+    monkeypatch.setattr(email_utils, '_connection_and_from', lambda site, sender: (
+        mail.get_connection('django.core.mail.backends.locmem.EmailBackend'), 'shop@example.com'))
+    site = SiteSettings.get()
+    site.email_logo.save('logo.jpg', SimpleUploadedFile('logo.jpg', _undecodable_png(tmp_path, 'x.jpg').read_bytes()))
+    html, data, mime = _build_html_email('Hello', '', 'Subject', None, site)
+    assert mime == 'image/png'
+    _smtp_send(site, 'Subject', 'Hello', html, data, mime, 'someone@example.com')
+    parts = [p for p in mail.outbox[-1].message().walk() if p.get_content_maintype() == 'image']
+    assert parts and parts[0].get_content_type() == 'image/png'
+    assert parts[0].get_payload(decode=True).startswith(b'\x89PNG')
+
+
+@pytest.mark.django_db
+def test_email_with_an_unidentifiable_logo_shows_the_company_name(tmp_path):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from core.email_utils import _build_html_email
+    site = SiteSettings.get()
+    site.company_name = 'Acme Repair'
+    site.save()
+    site.email_logo.save('logo.tiff', SimpleUploadedFile('logo.tiff', b'II*\x00 broken tiff'))
+    html, data, _ = _build_html_email('Hello', '', 'Subject', None, site)
+    assert data is None and 'cid:logo' not in html and 'Acme Repair' in html

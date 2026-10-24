@@ -17,6 +17,8 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ### Fixed
 
+- The email logo is resized for every image MB accepts, including the integer-mode TIFFs Pillow 13 no longer writes as PNG, without converting images that already save as they are (16-bit grayscale keeps its values). Its format is read from the file's content, not its name, and the email labels it by what is actually sent. A logo that cannot be processed is logged; if its content is not a format mail clients show, the email uses the company name instead.
+- The installer and INSTALL.md now require Python 3.11 or newer, matching Pillow 13. They said 3.10.
 - When Invoice Ninja's answer is lost or cut off, MB looks for the invoice it sent before saying it failed or sending again. MB writes its own reference into invoice custom field 4 to do this; if your Invoice Ninja uses that field, tell us before updating.
 - A send, payment or card charge is claimed in MB's database before it goes to Invoice Ninja, so a second click cannot send it again. Payments carry a key Invoice Ninja uses to refuse a duplicate.
 - When MB cannot tell what Invoice Ninja did, it holds the record and says why: a card charge Invoice Ninja did not confirm, an invoice whose total changed after its answer was lost, or a client with no email that Invoice Ninja may have created. No payment or charge goes through until Check IN shows Paid or someone clears the hold; MB records who cleared it.
