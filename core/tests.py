@@ -16268,6 +16268,103 @@ def test_reports_pdf_refuses_anything_that_is_not_a_real_png(client, admin_user)
     assert client.post(url, {**base, 'section': 'billing'}).status_code == 400   # section from another domain
 
 
+def _chart_png_variant(kind):
+    """A real 4x4 PNG chart picture, damaged one specific way, as a data URL.
+    'good' is undamaged; 'bad_idat_crc' breaks the image data's checksum;
+    'bad_text_crc' adds a tEXt note after the image data with a wrong
+    checksum; 'cut_after_length' stops right after the last chunk's length."""
+    import base64
+    import io
+    import struct
+    import zlib
+    from PIL import Image
+
+    def chunk(kind, data, crc=None):
+        crc = zlib.crc32(kind + data) & 0xffffffff if crc is None else crc
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', crc)
+
+    buf = io.BytesIO()
+    Image.new('RGB', (4, 4), 'red').save(buf, 'PNG')
+    raw = buf.getvalue()
+    sig, i, chunks = raw[:8], 8, []
+    while i < len(raw):
+        n = struct.unpack('>I', raw[i:i + 4])[0]
+        chunks.append((raw[i + 4:i + 8], raw[i + 8:i + 8 + n]))
+        i += 12 + n
+    assert [k for k, _ in chunks] == [b'IHDR', b'IDAT', b'IEND']
+    (_, ihdr), (_, idat), (_, iend) = chunks
+    if kind == 'good':
+        out = raw
+    elif kind == 'bad_idat_crc':
+        good = zlib.crc32(b'IDAT' + idat) & 0xffffffff
+        out = sig + chunk(b'IHDR', ihdr) + chunk(b'IDAT', idat, crc=good ^ 1) + chunk(b'IEND', iend)
+    elif kind == 'bad_text_crc':
+        good = zlib.crc32(b'tEXt' + b'note\x00chart') & 0xffffffff
+        out = (sig + chunk(b'IHDR', ihdr) + chunk(b'IDAT', idat)
+               + chunk(b'tEXt', b'note\x00chart', crc=good ^ 1) + chunk(b'IEND', iend))
+    elif kind == 'cut_after_length':
+        out = raw[:-8]
+    return 'data:image/png;base64,' + base64.b64encode(out).decode()
+
+
+@pytest.fixture
+def _stub_report_pdf(monkeypatch):
+    """Stands in for WeasyPrint so the Reports PDF view runs end to end
+    without making a real PDF; records each call."""
+    calls = []
+
+    def fake_render_pdf(html):
+        calls.append(html)
+        return b'%PDF-stub'
+    monkeypatch.setattr('core.pdf_utils.render_pdf', fake_render_pdf)
+    return calls
+
+
+# WeasyPrint sets PIL.ImageFile.LOAD_TRUNCATED_IMAGES = True process-wide when
+# its image module is imported, so which Pillow mode a chart is checked under
+# depends on whether this worker has made a PDF yet. Both are pinned here.
+
+@pytest.mark.parametrize('lenient', [False, True])
+@pytest.mark.django_db
+def test_reports_pdf_stub_renderer_accepts_a_good_chart(client, admin_user, monkeypatch, _stub_report_pdf, lenient):
+    """Control for the refusals below: the same request with an undamaged
+    picture reaches the renderer, so a 400 there is the chart check talking."""
+    from PIL import ImageFile
+    monkeypatch.setattr(ImageFile, 'LOAD_TRUNCATED_IMAGES', lenient)
+    client.force_login(admin_user)
+    r = client.post(reverse('core:reports_pdf'), {
+        'domain': 'workorders', 'start_date': '2026-08-01', 'end_date': '2026-08-21',
+        'section': 'wostatus', 'chart_chartWoStatus': _chart_png_variant('good')})
+    assert r.status_code == 200 and r.content == b'%PDF-stub'
+    assert len(_stub_report_pdf) == 1
+
+
+@pytest.mark.parametrize('lenient', [False, True])
+@pytest.mark.parametrize('kind', ['bad_idat_crc', 'bad_text_crc', 'cut_after_length'])
+@pytest.mark.django_db
+def test_reports_pdf_refuses_a_damaged_chart_png_instead_of_crashing(client, admin_user, monkeypatch, _stub_report_pdf, kind, lenient):
+    """Review R2-1: Pillow reports a bad PNG checksum as SyntaxError (and a
+    PNG cut off after a chunk length as IndexError when lenient). Those used
+    to escape the chart check as HTTP 500; they are a refused chart (400).
+
+    The one exception is a bad checksum on an ancillary (tEXt) chunk while
+    Pillow is lenient: Pillow skips that checksum by design, so the picture
+    is accepted. Whether to be stricter than Pillow is a separate decision;
+    this pins today's behaviour so a change to it is deliberate."""
+    from PIL import ImageFile
+    monkeypatch.setattr(ImageFile, 'LOAD_TRUNCATED_IMAGES', lenient)
+    client.force_login(admin_user)
+    r = client.post(reverse('core:reports_pdf'), {
+        'domain': 'workorders', 'start_date': '2026-08-01', 'end_date': '2026-08-21',
+        'section': 'wostatus', 'chart_chartWoStatus': _chart_png_variant(kind)})
+    if kind == 'bad_text_crc' and lenient:
+        assert r.status_code == 200 and len(_stub_report_pdf) == 1
+        return
+    assert r.status_code == 400
+    assert r.content.decode() == 'Chart picture refused: unreadable PNG.'
+    assert _stub_report_pdf == []
+
+
 @pytest.mark.django_db
 def test_reports_pdf_needs_the_reports_permission(client, db):
     from core.models import Role

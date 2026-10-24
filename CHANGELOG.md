@@ -8,6 +8,12 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Fixed
+
+- Reports PDF: a chart picture with a damaged PNG checksum is refused like any other bad chart picture, instead of failing with a server error.
+
 ## v0.17.0 — 2026-10-03
 
 Security release from GitHub's code scan and two outside reviews. Email templates are restricted to a fixed list of values, so skim the Changed section before updating if you have custom templates.
