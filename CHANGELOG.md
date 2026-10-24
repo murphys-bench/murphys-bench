@@ -17,6 +17,8 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ### Fixed
 
+- The email logo is resized for every image MB accepts, including the integer-mode TIFFs Pillow 13 no longer writes as PNG, without converting images that already save as they are (16-bit grayscale keeps its values). Its format is read from the file's content, not its name, and the email labels it by what is actually sent. A logo that cannot be processed is logged; if its content is not a format mail clients show, the email uses the company name instead.
+- The installer and INSTALL.md now require Python 3.11 or newer, matching Pillow 13. They said 3.10.
 - Reports PDF: a chart picture with a damaged PNG checksum is refused like any other bad chart picture, instead of failing with a server error.
 
 ## v0.17.0 — 2026-10-03
