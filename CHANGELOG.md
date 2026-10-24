@@ -15,6 +15,11 @@ the Unreleased entries move under that version and prod gets a single update.
 - Pillow 12.3.0 to 13.0.0 (about 38 advisories disclosed in October 2026). MB uses it for uploaded logos and the email logo. Pillow 13 needs Python 3.11 or newer; MB's supported Ubuntu releases ship 3.12 and 3.14.
 - brotli 1.2.0 to 1.2.1 (PYSEC-2026-4322) and certifi 2026.7.22 to 2026.10.19 (PYSEC-2026-4320), both pulled in by other packages. black 26.10.1, a development tool only.
 
+### Fixed
+
+- The email logo is resized for every image MB accepts, including the integer-mode TIFFs Pillow 13 no longer writes as PNG, and it is labelled with the format actually sent. A logo that cannot be processed is logged; if it is not a type mail clients show, the email uses the company name instead.
+- The installer and INSTALL.md now require Python 3.11 or newer, matching Pillow 13. They said 3.10.
+
 ## v0.17.0 — 2026-10-03
 
 Security release from GitHub's code scan and two outside reviews. Email templates are restricted to a fixed list of values, so skim the Changed section before updating if you have custom templates.

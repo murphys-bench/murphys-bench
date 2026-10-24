@@ -13,7 +13,7 @@
 # separate, optional step covered in INSTALL.md § Going public (remote
 # access). A LAN-only shop tool doesn't need it.
 #
-# Targets the Debian/Ubuntu (apt) family with Python >= 3.10.
+# Targets the Debian/Ubuntu (apt) family with Python >= 3.11 (Pillow 13 needs it).
 #
 # Flags / env:
 #   --skip-apt        don't install system packages (already present, or no sudo)
@@ -176,8 +176,8 @@ fi
 PYBIN="$(command -v python3 || true)"
 [ -n "$PYBIN" ] || fail "python3 not found"
 PYVER="$("$PYBIN" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
-"$PYBIN" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,10) else 1)' \
-    || fail "Python >= 3.10 required (found $PYVER)"
+"$PYBIN" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,11) else 1)' \
+    || fail "Python >= 3.11 required (found $PYVER)"
 # EVERY local address, not just the first one. `hostname -I` lists all of them in
 # no guaranteed order, and taking [1] picked whichever interface the kernel
 # happened to list first — on a box running Tailscale or a second VirtualBox

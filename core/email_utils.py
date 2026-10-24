@@ -43,27 +43,52 @@ def _contrast_text_color(bg_hex):
         return '#ffffff'
 
 
+# Image modes every output format below can save as-is. Anything else (a
+# 32-bit integer TIFF, say, which Pillow 13 no longer writes as PNG) is
+# converted first.
+_LOGO_SAVE_MODES = {
+    'JPEG': ('L', 'RGB', 'CMYK'),
+    'PNG': ('1', 'L', 'LA', 'P', 'RGB', 'RGBA', 'I;16'),
+    'GIF': ('1', 'L', 'P'),
+    'WEBP': ('L', 'RGB', 'RGBA'),
+}
+_LOGO_MIME_BY_FORMAT = {'JPEG': 'image/jpeg', 'PNG': 'image/png', 'GIF': 'image/gif', 'WEBP': 'image/webp'}
+
+
 def _load_logo_resized(path, mime_type, max_px=480):
-    """Return logo bytes scaled to <= max_px on the long side (keeps emails small
-    and the header logo a sane size). Falls back to the original bytes on error."""
+    """Return (bytes, mime_type) for the email logo, scaled to <= max_px on the
+    long side (keeps emails small and the header logo a sane size).
+
+    JPEG, GIF and WebP logos stay in their format; anything else becomes PNG.
+    The returned type always describes the returned bytes. If the image cannot
+    be processed, the original file goes out under its own type (or, for a
+    type mail clients do not show, no logo at all, so the company name is
+    used), and the failure is logged rather than hidden.
+    """
     try:
         import io
         from PIL import Image
         img = Image.open(path)
         img.thumbnail((max_px, max_px))
-        fmt = {'image/jpeg': 'JPEG', 'image/png': 'PNG',
-               'image/gif': 'GIF', 'image/webp': 'WEBP'}.get(mime_type, 'PNG')
-        if fmt == 'JPEG' and img.mode in ('RGBA', 'P'):
-            img = img.convert('RGB')
+        fmt = {'image/jpeg': 'JPEG', 'image/gif': 'GIF', 'image/webp': 'WEBP'}.get(mime_type, 'PNG')
+        if img.mode not in _LOGO_SAVE_MODES[fmt]:
+            keeps_alpha = 'A' in img.getbands() or 'transparency' in img.info
+            img = img.convert('RGBA' if keeps_alpha and fmt in ('PNG', 'WEBP') else 'RGB')
         buf = io.BytesIO()
         img.save(buf, format=fmt)
-        return buf.getvalue()
+        return buf.getvalue(), _LOGO_MIME_BY_FORMAT[fmt]
     except Exception:
+        if mime_type not in _LOGO_MIME_BY_FORMAT.values():
+            # Not a type mail clients show; the email uses the company name instead.
+            logger.warning('Email logo %s could not be converted; sending the email without it.', path, exc_info=True)
+            return None, mime_type
+        logger.warning('Email logo %s could not be resized; sending the original file.', path, exc_info=True)
         try:
             with open(path, 'rb') as f:
-                return f.read()
+                return f.read(), mime_type
         except Exception:
-            return None
+            logger.warning('Email logo %s could not be read.', path, exc_info=True)
+            return None, mime_type
 
 
 def _email_header_color(site):
@@ -189,12 +214,13 @@ def _build_html_email(body, signature_body, subject, ticket, site, embed_logo=Tr
             logo_path = logo_field.path
             if os.path.isfile(logo_path):
                 ext = os.path.splitext(logo_path)[1].lower()
-                logo_mime_type = {
+                source_mime = {
                     '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
                     '.png': 'image/png', '.gif': 'image/gif',
-                    '.webp': 'image/webp',
-                }.get(ext, 'image/png')
-                logo_data = _load_logo_resized(logo_path, logo_mime_type)
+                    '.webp': 'image/webp', '.tif': 'image/tiff', '.tiff': 'image/tiff',
+                    '.bmp': 'image/bmp',
+                }.get(ext, 'application/octet-stream')
+                logo_data, logo_mime_type = _load_logo_resized(logo_path, source_mime)
                 has_logo = logo_data is not None
         except Exception:
             logger.exception('Failed to load company logo for email.')

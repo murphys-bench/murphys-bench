@@ -17723,3 +17723,72 @@ def test_a_filter_does_not_excuse_printing_a_record(db):
     """Only a list prints something real through a filter; a record does not."""
     from core.email_utils import unavailable_variables
     assert unavailable_variables('{{ client|upper }}{{ prior_replies|length }}') == ['client']
+
+
+# ── Email logo under Pillow 13 (PR #113 review, Oct 23 2026) ──
+# Pillow 13 stopped writing 32-bit integer ("I" mode) images as PNG. The resize
+# used to fall back to the original file without a word and label it PNG.
+# These check the image that actually goes out: its size and its format.
+
+def _logo_file(tmp_path, name, mode, fmt, size=(1200, 400)):
+    from PIL import Image
+    img = Image.new(mode, size, 200 if mode in ('L', 'I') else (10, 120, 60) if mode == 'RGB' else (10, 120, 60, 128))
+    path = tmp_path / name
+    img.save(path, format=fmt)
+    return str(path)
+
+
+def _decoded(data):
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(data))
+    return im.format, im.size
+
+
+@pytest.mark.parametrize('name,mode,fmt,mime,out_fmt,out_mime', [
+    ('logo.png', 'RGBA', 'PNG', 'image/png', 'PNG', 'image/png'),
+    ('logo.jpg', 'RGB', 'JPEG', 'image/jpeg', 'JPEG', 'image/jpeg'),
+    ('logo.png', 'L', 'PNG', 'image/png', 'PNG', 'image/png'),
+    ('logo.tiff', 'I', 'TIFF', 'image/tiff', 'PNG', 'image/png'),
+    ('logo.tiff', 'RGBA', 'TIFF', 'image/tiff', 'PNG', 'image/png'),
+])
+def test_email_logo_is_really_resized_and_labelled_by_what_it_is(tmp_path, name, mode, fmt, mime, out_fmt, out_mime):
+    from core.email_utils import _load_logo_resized
+    data, got_mime = _load_logo_resized(_logo_file(tmp_path, name, mode, fmt), mime)
+    assert _decoded(data) == (out_fmt, (480, 160))
+    assert got_mime == out_mime
+
+
+def test_email_logo_that_cannot_be_resized_is_logged_and_sent_as_itself(tmp_path, caplog):
+    from core.email_utils import _load_logo_resized
+    path = tmp_path / 'logo.png'
+    path.write_bytes(b'\x89PNG\r\n\x1a\n not really a png')
+    with caplog.at_level(logging.WARNING, logger='core'):
+        data, mime = _load_logo_resized(str(path), 'image/png')
+    assert data == path.read_bytes() and mime == 'image/png'
+    assert 'could not be resized' in caplog.text
+
+
+def test_email_logo_of_a_type_mail_cannot_show_is_left_out_when_it_cannot_convert(tmp_path, caplog):
+    from core.email_utils import _load_logo_resized
+    path = tmp_path / 'logo.tiff'
+    path.write_bytes(b'II*\x00 broken tiff')
+    with caplog.at_level(logging.WARNING, logger='core'):
+        data, _ = _load_logo_resized(str(path), 'image/tiff')
+    assert data is None
+    assert 'without it' in caplog.text
+
+
+@pytest.mark.django_db
+def test_email_wrapper_sends_an_integer_tiff_logo_as_a_real_480px_png(tmp_path):
+    """The case the review reproduced: an accepted integer-mode TIFF email logo."""
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from core.email_utils import _build_html_email
+    site = SiteSettings.get()
+    src = _logo_file(tmp_path, 'logo.tiff', 'I', 'TIFF')
+    with open(src, 'rb') as f:
+        site.email_logo.save('logo.tiff', SimpleUploadedFile('logo.tiff', f.read(), content_type='image/tiff'))
+    html, data, mime = _build_html_email('Hello', '', 'Subject', None, site)
+    assert mime == 'image/png'
+    assert _decoded(data) == ('PNG', (480, 160))
+    assert 'cid:logo' in html
