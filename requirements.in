@@ -24,7 +24,7 @@ factory-boy==3.3.0   # core/factories.py — demo/test data (seed_demo_data)
 
 # Development
 django-extensions==3.2.3
-black==26.3.1
+black==26.10.1           # security: CVE-2026-114134 (dev tool)
 flake8==7.0.0
 isort==5.13.2
 
@@ -49,7 +49,7 @@ boto3==1.42.97
 weasyprint==70.0
 
 # Utilities
-Pillow==12.3.0          # security: clears CVE-2023-50447/2024-28219/2026-42310 + PYSEC-2026-165, PYSEC-2026-2253..2257
+Pillow==13.0.0          # security: clears ~38 Oct 2026 advisories (CVE-2026-112390..112901, 96636..96778, 114501, GHSA-78g4-xqwv-q3g8)
 requests==2.33.0        # security: clears CVE-2024-35195/2024-47081/2026-25645 (carries the IN API token)
 cryptography==50.0.0    # security: clears PYSEC-2026-3552/3553/3554; underpins field encryption
 markdown==3.10.2        # PyPI "Markdown" (Python-Markdown); pinned — an unpinned name is the one line a substituted package could ride in on

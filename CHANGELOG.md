@@ -10,6 +10,11 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+### Security
+
+- Pillow 12.3.0 to 13.0.0 (about 38 advisories disclosed in October 2026). MB uses it for uploaded logos and the email logo. Pillow 13 needs Python 3.11 or newer; MB's supported Ubuntu releases ship 3.12 and 3.14.
+- brotli 1.2.0 to 1.2.1 (PYSEC-2026-4322) and certifi 2026.7.22 to 2026.10.19 (PYSEC-2026-4320), both pulled in by other packages. black 26.10.1, a development tool only.
+
 ### Fixed
 
 - Reports PDF: a chart picture with a damaged PNG checksum is refused like any other bad chart picture, instead of failing with a server error.
