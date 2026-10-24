@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 from django.shortcuts import render, get_object_or_404, redirect
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -2858,7 +2858,7 @@ class SaleDraftSendView(SaleAccessMixin, View):
             )
             return redirect('core:sale_detail', pk=pk)
         try:
-            ref = invoice_ninja.push_sale(sale, draft=True)
+            ref = invoice_ninja.push_sale(sale, draft=True, resend=bool(sale.invoice_ninja_id), user=request.user)
             messages.success(
                 request,
                 f'{sale.sale_number} sent to Invoice Ninja as a draft — invoice #{ref}. '
@@ -2935,11 +2935,10 @@ class SaleChargeView(SaleAccessMixin, View):
         })
 
     # A charge is async on IN's side; a second trigger fired before the first
-    # settles could double-charge. Refuse another charge on the same sale within
-    # this window of a prior *successful* trigger (kills double-clicks, back-button
-    # resubmits, and the in-flight race the stored-status check can't see). A
-    # legitimate retry after a confirmed decline is still possible once it lapses.
-    _CHARGE_COOLDOWN = timedelta(minutes=5)
+    # settles could double-charge. invoice_ninja.charge_on_file claims the sale
+    # with a request row before anything is sent and keeps it until Check IN
+    # reads Paid or invoice_ninja.CHARGE_COOLDOWN passes, so a second charge is
+    # refused by the database, not by a query that could race.
 
     def post(self, request, pk):
         from . import invoice_ninja
@@ -2953,21 +2952,16 @@ class SaleChargeView(SaleAccessMixin, View):
             messages.error(request, 'Invoice Ninja is not enabled in Settings.')
             return redirect('core:sale_detail', pk=pk)
 
-        recent = PaymentChargeAttempt.objects.filter(
-            sale=sale, result='success',
-            initiated_at__gte=timezone.now() - self._CHARGE_COOLDOWN,
-        ).exists()
-        if recent:
-            messages.warning(
-                request,
-                f'{sale.sale_number} was charged moments ago. Use "Check IN" to confirm '
-                'it posted before charging again.'
-            )
+        # A held or busy sale gets nothing sent. charge_on_file's claim is the
+        # guard against two at once; this says why before anything is tried.
+        blocker = invoice_ninja.blocking_request(sale)
+        if blocker is not None:
+            messages.warning(request, invoice_ninja._busy_message(blocker))
             return redirect('core:sale_detail', pk=pk)
 
         amount = self._amount(sale)
         try:
-            label = invoice_ninja.charge_sale_on_file(sale)
+            label = invoice_ninja.charge_sale_on_file(sale, user=request.user)
             PaymentChargeAttempt.objects.create(
                 sale=sale, invoice_ninja_id=sale.invoice_ninja_id, amount=amount,
                 initiated_by=request.user, result='success', in_status_after=label,
@@ -2978,12 +2972,19 @@ class SaleChargeView(SaleAccessMixin, View):
                 f'Invoice Ninja currently reports "{label}" — the charge runs '
                 'asynchronously, so use "Check IN" in a moment to confirm it posted.'
             )
+        except invoice_ninja.InvoiceNinjaRefused as e:
+            messages.warning(request, str(e))
         except invoice_ninja.InvoiceNinjaError as e:
+            unconfirmed = isinstance(e, invoice_ninja.InvoiceNinjaOutcomeUnknown)
             PaymentChargeAttempt.objects.create(
                 sale=sale, invoice_ninja_id=sale.invoice_ninja_id, amount=amount,
-                initiated_by=request.user, result='failed', error_message=str(e),
+                initiated_by=request.user, result='unknown' if unconfirmed else 'failed',
+                error_message=str(e),
             )
-            messages.error(request, f'Charging the card on file failed: {e}')
+            if unconfirmed:
+                messages.warning(request, f'Invoice Ninja did not confirm the charge: {e}')
+            else:
+                messages.error(request, f'Charging the card on file failed: {e}')
         return redirect('core:sale_detail', pk=pk)
 
 
@@ -3055,7 +3056,7 @@ class MonthlyBatchSendView(SaleAccessMixin, View):
                 failed.append(f'{sale.client.name} (no priced line)')
                 continue
             try:
-                invoice_ninja.push_sale(sale, draft=True)
+                invoice_ninja.push_sale(sale, draft=True, user=request.user)
                 sent += 1
             except invoice_ninja.InvoiceNinjaError as e:
                 failed.append(f'{sale.client.name} ({e})')
@@ -3145,7 +3146,6 @@ class SaleCheckoutView(SaleAccessMixin, View):
     payment is never lost. MB never charges anything; it mirrors a payment already taken."""
 
     def post(self, request, pk):
-        from django.db import transaction
         from . import invoice_ninja
         sale = get_object_or_404(Sale, pk=pk)
 
@@ -3159,17 +3159,29 @@ class SaleCheckoutView(SaleAccessMixin, View):
         if sale.is_locked:
             messages.error(request, f'{sale.sale_number} is already {sale.get_status_display().lower()}.')
             return redirect('core:sale_detail', pk=pk)
+        # Nothing marks a held sale paid, with or without Invoice Ninja: clearing
+        # the hold is the only way through (Mike, Oct 24 2026).
+        blocker = invoice_ninja.blocking_request(sale)
+        if blocker is not None:
+            messages.error(request, invoice_ninja._busy_message(blocker))
+            return redirect(_sale_settle_url(sale))
 
         # No Charge: complete the sale at $0 as a documented no-charge/goodwill
         # transaction. Recorded in MB regardless of IN (no money to reconcile, so
         # no push). Allowed with no priced lines — the receipt documents it either way.
         if request.POST.get('action') == 'no_charge':
-            sale.status = 'completed'
-            sale.amount = 0
-            sale.payment_method = 'no_charge'
-            sale.reference = (request.POST.get('reference') or '').strip()
-            sale.paid_at = timezone.now()
-            sale.save()
+            def complete_no_charge():
+                sale.status = 'completed'
+                sale.amount = 0
+                sale.payment_method = 'no_charge'
+                sale.reference = (request.POST.get('reference') or '').strip()
+                sale.paid_at = timezone.now()
+                sale.save()
+            # Checked again in the same transaction as the write.
+            blocker = invoice_ninja.guarded(sale, complete_no_charge)
+            if blocker is not None:
+                messages.error(request, invoice_ninja._busy_message(blocker))
+                return redirect(_sale_settle_url(sale))
             messages.success(request, f'{sale.sale_number} completed as no charge.')
             return redirect('core:sale_detail', pk=pk)
 
@@ -3184,26 +3196,34 @@ class SaleCheckoutView(SaleAccessMixin, View):
                     messages.error(request, err)
             return redirect('core:sale_detail', pk=pk)
 
-        with transaction.atomic():
-            sale = form.save(commit=False)
+        sale = form.save(commit=False)
+
+        def complete_sale():
             sale.paid_at = timezone.now()
             sale.status = 'completed'
             sale.save()
+        # Checked again in the same transaction as the write.
+        blocker = invoice_ninja.guarded(sale, complete_sale)
+        if blocker is not None:
+            messages.error(request, invoice_ninja._busy_message(blocker))
+            return redirect(_sale_settle_url(sale))
 
         # Bundled push (client sale → its IN client; anonymous → the "Walk-In" client).
         if SiteSettings.get().invoice_ninja_enabled:
             try:
-                ref = invoice_ninja.push_sale(sale)
+                ref = invoice_ninja.push_sale(sale, user=request.user)
                 messages.success(request, f'{sale.sale_number} completed and sent to Invoice Ninja as paid — invoice #{ref}.')
+            except invoice_ninja.InvoiceNinjaAlreadyPaid as e:
+                messages.warning(request, f'{sale.sale_number} was completed and the payment recorded here. {e}')
             except invoice_ninja.InvoiceNinjaError as e:
                 messages.warning(
                     request,
                     f'{sale.sale_number} was completed and the payment recorded, but sending to '
-                    f'Invoice Ninja failed: {e} Use "Retry Send to Invoice Ninja".'
+                    f'Invoice Ninja did not finish: {e}'
                 )
         else:
             messages.success(request, f'{sale.sale_number} completed. Payment recorded.')
-        return redirect('core:sale_detail', pk=pk)
+        return redirect(_sale_settle_url(sale))
 
 
 class SaleSendINView(SaleAccessMixin, View):
@@ -3227,19 +3247,99 @@ class SaleSendINView(SaleAccessMixin, View):
             messages.error(request, 'Only a completed sale can be sent to Invoice Ninja.')
             return redirect('core:sale_detail', pk=pk)
         # Duplicate guard: already pushed and not an explicit confirmed re-send.
-        if sale.invoice_ninja_id and request.POST.get('confirm_resend') != '1':
+        # A push whose invoice landed but whose payment is not confirmed
+        # (in_payment_pending) is not a re-send: push_sale finishes it on the
+        # same invoice.
+        confirmed = request.POST.get('confirm_resend') == '1'
+        if sale.invoice_ninja_id and not sale.in_payment_pending and not confirmed:
             messages.warning(
                 request,
                 f'{sale.sale_number} was already sent to Invoice Ninja '
                 f'(#{sale.invoice_ninja_ref or sale.invoice_ninja_id}). Use "Re-send" to push again.'
             )
-            return redirect('core:sale_detail', pk=pk)
+            return redirect(_sale_settle_url(sale))
         try:
-            ref = invoice_ninja.push_sale(sale)
+            resend = bool(sale.invoice_ninja_id) and not sale.in_payment_pending
+            ref = invoice_ninja.push_sale(sale, resend=resend, user=request.user)
             messages.success(request, f'Sent to Invoice Ninja as paid — invoice #{ref}.')
+        except invoice_ninja.InvoiceNinjaAlreadyPaid as e:
+            messages.warning(request, str(e))
         except invoice_ninja.InvoiceNinjaError as e:
             messages.error(request, f'Could not send to Invoice Ninja: {e}')
-        return redirect('core:sale_detail', pk=pk)
+        return redirect(_sale_settle_url(sale))
+
+
+class InvoiceNinjaHoldView(LoginRequiredMixin, View):
+    """A person has checked Invoice Ninja and tells MB what they found:
+    `resolve` clears one held request (an unconfirmed charge or payment, a
+    total that does not match, a client IN may have created) or an unanswered
+    payment that is not there; `clear-send` settles a send whose answer was
+    lost (MB looks once more and links the invoice if it is there). Each is
+    recorded on that request: who, when and what they said. Clearing a charge
+    or payment needs the same permission as charging."""
+
+    HOSTS = {'wo': WorkOrder, 'sale': Sale, 'client': Client}
+
+    def post(self, request, host, pk, action):
+        from . import invoice_ninja
+        model = self.HOSTS.get(host)
+        if model is None or action not in ('resolve', 'clear-send'):
+            raise Http404
+        obj = get_object_or_404(model, pk=pk)
+        if host in ('wo', 'sale') and not _can_view_sales(request.user):
+            raise PermissionDenied
+        # A person's word applies only to the request they were shown, as it
+        # was then: both must come with the form, or nothing is cleared.
+        request_id = _int_or_none(request.POST.get('request'))
+        generation = _int_or_none(request.POST.get('generation'))
+        if request_id is None or generation is None:
+            messages.error(request, 'That page is out of date, so nothing was cleared. Reload it and check again.')
+            return redirect(_safe_next(request, self._back(host, obj)))
+        if action == 'resolve':
+            req = get_object_or_404(invoice_ninja.requests_for(obj), pk=request_id)
+            if req.kind in ('charge', 'payment') and not _can_process_payments(request.user):
+                raise PermissionDenied
+            if invoice_ninja.resolve_request(req, request.user, 'checked Invoice Ninja and cleared it',
+                                             generation=generation):
+                messages.success(request, 'Cleared. MB recorded who cleared it and when.')
+            else:
+                messages.info(request, 'That changed since the page was shown, so nothing was cleared. '
+                                       'Reload the page and check again.')
+        elif host != 'client':
+            try:
+                found = invoice_ninja.clear_pending_send(
+                    obj, request.user, request_id=request_id, generation=generation)
+            except invoice_ninja.InvoiceNinjaError as e:
+                messages.error(request, str(e))
+            else:
+                if found:
+                    messages.success(request, f'Found it: linked to Invoice Ninja invoice #{found.get("number") or found.get("id")}.')
+                else:
+                    messages.success(request, 'Cleared. It can be sent to Invoice Ninja again.')
+        return redirect(_safe_next(request, self._back(host, obj)))
+
+    @staticmethod
+    def _back(host, obj):
+        if host == 'wo':
+            return reverse('core:pos_wo_settle', args=[obj.pk])
+        if host == 'sale':
+            return _sale_settle_url(obj)
+        return reverse('core:client_detail', args=[obj.pk])
+
+
+def _int_or_none(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _sale_settle_url(sale):
+    """Where a sale's money actions live: the Register for a counter sale,
+    the sale page (its recurring card) for a recurring one."""
+    if sale.is_recurring:
+        return reverse('core:sale_detail', args=[sale.pk])
+    return reverse('core:pos_sale_settle', args=[sale.pk])
 
 
 class InvoiceExportView(LoginRequiredMixin, View):
@@ -3710,7 +3810,7 @@ class ContractBatchSendView(SaleAccessMixin, View):
                 failed.append(f'{sale.contract.contract_number} (no priced line)')
                 continue
             try:
-                invoice_ninja.push_sale(sale, draft=True)
+                invoice_ninja.push_sale(sale, draft=True, user=request.user)
                 sent += 1
             except invoice_ninja.InvoiceNinjaError as e:
                 failed.append(f'{sale.contract.contract_number} ({e})')
@@ -6816,19 +6916,37 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
         reference = (request.POST.get('reference') or '').strip()
         valid_methods = {c[0] for c in Invoice.PAYMENT_METHOD_CHOICES}
 
+        # Nothing marks a held work order paid: not Pay (Invoice Ninja on or
+        # off), not No Charge. Clearing the hold is the only way through (Mike,
+        # Oct 24 2026). A Pay with Invoice Ninja on may finish this record's own
+        # unanswered payment, so that one does not block it.
+        if action in ('pay', 'no_charge'):
+            finishing = 'payment' if action == 'pay' and in_enabled else None
+            blocker = invoice_ninja.blocking_request(wo, finishing=finishing)
+            if blocker is not None:
+                messages.error(request, invoice_ninja._busy_message(blocker))
+                return redirect('core:pos_wo_settle', pk=pk)
+
         # No Charge: settle the WO at $0 as a documented no-charge job (warranty,
         # goodwill). Recorded on MB's own Invoice regardless of IN — there's no
         # money to reconcile, so it never touches Invoice Ninja. Allowed even with
         # no priced lines; the receipt documents the work either way.
         if action == 'no_charge':
             invoice = wo.invoice
-            invoice.billing_status = 'paid'
-            invoice.amount = 0
-            invoice.payment_method = 'no_charge'
-            invoice.reference = reference
-            invoice.paid_date = timezone.localdate()
-            invoice.paid_at = timezone.now()
-            invoice.save()
+
+            def settle_no_charge():
+                invoice.billing_status = 'paid'
+                invoice.amount = 0
+                invoice.payment_method = 'no_charge'
+                invoice.reference = reference
+                invoice.paid_date = timezone.localdate()
+                invoice.paid_at = timezone.now()
+                invoice.save()
+            # Checked again in the same transaction as the write.
+            blocker = invoice_ninja.guarded(wo, settle_no_charge)
+            if blocker is not None:
+                messages.error(request, invoice_ninja._busy_message(blocker))
+                return redirect('core:pos_wo_settle', pk=pk)
             messages.success(request, f'{wo.work_order_number} settled as no charge.')
             return redirect('core:pos_wo_receipt', pk=pk)
 
@@ -6853,13 +6971,20 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
         # no nag. (Only the 'pay' action reaches here; 'draft' was blocked above.)
         if not in_enabled:
             invoice = wo.invoice
-            invoice.billing_status = 'paid'
-            invoice.amount = amount
-            invoice.payment_method = method
-            invoice.reference = reference
-            invoice.paid_date = timezone.localdate()
-            invoice.paid_at = timezone.now()
-            invoice.save()
+
+            def settle_locally():
+                invoice.billing_status = 'paid'
+                invoice.amount = amount
+                invoice.payment_method = method
+                invoice.reference = reference
+                invoice.paid_date = timezone.localdate()
+                invoice.paid_at = timezone.now()
+                invoice.save()
+            # Checked again in the same transaction as the write.
+            blocker = invoice_ninja.guarded(wo, settle_locally)
+            if blocker is not None:
+                messages.error(request, invoice_ninja._busy_message(blocker))
+                return redirect('core:pos_wo_settle', pk=pk)
             messages.success(request, f'{wo.work_order_number} settled — ${amount} paid.')
             return redirect('core:pos_wo_receipt', pk=pk)
 
@@ -6870,14 +6995,14 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
             in_client_id = None
             newly_pushed = False
             if not wo.invoice_ninja_id:
-                in_id, in_ref, in_client_id = invoice_ninja.push_host_invoice(
+                # A recovered invoice (found after a lost answer) was built
+                # earlier, so it is treated like a pre-existing one: no amount
+                # recorded from today's lines, and a read-back before paying.
+                in_id, in_ref, in_client_id, recovered = invoice_ninja.push_host_invoice(
                     wo, po_number=wo.work_order_number,
-                    client=wo.client, is_walkin=not wo.client_id,
+                    client=wo.client, is_walkin=not wo.client_id, user=request.user,
                 )
-                wo.invoice_ninja_id = in_id
-                wo.invoice_ninja_ref = in_ref
-                wo.save(update_fields=['invoice_ninja_id', 'invoice_ninja_ref'])
-                newly_pushed = True
+                newly_pushed = not recovered
 
             if action == 'draft':
                 # Record the draft on MB's OWN Invoice as well. Without this the
@@ -6924,7 +7049,10 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
                     )
                 return redirect('core:pos_wo_settle', pk=pk)
 
-            # Pay path. If the invoice PRE-EXISTED, it may already have been paid
+            # Pay path. Nothing is paid against a held record (an unconfirmed
+            # charge, a recovered invoice whose total no longer matches).
+            invoice_ninja.require_no_hold(wo, finishing='payment')
+            # If the invoice PRE-EXISTED, it may already have been paid
             # directly in IN (e.g. a WO settled in IN before the POS) — MB's
             # stored billing_status wouldn't know. Read IN's current status and
             # refuse a duplicate payment, self-healing MB's record. (Mirrors the
@@ -6932,45 +7060,116 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
             if not newly_pushed:
                 current = invoice_ninja.check_invoice_status(wo)
                 if current.strip().lower() == 'paid':
-                    inv = wo.invoice
-                    inv.billing_status = 'paid'
-                    inv.in_status = 'Paid'
-                    inv.save(update_fields=['billing_status', 'in_status'])
-                    messages.info(
-                        request,
-                        f'{wo.work_order_number} is already Paid in Invoice Ninja — '
-                        'recorded here, no second payment posted.'
-                    )
-                    return redirect('core:pos_wo_settle', pk=pk)
+                    return self._already_paid(request, wo)
                 in_client_id = (
-                    invoice_ninja.find_or_create_client(wo.client) if wo.client_id
+                    invoice_ninja.find_or_create_client(wo.client, user=request.user) if wo.client_id
                     else invoice_ninja.find_or_create_walkin_client()
                 )
 
             method_label = dict(Invoice.PAYMENT_METHOD_CHOICES).get(method, method)
-            invoice_ninja.post_payment(
-                wo.invoice_ninja_id, in_client_id,
-                amount=amount, method_label=method_label, reference=reference,
-            )
+            try:
+                payment = invoice_ninja.post_payment(
+                    wo, wo.invoice_ninja_id, in_client_id,
+                    amount=amount, method=method, method_label=method_label, reference=reference,
+                    user=request.user,
+                )
+            except invoice_ninja.InvoiceNinjaAlreadyPaid:
+                # Paid by something other than this payment: record Paid, but
+                # none of this form's payment details, which did not happen.
+                return self._already_paid(request, wo)
+            # Record the payment Invoice Ninja has, from the request that sent
+            # it: after a lost answer that is the earlier payment, not this form.
+            sent = payment.payload
             invoice = wo.invoice
-            invoice.billing_status = 'paid'
-            invoice.in_status = 'Paid'
-            invoice.amount = amount
-            invoice.payment_method = method
-            invoice.reference = reference
-            invoice.paid_date = timezone.localdate()
-            invoice.paid_at = timezone.now()
-            invoice.invoice_ninja_id = wo.invoice_ninja_id
-            invoice.save()
-            messages.success(
-                request,
-                f'{wo.work_order_number} settled — ${amount} paid, '
-                f'invoice #{wo.invoice_ninja_ref or wo.invoice_ninja_id}.'
-            )
+            # A hold can land while the payment is at Invoice Ninja. The payment
+            # stays recorded on its request; MB's own record is marked paid only
+            # if nothing is held, checked in the same transaction as the write.
+            blocker = invoice_ninja.guarded(wo, lambda: _record_payment(invoice, payment, wo.invoice_ninja_id))
+            if blocker is not None:
+                Invoice.objects.filter(pk=invoice.pk).update(in_status='Paid', invoice_ninja_id=wo.invoice_ninja_id)
+                messages.warning(
+                    request,
+                    f'Invoice Ninja recorded the payment (${sent["amount"]}), but {wo.work_order_number} '
+                    f'is held: {invoice_ninja._busy_message(blocker)} MB\'s own record stays unpaid '
+                    'until the hold is cleared; then Pay again records it without a second payment.'
+                )
+                return redirect('core:pos_wo_settle', pk=pk)
+            if payment.carried_on:
+                # Back to the Register, where messages show, not the receipt:
+                # the operator must see that this form was not what was paid.
+                messages.success(
+                    request,
+                    f'{wo.work_order_number}: finished the earlier payment that got no answer '
+                    f'(${sent["amount"]}, {sent.get("method_label") or "unspecified"}'
+                    f'{", ref " + sent["reference"] if sent.get("reference") else ""}), '
+                    f'invoice #{wo.invoice_ninja_ref or wo.invoice_ninja_id}. This form was not sent.'
+                )
+                return redirect('core:pos_wo_settle', pk=pk)
+            else:
+                messages.success(
+                    request,
+                    f'{wo.work_order_number} settled — ${amount} paid, '
+                    f'invoice #{wo.invoice_ninja_ref or wo.invoice_ninja_id}.'
+                )
             return redirect('core:pos_wo_receipt', pk=pk)
         except invoice_ninja.InvoiceNinjaError as e:
             messages.error(request, f'Could not settle at Invoice Ninja: {e}')
             return redirect('core:pos_wo_settle', pk=pk)
+
+    @staticmethod
+    def _already_paid(request, wo):
+        from . import invoice_ninja
+        inv = wo.invoice
+        # Invoice Ninja reads Paid. If it is MB's own payment on this invoice,
+        # confirmed earlier (its local write waited for a hold to clear), record
+        # its details; otherwise record Paid with none of a form's details.
+        own = (invoice_ninja.requests_for(wo)
+               .filter(kind='payment', state='done', base_invoice_id=wo.invoice_ninja_id)
+               .order_by('-finished_at').first())
+
+        def record_paid():
+            if own is not None:
+                _record_payment(inv, own, wo.invoice_ninja_id)
+                return
+            inv.billing_status = 'paid'
+            inv.in_status = 'Paid'
+            inv.save(update_fields=['billing_status', 'in_status'])
+        # Decision D (Mike, Oct 24 2026): a held record is not marked paid even
+        # on Invoice Ninja's own Paid. MB shows what Invoice Ninja says; its own
+        # record waits for the hold to be cleared.
+        blocker = invoice_ninja.guarded(wo, record_paid)
+        if blocker is not None:
+            Invoice.objects.filter(pk=inv.pk).update(in_status='Paid')
+            messages.warning(
+                request,
+                f'Invoice Ninja shows {wo.work_order_number} Paid, but this work order is held: '
+                f'{invoice_ninja._busy_message(blocker)} MB recorded what Invoice Ninja says; '
+                'its own record stays unpaid until the hold is cleared.'
+            )
+            return redirect('core:pos_wo_settle', pk=wo.pk)
+        messages.info(
+            request,
+            f'{wo.work_order_number} is already Paid in Invoice Ninja — '
+            'recorded here, no second payment posted.'
+        )
+        return redirect('core:pos_wo_settle', pk=wo.pk)
+
+
+def _record_payment(invoice, payment, invoice_ninja_id):
+    """Mark MB's own Invoice paid with the payment Invoice Ninja recorded, as
+    its request sent it: amount, method, reference, its business date and
+    when it was first sent."""
+    from decimal import Decimal
+    sent = payment.payload
+    invoice.billing_status = 'paid'
+    invoice.in_status = 'Paid'
+    invoice.amount = Decimal(sent['amount'])
+    invoice.payment_method = sent.get('method') or ''
+    invoice.reference = sent.get('reference') or ''
+    invoice.paid_date = date.fromisoformat(sent['payment']['date'])
+    invoice.paid_at = payment.started_at
+    invoice.invoice_ninja_id = invoice_ninja_id
+    invoice.save()
 
 
 def _wo_receipt_context(work_order, site):
@@ -7071,9 +7270,8 @@ class POSWorkOrderChargeView(POSAccessMixin, View):
             'amount': self._amount(wo),
         })
 
-    # Same double-charge cooldown window as SaleChargeView — see that class's
-    # comment for the rationale (async charge, back-button resubmits, etc.).
-    _CHARGE_COOLDOWN = timedelta(minutes=5)
+    # Double-charge protection is the request claim in charge_on_file; see
+    # SaleChargeView.
 
     def post(self, request, pk):
         from . import invoice_ninja
@@ -7087,16 +7285,10 @@ class POSWorkOrderChargeView(POSAccessMixin, View):
         if bail:
             return bail
 
-        recent = PaymentChargeAttempt.objects.filter(
-            work_order=wo, result='success',
-            initiated_at__gte=timezone.now() - self._CHARGE_COOLDOWN,
-        ).exists()
-        if recent:
-            messages.warning(
-                request,
-                f'{wo.work_order_number} was charged moments ago. Use "Check IN" to confirm '
-                'it posted before charging again.'
-            )
+        # Refuse before pushing a draft too: a held or busy record gets nothing sent.
+        blocker = invoice_ninja.blocking_request(wo)
+        if blocker is not None:
+            messages.warning(request, invoice_ninja._busy_message(blocker))
             return redirect('core:pos_wo_settle', pk=pk)
 
         amount = self._amount(wo)
@@ -7109,18 +7301,16 @@ class POSWorkOrderChargeView(POSAccessMixin, View):
         # keep-the-push behavior as the settle 'pay' path.
         if not wo.invoice_ninja_id:
             try:
-                in_id, in_ref, _ = invoice_ninja.push_host_invoice(
+                invoice_ninja.push_host_invoice(
                     wo, po_number=wo.work_order_number, client=wo.client, is_walkin=False,
+                    user=request.user,
                 )
-                wo.invoice_ninja_id = in_id
-                wo.invoice_ninja_ref = in_ref
-                wo.save(update_fields=['invoice_ninja_id', 'invoice_ninja_ref'])
             except invoice_ninja.InvoiceNinjaError as e:
                 messages.error(request, f'Could not send {wo.work_order_number} to Invoice Ninja: {e}')
                 return redirect('core:pos_wo_settle', pk=pk)
 
         try:
-            label = invoice_ninja.charge_on_file(wo)
+            label = invoice_ninja.charge_on_file(wo, user=request.user)
             PaymentChargeAttempt.objects.create(
                 work_order=wo, invoice_ninja_id=wo.invoice_ninja_id, amount=amount,
                 initiated_by=request.user, result='success', in_status_after=label,
@@ -7131,12 +7321,19 @@ class POSWorkOrderChargeView(POSAccessMixin, View):
                 f'Invoice Ninja currently reports "{label}" — the charge runs '
                 'asynchronously, so use "Check IN" in a moment to confirm it posted.'
             )
+        except invoice_ninja.InvoiceNinjaRefused as e:
+            messages.warning(request, str(e))
         except invoice_ninja.InvoiceNinjaError as e:
+            unconfirmed = isinstance(e, invoice_ninja.InvoiceNinjaOutcomeUnknown)
             PaymentChargeAttempt.objects.create(
                 work_order=wo, invoice_ninja_id=wo.invoice_ninja_id, amount=amount,
-                initiated_by=request.user, result='failed', error_message=str(e),
+                initiated_by=request.user, result='unknown' if unconfirmed else 'failed',
+                error_message=str(e),
             )
-            messages.error(request, f'Charging the card on file failed: {e}')
+            if unconfirmed:
+                messages.warning(request, f'Invoice Ninja did not confirm the charge: {e}')
+            else:
+                messages.error(request, f'Charging the card on file failed: {e}')
         return redirect('core:pos_wo_settle', pk=pk)
 
 
@@ -7362,6 +7559,19 @@ class WorkOrderBillingUpdateView(LoginRequiredMixin, View):
         # through; the Register computes its own amounts and never hits this.
         # Server-side because a hidden button is not a mechanism (outside
         # review rounds 2 and 3, Aug 15; guard widened on Mike's call).
+        # Nothing marks a held work order paid, the full edit included:
+        # clearing the hold is the only way through (Mike, Oct 24 2026).
+        becomes_paid = billing_status in ('paid', 'paid_direct') and invoice.billing_status != billing_status
+        if becomes_paid:
+            from . import invoice_ninja
+            blocker = invoice_ninja.blocking_request(wo)
+            if blocker is not None:
+                return render(request, 'core/partials/billing_card.html', {
+                    'work_order': wo,
+                    'invoice': invoice,
+                    'billing_error': invoice_ninja._busy_message(blocker),
+                })
+
         if (billing_status in ('paid', 'paid_direct')
                 and not request.POST.get('full_edit')
                 and invoice.amount is None):
@@ -7398,7 +7608,18 @@ class WorkOrderBillingUpdateView(LoginRequiredMixin, View):
 
             invoice.notes = request.POST.get('notes', '').strip()
 
-        invoice.save()
+        if becomes_paid:
+            # Checked again in the same transaction as the write.
+            blocker = invoice_ninja.guarded(wo, invoice.save)
+            if blocker is not None:
+                invoice.refresh_from_db()
+                return render(request, 'core/partials/billing_card.html', {
+                    'work_order': wo,
+                    'invoice': invoice,
+                    'billing_error': invoice_ninja._busy_message(blocker),
+                })
+        else:
+            invoice.save()
         return render(request, 'core/partials/billing_card.html', {
             'work_order': wo,
             'invoice': invoice,

@@ -115,6 +115,8 @@ REGISTRY = (
                      delete_order=70),
     OperationalModel('core.PaymentChargeAttempt', 'Card-charge attempts',
                      delete_order=50),
+    OperationalModel('core.InvoiceNinjaRequest', 'Invoice Ninja requests',
+                     delete_order=50),
     OperationalModel('core.Notification', 'Notifications', delete_order=80),
     # LineItem is a host-agnostic GenericForeignKey row. Its hosts are gone by
     # this point, so anything left is an orphan by definition.

@@ -40,6 +40,7 @@ agreement). Every card present; empty states say something real.
 {% endblock %}
 
 {% block content %}
+{% include "core/partials/in_hold_banner.html" with obj=client in_host="client" %}
 <div class="row row-cards">
 
     {# ── Open work ──────────────────────────────────────────────────── #}

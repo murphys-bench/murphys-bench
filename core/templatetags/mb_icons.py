@@ -40,6 +40,14 @@ def all_status_defs():
 
 
 @register.simple_tag
+def in_attention(obj):
+    """The record's Invoice Ninja requests a person should see: held,
+    unanswered, or a charge still running. See invoice_ninja.attention_requests."""
+    from core import invoice_ninja
+    return invoice_ninja.attention_requests(obj)
+
+
+@register.simple_tag
 def status_label(slug, entity_type):
     """Return the plain-text label for a status slug."""
     sd = _get_status_def(slug, entity_type)
