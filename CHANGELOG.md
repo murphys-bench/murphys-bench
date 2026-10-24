@@ -10,6 +10,11 @@ the Unreleased entries move under that version and prod gets a single update.
 
 ## Unreleased
 
+### Security
+
+- Pillow 12.3.0 to 13.0.0 (about 38 advisories disclosed in October 2026). MB uses it for uploaded logos and the email logo. Pillow 13 needs Python 3.11 or newer; MB's supported Ubuntu releases ship 3.12 and 3.14.
+- brotli 1.2.0 to 1.2.1 (PYSEC-2026-4322) and certifi 2026.7.22 to 2026.10.19 (PYSEC-2026-4320), both pulled in by other packages. black 26.10.1, a development tool only.
+
 ### Fixed
 
 - When Invoice Ninja's answer is lost or cut off, MB looks for the invoice it sent before saying it failed or sending again. MB writes its own reference into invoice custom field 4 to do this; if your Invoice Ninja uses that field, tell us before updating.
