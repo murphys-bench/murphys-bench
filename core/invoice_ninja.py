@@ -33,10 +33,12 @@ TIMEOUT = (5, 20)
 # handle. SCS confirmed custom field 4 is unused (Oct 23 2026).
 MB_KEY_FIELD = 'custom_value4'
 
-# How long a request that has not finished counts as still in progress. Longer
-# than the most one call can take (TIMEOUT: 5 + 20 seconds), so a request that
-# is still alive never loses its claim; past it, the owner is gone and another
-# request may take over (looking first, with the same key).
+# How long a request with no activity counts as still in progress. A request
+# renews its activity right before every call to IN (_touch), and one call
+# takes at most TIMEOUT (5 + 20 seconds), so a request that is alive never
+# loses its claim. Past this, the owner is gone (a crash; gunicorn kills a
+# worker after 30 seconds) and another request may take over, looking first
+# with the same key. An owner that lost its claim sends nothing more.
 IN_FLIGHT = timedelta(seconds=30)
 
 # A card charge IN accepted runs later, on IN's side. Until Check IN reads Paid
@@ -269,6 +271,18 @@ def _move(req, state, *, from_states=None, **fields):
     return bool(moved)
 
 
+def _touch(req):
+    """Renew the request's activity right before a call to IN, and refuse to
+    make the call if another request has taken it over meanwhile."""
+    R = _req_model()
+    now = timezone.now()
+    if not R.objects.filter(pk=req.pk, token=req.token, state=R.SENDING).update(active_at=now):
+        raise InvoiceNinjaRefused(
+            'Another request took this over after a long wait, so MB sent nothing more. '
+            'Reload the page before doing anything else.')
+    req.active_at = now
+
+
 def _held_message(req):
     return f'{req.reason} MB will not do this until a person has checked and cleared it.'
 
@@ -304,7 +318,7 @@ def _hold_vanished_charges(host):
     a hold a person can see and clear, never a request that blocks forever."""
     R = _req_model()
     for req in requests_for(host).filter(kind=R.KIND_CHARGE, state=R.SENDING,
-                                         started_at__lte=timezone.now() - IN_FLIGHT):
+                                         active_at__lte=timezone.now() - IN_FLIGHT):
         R.objects.filter(pk=req.pk, token=req.token, state=R.SENDING).update(
             state=R.HELD, reason=_vanished_charge_reason(req))
 
@@ -316,7 +330,7 @@ def _take_over(active, kind, token, now):
     should claim again; raises InvoiceNinjaRefused otherwise."""
     R = _req_model()
     if active.state == R.QUEUED:
-        if now - active.started_at < CHARGE_COOLDOWN:
+        if now - active.active_at < CHARGE_COOLDOWN:
             raise InvoiceNinjaRefused(_busy_message(active))
         _move(active, R.LAPSED, from_states=(R.QUEUED,))
         return None
@@ -324,7 +338,7 @@ def _take_over(active, kind, token, now):
         raise InvoiceNinjaRefused(_held_message(active))
     if active.kind != kind:
         raise InvoiceNinjaRefused(_busy_message(active))
-    if active.state == R.SENDING and now - active.started_at < IN_FLIGHT:
+    if active.state == R.SENDING and now - active.active_at < IN_FLIGHT:
         raise InvoiceNinjaRefused(_busy_message(active))
     if kind == R.KIND_CHARGE:
         # A charge is never re-sent blind: its owner vanished mid-call, so the
@@ -332,10 +346,10 @@ def _take_over(active, kind, token, now):
         _move(active, R.HELD, from_states=(R.SENDING, R.UNKNOWN), reason=_vanished_charge_reason(active))
         raise InvoiceNinjaRefused(_held_message(active))
     taken = R.objects.filter(pk=active.pk, token=active.token, state=active.state).update(
-        token=token, state=R.SENDING, started_at=now)
+        token=token, state=R.SENDING, active_at=now)
     if not taken:
         return None
-    active.token, active.state, active.started_at = token, R.SENDING, now
+    active.token, active.state, active.active_at = token, R.SENDING, now
     return active
 
 
@@ -362,7 +376,7 @@ def _claim(host, kind, payload, *, base_invoice_id='', user=None):
                     **{field: host}, kind=kind, lane=lane, state=R.SENDING,
                     key=f'mb-{kind[:3]}-{type(host)._meta.model_name[:4]}-{host.pk}-{secrets.token_hex(6)}',
                     token=token, payload=payload, base_invoice_id=base_invoice_id or '',
-                    started_by=user, started_at=now,
+                    started_by=user, started_at=now, active_at=now,
                 )
             return req, False
         except IntegrityError:
@@ -383,7 +397,7 @@ def blocking_request(host, *, finishing=None):
             return req
         if req.lane != 'money':
             continue
-        if req.state == R.QUEUED and now - req.started_at >= CHARGE_COOLDOWN:
+        if req.state == R.QUEUED and now - req.active_at >= CHARGE_COOLDOWN:
             continue
         if req.kind == finishing and req.looks_lost:
             continue
@@ -535,6 +549,7 @@ def _finish_invoice(req, host, invoice, *, recovered):
 
 
 def _recover_invoice(req, host, why):
+    _touch(req)
     try:
         found = _find_invoice_by_key(req.key)
     except InvoiceNinjaError:
@@ -574,6 +589,7 @@ def _create_invoice(host, payload, *, resend=False, host_fields=None, user=None)
     else:
         # An earlier send of this record never got its answer: look for it,
         # with its own key, before sending anything.
+        _touch(req)
         try:
             found = _find_invoice_by_key(req.key)
         except InvoiceNinjaError as e:
@@ -584,6 +600,7 @@ def _create_invoice(host, payload, *, resend=False, host_fields=None, user=None)
             )
         if found:
             return _finish_invoice(req, host, found, recovered=True)
+    _touch(req)
     try:
         data = _request('POST', '/invoices', json={**req.payload['invoice'], MB_KEY_FIELD: req.key})
         invoice = data['data']
@@ -611,14 +628,15 @@ def clear_pending_send(host, user):
     if req is None:
         return None
     token = secrets.token_hex(16)
-    if req.state == R.SENDING and timezone.now() - req.started_at < IN_FLIGHT:
+    if req.state == R.SENDING and timezone.now() - req.active_at < IN_FLIGHT:
         raise InvoiceNinjaRefused(_IN_PROGRESS_MSG)
     if not R.objects.filter(pk=req.pk, token=req.token, state=req.state).update(
-            token=token, state=R.SENDING, started_at=timezone.now()):
+            token=token, state=R.SENDING, active_at=timezone.now()):
         raise InvoiceNinjaRefused(_IN_PROGRESS_MSG)
     req.token, req.state = token, R.SENDING
     lookup_error = ''
     try:
+        _touch(req)
         found = _find_invoice_by_key(req.key)
     except InvoiceNinjaError as e:
         found, lookup_error = None, str(e)
@@ -671,6 +689,7 @@ def _classify_payment_refusal(req, e):
     paid = 'have been paid' in body
     if not paid:
         try:
+            _touch(req)
             paid = _invoice_label(req.base_invoice_id) == 'Paid'
         except InvoiceNinjaError:
             paid = False
@@ -722,10 +741,12 @@ def post_payment(host, invoice_id, in_client_id, *, amount, method='', method_la
     send = {**req.payload['payment'], 'idempotency_key': req.key}
     try:
         try:
+            _touch(req)
             data = _request('POST', '/payments', json=send)
         except InvoiceNinjaOutcomeUnknown:
             # Once more with the same key: IN records it (the first never
             # landed) or refuses the key as used (it did, and it is this one).
+            _touch(req)
             data = _request('POST', '/payments', json=send)
     except InvoiceNinjaOutcomeUnknown as e:
         _move(req, R.UNKNOWN, error=str(e))
@@ -740,7 +761,10 @@ def post_payment(host, invoice_id, in_client_id, *, amount, method='', method_la
         in_id = _usable_id((data or {}).get('data') or {})
     except (KeyError, TypeError, ValueError, AttributeError):
         in_id = ''
-    _move(req, R.DONE, in_id=in_id)
+    if not _move(req, R.DONE, in_id=in_id):
+        raise InvoiceNinjaRefused(
+            'Invoice Ninja recorded the payment, but another request took this one over '
+            'meanwhile. Reload the page before doing anything else.')
     return req
 
 
@@ -842,6 +866,7 @@ def find_or_create_client(client, user=None):
         raise InvoiceNinjaOutcomeUnknown(_held_message(req))
     # Carried on with an email: the lookup above found nothing, so the earlier
     # create never landed and this one goes, with the client as it is now.
+    _touch(req)
     try:
         data = _request('POST', '/clients', json=payload)
         in_id = _usable_id(data['data'])
@@ -878,6 +903,7 @@ def _no_email_reason(name):
 def _recover_client(req, client, email, name, why):
     R = _req_model()
     if email:
+        _touch(req)
         try:
             in_id = _find_client_by_email(email)
         except InvoiceNinjaError:
@@ -1239,6 +1265,7 @@ def charge_on_file(host, user=None):
         # Fresh status from IN (updates the host's stored status) — not the
         # possibly-stale stored value. Fails loud if IN is unreachable, so no
         # charge fires blind.
+        _touch(req)
         current = check_status(host)
     except InvoiceNinjaError as e:
         _move(req, R.FAILED, error=f'Status check before charging failed: {e}')
@@ -1246,6 +1273,7 @@ def charge_on_file(host, user=None):
     if current.strip().lower() == 'paid':
         _move(req, R.FAILED, error='Already Paid in Invoice Ninja.')
         raise InvoiceNinjaError(f'This {noun} is already marked Paid in Invoice Ninja — refusing to charge again.')
+    _touch(req)
     try:
         _request('POST', '/invoices/bulk', json={'action': 'auto_bill', 'ids': [in_id]})
     except InvoiceNinjaOutcomeUnknown as e:
@@ -1259,7 +1287,11 @@ def charge_on_file(host, user=None):
     except InvoiceNinjaError as e:
         _move(req, R.FAILED, error=str(e))
         raise
-    _move(req, R.QUEUED)
+    if not _move(req, R.QUEUED, active_at=timezone.now()):
+        # IN accepted the trigger, but this request had been taken for gone
+        # and its row held meanwhile: the hold already says the card may have
+        # been charged.
+        raise InvoiceNinjaOutcomeUnknown(_held_message(req))
 
     # Best-effort immediate read-back — the async job may not have run yet, so
     # this often still reports the pre-charge status. That's expected; the

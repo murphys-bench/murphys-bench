@@ -2031,6 +2031,7 @@ def _in_request(host, kind, state, **fields):
     from core.models import InvoiceNinjaRequest as R
     field = {'WorkOrder': 'work_order', 'Sale': 'sale', 'Client': 'client'}[type(host).__name__]
     fields.setdefault('started_at', timezone.now())
+    fields.setdefault('active_at', fields['started_at'])
     fields.setdefault('key', f'mb-test-{secrets.token_hex(6)}')
     fields.setdefault('token', secrets.token_hex(8))
     return R.objects.create(**{field: host}, kind=kind, lane=R.LANES[kind], state=state, **fields)
@@ -18135,7 +18136,7 @@ def test_send_that_never_landed_resends_with_the_same_key_after_the_wait(client_
     assert 'already being sent' in str(exc.value)
     assert fake.creates() == []
 
-    type(req).objects.filter(pk=req.pk).update(started_at=timezone.now() - IN_FLIGHT_PAST)
+    type(req).objects.filter(pk=req.pk).update(active_at=timezone.now() - IN_FLIGHT_PAST)
     invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
     assert len(fake.creates()) == 1
     assert fake.creates()[0][3][invoice_ninja.MB_KEY_FIELD] == 'mb-inv-work-x-1'
@@ -18689,7 +18690,7 @@ def test_clearing_a_lost_send_links_it_if_found_or_allows_sending_again(client, 
     req.refresh_from_db()
     assert req.state == 'sending'                       # too soon: still in flight
 
-    type(req).objects.filter(pk=req.pk).update(started_at=timezone.now() - IN_FLIGHT_PAST)
+    type(req).objects.filter(pk=req.pk).update(active_at=timezone.now() - IN_FLIGHT_PAST)
     page = client.get(reverse('core:pos_wo_settle', args=[wo.pk]))
     assert b'the invoice is not there' in page.content
     client.post(reverse('core:in_hold', args=['wo', wo.pk, 'clear-send']))
@@ -19113,6 +19114,47 @@ def test_a_charge_whose_owner_vanished_is_held_not_resent(client_obj, monkeypatc
         invoice_ninja.charge_on_file(sale)
     stuck.refresh_from_db()
     assert stuck.state == 'held' and not [c for c in fake.calls if c[1] == '/invoices/bulk']
+
+
+@pytest.mark.django_db
+def test_a_long_running_request_that_is_still_calling_keeps_its_claim(client_obj, monkeypatch):
+    """A request renews its activity before every call: one that began long
+    ago but called IN moments ago is alive, and a second click is refused."""
+    from datetime import timedelta
+    from django.utils import timezone
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _priced_wo(client_obj)
+    _in_request(wo, 'invoice', 'sending', started_at=timezone.now() - timedelta(minutes=2),
+                active_at=timezone.now())
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    with pytest.raises(invoice_ninja.InvoiceNinjaRefused):
+        invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
+    assert fake.calls == []
+
+
+@pytest.mark.django_db
+def test_an_owner_that_lost_its_claim_sends_nothing_more(client_obj, monkeypatch):
+    """The owner's first payment answer is lost; while it waits, its row is
+    taken over. Its retry must not go out."""
+    from core import invoice_ninja
+    from core.models import InvoiceNinjaRequest
+    wo = _priced_wo(client_obj)
+    fake = _FakeIN(invoice_ninja)
+    posts = []
+
+    def taken_over_meanwhile(method, path, **kwargs):
+        posts.append(path)
+        if len(posts) == 1:
+            InvoiceNinjaRequest.objects.filter(work_order=wo).update(token='another-request')
+            raise invoice_ninja.InvoiceNinjaOutcomeUnknown('dropped')
+        return fake(method, path, **kwargs)
+    monkeypatch.setattr(invoice_ninja, '_request', taken_over_meanwhile)
+    with pytest.raises(invoice_ninja.InvoiceNinjaRefused):
+        invoice_ninja.post_payment(wo, 'inv1', 'cl1', amount=95, method='cash', method_label='Cash')
+    assert posts == ['/payments']
 
 
 @pytest.mark.django_db

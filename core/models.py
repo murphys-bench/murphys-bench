@@ -1984,6 +1984,9 @@ class InvoiceNinjaRequest(models.Model):
     error = models.TextField(blank=True, default='')
     started_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     started_at = models.DateTimeField()
+    # Renewed by the owner right before every call to IN. A request with no
+    # activity for invoice_ninja.IN_FLIGHT is gone (a crash, a killed worker).
+    active_at = models.DateTimeField()
     finished_at = models.DateTimeField(null=True, blank=True)
     resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     resolved_at = models.DateTimeField(null=True, blank=True)
@@ -2017,11 +2020,11 @@ class InvoiceNinjaRequest(models.Model):
 
     @property
     def looks_lost(self):
-        """Sent and unanswered, or 'being sent' by a request that has been
-        gone longer than any call can take (invoice_ninja.IN_FLIGHT)."""
+        """Sent and unanswered, or 'being sent' by a request with no activity
+        for longer than any one call can take (invoice_ninja.IN_FLIGHT)."""
         from core.invoice_ninja import IN_FLIGHT
         return self.state == self.UNKNOWN or (
-            self.state == self.SENDING and timezone.now() - self.started_at >= IN_FLIGHT)
+            self.state == self.SENDING and timezone.now() - self.active_at >= IN_FLIGHT)
 
     def __str__(self):
         return f'{self.get_kind_display()} for {self.host} — {self.get_state_display()}'
