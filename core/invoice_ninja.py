@@ -292,6 +292,23 @@ def _busy_message(req):
     return _IN_PROGRESS_MSG
 
 
+def _vanished_charge_reason(req):
+    return (f'A card charge started {_when(req.started_at)} never finished, so the card may '
+            'have been charged. Use "Check IN": if it shows Paid this clears by itself. If '
+            'Invoice Ninja shows no charge, clear this hold to allow charging again.')
+
+
+def _hold_vanished_charges(host):
+    """A charge still 'being sent' long after any call could take was cut off
+    mid-way (a crash, a restart): the card may have been charged. It becomes
+    a hold a person can see and clear, never a request that blocks forever."""
+    R = _req_model()
+    for req in requests_for(host).filter(kind=R.KIND_CHARGE, state=R.SENDING,
+                                         started_at__lte=timezone.now() - IN_FLIGHT):
+        R.objects.filter(pk=req.pk, token=req.token, state=R.SENDING).update(
+            state=R.HELD, reason=_vanished_charge_reason(req))
+
+
 def _take_over(active, kind, token, now):
     """Decide what a new request does about the active one in its lane.
     Returns the active request, now ours, when this request may carry it on
@@ -312,10 +329,7 @@ def _take_over(active, kind, token, now):
     if kind == R.KIND_CHARGE:
         # A charge is never re-sent blind: its owner vanished mid-call, so the
         # card may have been charged. A person checks.
-        _move(active, R.HELD, from_states=(R.SENDING, R.UNKNOWN), reason=(
-            f'A card charge started {_when(active.started_at)} never finished, so the card may '
-            'have been charged. Use "Check IN": if it shows Paid this clears by itself. If '
-            'Invoice Ninja shows no charge, clear this hold to allow charging again.'))
+        _move(active, R.HELD, from_states=(R.SENDING, R.UNKNOWN), reason=_vanished_charge_reason(active))
         raise InvoiceNinjaRefused(_held_message(active))
     taken = R.objects.filter(pk=active.pk, token=active.token, state=active.state).update(
         token=token, state=R.SENDING, started_at=now)
@@ -362,6 +376,7 @@ def blocking_request(host, *, finishing=None):
     its cooldown passes). `finishing` names a kind whose own unanswered request
     the caller is about to carry on (a payment retry), so it does not block."""
     R = _req_model()
+    _hold_vanished_charges(host)
     now = timezone.now()
     for req in requests_for(host).filter(state__in=R.ACTIVE).order_by('started_at'):
         if req.state == R.HELD:
@@ -387,6 +402,7 @@ def attention_requests(host):
     """The requests a person should see on the record's page: held, unanswered,
     or a charge still running."""
     R = _req_model()
+    _hold_vanished_charges(host)
     return list(requests_for(host).filter(state__in=(R.HELD, R.UNKNOWN, R.QUEUED, R.SENDING)).order_by('started_at'))
 
 

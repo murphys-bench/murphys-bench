@@ -2858,7 +2858,7 @@ class SaleDraftSendView(SaleAccessMixin, View):
             )
             return redirect('core:sale_detail', pk=pk)
         try:
-            ref = invoice_ninja.push_sale(sale, draft=True, resend=bool(sale.invoice_ninja_id))
+            ref = invoice_ninja.push_sale(sale, draft=True, resend=bool(sale.invoice_ninja_id), user=request.user)
             messages.success(
                 request,
                 f'{sale.sale_number} sent to Invoice Ninja as a draft — invoice #{ref}. '
@@ -3056,7 +3056,7 @@ class MonthlyBatchSendView(SaleAccessMixin, View):
                 failed.append(f'{sale.client.name} (no priced line)')
                 continue
             try:
-                invoice_ninja.push_sale(sale, draft=True)
+                invoice_ninja.push_sale(sale, draft=True, user=request.user)
                 sent += 1
             except invoice_ninja.InvoiceNinjaError as e:
                 failed.append(f'{sale.client.name} ({e})')
@@ -3782,7 +3782,7 @@ class ContractBatchSendView(SaleAccessMixin, View):
                 failed.append(f'{sale.contract.contract_number} (no priced line)')
                 continue
             try:
-                invoice_ninja.push_sale(sale, draft=True)
+                invoice_ninja.push_sale(sale, draft=True, user=request.user)
                 sent += 1
             except invoice_ninja.InvoiceNinjaError as e:
                 failed.append(f'{sale.contract.contract_number} ({e})')
@@ -7050,6 +7050,8 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
             invoice.invoice_ninja_id = wo.invoice_ninja_id
             invoice.save()
             if payment.carried_on:
+                # Back to the Register, where messages show, not the receipt:
+                # the operator must see that this form was not what was paid.
                 messages.success(
                     request,
                     f'{wo.work_order_number}: finished the earlier payment that got no answer '
@@ -7057,6 +7059,7 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
                     f'{", ref " + sent["reference"] if sent.get("reference") else ""}), '
                     f'invoice #{wo.invoice_ninja_ref or wo.invoice_ninja_id}. This form was not sent.'
                 )
+                return redirect('core:pos_wo_settle', pk=pk)
             else:
                 messages.success(
                     request,
