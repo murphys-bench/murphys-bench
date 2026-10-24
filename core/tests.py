@@ -18120,7 +18120,10 @@ IN_FLIGHT_PAST = __import__('datetime').timedelta(minutes=1)
 
 
 @pytest.mark.django_db
-def test_send_that_never_landed_resends_with_the_same_key_after_the_wait(client_obj, monkeypatch):
+def test_a_send_that_vanished_is_looked_for_and_never_resent_on_its_own(client, admin_user, client_obj, monkeypatch):
+    """Decision C: a send whose owner vanished is looked for by its key. Not
+    found, MB does not send it again; after a person says it is not there,
+    the next send goes with a new key."""
     from django.utils import timezone
     from core import invoice_ninja
     _enable_in()
@@ -18134,12 +18137,18 @@ def test_send_that_never_landed_resends_with_the_same_key_after_the_wait(client_
     with pytest.raises(invoice_ninja.InvoiceNinjaError) as exc:       # still in flight
         invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
     assert 'already being sent' in str(exc.value)
-    assert fake.creates() == []
 
     type(req).objects.filter(pk=req.pk).update(active_at=timezone.now() - IN_FLIGHT_PAST)
+    with pytest.raises(invoice_ninja.InvoiceNinjaOutcomeUnknown) as exc:
+        invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
+    assert 'will not send it again on its own' in str(exc.value)
+    assert fake.creates() == [] and _active(wo, 'invoice').state == 'unknown'
+
+    client.force_login(admin_user)
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'clear-send']))
     invoice_ninja.push_host_invoice(wo, po_number=wo.work_order_number, client=client_obj)
     assert len(fake.creates()) == 1
-    assert fake.creates()[0][3][invoice_ninja.MB_KEY_FIELD] == 'mb-inv-work-x-1'
+    assert fake.creates()[0][3][invoice_ninja.MB_KEY_FIELD] != 'mb-inv-work-x-1'
 
 
 @pytest.mark.django_db
@@ -18612,7 +18621,7 @@ def test_check_in_paid_clears_an_unconfirmed_charge(client_obj, monkeypatch):
     from core import invoice_ninja
     _enable_in()
     sale = _pushed_recurring_sale(client_obj)
-    hold = _in_request(sale, 'charge', 'held', reason='unconfirmed')
+    hold = _in_request(sale, 'charge', 'held', reason='unconfirmed', base_invoice_id='42')
     monkeypatch.setattr(invoice_ninja, '_request', lambda *a, **k: {'data': {'status_id': '4'}})
     invoice_ninja.check_sale_status(sale)
     hold.refresh_from_db()
@@ -19022,7 +19031,8 @@ def test_check_in_paid_closes_an_unanswered_payment_without_its_details(client_o
     wo = _priced_wo(client_obj)
     WorkOrder.objects.filter(pk=wo.pk).update(invoice_ninja_id='inv1')
     wo.refresh_from_db()
-    req = _in_request(wo, 'payment', 'unknown', payload={'amount': '95', 'method': 'cash', 'reference': 'X'})
+    req = _in_request(wo, 'payment', 'unknown', base_invoice_id='inv1',
+                      payload={'amount': '95', 'method': 'cash', 'reference': 'X'})
     monkeypatch.setattr(invoice_ninja, '_request', lambda *a, **k: {'data': {'status_id': '4'}})
     invoice_ninja.check_invoice_status(wo)
     req.refresh_from_db()

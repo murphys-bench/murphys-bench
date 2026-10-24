@@ -1987,6 +1987,9 @@ class InvoiceNinjaRequest(models.Model):
     # Renewed by the owner right before every call to IN. A request with no
     # activity for invoice_ninja.IN_FLIGHT is gone (a crash, a killed worker).
     active_at = models.DateTimeField()
+    # Goes up each time another request takes this one over. A person's
+    # "I checked" applies only to the generation they were shown.
+    generation = models.PositiveIntegerField(default=1)
     finished_at = models.DateTimeField(null=True, blank=True)
     resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     resolved_at = models.DateTimeField(null=True, blank=True)
