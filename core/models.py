@@ -1604,6 +1604,9 @@ class Sale(models.Model):
     invoice_ninja_ref = models.CharField(max_length=100, blank=True, help_text='Invoice Ninja invoice number (for display).')
     in_status = models.CharField(max_length=50, blank=True)
     in_status_checked_at = models.DateTimeField(null=True, blank=True)
+    # A paid push whose invoice is in IN but whose payment MB has not seen
+    # confirmed. Kept apart from in_status, which Check IN overwrites.
+    in_payment_pending = models.BooleanField(default=False)
 
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='sales_created')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1873,6 +1876,9 @@ class PaymentChargeAttempt(models.Model):
     RESULT_CHOICES = [
         ('success', 'Trigger Succeeded'),
         ('failed', 'Trigger Failed'),
+        # The trigger may have reached IN but no answer came back: treated like
+        # a success for the double-charge cooldown.
+        ('unknown', 'Trigger Unconfirmed'),
     ]
 
     sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name='charge_attempts', null=True, blank=True)
@@ -1913,6 +1919,118 @@ class PaymentChargeAttempt(models.Model):
 
     def __str__(self):
         return f'{self.host_number} — {self.get_result_display()} ({self.initiated_at:%Y-%m-%d %H:%M})'
+
+
+class InvoiceNinjaRequest(models.Model):
+    """One thing MB asked Invoice Ninja to do: create a client or an invoice,
+    record a payment, or charge a card on file. The row is written BEFORE MB
+    calls IN and is the claim: at most one active request per host and lane
+    (a partial unique constraint), so a second click is refused by the
+    database, not by a check that can race. Only the request holding `token`
+    can move it on. `payload` is exactly what was sent, so a retry after a
+    lost answer resends that and MB records those details, never a later
+    form's. A request IN may or may not have acted on, that MB cannot settle
+    by looking, is `held` until a person has checked; that is what a hold is.
+    Each row keeps its own outcome and who resolved it. See invoice_ninja.py
+    and mb-docs DESIGN-in-request-records.md."""
+
+    KIND_CLIENT = 'client'
+    KIND_INVOICE = 'invoice'
+    KIND_PAYMENT = 'payment'
+    KIND_CHARGE = 'charge'
+    KIND_CHOICES = [
+        (KIND_CLIENT, 'Create client'),
+        (KIND_INVOICE, 'Create invoice'),
+        (KIND_PAYMENT, 'Record payment'),
+        (KIND_CHARGE, 'Charge card on file'),
+    ]
+    # Payments and charges share a lane: two money requests on one record
+    # never overlap.
+    LANES = {KIND_CLIENT: 'client', KIND_INVOICE: 'invoice', KIND_PAYMENT: 'money', KIND_CHARGE: 'money'}
+
+    SENDING = 'sending'
+    UNKNOWN = 'unknown'
+    HELD = 'held'
+    QUEUED = 'queued'
+    DONE = 'done'
+    FAILED = 'failed'
+    CLEARED = 'cleared'
+    LAPSED = 'lapsed'
+    STATE_CHOICES = [
+        (SENDING, 'Being sent'),
+        (UNKNOWN, 'No answer yet'),
+        (HELD, 'Waiting for a person'),
+        (QUEUED, 'Charge started'),
+        (DONE, 'Done'),
+        (FAILED, 'Not done'),
+        (CLEARED, 'Cleared by a person'),
+        (LAPSED, 'Charge window passed'),
+    ]
+    ACTIVE = (SENDING, UNKNOWN, HELD, QUEUED)
+
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, null=True, blank=True, related_name='in_requests')
+    work_order = models.ForeignKey(WorkOrder, on_delete=models.CASCADE, null=True, blank=True, related_name='in_requests')
+    sale = models.ForeignKey(Sale, on_delete=models.CASCADE, null=True, blank=True, related_name='in_requests')
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES)
+    lane = models.CharField(max_length=10)
+    state = models.CharField(max_length=10, choices=STATE_CHOICES, default=SENDING)
+    key = models.CharField(max_length=64, unique=True)
+    token = models.CharField(max_length=64)
+    payload = models.JSONField(default=dict)
+    base_invoice_id = models.CharField(max_length=100, blank=True, default='')
+    in_id = models.CharField(max_length=100, blank=True, default='')
+    in_number = models.CharField(max_length=100, blank=True, default='')
+    reason = models.TextField(blank=True, default='')
+    error = models.TextField(blank=True, default='')
+    started_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    started_at = models.DateTimeField()
+    # Renewed by the owner right before every call to IN. A request with no
+    # activity for invoice_ninja.IN_FLIGHT is gone (a crash, a killed worker).
+    active_at = models.DateTimeField()
+    # Goes up each time another request takes this one over. A person's
+    # "I checked" applies only to the generation they were shown.
+    generation = models.PositiveIntegerField(default=1)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_note = models.TextField(blank=True, default='')
+
+    class Meta:
+        db_table = 'invoice_ninja_requests'
+        ordering = ['-started_at']
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(client__isnull=False, work_order__isnull=True, sale__isnull=True)
+                    | models.Q(client__isnull=True, work_order__isnull=False, sale__isnull=True)
+                    | models.Q(client__isnull=True, work_order__isnull=True, sale__isnull=False)
+                ),
+                name='in_request_exactly_one_host',
+            ),
+            *[
+                models.UniqueConstraint(
+                    fields=[host, 'lane'],
+                    condition=models.Q(**{f'{host}__isnull': False}, state__in=['sending', 'unknown', 'held', 'queued']),
+                    name=f'in_request_one_active_per_{host}_lane',
+                )
+                for host in ('client', 'work_order', 'sale')
+            ],
+        ]
+
+    @property
+    def host(self):
+        return self.client or self.work_order or self.sale
+
+    @property
+    def looks_lost(self):
+        """Sent and unanswered, or 'being sent' by a request with no activity
+        for longer than any one call can take (invoice_ninja.IN_FLIGHT)."""
+        from core.invoice_ninja import IN_FLIGHT
+        return self.state == self.UNKNOWN or (
+            self.state == self.SENDING and timezone.now() - self.active_at >= IN_FLIGHT)
+
+    def __str__(self):
+        return f'{self.get_kind_display()} for {self.host} — {self.get_state_display()}'
 
 
 class OrgCredential(models.Model):

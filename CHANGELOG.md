@@ -19,6 +19,12 @@ the Unreleased entries move under that version and prod gets a single update.
 
 - The email logo is resized for every image MB accepts, including the integer-mode TIFFs Pillow 13 no longer writes as PNG, without converting images that already save as they are (16-bit grayscale keeps its values). Its format is read from the file's content, not its name, and the email labels it by what is actually sent. A logo that cannot be processed is logged; if its content is not a format mail clients show, the email uses the company name instead.
 - The installer and INSTALL.md now require Python 3.11 or newer, matching Pillow 13. They said 3.10.
+- When Invoice Ninja's answer is lost or cut off, MB looks for the invoice (by its own reference in invoice custom field 4) or client (by the email it sent) instead of reporting a failure, and never sends it a second time on its own: if it is not found, a person checks Invoice Ninja and says so. If your Invoice Ninja uses custom field 4, tell us before updating.
+- Every send, payment and card charge is recorded in MB before it goes to Invoice Ninja, with exactly what was sent, so a second click cannot send it again. A payment retried after a lost answer resends that same payment, and MB records its details, not those of a later form.
+- When MB cannot tell what Invoice Ninja did, it holds the record and says why: a card charge Invoice Ninja did not confirm, an invoice whose total changed after its answer was lost, or a client with no email that Invoice Ninja may have created. Nothing marks a held job or sale paid, with Invoice Ninja on or off (Register, No Charge, billing card), not even Invoice Ninja showing it Paid, until someone clears the hold; each hold keeps who cleared it and when.
+- If Invoice Ninja shows an invoice already paid by something else, MB records it as Paid without claiming its own payment details.
+- A counter sale whose invoice reached Invoice Ninja but whose payment MB has not seen confirmed offers to finish the payment on that same invoice, from the Register.
+- A wrong, deleted or archived API token gets the "check the token" message (Invoice Ninja answers 403, not 401). Rate limits say to wait a minute, and an error page from a proxy no longer shows its raw HTML. MB gives up connecting to Invoice Ninja after 5 seconds, and never follows a redirect after sending something.
 - Reports PDF: a chart picture with a damaged PNG checksum is refused like any other bad chart picture, instead of failing with a server error.
 
 ## v0.17.0 — 2026-10-03

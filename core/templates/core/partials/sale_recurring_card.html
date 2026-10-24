@@ -6,6 +6,7 @@ Ninja; nothing is charged. The operator charges the card by hand in IN, then
 <div class="card" id="sale-recurring-card">
     <div class="card-header"><h3 class="card-title">Recurring charge</h3></div>
     <div class="card-body">
+        {% include "core/partials/in_hold_banner.html" with obj=sale in_host="sale" %}
         {% if sale.pulled_from_in %}
         <p class="text-secondary">This record mirrors an invoice Invoice Ninja generated on its own (Pull from IN). Murphy's Bench reads its status back and changes nothing in Invoice Ninja; charge or record payment there, then Check IN.</p>
         {% else %}
