@@ -208,7 +208,7 @@ Confirm the Python version:
 python3 --version
 ```
 
-Murphy's Bench requires Python 3.10 or later.
+Murphy's Bench requires Python 3.11 or later (Ubuntu 24.04 ships 3.12, 26.04 ships 3.14).
 
 ### 2. Create the Application Directory
 
