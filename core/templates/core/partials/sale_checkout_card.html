@@ -20,11 +20,12 @@ re-send. The view swaps this card out-of-band after line-item changes.
             </div>
         </div>
         <div class="card-footer">
-            {% if sale.invoice_ninja_id and not sale.in_status %}
-                {# The invoice landed but its payment did not: retrying finishes the same invoice. #}
-                <div class="text-warning mb-2">Invoice Ninja #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }} was created, but its payment is not recorded there yet.</div>
+            {% include "core/partials/in_hold_banner.html" with obj=sale in_host="sale" %}
+            {% if sale.invoice_ninja_id and sale.in_payment_pending %}
+                {# The invoice landed; MB has not seen its payment confirmed. Retrying finishes the same invoice. #}
+                <div class="text-warning mb-2">Invoice Ninja #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }} was created, but MB has not seen its payment confirmed there. Trying again is safe: Invoice Ninja refuses the same payment twice.</div>
                 {% if invoice_ninja_enabled %}
-                <form method="post" action="{% url 'core:sale_send_in' sale.pk %}">{% csrf_token %}<button type="submit" class="btn">Record the payment in Invoice Ninja</button></form>
+                <form method="post" action="{% url 'core:sale_send_in' sale.pk %}">{% csrf_token %}<button type="submit" class="btn">Finish recording the payment in Invoice Ninja</button></form>
                 {% endif %}
             {% elif sale.invoice_ninja_id %}
                 <div class="d-flex flex-wrap align-items-center gap-2">

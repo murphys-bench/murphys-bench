@@ -1,0 +1,21 @@
+{% comment %}
+Shows a record's Invoice Ninja hold or lost-answer send, with the button a
+person presses after checking Invoice Ninja. Pass `obj` (WorkOrder, Sale or
+Client) and `in_host` ('wo', 'sale' or 'client').
+{% endcomment %}
+{% if obj.in_hold_kind %}
+<div class="alert alert-warning" role="alert">
+    <div class="fw-medium mb-1">{{ obj.get_in_hold_kind_display }}</div>
+    <div class="mb-2">{{ obj.in_hold_reason }}</div>
+    <form method="post" action="{% url 'core:in_hold' in_host obj.pk 'resolve' %}">{% csrf_token %}
+        <button type="submit" class="btn btn-sm">{% if obj.in_hold_kind == 'charge' %}I checked Invoice Ninja: the charge did not go through{% elif obj.in_hold_kind == 'amount' %}I checked Invoice Ninja: the invoice is right{% else %}I checked Invoice Ninja: clear this hold{% endif %}</button>
+    </form>
+</div>
+{% elif obj.in_push_key %}
+<div class="alert alert-warning" role="alert">
+    <div class="mb-2">A send to Invoice Ninja did not get an answer. MB looks for that invoice before sending again. If Invoice Ninja does not have it, clear it here so a new send can go.</div>
+    <form method="post" action="{% url 'core:in_hold' in_host obj.pk 'clear-send' %}">{% csrf_token %}
+        <button type="submit" class="btn btn-sm">I checked Invoice Ninja: the invoice is not there</button>
+    </form>
+</div>
+{% endif %}

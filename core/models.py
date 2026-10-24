@@ -176,7 +176,36 @@ class User(AbstractUser):
         return False
 
 
-class Client(models.Model):
+class InvoiceNinjaHold(models.Model):
+    """A money action with Invoice Ninja that MB will not repeat until a person
+    has looked: a card charge IN did not confirm, an invoice recovered after a
+    lost answer whose total no longer matches, or a client IN may have created
+    without an email to find it by. Pay and charge refuse while a hold is set.
+    Clearing it records who and when. See invoice_ninja.hold / resolve_hold."""
+
+    HOLD_CHARGE = 'charge'
+    HOLD_AMOUNT = 'amount'
+    HOLD_CLIENT = 'client_create'
+    HOLD_CHOICES = [
+        (HOLD_CHARGE, 'Card charge not confirmed'),
+        (HOLD_AMOUNT, 'Invoice total does not match'),
+        (HOLD_CLIENT, 'Client may already exist in Invoice Ninja'),
+    ]
+
+    in_hold_kind = models.CharField(max_length=20, choices=HOLD_CHOICES, blank=True, default='')
+    in_hold_reason = models.TextField(blank=True, default='')
+    in_hold_at = models.DateTimeField(null=True, blank=True)
+    in_hold_resolved_by = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+    )
+    in_hold_resolved_at = models.DateTimeField(null=True, blank=True)
+    in_hold_resolved_note = models.TextField(blank=True, default='')
+
+    class Meta:
+        abstract = True
+
+
+class Client(InvoiceNinjaHold):
     """Companies/customers requesting service"""
 
     CLIENT_TYPE_CHOICES = [
@@ -209,6 +238,8 @@ class Client(models.Model):
     # Invoice Ninja client id, saved after the first push (link once, don't sync).
     # Later pushes use this directly — no re-search, no duplicate IN clients.
     invoice_ninja_id = models.CharField(max_length=64, blank=True, default='')
+    # A client create sent to IN whose answer has not come back yet.
+    in_create_started_at = models.DateTimeField(null=True, blank=True)
     # Recurring/managed monthly billing (Lane C) — Client is the group membership;
     # the actual charge each month is a Sale (is_recurring=True), not a separate model.
     is_managed = models.BooleanField(
@@ -1101,7 +1132,7 @@ class TicketWorkLog(models.Model):
         return f"{self.minutes} min on {self.ticket} by {self.logged_by}"
 
 
-class WorkOrder(models.Model):
+class WorkOrder(InvoiceNinjaHold):
     """Repair job (main entity)"""
 
     # ⚠ There is no 'closed' work order. A work order finishes as 'completed'
@@ -1551,7 +1582,7 @@ class EstimateOption(models.Model):
         self.save(update_fields=['is_selected'])
 
 
-class Sale(models.Model):
+class Sale(InvoiceNinjaHold):
     """A counter/walk-in sale — Lane B (Counter). Client is optional (nullable):
     a cash walk-in with no client stays MB-only and is never pushed to Invoice
     Ninja (IN needs a client). Reuses the LineItem GenericRelation exactly like
@@ -1612,6 +1643,9 @@ class Sale(models.Model):
     # Pending-send reference, as on WorkOrder (see invoice_ninja._create_invoice).
     in_push_key = models.CharField(max_length=64, blank=True, default='')
     in_push_started_at = models.DateTimeField(null=True, blank=True)
+    # A paid push whose invoice is in IN but whose payment MB has not seen
+    # confirmed. Kept apart from in_status, which Check IN overwrites.
+    in_payment_pending = models.BooleanField(default=False)
 
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='sales_created')
     created_at = models.DateTimeField(auto_now_add=True)
