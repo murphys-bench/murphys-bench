@@ -19286,6 +19286,28 @@ def test_clearing_from_a_stale_read_leaves_a_taken_over_request_alone(client_obj
 
 
 @pytest.mark.django_db
+def test_clearing_from_a_stale_read_leaves_a_request_that_went_unanswered_again_alone(client_obj, admin_user, monkeypatch):
+    """M1: judged unanswered, then carried on by another request whose own
+    attempt also went unanswered: same state, new owner. Nothing is cleared."""
+    from core import invoice_ninja
+    from core.models import InvoiceNinjaRequest as R
+    wo = _priced_wo(client_obj)
+    req = _in_request(wo, 'payment', 'unknown', base_invoice_id='inv1', payload=_payment_payload())
+    stale_read = R.objects.get(pk=req.pk)
+
+    def lost(*a, **k):
+        raise invoice_ninja.InvoiceNinjaOutcomeUnknown('dropped')
+    monkeypatch.setattr(invoice_ninja, '_request', lost)
+    with pytest.raises(invoice_ninja.InvoiceNinjaOutcomeUnknown):
+        invoice_ninja.post_payment(wo, 'inv1', 'cl1', amount=95, method='cash', method_label='Cash')
+    req.refresh_from_db()
+    assert req.state == 'unknown' and req.token != stale_read.token
+    assert not invoice_ninja.resolve_request(stale_read, admin_user, 'checked')
+    req.refresh_from_db()
+    assert req.state == 'unknown'
+
+
+@pytest.mark.django_db
 def test_clearing_needs_the_generation_the_person_was_shown(client, admin_user, client_obj):
     from datetime import timedelta
     from django.utils import timezone
