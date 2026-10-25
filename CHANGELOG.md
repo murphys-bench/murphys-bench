@@ -27,6 +27,8 @@ the Unreleased entries move under that version and prod gets a single update.
 - A wrong, deleted or archived API token gets the "check the token" message (Invoice Ninja answers 403, not 401). Rate limits say to wait a minute, and an error page from a proxy no longer shows its raw HTML. MB gives up connecting to Invoice Ninja after 5 seconds, and never follows a redirect after sending something.
 - Reports PDF: a chart picture with a damaged PNG checksum is refused like any other bad chart picture, instead of failing with a server error.
 - Reports PDF: a chart picture whose header claims an enormous size is refused like any other oversized chart, instead of failing with a server error.
+- Alert boxes holding a title, a form or running text with bold words or links stack as one block again instead of splitting into narrow columns (Register hold banner, charge warnings, status and confirm boxes, the message banner).
+- Register messages and the hold banner show amounts in dollars and cents ($2.35, not $2.3450); the amount sent and stored is unchanged. The lost-send banner now says MB never sends it again on its own, and both receipts show the message from settling on screen (not when printed).
 
 ## v0.17.0 — 2026-10-03
 
