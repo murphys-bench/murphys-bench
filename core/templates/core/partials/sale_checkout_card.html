@@ -23,7 +23,7 @@ re-send. The view swaps this card out-of-band after line-item changes.
             {% include "core/partials/in_hold_banner.html" with obj=sale in_host="sale" %}
             {% if sale.invoice_ninja_id and sale.in_payment_pending %}
                 {# The invoice landed; MB has not seen its payment confirmed. Retrying finishes the same invoice. #}
-                <div class="text-warning mb-2">Invoice Ninja #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }} was created, but MB has not seen its payment confirmed there. Finishing reads the invoice first: if it still shows unpaid, MB sends that same payment, which Invoice Ninja refuses twice; if a payment already shows there, MB holds it for you to check.</div>
+                <div class="text-warning mb-2">Invoice Ninja #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }} was created, but MB has not seen its payment confirmed there. Finishing reads the invoice first and sends a payment only if it still shows unpaid: MB's same payment, which Invoice Ninja refuses twice. If Invoice Ninja shows a payment already there, MB sends nothing and says why; if it cannot tell whether that payment is its own, it holds it for you to check.</div>
                 {% if invoice_ninja_enabled %}
                 <div class="btn-list">
                 <form method="post" action="{% url 'core:sale_send_in' sale.pk %}">{% csrf_token %}<button type="submit" class="btn">Finish recording the payment in Invoice Ninja</button></form>

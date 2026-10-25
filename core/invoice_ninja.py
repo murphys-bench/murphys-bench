@@ -854,6 +854,12 @@ class InvoiceNinjaAlreadyPaid(InvoiceNinjaError):
     shows it was MB's own payment. MB must not record its payment details."""
 
 
+class InvoiceNinjaAlreadyRecorded(InvoiceNinjaError):
+    """IN already shows the invoice Paid with MB's own accepted payment on it,
+    so MB sent nothing. The record is finished; the message says why nothing
+    went out, not that something was sent."""
+
+
 class InvoiceNinjaPartlyPaid(InvoiceNinjaError):
     """IN recorded MB's payment, but the invoice still shows money owed (or MB
     could not read it back). MB records the payment it made and what IN says,
@@ -1416,8 +1422,12 @@ def push_sale(sale, draft=False, resend=False, user=None):
         # The read may have held MB's unanswered payment: a person checks first.
         require_no_hold(sale, finishing=_req_model().KIND_PAYMENT)
         if label == 'Paid':
-            if _own_done_payment(sale, invoice_id) is not None:
-                return ref
+            own = _own_done_payment(sale, invoice_id)
+            if own is not None:
+                raise InvoiceNinjaAlreadyRecorded(
+                    f'Invoice Ninja shows invoice #{ref} Paid, with MB\'s payment of '
+                    f'${money(own.payload.get("amount"))} already recorded there {_when(own.started_at)}. '
+                    'Nothing more was sent.')
             raise InvoiceNinjaAlreadyPaid(
                 f'Invoice #{ref}: Invoice Ninja already shows this invoice as Paid, and not by a payment '
                 'MB knows is its own. MB did not post a payment there. Check Invoice Ninja for how it was paid.')

@@ -3211,6 +3211,8 @@ class SaleCheckoutView(SaleAccessMixin, View):
             try:
                 ref = invoice_ninja.push_sale(sale, user=request.user)
                 messages.success(request, f'{sale.sale_number} completed and sent to Invoice Ninja as paid — invoice #{ref}.')
+            except invoice_ninja.InvoiceNinjaAlreadyRecorded as e:
+                messages.success(request, f'{sale.sale_number} completed. {e}')
             except invoice_ninja.InvoiceNinjaAlreadyPaid as e:
                 messages.warning(request, f'{sale.sale_number} was completed and the payment recorded here. {e}')
             except invoice_ninja.InvoiceNinjaPartlyPaid as e:
@@ -3262,6 +3264,8 @@ class SaleSendINView(SaleAccessMixin, View):
             resend = bool(sale.invoice_ninja_id) and not sale.in_payment_pending
             ref = invoice_ninja.push_sale(sale, resend=resend, user=request.user)
             messages.success(request, f'Sent to Invoice Ninja as paid — invoice #{ref}.')
+        except invoice_ninja.InvoiceNinjaAlreadyRecorded as e:
+            messages.success(request, str(e))
         except (invoice_ninja.InvoiceNinjaAlreadyPaid, invoice_ninja.InvoiceNinjaPartlyPaid) as e:
             messages.warning(request, str(e))
         except invoice_ninja.InvoiceNinjaError as e:

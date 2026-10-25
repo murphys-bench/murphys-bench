@@ -20950,6 +20950,29 @@ def test_finishing_a_sale_payment_on_an_unpaid_invoice_sends_the_same_payment_on
 
 
 @pytest.mark.django_db
+def test_finishing_a_sale_whose_own_payment_already_paid_it_says_nothing_was_sent(
+        client, admin_user, client_obj, monkeypatch):
+    """MB's own payment was accepted and Invoice Ninja shows the invoice Paid,
+    but the sale is still pending (its local write lost). Finishing sends
+    nothing and must not say it sent the sale "as paid"."""
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    _enable_in()
+    _linked_client(client_obj)
+    sale = _fractional_sale(client_obj)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    client.post(reverse('core:sale_checkout', args=[sale.pk]), {'payment_method': 'cash', 'amount': '2.35'})
+    client.get(reverse('core:pos_sale_settle', args=[sale.pk]))  # uses up checkout's own messages
+    assert _last(sale, 'payment').state == 'done'
+    Sale.objects.filter(pk=sale.pk).update(in_payment_pending=True, in_status='')
+    page = _finish(client, sale)
+    sale.refresh_from_db()
+    assert len(fake.payments()) == 1 and not sale.in_payment_pending
+    assert 'already recorded there' in page and 'Nothing more was sent' in page and 'as paid' not in page
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize('read, says', [
     (__import__('core.invoice_ninja', fromlist=['x']).InvoiceNinjaError('timed out'), 'nothing was sent'),
     ({'status_id': None, 'balance': 2.35}, 'as Unknown'),
