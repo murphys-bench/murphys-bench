@@ -26,6 +26,7 @@ the Unreleased entries move under that version and prod gets a single update.
 - A counter sale whose invoice reached Invoice Ninja but whose payment MB has not seen confirmed offers to finish the payment on that same invoice, from the Register.
 - A wrong, deleted or archived API token gets the "check the token" message (Invoice Ninja answers 403, not 401). Rate limits say to wait a minute, and an error page from a proxy no longer shows its raw HTML. MB gives up connecting to Invoice Ninja after 5 seconds, and never follows a redirect after sending something.
 - Reports PDF: a chart picture with a damaged PNG checksum is refused like any other bad chart picture, instead of failing with a server error.
+- Reports PDF: a chart picture whose header claims an enormous size is refused like any other oversized chart, instead of failing with a server error.
 
 ## v0.17.0 — 2026-10-03
 
