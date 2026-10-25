@@ -252,6 +252,19 @@ def requests_for(host):
     return _req_model().objects.filter(**{_host_field(host): host})
 
 
+def money(value):
+    """A dollar amount for a person to read: two places, rounded the way the
+    Register's own buttons show it (Django's floatformat). Display only; never
+    use it for an amount MB sends or stores. A value that is not a number is
+    shown as it is: a message must never fail because of what it displays."""
+    from decimal import Decimal, InvalidOperation
+    from django.template.defaultfilters import floatformat
+    try:
+        return floatformat(Decimal(str(value)), 2)
+    except (InvalidOperation, ValueError):
+        return str(value)
+
+
 def _when(dt):
     return timezone.localtime(dt).strftime('%b %-d at %-I:%M %p')
 
@@ -307,7 +320,7 @@ def _busy_message(req):
         return 'A card charge is being sent to Invoice Ninja right now.'
     if req.kind == R.KIND_PAYMENT and req.looks_lost:
         p = req.payload
-        return (f'A payment of ${p.get("amount")} ({p.get("method_label") or "unspecified"}) sent '
+        return (f'A payment of ${money(p.get("amount"))} ({p.get("method_label") or "unspecified"}) sent '
                 f'{_when(req.started_at)} got no answer from Invoice Ninja. Pay again to finish that '
                 'same payment, or use "Check IN".')
     if req.kind == R.KIND_PAYMENT:
@@ -502,7 +515,7 @@ def _settle_on_paid(host, label, invoice_id):
         p = req.payload
         R.objects.filter(pk=req.pk, token=req.token, state=R.UNKNOWN, active_at=req.active_at).update(
             state=R.HELD, reason=(
-                f'Invoice Ninja shows this invoice Paid, and a payment of ${p.get("amount")} '
+                f'Invoice Ninja shows this invoice Paid, and a payment of ${money(p.get("amount"))} '
                 f'({p.get("method_label") or "unspecified"}) sent {_when(req.started_at)} got no '
                 'answer, so MB cannot tell whether that payment is the one recorded. Check '
                 'Invoice Ninja, then clear this hold.'))
@@ -799,7 +812,7 @@ def _classify_payment_refusal(req, e, *, uncertain):
         if paid:
             reason = (
                 f'Invoice Ninja shows this invoice Paid, and an earlier attempt of a payment of '
-                f'${p.get("amount")} ({p.get("method_label") or "unspecified"}) got no answer, so MB '
+                f'${money(p.get("amount"))} ({p.get("method_label") or "unspecified"}) got no answer, so MB '
                 'cannot tell whether that payment is the one recorded. Check Invoice Ninja, then '
                 'clear this hold.'
             )
@@ -872,7 +885,7 @@ def post_payment(host, invoice_id, in_client_id, *, amount, method='', method_la
         _move(req, R.UNKNOWN, error=str(e))
         raise InvoiceNinjaOutcomeUnknown(
             f'{e} The payment may or may not have been recorded. Trying again sends this same '
-            f'payment (${req.payload["amount"]}, {req.payload["method_label"] or "unspecified"}): '
+            f'payment (${money(req.payload["amount"])}, {req.payload["method_label"] or "unspecified"}): '
             'Invoice Ninja refuses the same payment twice.'
         )
     except InvoiceNinjaRefused:

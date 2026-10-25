@@ -9,8 +9,8 @@ gunicorn is back.
     {% if restore_running %}
     <div class="alert alert-warning d-flex align-items-center gap-2"><span class="spinner-border spinner-border-sm"></span><span>Restore in progress{% if restore_status.message %}: {{ restore_status.message }}{% endif %}. Murphy's Bench stops and restarts during this, so this page may briefly fail to load. It picks up again on its own.</span></div>
     {% elif restore_status.state == 'succeeded' %}
-    <div class="alert alert-success">Restore succeeded{% if restore_status.at %} ({{ restore_status.at|slice:":19" }} UTC){% endif %}. {% if restore_status.message %}{{ restore_status.message }}.{% endif %} Check that your data looks right, then delete the pre-restore copy under <code>backups/</code>.</div>
+    <div class="alert d-block alert-success">Restore succeeded{% if restore_status.at %} ({{ restore_status.at|slice:":19" }} UTC){% endif %}. {% if restore_status.message %}{{ restore_status.message }}.{% endif %} Check that your data looks right, then delete the pre-restore copy under <code>backups/</code>.</div>
     {% elif restore_status.state == 'failed' %}
-    <div class="alert alert-danger">Restore <strong>failed</strong>{% if restore_status.at %} ({{ restore_status.at|slice:":19" }} UTC){% endif %}. {% if restore_status.message %}{{ restore_status.message }}{% endif %}<div class="mt-2">Your data before the attempt was copied to <code>backups/pre-restore-&lt;timestamp&gt;/</code> first, so nothing is lost. Recovering from that copy is a command-line step.</div></div>
+    <div class="alert d-block alert-danger">Restore <strong>failed</strong>{% if restore_status.at %} ({{ restore_status.at|slice:":19" }} UTC){% endif %}. {% if restore_status.message %}{{ restore_status.message }}{% endif %}<div class="mt-2">Your data before the attempt was copied to <code>backups/pre-restore-&lt;timestamp&gt;/</code> first, so nothing is lost. Recovering from that copy is a command-line step.</div></div>
     {% endif %}
 </div>

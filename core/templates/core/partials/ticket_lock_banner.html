@@ -1,6 +1,6 @@
 {% load mb_tabler %}
 {% if lock_user %}
-<div id="lock-banner" class="alert alert-warning py-2">{% ticon 'alert-triangle' 'icon-sm' %} <strong>{{ lock_user.get_full_name|default:lock_user.username }}</strong> is viewing this ticket right now.</div>
+<div id="lock-banner" class="alert d-block alert-warning py-2">{% ticon 'alert-triangle' 'icon-sm' %} <strong>{{ lock_user.get_full_name|default:lock_user.username }}</strong> is viewing this ticket right now.</div>
 {% else %}
 <div id="lock-banner"></div>
 {% endif %}

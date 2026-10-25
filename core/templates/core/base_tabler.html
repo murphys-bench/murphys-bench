@@ -290,7 +290,7 @@
         <div class="container-fluid">
             {% if messages %}
             {% for message in messages %}
-            <div class="alert alert-dismissible {% if message.tags == 'success' %}alert-success{% elif message.tags == 'error' %}alert-danger{% elif message.tags == 'warning' %}alert-warning{% else %}alert-info{% endif %}" role="alert">
+            <div class="alert d-block alert-dismissible {% if message.tags == 'success' %}alert-success{% elif message.tags == 'error' %}alert-danger{% elif message.tags == 'warning' %}alert-warning{% else %}alert-info{% endif %}" role="alert">
                 {{ message }}
                 <a class="btn-close" data-bs-dismiss="alert" aria-label="Dismiss"></a>
             </div>

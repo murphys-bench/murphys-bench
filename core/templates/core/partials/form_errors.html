@@ -1,5 +1,5 @@
 {% if form.errors %}
-<div class="alert alert-danger">
+<div class="alert alert-danger d-block">
     <div class="fw-medium">Please fix the following:</div>
     <ul class="mb-0">
         {% for field in form %}{% for error in field.errors %}<li>{{ field.label }}: {{ error }}</li>{% endfor %}{% endfor %}

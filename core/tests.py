@@ -19856,6 +19856,199 @@ def test_a_recovered_invoice_that_does_not_name_its_client_is_held(client, admin
     assert not [c for c in fake.calls if c[:2] == ('POST', '/invoices/bulk')]
 
 
+# ── Register display, found by walking the Register on mb-test (Oct 24 2026) ──
+
+def _alerts_with_stacked_content():
+    """Template alert boxes still laid out as Tabler's default flex row while
+    holding content that row layout splits apart: two or more stacked blocks
+    (a title and text, a message and a form), or running text mixed with
+    inline elements (each <strong> becomes its own column).
+
+    A heuristic over template source, not a rendered layout check: it reads
+    the raw template, so both branches of an {% if %} count, and it cannot
+    see a row nested inside a single wrapper. It is a guard against this
+    known shape coming back, not proof that every alert looks right."""
+    from html.parser import HTMLParser
+    from pathlib import Path
+    BLOCK = {'div', 'form', 'p', 'ul', 'ol', 'table', 'pre', 'details'}
+    INLINE = {'strong', 'em', 'b', 'i', 'a', 'code', 'span', 'small', 'kbd', 'br'}
+    VOID = {'br', 'img', 'input', 'hr', 'meta', 'link', 'source'}
+
+    class Scan(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.stack, self.found = [], []
+
+        def handle_starttag(self, tag, attrs):
+            classes = (dict(attrs).get('class') or '').split()
+            if self.stack and len(self.stack[-1]['open']) == 0:
+                alert = self.stack[-1]
+                alert['blocks'] += tag in BLOCK
+                alert['inline'] += tag in INLINE
+            for alert in self.stack:
+                if tag not in VOID:
+                    alert['open'].append(tag)
+            if tag == 'div' and 'alert' in classes and not ({'d-block', 'flex-column'} & set(classes)):
+                self.stack.append({'line': self.getpos()[0], 'open': [], 'blocks': 0, 'inline': 0, 'text': False})
+
+        def handle_endtag(self, tag):
+            for alert in list(self.stack):
+                if alert['open']:
+                    alert['open'].pop()
+                elif tag == 'div' and alert is self.stack[-1]:
+                    self.stack.pop()
+                    if alert['blocks'] >= 2 or (alert['text'] and alert['inline']):
+                        self.found.append(alert['line'])
+
+        def handle_data(self, data):
+            if self.stack and not self.stack[-1]['open'] and data.strip() and not data.strip().startswith('{%'):
+                self.stack[-1]['text'] = True
+
+    root = Path(__file__).resolve().parent.parent
+    found = []
+    for path in sorted(list(root.glob('core/templates/**/*.html')) + list(root.glob('templates/**/*.html'))):
+        scan = Scan()
+        scan.feed(path.read_text())
+        found += [f'{path.relative_to(root)}:{line}' for line in scan.found]
+    return found
+
+
+def test_no_alert_box_squeezes_stacked_content_side_by_side():
+    assert _alerts_with_stacked_content() == []
+
+
+@pytest.mark.django_db
+def test_register_hold_banner_stacks_and_says_mb_will_not_resend(client, admin_user, client_obj):
+    """The lost-send banner stacks its text over its button, and says what MB
+    does now (decision C): it never sends again on its own."""
+    wo = _priced_wo(client_obj)
+    _in_request(wo, 'invoice', 'unknown')
+    client.force_login(admin_user)
+    page = client.get(reverse('core:pos_wo_settle', args=[wo.pk])).content.decode()
+    assert 'class="alert alert-warning d-block"' in page
+    assert 'MB will not send it again on its own' in page
+    assert 'before sending again' not in page
+
+
+@pytest.mark.django_db
+def test_register_settled_message_shows_cents_and_appears_on_the_receipt(client, admin_user, client_obj):
+    """Settling lands on the receipt. Its message shows there (screen only),
+    in dollars and cents, and does not wait for the next page."""
+    from decimal import Decimal
+    wo = _priced_wo(client_obj, '2.00')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'pay', 'payment_method': 'cash'}, follow=True)
+    page = resp.content.decode()
+    assert resp.redirect_chain[-1][0] == reverse('core:pos_wo_receipt', args=[wo.pk])
+    assert 'class="screen-messages"' in page and 'settled — $2.00 paid.' in page
+    assert '2.0000' not in page
+    assert '.screen-messages { display: none; }' in page          # hidden when printed
+    later = client.get(reverse('core:pos_home')).content.decode()
+    assert 'settled — $2.00 paid.' not in later                   # not carried to the next page
+    assert WorkOrder.objects.get(pk=wo.pk).invoice.amount == Decimal('2.00')
+
+
+def _fractional_wo(client_obj, quantity, unit_price):
+    from decimal import Decimal
+    from core.models import LineItem
+    wo = WorkOrder.objects.create(client=client_obj, reported_problem='x', status='completed')
+    LineItem.objects.create(content_object=wo, kind='labor', description='Part hour', quantity=Decimal(quantity),
+                            unit_price=Decimal(unit_price))
+    return wo
+
+
+@pytest.mark.django_db
+def test_register_pay_sends_the_exact_total_and_shows_it_as_the_button_does(client, admin_user, client_obj, monkeypatch):
+    """Review P117-1: 0.50 x $4.69 = $2.345. The payment sent to Invoice Ninja
+    is that exact total, as before; only the message is rounded, the same way
+    the Register's button shows it ($2.35)."""
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _fractional_wo(client_obj, '0.50', '4.69')
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    client.force_login(admin_user)
+    settle = client.get(reverse('core:pos_wo_settle', args=[wo.pk])).content.decode()
+    assert 'Mark paid, $2.35' in settle
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'pay', 'payment_method': 'cash'}, follow=True)
+    sent = fake.payments()[0][3]
+    assert sent['amount'] == 2.345 and sent['invoices'][0]['amount'] == 2.345
+    assert 'settled — $2.35 paid' in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_register_bill_later_on_a_half_cent_total_still_sends_the_draft(client, admin_user, client_obj, monkeypatch):
+    """Review P117-1: 0.50 x $0.01 is a positive total; Bill Later still sends
+    it as a draft rather than calling it 'no priced line items'."""
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _fractional_wo(client_obj, '0.50', '0.01')
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    client.force_login(admin_user)
+    client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'draft'})
+    assert len(fake.creates()) == 1
+    assert WorkOrder.objects.get(pk=wo.pk).invoice.billing_status == 'invoiced'
+
+
+@pytest.mark.django_db
+def test_register_settled_message_rounds_like_the_button_with_invoice_ninja_off(client, admin_user, client_obj):
+    wo = _fractional_wo(client_obj, '0.50', '4.69')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'pay', 'payment_method': 'cash'}, follow=True)
+    assert 'settled — $2.35 paid.' in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_register_banner_shows_an_unanswered_payment_in_dollars_and_cents(client, admin_user, client_obj):
+    wo = _fractional_wo(client_obj, '0.50', '4.69')
+    _in_request(wo, 'payment', 'unknown', payload={'amount': '2.345', 'method_label': 'Cash', 'reference': ''})
+    client.force_login(admin_user)
+    page = client.get(reverse('core:pos_wo_settle', args=[wo.pk])).content.decode()
+    assert 'A payment of $2.35 (Cash)' in page and '2.345' not in page
+
+
+def test_money_shows_two_places_rounded_like_the_register_button():
+    from core import invoice_ninja
+    assert invoice_ninja.money('2.345') == '2.35'
+    assert invoice_ninja.money('2.0000') == '2.00'
+    assert invoice_ninja.money(95) == '95.00'
+
+
+@pytest.mark.django_db
+def test_money_never_fails_a_message_over_a_missing_amount(client_obj):
+    """A display helper must not raise: a payment record without an amount
+    still gets its busy message, shown as before (the raw value)."""
+    from core import invoice_ninja
+    assert invoice_ninja.money(None) == 'None' and invoice_ninja.money('abc') == 'abc'
+    wo = _fractional_wo(client_obj, '1', '5.00')
+    req = _in_request(wo, 'payment', 'unknown', payload={'method_label': 'Cash'})
+    assert 'A payment of $None (Cash)' in invoice_ninja._busy_message(req)
+
+
+@pytest.mark.django_db
+def test_sale_receipt_shows_a_waiting_message_on_screen_only(client_obj):
+    """The counter-sale receipt carries the same screen-only message block."""
+    from decimal import Decimal
+    from django.template.loader import render_to_string
+    from core.models import SiteSettings
+    from core.views import _receipt_context
+    sale = Sale.objects.create(client=client_obj, status='completed', amount=Decimal('5.00'), payment_method='cash')
+
+    class Message:
+        tags = 'success'
+
+        def __str__(self):
+            return 'SALE-00001 completed.'
+    ctx = _receipt_context(sale, SiteSettings.get())
+    html = render_to_string('core/sale_receipt_print.html', {**ctx, 'messages': [Message()]})
+    assert 'class="screen-messages"' in html and 'SALE-00001 completed.' in html
+    assert '.screen-messages { display: none; }' in html
+    assert 'class="screen-messages"' not in render_to_string('core/sale_receipt_print.html', {**ctx, 'messages': []})
+
+
 # ── Email logo under Pillow 13 (PR #113 and #114 reviews, Oct 23 2026) ──
 # Pillow 13 stopped writing 32-bit integer ("I" mode) images as PNG. The resize
 # used to fall back to the original file without a word and label it by its
