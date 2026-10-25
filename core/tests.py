@@ -18085,6 +18085,7 @@ class _FakeIN:
         self.invoices = []
         self.calls = []
         self.lose_creates = 0
+        self.miss_finds = 0     # look-ups by MB key that answer "not found"
         self.refuse_creates = None
         self.payment_outcomes = []
         self.paid = set()       # invoices IN shows fully paid (by anything)
@@ -18113,6 +18114,9 @@ class _FakeIN:
                 raise self.inj.InvoiceNinjaOutcomeUnknown('Invoice Ninja did not answer within 20 seconds.')
             return {'data': inv}
         if method == 'GET' and path == '/invoices':
+            if self.miss_finds:
+                self.miss_finds -= 1
+                return {'data': []}
             key = (params or {}).get(self.inj.MB_KEY_FIELD)
             return {'data': [i for i in self.invoices if i.get(self.inj.MB_KEY_FIELD) == key]}
         if method == 'GET' and path.startswith('/invoices/'):
@@ -20377,30 +20381,36 @@ def test_in_stand_in_rounds_lines_on_its_own():
 
 @pytest.mark.django_db
 def test_recovered_legacy_sale_payment_short_of_the_invoice_is_not_called_paid(client, admin_user, client_obj, monkeypatch):
-    """The reviewer's case: checkout recorded $2.34 (the old prefill), the
-    create's answer was lost, MB finds the $2.35 invoice and posts the recorded
-    $2.34. MB shows Partial and the cent owed, not Paid, and a later send adds
-    no second payment."""
+    """The reviewer's case, step for step: checkout recorded $2.34 (the old
+    prefill); the create's answer was lost and the first look-up missed, so
+    nothing was paid. The later Send finds the $2.35 invoice and posts the
+    recorded $2.34. MB shows Partial and the cent owed, not Paid, and sending
+    again adds no second payment."""
     from decimal import Decimal
     from core import invoice_ninja
+    from core.models import InvoiceNinjaRequest
     _enable_in()
     _linked_client(client_obj)
     sale = _fractional_sale(client_obj)
     fake = _FakeIN(invoice_ninja)
-    fake.lose_creates = 1
+    fake.lose_creates = fake.miss_finds = 1
     monkeypatch.setattr(invoice_ninja, '_request', fake)
     client.force_login(admin_user)
-    resp = client.post(reverse('core:sale_checkout', args=[sale.pk]),
-                       {'payment_method': 'cash', 'amount': '2.34', 'reference': ''}, follow=True)
+    client.post(reverse('core:sale_checkout', args=[sale.pk]), {'payment_method': 'cash', 'amount': '2.34', 'reference': ''})
+    req = InvoiceNinjaRequest.objects.get(sale=sale, kind='invoice')
+    assert req.state == 'unknown' and not fake.payments()
+    resp = client.post(reverse('core:sale_send_in', args=[sale.pk]), follow=True)
     assert len(fake.creates()) == 1, 'the lost invoice is found, not created twice'
     assert [p[3]['amount'] for p in fake.payments()] == [2.34], 'the recorded payment is sent as recorded'
     sale.refresh_from_db()
     assert sale.amount == Decimal('2.34')
     assert sale.in_status == 'Partial' and not sale.in_payment_pending
+    assert fake.state(fake.invoices[0]['id'])['balance'] == 0.01
     page = resp.content.decode()
     assert 'with $0.01 still owed' in page and 'as paid' not in page
     client.post(reverse('core:sale_send_in', args=[sale.pk]), follow=True)
     assert len(fake.payments()) == 1 and len(fake.creates()) == 1
+    assert invoice_ninja.check_sale_status(sale) == 'Partial'
 
 
 @pytest.mark.django_db
@@ -20505,3 +20515,24 @@ def test_register_pay_whose_invoice_cannot_be_read_back_leaves_it_unpaid(client,
     assert len(fake.payments()) == 1
     assert WorkOrder.objects.get(pk=wo.pk).invoice.billing_status != 'paid'
     assert 'could not read invoice' in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_reprinted_old_receipt_shows_the_rounded_total_and_the_recorded_amount(client, admin_user, client_obj):
+    """What the changelog announces: an existing record with fractional lines
+    shows the rounded total ($4.70 for two 0.50 x $4.69 lines) while the amount
+    it recorded ($4.69, before this release) does not move."""
+    from decimal import Decimal
+    from core.models import LineItem
+    wo = WorkOrder.objects.create(client=client_obj, reported_problem='x', status='completed')
+    for _ in range(2):
+        LineItem.objects.create(content_object=wo, kind='labor', description='Half hour',
+                                quantity=Decimal('0.50'), unit_price=Decimal('4.69'))
+    inv = wo.invoice
+    inv.billing_status = 'paid'; inv.amount = Decimal('4.69'); inv.payment_method = 'cash'
+    inv.paid_date = inv.paid_date or __import__('datetime').date(2026, 10, 1); inv.save()
+    client.force_login(admin_user)
+    page = client.get(reverse('core:pos_wo_receipt', args=[wo.pk])).content.decode()
+    assert '$4.70' in page and '$4.69' in page
+    assert WorkOrder.objects.get(pk=wo.pk).invoice.amount == Decimal('4.69')
+
