@@ -21093,3 +21093,19 @@ def test_every_payment_hold_shows_what_mb_sent(client, admin_user, client_obj):
     assert 'ref PAID-HOLD' in page and 'to invoice #0002' in page
     page = client.get(reverse('core:pos_wo_settle', args=[other.pk])).content.decode()
     assert 'no reference' in page and 'an earlier invoice (Invoice Ninja id inv1)' in page
+
+
+@pytest.mark.django_db
+def test_a_sale_payment_refused_after_the_read_does_not_promise_a_retry(client, admin_user, client_obj, monkeypatch):
+    """A hold (or MB's accepted payment) can land between the read and the
+    payment. Nothing is sent, so the message must not say retrying adds it."""
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    sale = _short_sale_lost_payment(client, client_obj, monkeypatch, fake)
+
+    def refused(*a, **k):
+        raise invoice_ninja.InvoiceNinjaRefused('Held meanwhile. MB will not do this until a person has checked.')
+    monkeypatch.setattr(invoice_ninja, 'post_payment', refused)
+    page = _finish(client, sale)
+    assert 'Held meanwhile' in page and 'Retrying adds' not in page
