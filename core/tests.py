@@ -20535,4 +20535,3 @@ def test_reprinted_old_receipt_shows_the_rounded_total_and_the_recorded_amount(c
     page = client.get(reverse('core:pos_wo_receipt', args=[wo.pk])).content.decode()
     assert '$4.70' in page and '$4.69' in page
     assert WorkOrder.objects.get(pk=wo.pk).invoice.amount == Decimal('4.69')
-
