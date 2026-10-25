@@ -3213,6 +3213,8 @@ class SaleCheckoutView(SaleAccessMixin, View):
                 messages.success(request, f'{sale.sale_number} completed and sent to Invoice Ninja as paid — invoice #{ref}.')
             except invoice_ninja.InvoiceNinjaAlreadyPaid as e:
                 messages.warning(request, f'{sale.sale_number} was completed and the payment recorded here. {e}')
+            except invoice_ninja.InvoiceNinjaPartlyPaid as e:
+                messages.warning(request, f'{sale.sale_number} was completed and the payment recorded here. {e}')
             except invoice_ninja.InvoiceNinjaError as e:
                 messages.warning(
                     request,
@@ -3260,7 +3262,7 @@ class SaleSendINView(SaleAccessMixin, View):
             resend = bool(sale.invoice_ninja_id) and not sale.in_payment_pending
             ref = invoice_ninja.push_sale(sale, resend=resend, user=request.user)
             messages.success(request, f'Sent to Invoice Ninja as paid — invoice #{ref}.')
-        except invoice_ninja.InvoiceNinjaAlreadyPaid as e:
+        except (invoice_ninja.InvoiceNinjaAlreadyPaid, invoice_ninja.InvoiceNinjaPartlyPaid) as e:
             messages.warning(request, str(e))
         except invoice_ninja.InvoiceNinjaError as e:
             messages.error(request, f'Could not send to Invoice Ninja: {e}')
@@ -7059,6 +7061,14 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
                 current = invoice_ninja.check_invoice_status(wo)
                 if current.strip().lower() == 'paid':
                     return self._already_paid(request, wo)
+                if current.strip().lower() == 'partial':
+                    # A payment is already on it. Another from here would pay the
+                    # whole total again on top.
+                    messages.error(
+                        request,
+                        f'Invoice Ninja shows invoice #{wo.invoice_ninja_ref or wo.invoice_ninja_id} partly paid. '
+                        'Settle the rest in Invoice Ninja, then use "Check IN"; MB will not add a second payment.')
+                    return redirect('core:pos_wo_settle', pk=pk)
                 in_client_id = (
                     invoice_ninja.find_or_create_client(wo.client, user=request.user) if wo.client_id
                     else invoice_ninja.find_or_create_walkin_client()
@@ -7079,6 +7089,24 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
             # it: after a lost answer that is the earlier payment, not this form.
             sent = payment.payload
             invoice = wo.invoice
+            ref = wo.invoice_ninja_ref or wo.invoice_ninja_id
+            # Accepted is not paid: MB records Paid only when Invoice Ninja shows
+            # it (a carried-on payment, or lines changed since the invoice was
+            # made, can leave money owed).
+            try:
+                label, balance = invoice_ninja.invoice_state(wo.invoice_ninja_id)
+            except invoice_ninja.InvoiceNinjaError as e:
+                messages.warning(
+                    request,
+                    f'Invoice Ninja recorded the payment of ${invoice_ninja.money(sent["amount"])}, but MB could not '
+                    f'read invoice #{ref} back to confirm it is paid: {e} Use "Check IN"; '
+                    f'{wo.work_order_number} stays unpaid here until it shows Paid.')
+                return redirect('core:pos_wo_settle', pk=pk)
+            if label != 'Paid':
+                Invoice.objects.filter(pk=invoice.pk).update(
+                    in_status=label, invoice_ninja_id=wo.invoice_ninja_id, in_status_checked_at=timezone.now())
+                messages.warning(request, invoice_ninja.owed_message(sent['amount'], ref, label, balance))
+                return redirect('core:pos_wo_settle', pk=pk)
             # A hold can land while the payment is at Invoice Ninja. The payment
             # stays recorded on its request; MB's own record is marked paid only
             # if nothing is held, checked in the same transaction as the write.

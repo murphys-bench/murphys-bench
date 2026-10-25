@@ -776,6 +776,37 @@ class InvoiceNinjaAlreadyPaid(InvoiceNinjaError):
     shows it was MB's own payment. MB must not record its payment details."""
 
 
+class InvoiceNinjaPartlyPaid(InvoiceNinjaError):
+    """IN recorded MB's payment, but the invoice still shows money owed (or MB
+    could not read it back). MB records the payment it made and what IN says,
+    and does not call the record Paid."""
+
+
+def invoice_state(invoice_id):
+    """Read one invoice back from IN: (status label, balance or None). A payment
+    being accepted is not proof the invoice is paid; this is."""
+    from decimal import Decimal, InvalidOperation
+    data = (_request('GET', f'/invoices/{invoice_id}') or {}).get('data') or {}
+    status_id = data.get('status_id')
+    try:
+        label = _IN_STATUS_LABELS.get(int(status_id), f'Unknown ({status_id})')
+    except (TypeError, ValueError):
+        label = 'Unknown'
+    try:
+        balance = Decimal(str(data.get('balance')))
+    except (InvalidOperation, TypeError, ValueError):
+        balance = None
+    return label, balance
+
+
+def owed_message(paid, ref, label, balance):
+    """The words for a payment IN recorded on an invoice it does not show Paid."""
+    owed = f' with ${money(balance)} still owed' if balance is not None and balance > 0 else ''
+    return (f'Invoice Ninja recorded the payment of ${money(paid)}, but shows invoice #{ref} '
+            f'{label}{owed}. MB does not call it Paid: settle the rest in Invoice Ninja, '
+            'then use "Check IN".')
+
+
 def _key_already_used(e):
     import json
     try:
@@ -1302,8 +1333,35 @@ def push_sale(sale, draft=False, resend=False, user=None):
             f'its payment was not confirmed: {e} Retrying adds the payment to that '
             'same invoice.'
         )
+    # The payment is recorded at IN: nothing is left to post. Paid only when IN
+    # says so; the amount recorded here may be short of the invoice (an edited
+    # checkout amount, or one recorded before line totals were rounded).
+    ref = sale.invoice_ninja_ref or invoice_id
+    try:
+        label, balance = invoice_state(invoice_id)
+    except InvoiceNinjaError as e:
+        _record_sale_payment_state(sale, None)
+        raise InvoiceNinjaPartlyPaid(
+            f'Invoice Ninja recorded the payment of ${money(amount)} on invoice #{ref}, but MB '
+            f'could not read the invoice back to confirm it is paid: {e} Use "Check IN".')
+    if label != 'Paid':
+        _record_sale_payment_state(sale, label)
+        raise InvoiceNinjaPartlyPaid(owed_message(amount, ref, label, balance))
     _mark_sale_paid(sale)
     return sale.invoice_ninja_ref or sale.invoice_ninja_id
+
+
+def _record_sale_payment_state(sale, label):
+    """MB's payment is at IN but IN does not (or could not be read to) show the
+    invoice Paid: the payment is no longer pending; the status is IN's word."""
+    from django.utils import timezone
+    sale.in_payment_pending = False
+    fields = ['in_payment_pending']
+    if label:
+        sale.in_status = label
+        sale.in_status_checked_at = timezone.now()
+        fields += ['in_status', 'in_status_checked_at']
+    sale.save(update_fields=fields)
 
 
 def _mark_sale_paid(sale):
