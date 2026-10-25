@@ -3313,7 +3313,7 @@ class InvoiceNinjaHoldView(LoginRequiredMixin, View):
                 raise PermissionDenied
             if invoice_ninja.found_payment(req, request.user, generation=generation):
                 then = ('Pay here records it Paid once Invoice Ninja shows it Paid; nothing more is sent.'
-                        if host == 'wo' else 'Nothing more is sent.')
+                        if host == 'wo' else 'Nothing more is sent; use "Check IN" to read the invoice again.')
                 messages.success(
                     request, f'Recorded: MB\'s payment of ${invoice_ninja.money(req.payload.get("amount"))} '
                              f'is the one in Invoice Ninja. MB recorded who said so and when. {then}')

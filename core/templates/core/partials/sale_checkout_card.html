@@ -23,16 +23,20 @@ re-send. The view swaps this card out-of-band after line-item changes.
             {% include "core/partials/in_hold_banner.html" with obj=sale in_host="sale" %}
             {% if sale.invoice_ninja_id and sale.in_payment_pending %}
                 {# The invoice landed; MB has not seen its payment confirmed. Retrying finishes the same invoice. #}
-                <div class="text-warning mb-2">Invoice Ninja #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }} was created, but MB has not seen its payment confirmed there. Trying again is safe: Invoice Ninja refuses the same payment twice.</div>
+                <div class="text-warning mb-2">Invoice Ninja #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }} was created, but MB has not seen its payment confirmed there. Finishing reads the invoice first: if it still shows unpaid, MB sends that same payment, which Invoice Ninja refuses twice; if a payment already shows there, MB holds it for you to check.</div>
                 {% if invoice_ninja_enabled %}
+                <div class="btn-list">
                 <form method="post" action="{% url 'core:sale_send_in' sale.pk %}">{% csrf_token %}<button type="submit" class="btn">Finish recording the payment in Invoice Ninja</button></form>
+                <form method="post" action="{% url 'core:sale_check_in' sale.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{% url 'core:pos_sale_settle' sale.pk %}"><button type="submit" class="btn">Check IN</button></form>
+                </div>
                 {% endif %}
             {% elif sale.invoice_ninja_id %}
                 <div class="d-flex flex-wrap align-items-center gap-2">
                     <span class="badge bg-green-lt">Invoice Ninja #{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }}{% if sale.in_status %} &middot; {{ sale.in_status }}{% endif %}</span>
                     {% if not sale.client_id %}<span class="text-secondary small">billed to Walk-In</span>{% endif %}
                     {% if invoice_ninja_enabled %}
-                    <form method="post" action="{% url 'core:sale_send_in' sale.pk %}" class="ms-auto" data-mb-confirm="Re-send this sale to Invoice Ninja? This creates another paid invoice there.">{% csrf_token %}<input type="hidden" name="confirm_resend" value="1"><button type="submit" class="btn btn-sm">Re-send</button></form>
+                    <form method="post" action="{% url 'core:sale_check_in' sale.pk %}" class="ms-auto">{% csrf_token %}<input type="hidden" name="next" value="{% url 'core:pos_sale_settle' sale.pk %}"><button type="submit" class="btn">Check IN</button></form>
+                    <form method="post" action="{% url 'core:sale_send_in' sale.pk %}" data-mb-confirm="Re-send this sale to Invoice Ninja? This creates another paid invoice there.">{% csrf_token %}<input type="hidden" name="confirm_resend" value="1"><button type="submit" class="btn btn-sm">Re-send</button></form>
                     {% endif %}
                 </div>
             {% elif invoice_ninja_enabled %}

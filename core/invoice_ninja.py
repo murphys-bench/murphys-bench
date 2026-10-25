@@ -567,25 +567,32 @@ def found_payment(req, user, *, generation=None):
     return bool(moved)
 
 
-def payment_refusal(host, invoice_id, label):
-    """Why MB must not send a new payment onto invoice `invoice_id`, which IN
-    has just read as `label` (not Paid), or None. MB's own payment already
+def _own_done_payment(host, invoice_id):
+    """MB's own payment that IN accepted onto invoice `invoice_id`, or None."""
+    R = _req_model()
+    return (requests_for(host).filter(kind=R.KIND_PAYMENT, state=R.DONE, base_invoice_id=invoice_id)
+            .order_by('-finished_at').first())
+
+
+def payment_refusal(host, invoice_id, label, *, then='then Pay here records it Paid and sends nothing more'):
+    """Why MB must not send a payment onto invoice `invoice_id`, which IN has
+    just read as `label` (not Paid), or None. MB's own payment already
     accepted there means it is waiting to show Paid, not to be paid again
     (review R2-1); a payment somebody else made is not added to; and a status
-    MB cannot read as unpaid is no permission to pay."""
-    R = _req_model()
+    MB cannot read as unpaid is no permission to pay. `then` is how this
+    record is finished once IN shows it Paid. Every caller that pays onto an
+    existing invoice reads it and asks this first (review R3-1)."""
     ref = getattr(host, 'invoice_ninja_ref', '') or invoice_id
-    own = (requests_for(host).filter(kind=R.KIND_PAYMENT, state=R.DONE, base_invoice_id=invoice_id)
-           .order_by('-finished_at').first())
+    own = _own_done_payment(host, invoice_id)
     if own is not None:
         return (f'Invoice Ninja already has MB\'s payment of ${money(own.payload.get("amount"))} on invoice '
                 f'#{ref}, recorded {_when(own.started_at)}, and shows the invoice {label}. MB will not send '
-                'another. Settle the rest in Invoice Ninja; then Pay here records it Paid and sends nothing more.')
+                f'another. Settle the rest in Invoice Ninja; {then}.')
     if label == 'Partial':
         # A payment is already on it. Another from here would pay the whole
         # total again on top.
         return (f'Invoice Ninja shows invoice #{ref} partly paid. MB will not add a second payment. '
-                'Settle the rest in Invoice Ninja; then Pay here records it Paid and sends nothing more.')
+                f'Settle the rest in Invoice Ninja; {then}.')
     if label not in _PAYABLE_LABELS:
         return (f'Invoice Ninja shows invoice #{ref} as {label}, so MB cannot tell whether anything is owed '
                 'on it. Nothing was sent. Check the invoice in Invoice Ninja.')
@@ -1372,6 +1379,7 @@ def push_sale(sale, draft=False, resend=False, user=None):
         in_client_id = find_or_create_walkin_client()
 
     resume = not draft and not resend and bool(sale.invoice_ninja_id) and sale.in_payment_pending
+    recovered = False
     if not resume:
         if draft:
             host_fields = {'in_status': 'Draft', 'in_status_checked_at': '__now__', 'in_payment_pending': False}
@@ -1381,7 +1389,7 @@ def push_sale(sale, draft=False, resend=False, user=None):
             # however the invoice is found (answer, recovery, a person's
             # check), the payment is still owed.
             host_fields = {'in_status': '', 'in_payment_pending': True}
-        _create_invoice(sale, {
+        _, recovered = _create_invoice(sale, {
             'client_id': in_client_id,
             'po_number': sale.sale_number,  # SALE# for bank→IN→MB traceability
             'line_items': line_items,
@@ -1391,6 +1399,31 @@ def push_sale(sale, draft=False, resend=False, user=None):
     if draft:
         # No payment posted — the invoice stays an unpaid Draft in IN.
         return sale.invoice_ninja_ref or sale.invoice_ninja_id
+
+    if resume or recovered:
+        # The invoice already existed (a payment being finished, or an invoice
+        # found after its answer was lost): read it first, as the Register does
+        # for a work order. Somebody else may have paid on it, or MB's own
+        # payment may be there (review R3-1). An unreadable invoice sends nothing.
+        ref = sale.invoice_ninja_ref or invoice_id
+        try:
+            label = check_sale_status(sale)
+        except InvoiceNinjaRefused:
+            raise
+        except InvoiceNinjaError as e:
+            raise InvoiceNinjaError(
+                f'MB could not read invoice #{ref} before finishing the payment, so nothing was sent: {e}')
+        # The read may have held MB's unanswered payment: a person checks first.
+        require_no_hold(sale, finishing=_req_model().KIND_PAYMENT)
+        if label == 'Paid':
+            if _own_done_payment(sale, invoice_id) is not None:
+                return ref
+            raise InvoiceNinjaAlreadyPaid(
+                f'Invoice #{ref}: Invoice Ninja already shows this invoice as Paid, and not by a payment '
+                'MB knows is its own. MB did not post a payment there. Check Invoice Ninja for how it was paid.')
+        refusal = payment_refusal(sale, invoice_id, label, then='then use "Check IN"')
+        if refusal:
+            raise InvoiceNinjaRefused(refusal)
 
     # Post the payment → IN marks the invoice Paid (not Draft).
     amount = sale.amount if sale.amount is not None else sale.line_items_total
@@ -1403,6 +1436,9 @@ def push_sale(sale, draft=False, resend=False, user=None):
     except InvoiceNinjaAlreadyPaid as e:
         _mark_sale_paid(sale)
         raise InvoiceNinjaAlreadyPaid(f'Invoice #{sale.invoice_ninja_ref or invoice_id}: {e}')
+    except InvoiceNinjaRefused as e:
+        # Held, or already accepted: nothing was sent, and retrying would not send.
+        raise InvoiceNinjaRefused(f'Invoice #{sale.invoice_ninja_ref or invoice_id}: {e}')
     except InvoiceNinjaError as e:
         raise type(e)(
             f'Invoice #{sale.invoice_ninja_ref or invoice_id} is in Invoice Ninja, but '
@@ -1468,8 +1504,9 @@ def check_sale_status(sale):
     sale.in_status = label
     sale.in_status_checked_at = timezone.now()
     fields = ['in_status', 'in_status_checked_at']
-    if label == 'Paid' and sale.in_payment_pending:
-        # Paid settles a pending payment either way: nothing is left to post.
+    if sale.in_payment_pending and (label == 'Paid' or _own_done_payment(sale, in_id) is not None):
+        # Paid settles a pending payment either way, and MB's own payment
+        # accepted there (its local write lost, say) leaves nothing to post.
         sale.in_payment_pending = False
         fields.append('in_payment_pending')
     sale.save(update_fields=fields)

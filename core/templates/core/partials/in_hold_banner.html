@@ -13,6 +13,8 @@ or Client) and `in_host` ('wo', 'sale' or 'client').
         <div class="fw-medium mb-1">{% if req.kind == 'charge' %}Card charge not confirmed{% elif req.kind == 'payment' %}Payment not confirmed{% elif req.kind == 'client' %}Client may already exist in Invoice Ninja{% else %}Invoice needs checking{% endif %}</div>
         <div class="mb-2">{{ req.reason }}</div>
         {% if req.kind == 'payment' %}
+        {# What MB sent, from the request itself, to compare with the payment in Invoice Ninja. #}
+        <div class="mb-2">MB's payment: ${{ req.payload.amount|floatformat:2 }}, {{ req.payload.method_label|default:"unspecified" }}, {% if req.payload.reference %}ref {{ req.payload.reference }}{% else %}no reference{% endif %}, dated {{ req.payload.payment.date|default:"unknown" }}, to {% if req.base_invoice_id and req.base_invoice_id == obj.invoice_ninja_id %}invoice #{{ obj.invoice_ninja_ref|default:obj.invoice_ninja_id }}{% else %}an earlier invoice (Invoice Ninja id {{ req.base_invoice_id|default:"unknown" }}){% endif %}, sent {{ req.started_at|date:"M j, g:i A" }}.</div>
         <div class="d-flex flex-wrap gap-2">
         <form method="post" action="{% url 'core:in_hold' in_host obj.pk 'found' %}">{% csrf_token %}
             <input type="hidden" name="request" value="{{ req.pk }}">
