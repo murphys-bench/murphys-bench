@@ -113,8 +113,14 @@
             display: inline-block;
         }
 
+        /* Screen-only messages from the step that led here */
+        .screen-messages { max-width: 780px; margin: 0 auto 16px; }
+        .screen-message { padding: 10px 14px; border-radius: 4px; margin-bottom: 8px; border: 1px solid #a7f3d0; background: #ecfdf3; color: #064e3b; }
+        .screen-message-warning, .screen-message-error { border-color: #fcd34d; background: #fffbeb; color: #78350f; }
+
         /* Print styles */
         @media print {
+            .screen-messages { display: none; }
             body { background: #fff; padding: 0; font-size: 12px; }
             .page { box-shadow: none; border-radius: 0; max-width: 100%; }
             .print-controls { display: none; }
@@ -126,6 +132,13 @@
     </style>
 </head>
 <body>
+
+{% if messages %}
+<!-- Screen-only: what the Register just did. Without this the message waits for the next page. -->
+<div class="screen-messages">
+    {% for message in messages %}<div class="screen-message screen-message-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>{% endfor %}
+</div>
+{% endif %}
 
 <!-- Screen-only controls -->
 <div class="print-controls">

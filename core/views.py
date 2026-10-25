@@ -6900,6 +6900,7 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
         })
 
     def post(self, request, pk):
+        from decimal import Decimal
         from . import invoice_ninja
         wo = get_object_or_404(WorkOrder.objects.select_related('client', 'invoice'), pk=pk)
         if wo.status not in POS_SETTLE_STATUSES:
@@ -6950,7 +6951,9 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
             messages.success(request, f'{wo.work_order_number} settled as no charge.')
             return redirect('core:pos_wo_receipt', pk=pk)
 
-        amount = wo.line_items_total  # server-computed — never trust the request
+        # Server-computed, never from the request; to the cent, as the charge
+        # views do (line totals carry four decimal places).
+        amount = wo.line_items_total.quantize(Decimal('0.01'))
         if amount <= 0:
             messages.error(request, 'This work order has no priced line items — nothing to settle.')
             return redirect('core:pos_wo_settle', pk=pk)

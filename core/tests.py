@@ -19856,6 +19856,94 @@ def test_a_recovered_invoice_that_does_not_name_its_client_is_held(client, admin
     assert not [c for c in fake.calls if c[:2] == ('POST', '/invoices/bulk')]
 
 
+# ── Register display, found by walking the Register on mb-test (Oct 24 2026) ──
+
+def _alerts_with_stacked_content():
+    """Every template alert box with two or more stacked parts (a title and
+    text, a message and a form) that is still laid out as Tabler's default
+    flex row, which squeezes the parts side by side."""
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    opener = re.compile(r'<div class="(alert[^"]*)"[^>]*>')
+    block = re.compile(r'<(/?)(div|form|p|ul|ol|table|pre)\b[^>]*?>')
+    found = []
+    for path in sorted(list(root.glob('core/templates/**/*.html')) + list(root.glob('templates/**/*.html'))):
+        text = path.read_text()
+        for m in opener.finditer(text):
+            if 'd-block' in m.group(1).split() or 'flex-column' in m.group(1).split():
+                continue
+            level = children = 0
+            for t in block.finditer(text, m.end()):
+                if t.group(1):
+                    if level == 0:
+                        break
+                    level -= 1
+                else:
+                    if level == 0:
+                        children += 1
+                    level += 1
+            if children >= 2:
+                found.append(f'{path.relative_to(root)}:{text[:m.start()].count(chr(10)) + 1}')
+    return found
+
+
+def test_no_alert_box_squeezes_stacked_content_side_by_side():
+    assert _alerts_with_stacked_content() == []
+
+
+@pytest.mark.django_db
+def test_register_hold_banner_stacks_and_says_mb_will_not_resend(client, admin_user, client_obj):
+    """The lost-send banner stacks its text over its button, and says what MB
+    does now (decision C): it never sends again on its own."""
+    wo = _priced_wo(client_obj)
+    _in_request(wo, 'invoice', 'unknown')
+    client.force_login(admin_user)
+    page = client.get(reverse('core:pos_wo_settle', args=[wo.pk])).content.decode()
+    assert 'class="alert alert-warning d-block"' in page
+    assert 'MB will not send it again on its own' in page
+    assert 'before sending again' not in page
+
+
+@pytest.mark.django_db
+def test_register_settled_message_shows_cents_and_appears_on_the_receipt(client, admin_user, client_obj):
+    """Settling lands on the receipt. Its message shows there (screen only),
+    in dollars and cents, and does not wait for the next page."""
+    from decimal import Decimal
+    wo = _priced_wo(client_obj, '2.00')
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'pay', 'payment_method': 'cash'}, follow=True)
+    page = resp.content.decode()
+    assert resp.redirect_chain[-1][0] == reverse('core:pos_wo_receipt', args=[wo.pk])
+    assert 'class="screen-messages"' in page and 'settled — $2.00 paid.' in page
+    assert '2.0000' not in page
+    assert '.screen-messages { display: none; }' in page          # hidden when printed
+    later = client.get(reverse('core:pos_home')).content.decode()
+    assert 'settled — $2.00 paid.' not in later                   # not carried to the next page
+    assert WorkOrder.objects.get(pk=wo.pk).invoice.amount == Decimal('2.00')
+
+
+@pytest.mark.django_db
+def test_sale_receipt_shows_a_waiting_message_on_screen_only(client_obj):
+    """The counter-sale receipt carries the same screen-only message block."""
+    from decimal import Decimal
+    from django.template.loader import render_to_string
+    from core.models import SiteSettings
+    from core.views import _receipt_context
+    sale = Sale.objects.create(client=client_obj, status='completed', amount=Decimal('5.00'), payment_method='cash')
+
+    class Message:
+        tags = 'success'
+
+        def __str__(self):
+            return 'SALE-00001 completed.'
+    ctx = _receipt_context(sale, SiteSettings.get())
+    html = render_to_string('core/sale_receipt_print.html', {**ctx, 'messages': [Message()]})
+    assert 'class="screen-messages"' in html and 'SALE-00001 completed.' in html
+    assert '.screen-messages { display: none; }' in html
+    assert 'class="screen-messages"' not in render_to_string('core/sale_receipt_print.html', {**ctx, 'messages': []})
+
+
 # ── Email logo under Pillow 13 (PR #113 and #114 reviews, Oct 23 2026) ──
 # Pillow 13 stopped writing 32-bit integer ("I" mode) images as PNG. The resize
 # used to fall back to the original file without a word and label it by its

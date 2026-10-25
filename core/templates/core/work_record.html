@@ -119,7 +119,7 @@ status control sits with the reply.
 <div class="alert alert-success">{% ticon 'check' 'icon-sm' %} <strong>Work is complete.</strong> Contact the client and close this ticket when done.</div>
 {% endif %}
 {% if ticket.needs_response %}
-<div class="alert alert-warning">
+<div class="alert alert-warning d-block">
     <div class="d-flex align-items-center gap-2">
         <div class="flex-fill">
             {% if ticket.status in ticket.CLOSED_AT_STATUSES %}<strong>Client replied after this ticket was closed.</strong> Reopen to respond, or dismiss with a note.{% else %}<strong>Client replied, response needed.</strong> Reply below to clear this, or dismiss with a note.{% endif %}
