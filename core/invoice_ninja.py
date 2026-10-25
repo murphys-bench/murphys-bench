@@ -558,9 +558,12 @@ def _find_invoice_by_key(key):
 
 
 def _payload_total(payload):
+    """What Invoice Ninja totals these lines to: each line rounded to the cent,
+    then added (models.line_amount, Invoice Ninja's own rule)."""
     from decimal import Decimal
-    return sum((Decimal(str(li.get('cost') or 0)) * Decimal(str(li.get('quantity') or 0))
-                for li in payload.get('line_items') or []), Decimal('0')).quantize(Decimal('0.01'))
+    from .models import line_amount
+    return sum((line_amount(li.get('quantity') or 0, li.get('cost') or 0)
+                for li in payload.get('line_items') or []), Decimal('0.00'))
 
 
 def _current_in_client(host):

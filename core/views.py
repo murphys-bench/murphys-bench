@@ -2642,8 +2642,7 @@ def _sale_checkout_context(sale):
     out-of-band refresh triggered whenever a line item is logged/deleted —
     has_priced_lines and the amount prefill must reflect the CURRENT line
     total, not the total at the time the page first loaded."""
-    from decimal import Decimal
-    prefill_amount = sale.line_items_total.quantize(Decimal('0.01'))
+    prefill_amount = sale.line_items_total  # whole cents: each line is rounded (line_amount)
     return {
         'checkout_form': SaleCheckoutForm(initial={'amount': prefill_amount}),
         'has_priced_lines': sale.line_items_total > 0,
@@ -2913,8 +2912,7 @@ class SaleChargeView(SaleAccessMixin, View):
         # _sale_checkout_context's prefill). sale.amount is a counter-lane-only
         # field (set by SaleCheckoutView) and doesn't apply to recurring sales,
         # so it is deliberately NOT used here. Never trust an amount from the request.
-        from decimal import Decimal
-        return sale.line_items_total.quantize(Decimal('0.01'))
+        return sale.line_items_total  # whole cents: each line is rounded (line_amount)
 
     def get(self, request, pk):
         if not _can_process_payments(request.user):
@@ -7238,8 +7236,7 @@ class POSWorkOrderChargeView(POSAccessMixin, View):
     def _amount(self, wo):
         # Server-side only, from the WO's current priced line items — never
         # trust an amount from the request. Mirrors SaleChargeView._amount.
-        from decimal import Decimal
-        return wo.line_items_total.quantize(Decimal('0.01'))
+        return wo.line_items_total  # whole cents: each line is rounded (line_amount)
 
     def _guard(self, request, wo):
         """Shared GET/POST preconditions. Returns a redirect response to bail,

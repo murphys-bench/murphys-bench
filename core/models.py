@@ -284,7 +284,7 @@ class Client(models.Model):
         draft will total. Unpriced lines ignored (same vocabulary as the other
         LineItem hosts' line_items_total)."""
         from decimal import Decimal
-        total = Decimal('0')
+        total = Decimal('0.00')
         for li in self.line_items.all():
             lt = li.line_total
             if lt is not None:
@@ -1202,7 +1202,7 @@ class WorkOrder(models.Model):
         unit_price set) are ignored. MB captures/totals prices only — Invoice
         Ninja remains the billing authority."""
         from decimal import Decimal
-        total = Decimal('0')
+        total = Decimal('0.00')
         for li in self.line_items.all():
             lt = li.line_total
             if lt is not None:
@@ -1479,7 +1479,7 @@ class Estimate(models.Model):
         """Sum of priced line items. Unpriced lines are ignored — mirrors
         WorkOrder.line_items_total so the same vocabulary applies pre-WO."""
         from decimal import Decimal
-        total = Decimal('0')
+        total = Decimal('0.00')
         for li in self.line_items.all():
             lt = li.line_total
             if lt is not None:
@@ -1532,7 +1532,7 @@ class EstimateOption(models.Model):
     @property
     def total(self):
         from decimal import Decimal
-        total = Decimal('0')
+        total = Decimal('0.00')
         for li in self.line_items.all():
             lt = li.line_total
             if lt is not None:
@@ -1662,7 +1662,7 @@ class Sale(models.Model):
         """Sum of priced line items. Unpriced lines are ignored — same vocabulary
         as WorkOrder.line_items_total / Estimate.line_items_total."""
         from decimal import Decimal
-        total = Decimal('0')
+        total = Decimal('0.00')
         for li in self.line_items.all():
             lt = li.line_total
             if lt is not None:
@@ -1758,7 +1758,7 @@ class Contract(models.Model):
     def line_items_total(self):
         """Sum of priced recurring lines — same vocabulary as the other LineItem hosts."""
         from decimal import Decimal
-        total = Decimal('0')
+        total = Decimal('0.00')
         for li in self.line_items.all():
             lt = li.line_total
             if lt is not None:
@@ -2371,6 +2371,16 @@ class CatalogItem(models.Model):
         return self.print_description.strip() if self.print_description.strip() else self.name
 
 
+def line_amount(quantity, unit_price):
+    """The total of one priced line: quantity x unit price, rounded to the cent
+    with halves up. This is Invoice Ninja's own rule (it rounds each line, then
+    adds them; checked against Invoice Ninja 5.13.43 on Oct 24 2026), so every
+    MB total built from lines matches the invoice Invoice Ninja makes from them.
+    The one place line money is rounded: use it, never a second rule."""
+    from decimal import Decimal, ROUND_HALF_UP
+    return (Decimal(str(quantity)) * Decimal(str(unit_price))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
 class LineItem(models.Model):
     """A priced line on a work order (and, in a future phase, a quote).
 
@@ -2419,10 +2429,11 @@ class LineItem(models.Model):
 
     @property
     def line_total(self):
-        """quantity × unit_price, or None when the line is unpriced."""
+        """quantity × unit_price rounded to the cent (line_amount), or None when
+        the line is unpriced."""
         if self.unit_price is None:
             return None
-        return self.quantity * self.unit_price
+        return line_amount(self.quantity, self.unit_price)
 
     def print_description(self):
         """Client-facing description for the repair report: explicit notes win,

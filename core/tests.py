@@ -18077,7 +18077,9 @@ class _FakeIN:
             if self.refuse_creates:
                 raise self.inj.InvoiceNinjaError(self.refuse_creates)
             n = len(self.invoices) + 1
-            amount = sum(li['cost'] * li['quantity'] for li in json.get('line_items') or [])
+            # Real Invoice Ninja rounds each line to the cent (halves up), then adds.
+            from core.models import line_amount
+            amount = float(sum(line_amount(li['quantity'], li['cost']) for li in json.get('line_items') or []))
             inv = {'id': f'inv{n}', 'number': f'000{n}', 'amount': amount, **json}
             self.invoices.append(inv)
             if self.lose_creates:
@@ -19958,10 +19960,11 @@ def _fractional_wo(client_obj, quantity, unit_price):
 
 
 @pytest.mark.django_db
-def test_register_pay_sends_the_exact_total_and_shows_it_as_the_button_does(client, admin_user, client_obj, monkeypatch):
-    """Review P117-1: 0.50 x $4.69 = $2.345. The payment sent to Invoice Ninja
-    is that exact total, as before; only the message is rounded, the same way
-    the Register's button shows it ($2.35)."""
+def test_register_pay_sends_the_line_rounded_total_and_every_place_agrees(client, admin_user, client_obj, monkeypatch):
+    """0.50 x $4.69: the line is $2.35 (Invoice Ninja's rule). The button, the
+    payment and allocation sent, MB's stored amount, the message and the
+    receipt all say $2.35. (Before the rounding fix the payment was 2.345, MB
+    stored 2.34 and the receipt read Total $2.35 / Amount paid $2.34.)"""
     from core import invoice_ninja
     _enable_in()
     _linked_client(client_obj)
@@ -19973,8 +19976,13 @@ def test_register_pay_sends_the_exact_total_and_shows_it_as_the_button_does(clie
     assert 'Mark paid, $2.35' in settle
     resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'pay', 'payment_method': 'cash'}, follow=True)
     sent = fake.payments()[0][3]
-    assert sent['amount'] == 2.345 and sent['invoices'][0]['amount'] == 2.345
-    assert 'settled — $2.35 paid' in resp.content.decode()
+    assert sent['amount'] == 2.35 and sent['invoices'][0]['amount'] == 2.35
+    assert fake.invoices[0]['amount'] == 2.35
+    page = resp.content.decode()
+    assert 'settled — $2.35 paid' in page
+    from decimal import Decimal
+    assert WorkOrder.objects.get(pk=wo.pk).invoice.amount == Decimal('2.35')
+    assert page.count('$2.35') >= 3 and '$2.34' not in page  # message, total, amount paid
 
 
 @pytest.mark.django_db
@@ -20217,3 +20225,86 @@ def test_email_with_an_unidentifiable_logo_shows_the_company_name(tmp_path):
     site.email_logo.save('logo.tiff', SimpleUploadedFile('logo.tiff', b'II*\x00 broken tiff'))
     html, data, _ = _build_html_email('Hello', '', 'Subject', None, site)
     assert data is None and 'cid:logo' not in html and 'Acme Repair' in html
+
+
+# --- Line totals round to the cent, Invoice Ninja's rule (Oct 24 2026) --------
+# Checked against Invoice Ninja 5.13.43: it rounds each line to the cent with
+# halves up, then adds the lines. MB added unrounded lines and rounded totals
+# in several different ways, so one job showed $2.35 and $2.34 in different
+# places and Invoice Ninja kept a half-cent balance.
+
+@pytest.mark.parametrize('quantity,price,expected', [
+    ('0.50', '4.69', '2.35'),   # a half cent rounds up
+    ('0.50', '4.67', '2.34'),   # under a half cent rounds down
+    ('0.50', '0.01', '0.01'),
+    ('1.50', '0.03', '0.05'),
+    ('1', '95', '95.00'),
+    ('0.25', '0.00', '0.00'),
+])
+def test_line_amount_rounds_to_the_cent_halves_up_like_invoice_ninja(quantity, price, expected):
+    from decimal import Decimal
+    from core.models import line_amount
+    assert str(line_amount(Decimal(quantity), Decimal(price))) == expected
+
+
+@pytest.mark.django_db
+def test_every_line_host_totals_its_rounded_lines(client_obj):
+    """Two lines of 0.50 x $4.69 total $4.70 (Invoice Ninja's figure), not the
+    unrounded $4.69, on every kind of record that carries lines."""
+    from decimal import Decimal
+    from core.models import Contract, Estimate, LineItem, Sale
+    est = Estimate.objects.create(client=client_obj)
+    hosts = [
+        WorkOrder.objects.create(client=client_obj, reported_problem='x'),
+        Sale.objects.create(client=client_obj),
+        est,
+        est.options.create(label='A'),
+        Contract.objects.create(client=client_obj, title='MSP', status='active'),
+        client_obj,
+    ]
+    for host in hosts:
+        for _ in range(2):
+            LineItem.objects.create(content_object=host, kind='labor', description='Half hour',
+                                    quantity=Decimal('0.50'), unit_price=Decimal('4.69'))
+        total = {'Client': 'recurring_total', 'EstimateOption': 'total'}.get(type(host).__name__, 'line_items_total')
+        value = getattr(host, total)
+        assert value == Decimal('4.70') and str(value) == '4.70', (type(host).__name__, value)
+
+
+@pytest.mark.django_db
+def test_register_charge_page_shows_the_same_amount_as_the_settle_button(client, admin_user, client_obj):
+    """The charge page said $2.34 for a job whose settle button said $2.35."""
+    _linked_client(client_obj)
+    wo = _fractional_wo(client_obj, '0.50', '4.69')
+    client.force_login(admin_user)
+    settle = client.get(reverse('core:pos_wo_settle', args=[wo.pk])).content.decode()
+    charge = client.get(reverse('core:pos_wo_charge', args=[wo.pk])).content.decode()
+    assert 'Mark paid, $2.35' in settle
+    assert 'Charge $2.35' in charge and '$2.34' not in charge
+
+
+@pytest.mark.django_db
+def test_sale_checkout_prefills_the_line_rounded_total(client, admin_user, client_obj):
+    from decimal import Decimal
+    sale = Sale.objects.create(client=client_obj)
+    sale.line_items.create(kind='labor', description='Half hour', quantity=Decimal('0.50'), unit_price=Decimal('4.69'))
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:sale_detail', args=[sale.pk]))
+    assert resp.context['checkout_form'].initial['amount'] == Decimal('2.35')
+
+
+@pytest.mark.django_db
+def test_recovered_invoice_check_uses_invoice_ninjas_rounding(client_obj):
+    """An invoice found after a lost answer is checked against what MB sent.
+    MB rounded half-to-even (0.50 x $4.69 -> $2.34) while Invoice Ninja made it
+    $2.35, so a correct invoice was held. It now matches; a real difference is
+    still held."""
+    from core import invoice_ninja
+    _linked_client(client_obj)
+    wo = _fractional_wo(client_obj, '0.50', '4.69')
+    payload = {'invoice': {'client_id': 'cl1', 'line_items': invoice_ninja._line_items_payload(wo)}}
+    req = _in_request(wo, 'invoice', 'unknown', payload=payload)
+    assert invoice_ninja._recovered_problem(req, wo, {'number': '0001', 'client_id': 'cl1', 'amount': 2.35}) == ''
+    held = invoice_ninja._recovered_problem(req, wo, {'number': '0001', 'client_id': 'cl1', 'amount': 2.36})
+    assert 'it is for $2.36; MB sent $2.35' in held
+
