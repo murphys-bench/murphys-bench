@@ -12,11 +12,26 @@ or Client) and `in_host` ('wo', 'sale' or 'client').
     {% if req.state == 'held' %}
         <div class="fw-medium mb-1">{% if req.kind == 'charge' %}Card charge not confirmed{% elif req.kind == 'payment' %}Payment not confirmed{% elif req.kind == 'client' %}Client may already exist in Invoice Ninja{% else %}Invoice needs checking{% endif %}</div>
         <div class="mb-2">{{ req.reason }}</div>
+        {% if req.kind == 'payment' %}
+        <div class="d-flex flex-wrap gap-2">
+        <form method="post" action="{% url 'core:in_hold' in_host obj.pk 'found' %}">{% csrf_token %}
+            <input type="hidden" name="request" value="{{ req.pk }}">
+            <input type="hidden" name="generation" value="{{ req.generation }}">
+            <button type="submit" class="btn btn-sm">I checked Invoice Ninja: the payment is there</button>
+        </form>
         <form method="post" action="{% url 'core:in_hold' in_host obj.pk 'resolve' %}">{% csrf_token %}
             <input type="hidden" name="request" value="{{ req.pk }}">
             <input type="hidden" name="generation" value="{{ req.generation }}">
-            <button type="submit" class="btn btn-sm">{% if req.kind == 'charge' %}I checked Invoice Ninja: the charge did not go through{% elif req.kind == 'payment' %}I checked Invoice Ninja: the payment is not there{% elif req.kind == 'invoice' %}I checked: Invoice Ninja and MB match{% else %}I checked Invoice Ninja: clear this hold{% endif %}</button>
+            <button type="submit" class="btn btn-sm">I checked Invoice Ninja: the payment is not there</button>
         </form>
+        </div>
+        {% else %}
+        <form method="post" action="{% url 'core:in_hold' in_host obj.pk 'resolve' %}">{% csrf_token %}
+            <input type="hidden" name="request" value="{{ req.pk }}">
+            <input type="hidden" name="generation" value="{{ req.generation }}">
+            <button type="submit" class="btn btn-sm">{% if req.kind == 'charge' %}I checked Invoice Ninja: the charge did not go through{% elif req.kind == 'invoice' %}I checked: Invoice Ninja and MB match{% else %}I checked Invoice Ninja: clear this hold{% endif %}</button>
+        </form>
+        {% endif %}
     {% elif req.kind == 'invoice' and req.looks_lost %}
         <div class="mb-2">A send to Invoice Ninja on {{ req.started_at|date:"M j, g:i A" }} did not get an answer. MB will not send it again on its own: each time it is sent, MB looks for that invoice and links it if Invoice Ninja has it. If Invoice Ninja does not have it, clear it here so a new send can go.</div>
         <form method="post" action="{% url 'core:in_hold' in_host obj.pk 'clear-send' %}">{% csrf_token %}
@@ -25,7 +40,7 @@ or Client) and `in_host` ('wo', 'sale' or 'client').
             <button type="submit" class="btn btn-sm">I checked Invoice Ninja: the invoice is not there</button>
         </form>
     {% elif req.kind == 'payment' and req.looks_lost %}
-        <div class="mb-2">A payment of ${{ req.payload.amount|floatformat:2 }} ({{ req.payload.method_label|default:"unspecified" }}{% if req.payload.reference %}, ref {{ req.payload.reference }}{% endif %}) sent on {{ req.started_at|date:"M j, g:i A" }} got no answer from Invoice Ninja. Paying again finishes that same payment; Invoice Ninja refuses it twice. If Invoice Ninja does not have it, clear it here.</div>
+        <div class="mb-2">A payment of ${{ req.payload.amount|floatformat:2 }} ({{ req.payload.method_label|default:"unspecified" }}{% if req.payload.reference %}, ref {{ req.payload.reference }}{% endif %}) sent on {{ req.started_at|date:"M j, g:i A" }} got no answer from Invoice Ninja. Pay again: if Invoice Ninja still shows the invoice unpaid, MB sends that same payment, which Invoice Ninja refuses twice; if it shows a payment already there, MB holds it for you to check. If Invoice Ninja does not have it, clear it here.</div>
         <form method="post" action="{% url 'core:in_hold' in_host obj.pk 'resolve' %}">{% csrf_token %}
             <input type="hidden" name="request" value="{{ req.pk }}">
             <input type="hidden" name="generation" value="{{ req.generation }}">

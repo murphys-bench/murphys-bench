@@ -3273,7 +3273,9 @@ class InvoiceNinjaHoldView(LoginRequiredMixin, View):
     """A person has checked Invoice Ninja and tells MB what they found:
     `resolve` clears one held request (an unconfirmed charge or payment, a
     total that does not match, a client IN may have created) or an unanswered
-    payment that is not there; `clear-send` settles a send whose answer was
+    payment that is not there; `found` says a held payment of MB's IS there,
+    so it is recorded as done with its own details and nothing is sent;
+    `clear-send` settles a send whose answer was
     lost (MB looks once more and links the invoice if it is there). Each is
     recorded on that request: who, when and what they said. Clearing a charge
     or payment needs the same permission as charging."""
@@ -3283,7 +3285,7 @@ class InvoiceNinjaHoldView(LoginRequiredMixin, View):
     def post(self, request, host, pk, action):
         from . import invoice_ninja
         model = self.HOSTS.get(host)
-        if model is None or action not in ('resolve', 'clear-send'):
+        if model is None or action not in ('resolve', 'found', 'clear-send'):
             raise Http404
         obj = get_object_or_404(model, pk=pk)
         if host in ('wo', 'sale') and not _can_view_sales(request.user):
@@ -3304,6 +3306,19 @@ class InvoiceNinjaHoldView(LoginRequiredMixin, View):
                 messages.success(request, 'Cleared. MB recorded who cleared it and when.')
             else:
                 messages.info(request, 'That changed since the page was shown, so nothing was cleared. '
+                                       'Reload the page and check again.')
+        elif action == 'found':
+            req = get_object_or_404(invoice_ninja.requests_for(obj), pk=request_id)
+            if not _can_process_payments(request.user):
+                raise PermissionDenied
+            if invoice_ninja.found_payment(req, request.user, generation=generation):
+                then = ('Pay here records it Paid once Invoice Ninja shows it Paid; nothing more is sent.'
+                        if host == 'wo' else 'Nothing more is sent.')
+                messages.success(
+                    request, f'Recorded: MB\'s payment of ${invoice_ninja.money(req.payload.get("amount"))} '
+                             f'is the one in Invoice Ninja. MB recorded who said so and when. {then}')
+            else:
+                messages.info(request, 'That changed since the page was shown, so nothing was recorded. '
                                        'Reload the page and check again.')
         elif host != 'client':
             try:
@@ -7058,16 +7073,15 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
             # refuse a duplicate payment, self-healing MB's record. (Mirrors the
             # Slice 5d fresh-read-back guard; an unreachable IN aborts, not posts.)
             if not newly_pushed:
-                current = invoice_ninja.check_invoice_status(wo)
-                if current.strip().lower() == 'paid':
+                current = invoice_ninja.check_invoice_status(wo).strip()
+                if current.lower() == 'paid':
                     return self._already_paid(request, wo)
-                if current.strip().lower() == 'partial':
-                    # A payment is already on it. Another from here would pay the
-                    # whole total again on top.
-                    messages.error(
-                        request,
-                        f'Invoice Ninja shows invoice #{wo.invoice_ninja_ref or wo.invoice_ninja_id} partly paid. '
-                        'Settle the rest in Invoice Ninja, then use "Check IN"; MB will not add a second payment.')
+                # The read may have held MB's own unanswered payment (a payment
+                # is there, maybe not MB's): a person checks before anything.
+                invoice_ninja.require_no_hold(wo, finishing='payment')
+                refusal = invoice_ninja.payment_refusal(wo, wo.invoice_ninja_id, current)
+                if refusal:
+                    messages.error(request, refusal)
                     return redirect('core:pos_wo_settle', pk=pk)
                 in_client_id = (
                     invoice_ninja.find_or_create_client(wo.client, user=request.user) if wo.client_id
@@ -7099,13 +7113,15 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
                 messages.warning(
                     request,
                     f'Invoice Ninja recorded the payment of ${invoice_ninja.money(sent["amount"])}, but MB could not '
-                    f'read invoice #{ref} back to confirm it is paid: {e} Use "Check IN"; '
-                    f'{wo.work_order_number} stays unpaid here until it shows Paid.')
+                    f'read invoice #{ref} back to confirm it is paid: {e} {wo.work_order_number} stays unpaid '
+                    'here until Invoice Ninja shows it Paid; then Pay here records it and sends nothing more.')
                 return redirect('core:pos_wo_settle', pk=pk)
             if label != 'Paid':
                 Invoice.objects.filter(pk=invoice.pk).update(
                     in_status=label, invoice_ninja_id=wo.invoice_ninja_id, in_status_checked_at=timezone.now())
-                messages.warning(request, invoice_ninja.owed_message(sent['amount'], ref, label, balance))
+                messages.warning(request, invoice_ninja.owed_message(
+                    sent['amount'], ref, label, balance,
+                    then='then Pay here records it Paid and sends nothing more'))
                 return redirect('core:pos_wo_settle', pk=pk)
             # A hold can land while the payment is at Invoice Ninja. The payment
             # stays recorded on its request; MB's own record is marked paid only
