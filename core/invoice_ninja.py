@@ -255,10 +255,14 @@ def requests_for(host):
 def money(value):
     """A dollar amount for a person to read: two places, rounded the way the
     Register's own buttons show it (Django's floatformat). Display only; never
-    use it for an amount MB sends or stores."""
-    from decimal import Decimal
+    use it for an amount MB sends or stores. A value that is not a number is
+    shown as it is: a message must never fail because of what it displays."""
+    from decimal import Decimal, InvalidOperation
     from django.template.defaultfilters import floatformat
-    return floatformat(Decimal(str(value)), 2)
+    try:
+        return floatformat(Decimal(str(value)), 2)
+    except (InvalidOperation, ValueError):
+        return str(value)
 
 
 def _when(dt):

@@ -20018,6 +20018,17 @@ def test_money_shows_two_places_rounded_like_the_register_button():
 
 
 @pytest.mark.django_db
+def test_money_never_fails_a_message_over_a_missing_amount(client_obj):
+    """A display helper must not raise: a payment record without an amount
+    still gets its busy message, shown as before (the raw value)."""
+    from core import invoice_ninja
+    assert invoice_ninja.money(None) == 'None' and invoice_ninja.money('abc') == 'abc'
+    wo = _fractional_wo(client_obj, '1', '5.00')
+    req = _in_request(wo, 'payment', 'unknown', payload={'method_label': 'Cash'})
+    assert 'A payment of $None (Cash)' in invoice_ninja._busy_message(req)
+
+
+@pytest.mark.django_db
 def test_sale_receipt_shows_a_waiting_message_on_screen_only(client_obj):
     """The counter-sale receipt carries the same screen-only message block."""
     from decimal import Decimal
