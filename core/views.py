@@ -2642,8 +2642,7 @@ def _sale_checkout_context(sale):
     out-of-band refresh triggered whenever a line item is logged/deleted —
     has_priced_lines and the amount prefill must reflect the CURRENT line
     total, not the total at the time the page first loaded."""
-    from decimal import Decimal
-    prefill_amount = sale.line_items_total.quantize(Decimal('0.01'))
+    prefill_amount = sale.line_items_total  # whole cents: each line is rounded (line_amount)
     return {
         'checkout_form': SaleCheckoutForm(initial={'amount': prefill_amount}),
         'has_priced_lines': sale.line_items_total > 0,
@@ -2913,8 +2912,7 @@ class SaleChargeView(SaleAccessMixin, View):
         # _sale_checkout_context's prefill). sale.amount is a counter-lane-only
         # field (set by SaleCheckoutView) and doesn't apply to recurring sales,
         # so it is deliberately NOT used here. Never trust an amount from the request.
-        from decimal import Decimal
-        return sale.line_items_total.quantize(Decimal('0.01'))
+        return sale.line_items_total  # whole cents: each line is rounded (line_amount)
 
     def get(self, request, pk):
         if not _can_process_payments(request.user):
@@ -3213,7 +3211,11 @@ class SaleCheckoutView(SaleAccessMixin, View):
             try:
                 ref = invoice_ninja.push_sale(sale, user=request.user)
                 messages.success(request, f'{sale.sale_number} completed and sent to Invoice Ninja as paid — invoice #{ref}.')
+            except invoice_ninja.InvoiceNinjaAlreadyRecorded as e:
+                messages.success(request, f'{sale.sale_number} completed. {e}')
             except invoice_ninja.InvoiceNinjaAlreadyPaid as e:
+                messages.warning(request, f'{sale.sale_number} was completed and the payment recorded here. {e}')
+            except invoice_ninja.InvoiceNinjaPartlyPaid as e:
                 messages.warning(request, f'{sale.sale_number} was completed and the payment recorded here. {e}')
             except invoice_ninja.InvoiceNinjaError as e:
                 messages.warning(
@@ -3262,7 +3264,9 @@ class SaleSendINView(SaleAccessMixin, View):
             resend = bool(sale.invoice_ninja_id) and not sale.in_payment_pending
             ref = invoice_ninja.push_sale(sale, resend=resend, user=request.user)
             messages.success(request, f'Sent to Invoice Ninja as paid — invoice #{ref}.')
-        except invoice_ninja.InvoiceNinjaAlreadyPaid as e:
+        except invoice_ninja.InvoiceNinjaAlreadyRecorded as e:
+            messages.success(request, str(e))
+        except (invoice_ninja.InvoiceNinjaAlreadyPaid, invoice_ninja.InvoiceNinjaPartlyPaid) as e:
             messages.warning(request, str(e))
         except invoice_ninja.InvoiceNinjaError as e:
             messages.error(request, f'Could not send to Invoice Ninja: {e}')
@@ -3273,7 +3277,9 @@ class InvoiceNinjaHoldView(LoginRequiredMixin, View):
     """A person has checked Invoice Ninja and tells MB what they found:
     `resolve` clears one held request (an unconfirmed charge or payment, a
     total that does not match, a client IN may have created) or an unanswered
-    payment that is not there; `clear-send` settles a send whose answer was
+    payment that is not there; `found` says a held payment of MB's IS there,
+    so it is recorded as done with its own details and nothing is sent;
+    `clear-send` settles a send whose answer was
     lost (MB looks once more and links the invoice if it is there). Each is
     recorded on that request: who, when and what they said. Clearing a charge
     or payment needs the same permission as charging."""
@@ -3283,7 +3289,7 @@ class InvoiceNinjaHoldView(LoginRequiredMixin, View):
     def post(self, request, host, pk, action):
         from . import invoice_ninja
         model = self.HOSTS.get(host)
-        if model is None or action not in ('resolve', 'clear-send'):
+        if model is None or action not in ('resolve', 'found', 'clear-send'):
             raise Http404
         obj = get_object_or_404(model, pk=pk)
         if host in ('wo', 'sale') and not _can_view_sales(request.user):
@@ -3304,6 +3310,19 @@ class InvoiceNinjaHoldView(LoginRequiredMixin, View):
                 messages.success(request, 'Cleared. MB recorded who cleared it and when.')
             else:
                 messages.info(request, 'That changed since the page was shown, so nothing was cleared. '
+                                       'Reload the page and check again.')
+        elif action == 'found':
+            req = get_object_or_404(invoice_ninja.requests_for(obj), pk=request_id)
+            if not _can_process_payments(request.user):
+                raise PermissionDenied
+            if invoice_ninja.found_payment(req, request.user, generation=generation):
+                then = ('Pay here records it Paid once Invoice Ninja shows it Paid; nothing more is sent.'
+                        if host == 'wo' else 'Nothing more is sent; use "Check IN" to read the invoice again.')
+                messages.success(
+                    request, f'Recorded: MB\'s payment of ${invoice_ninja.money(req.payload.get("amount"))} '
+                             f'is the one in Invoice Ninja. MB recorded who said so and when. {then}')
+            else:
+                messages.info(request, 'That changed since the page was shown, so nothing was recorded. '
                                        'Reload the page and check again.')
         elif host != 'client':
             try:
@@ -7058,9 +7077,16 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
             # refuse a duplicate payment, self-healing MB's record. (Mirrors the
             # Slice 5d fresh-read-back guard; an unreachable IN aborts, not posts.)
             if not newly_pushed:
-                current = invoice_ninja.check_invoice_status(wo)
-                if current.strip().lower() == 'paid':
+                current = invoice_ninja.check_invoice_status(wo).strip()
+                if current.lower() == 'paid':
                     return self._already_paid(request, wo)
+                # The read may have held MB's own unanswered payment (a payment
+                # is there, maybe not MB's): a person checks before anything.
+                invoice_ninja.require_no_hold(wo, finishing='payment')
+                refusal = invoice_ninja.payment_refusal(wo, wo.invoice_ninja_id, current)
+                if refusal:
+                    messages.error(request, refusal)
+                    return redirect('core:pos_wo_settle', pk=pk)
                 in_client_id = (
                     invoice_ninja.find_or_create_client(wo.client, user=request.user) if wo.client_id
                     else invoice_ninja.find_or_create_walkin_client()
@@ -7081,6 +7107,26 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
             # it: after a lost answer that is the earlier payment, not this form.
             sent = payment.payload
             invoice = wo.invoice
+            ref = wo.invoice_ninja_ref or wo.invoice_ninja_id
+            # Accepted is not paid: MB records Paid only when Invoice Ninja shows
+            # it (a carried-on payment, or lines changed since the invoice was
+            # made, can leave money owed).
+            try:
+                label, balance = invoice_ninja.invoice_state(wo.invoice_ninja_id)
+            except invoice_ninja.InvoiceNinjaError as e:
+                messages.warning(
+                    request,
+                    f'Invoice Ninja recorded the payment of ${invoice_ninja.money(sent["amount"])}, but MB could not '
+                    f'read invoice #{ref} back to confirm it is paid: {e} {wo.work_order_number} stays unpaid '
+                    'here until Invoice Ninja shows it Paid; then Pay here records it and sends nothing more.')
+                return redirect('core:pos_wo_settle', pk=pk)
+            if label != 'Paid':
+                Invoice.objects.filter(pk=invoice.pk).update(
+                    in_status=label, invoice_ninja_id=wo.invoice_ninja_id, in_status_checked_at=timezone.now())
+                messages.warning(request, invoice_ninja.owed_message(
+                    sent['amount'], ref, label, balance,
+                    then='then Pay here records it Paid and sends nothing more'))
+                return redirect('core:pos_wo_settle', pk=pk)
             # A hold can land while the payment is at Invoice Ninja. The payment
             # stays recorded on its request; MB's own record is marked paid only
             # if nothing is held, checked in the same transaction as the write.
@@ -7238,8 +7284,7 @@ class POSWorkOrderChargeView(POSAccessMixin, View):
     def _amount(self, wo):
         # Server-side only, from the WO's current priced line items — never
         # trust an amount from the request. Mirrors SaleChargeView._amount.
-        from decimal import Decimal
-        return wo.line_items_total.quantize(Decimal('0.01'))
+        return wo.line_items_total  # whole cents: each line is rounded (line_amount)
 
     def _guard(self, request, wo):
         """Shared GET/POST preconditions. Returns a redirect response to bail,

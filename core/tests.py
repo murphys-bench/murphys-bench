@@ -6119,7 +6119,7 @@ def test_push_sale_creates_paid_invoice_for_client(client_obj, monkeypatch):
         if path == '/invoices':
             return {'data': {'id': 999, 'number': 'INV-0007'}}
         return {'data': {'id': 1}}
-    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    monkeypatch.setattr(invoice_ninja, '_request', _paid_after_payment(fake_request))
 
     ref = invoice_ninja.push_sale(sale)
     sale.refresh_from_db()
@@ -6167,7 +6167,7 @@ def test_push_sale_walkin_creates_and_caches_client(monkeypatch):
             n = next(invoice_seq)
             return {'data': {'id': n, 'number': f'INV-{n}'}}
         return {'data': {'id': 1}}
-    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    monkeypatch.setattr(invoice_ninja, '_request', _paid_after_payment(fake_request))
 
     invoice_ninja.push_sale(make_sale())
     assert SiteSettings.get().invoice_ninja_walkin_client_id == '500'
@@ -6614,7 +6614,7 @@ def test_push_sale_paid_still_posts_payment(client_obj, monkeypatch):
         if path == '/invoices':
             return {'data': {'id': 5, 'number': 'INV-5'}}
         return {'data': {'id': 1}}
-    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    monkeypatch.setattr(invoice_ninja, '_request', _paid_after_payment(fake_request))
     monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c, **kw: 'inclient-1')
 
     invoice_ninja.push_sale(sale, draft=False)
@@ -7724,7 +7724,7 @@ def test_pos_wo_settle_pushes_and_pays_in_one_invoice(client, admin_user, client
         if path == '/payments':
             return {'data': {'id': 1}}
         raise AssertionError(f'Unexpected call {method} {path}')
-    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    monkeypatch.setattr(invoice_ninja, '_request', _paid_after_payment(fake_request))
     monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c, **kw: 'inclient-1')
 
     client.force_login(admin_user)
@@ -8108,7 +8108,7 @@ def test_pos_wo_settle_reuses_existing_invoice_never_double_pushes(client, admin
         if path == '/payments':
             return {'data': {'id': 1}}
         raise AssertionError(f'Unexpected call {method} {path}')
-    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    monkeypatch.setattr(invoice_ninja, '_request', _paid_after_payment(fake_request))
     monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c, **kw: 'inclient-1')
 
     client.force_login(admin_user)
@@ -8199,7 +8199,7 @@ def test_pos_wo_settle_walkin_routes_to_walkin_client(client, admin_user, monkey
         if path == '/payments':
             return {'data': {'id': 1}}
         raise AssertionError(f'Unexpected call {method} {path}')
-    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    monkeypatch.setattr(invoice_ninja, '_request', _paid_after_payment(fake_request))
     monkeypatch.setattr(invoice_ninja, 'find_or_create_walkin_client', lambda: 'walkin-in-id')
 
     client.force_login(admin_user)
@@ -8231,7 +8231,7 @@ def test_pos_wo_settle_amount_is_server_computed_not_from_post(client, admin_use
             captured['amount'] = kwargs['json']['amount']
             return {'data': {'id': 1}}
         raise AssertionError(f'Unexpected call {method} {path}')
-    monkeypatch.setattr(invoice_ninja, '_request', fake_request)
+    monkeypatch.setattr(invoice_ninja, '_request', _paid_after_payment(fake_request))
     monkeypatch.setattr(invoice_ninja, 'find_or_create_client', lambda c, **kw: 'inclient-1')
 
     client.force_login(admin_user)
@@ -18050,6 +18050,33 @@ def test_in_connect_wait_is_short_and_answer_wait_unchanged():
     assert invoice_ninja.TIMEOUT == (5, 20)
 
 
+def _paid_after_payment(fake_request):
+    """For tests with a hand-written IN mock that pay the whole invoice: once a
+    payment onto an invoice has been posted, the read-back of THAT invoice
+    answers Paid with nothing owed. It checks no amounts, so it is no evidence
+    for read-back balances (the balance-aware _FakeIN is). Everything else,
+    other invoices included, goes to the mock."""
+    paid = set()
+
+    def wrapped(method, path, **kwargs):
+        if method == 'GET' and path.startswith('/invoices/') and path.rsplit('/', 1)[1] in paid:
+            return {'data': {'id': path.rsplit('/', 1)[1], 'status_id': '4', 'balance': 0}}
+        result = fake_request(method, path, **kwargs)
+        if method == 'POST' and path == '/payments':
+            paid.update(i['invoice_id'] for i in (kwargs.get('json') or {}).get('invoices') or [])
+        return result
+    return wrapped
+
+
+def _in_line_cents(quantity, cost):
+    """One invoice line in whole cents as Invoice Ninja computes it (each line
+    rounded, halves up). Integer arithmetic on purpose: it must not share code
+    with MB's line_amount, or a wrong MB rule would agree with itself."""
+    q = int(round(float(quantity) * 100))
+    c = int(round(float(cost) * 100))
+    return (q * c + 50) // 100
+
+
 class _FakeIN:
     """Stands in for invoice_ninja._request. Keeps the invoices and payments IN
     'has', honours payment idempotency keys like IN does, and lets a test lose
@@ -18060,9 +18087,11 @@ class _FakeIN:
         self.invoices = []
         self.calls = []
         self.lose_creates = 0
+        self.miss_finds = 0     # look-ups by MB key that answer "not found"
         self.refuse_creates = None
         self.payment_outcomes = []
-        self.paid = set()
+        self.paid = set()       # invoices IN shows fully paid (by anything)
+        self.received = {}      # payments MB posted, by invoice: Decimal dollars
         self.payment_keys = set()
         self.in_charge = None
 
@@ -18077,7 +18106,9 @@ class _FakeIN:
             if self.refuse_creates:
                 raise self.inj.InvoiceNinjaError(self.refuse_creates)
             n = len(self.invoices) + 1
-            amount = sum(li['cost'] * li['quantity'] for li in json.get('line_items') or [])
+            # Real Invoice Ninja rounds each line to the cent (halves up), then adds.
+            # Computed here in whole cents, independently of MB's own helper.
+            amount = sum(_in_line_cents(li['quantity'], li['cost']) for li in json.get('line_items') or []) / 100
             inv = {'id': f'inv{n}', 'number': f'000{n}', 'amount': amount, **json}
             self.invoices.append(inv)
             if self.lose_creates:
@@ -18085,11 +18116,14 @@ class _FakeIN:
                 raise self.inj.InvoiceNinjaOutcomeUnknown('Invoice Ninja did not answer within 20 seconds.')
             return {'data': inv}
         if method == 'GET' and path == '/invoices':
+            if self.miss_finds:
+                self.miss_finds -= 1
+                return {'data': []}
             key = (params or {}).get(self.inj.MB_KEY_FIELD)
             return {'data': [i for i in self.invoices if i.get(self.inj.MB_KEY_FIELD) == key]}
         if method == 'GET' and path.startswith('/invoices/'):
             iid = path.rsplit('/', 1)[1]
-            return {'data': {'id': iid, 'status_id': '4' if iid in self.paid else '1'}}
+            return {'data': self.state(iid)}
         if method == 'POST' and path == '/payments':
             iid = json['invoices'][0]['invoice_id']
             key = json.get('idempotency_key')
@@ -18104,7 +18138,7 @@ class _FakeIN:
             if isinstance(outcome, Exception):
                 raise outcome
             self.payment_keys.add(key)
-            self.paid.add(iid)
+            self._receive(iid, json['amount'])
             if outcome == 'lost':
                 raise self.inj.InvoiceNinjaOutcomeUnknown('Invoice Ninja did not answer within 20 seconds.')
             return {'data': {'id': 'pay1'}}
@@ -18115,6 +18149,27 @@ class _FakeIN:
         if path == '/clients':
             return {'data': {'id': 'cl1'}} if method == 'POST' else {'data': []}
         raise AssertionError(f'unexpected IN call {method} {path}')
+
+    def _receive(self, iid, amount):
+        """A payment lands. The invoice is paid when payments cover it; an
+        invoice this fake did not create is taken as covered."""
+        from decimal import Decimal
+        self.received[iid] = self.received.get(iid, Decimal('0')) + Decimal(str(amount))
+        inv = next((i for i in self.invoices if i['id'] == iid), None)
+        if inv is None or self.received[iid] >= Decimal(str(inv['amount'])):
+            self.paid.add(iid)
+
+    def state(self, iid):
+        """What GET /invoices/<id> answers: status and balance, like IN."""
+        from decimal import Decimal
+        inv = next((i for i in self.invoices if i['id'] == iid), None)
+        amount = Decimal(str(inv['amount'])) if inv else Decimal('0')
+        got = self.received.get(iid, Decimal('0'))
+        if iid in self.paid:
+            return {'id': iid, 'status_id': '4', 'amount': float(amount), 'balance': 0}
+        if got > 0:
+            return {'id': iid, 'status_id': '3', 'amount': float(amount), 'balance': float(amount - got)}
+        return {'id': iid, 'status_id': '1', 'amount': float(amount), 'balance': float(amount)}
 
     def creates(self):
         return [c for c in self.calls if c[:2] == ('POST', '/invoices')]
@@ -19958,10 +20013,11 @@ def _fractional_wo(client_obj, quantity, unit_price):
 
 
 @pytest.mark.django_db
-def test_register_pay_sends_the_exact_total_and_shows_it_as_the_button_does(client, admin_user, client_obj, monkeypatch):
-    """Review P117-1: 0.50 x $4.69 = $2.345. The payment sent to Invoice Ninja
-    is that exact total, as before; only the message is rounded, the same way
-    the Register's button shows it ($2.35)."""
+def test_register_pay_sends_the_line_rounded_total_and_every_place_agrees(client, admin_user, client_obj, monkeypatch):
+    """0.50 x $4.69: the line is $2.35 (Invoice Ninja's rule). The button, the
+    payment and allocation sent, MB's stored amount, the message and the
+    receipt all say $2.35. (Before the rounding fix the payment was 2.345, MB
+    stored 2.34 and the receipt read Total $2.35 / Amount paid $2.34.)"""
     from core import invoice_ninja
     _enable_in()
     _linked_client(client_obj)
@@ -19973,8 +20029,13 @@ def test_register_pay_sends_the_exact_total_and_shows_it_as_the_button_does(clie
     assert 'Mark paid, $2.35' in settle
     resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'pay', 'payment_method': 'cash'}, follow=True)
     sent = fake.payments()[0][3]
-    assert sent['amount'] == 2.345 and sent['invoices'][0]['amount'] == 2.345
-    assert 'settled — $2.35 paid' in resp.content.decode()
+    assert sent['amount'] == 2.35 and sent['invoices'][0]['amount'] == 2.35
+    assert fake.invoices[0]['amount'] == 2.35
+    page = resp.content.decode()
+    assert 'settled — $2.35 paid' in page
+    from decimal import Decimal
+    assert WorkOrder.objects.get(pk=wo.pk).invoice.amount == Decimal('2.35')
+    assert page.count('$2.35') >= 3 and '$2.34' not in page  # message, total, amount paid
 
 
 @pytest.mark.django_db
@@ -20217,3 +20278,857 @@ def test_email_with_an_unidentifiable_logo_shows_the_company_name(tmp_path):
     site.email_logo.save('logo.tiff', SimpleUploadedFile('logo.tiff', b'II*\x00 broken tiff'))
     html, data, _ = _build_html_email('Hello', '', 'Subject', None, site)
     assert data is None and 'cid:logo' not in html and 'Acme Repair' in html
+
+
+# --- Line totals round to the cent, Invoice Ninja's rule (Oct 24 2026) --------
+# Checked against Invoice Ninja 5.13.43: it rounds each line to the cent with
+# halves up, then adds the lines. MB added unrounded lines and rounded totals
+# in several different ways, so one job showed $2.35 and $2.34 in different
+# places and Invoice Ninja kept a half-cent balance.
+
+@pytest.mark.parametrize('quantity,price,expected', [
+    ('0.50', '4.69', '2.35'),   # a half cent rounds up
+    ('0.50', '4.67', '2.34'),   # 2.335, also exactly a half cent: rounds up
+    ('0.50', '0.01', '0.01'),
+    ('1.50', '0.03', '0.05'),
+    ('1', '95', '95.00'),
+    ('0.25', '0.00', '0.00'),
+])
+def test_line_amount_rounds_to_the_cent_halves_up_like_invoice_ninja(quantity, price, expected):
+    from decimal import Decimal
+    from core.models import line_amount
+    assert str(line_amount(Decimal(quantity), Decimal(price))) == expected
+
+
+@pytest.mark.django_db
+def test_every_line_host_totals_its_rounded_lines(client_obj):
+    """Two lines of 0.50 x $4.69 total $4.70 (Invoice Ninja's figure), not the
+    unrounded $4.69, on every kind of record that carries lines."""
+    from decimal import Decimal
+    from core.models import Contract, Estimate, LineItem, Sale
+    est = Estimate.objects.create(client=client_obj)
+    hosts = [
+        WorkOrder.objects.create(client=client_obj, reported_problem='x'),
+        Sale.objects.create(client=client_obj),
+        est,
+        est.options.create(label='A'),
+        Contract.objects.create(client=client_obj, title='MSP', status='active'),
+        client_obj,
+    ]
+    for host in hosts:
+        for _ in range(2):
+            LineItem.objects.create(content_object=host, kind='labor', description='Half hour',
+                                    quantity=Decimal('0.50'), unit_price=Decimal('4.69'))
+        total = {'Client': 'recurring_total', 'EstimateOption': 'total'}.get(type(host).__name__, 'line_items_total')
+        value = getattr(host, total)
+        assert value == Decimal('4.70') and str(value) == '4.70', (type(host).__name__, value)
+
+
+@pytest.mark.django_db
+def test_register_charge_page_shows_the_same_amount_as_the_settle_button(client, admin_user, client_obj):
+    """The charge page said $2.34 for a job whose settle button said $2.35."""
+    _linked_client(client_obj)
+    wo = _fractional_wo(client_obj, '0.50', '4.69')
+    client.force_login(admin_user)
+    settle = client.get(reverse('core:pos_wo_settle', args=[wo.pk])).content.decode()
+    charge = client.get(reverse('core:pos_wo_charge', args=[wo.pk])).content.decode()
+    assert 'Mark paid, $2.35' in settle
+    assert 'Charge $2.35' in charge and '$2.34' not in charge
+
+
+@pytest.mark.django_db
+def test_sale_checkout_prefills_the_line_rounded_total(client, admin_user, client_obj):
+    from decimal import Decimal
+    sale = Sale.objects.create(client=client_obj)
+    sale.line_items.create(kind='labor', description='Half hour', quantity=Decimal('0.50'), unit_price=Decimal('4.69'))
+    client.force_login(admin_user)
+    resp = client.get(reverse('core:sale_detail', args=[sale.pk]))
+    assert resp.context['checkout_form'].initial['amount'] == Decimal('2.35')
+
+
+@pytest.mark.django_db
+def test_recovered_invoice_check_uses_invoice_ninjas_rounding(client_obj):
+    """An invoice found after a lost answer is checked against what MB sent.
+    MB rounded half-to-even (0.50 x $4.69 -> $2.34) while Invoice Ninja made it
+    $2.35, so a correct invoice was held. It now matches; a real difference is
+    still held."""
+    from core import invoice_ninja
+    _linked_client(client_obj)
+    wo = _fractional_wo(client_obj, '0.50', '4.69')
+    payload = {'invoice': {'client_id': 'cl1', 'line_items': invoice_ninja._line_items_payload(wo)}}
+    req = _in_request(wo, 'invoice', 'unknown', payload=payload)
+    assert invoice_ninja._recovered_problem(req, wo, {'number': '0001', 'client_id': 'cl1', 'amount': 2.35}) == ''
+    held = invoice_ninja._recovered_problem(req, wo, {'number': '0001', 'client_id': 'cl1', 'amount': 2.36})
+    assert 'it is for $2.36; MB sent $2.35' in held
+
+
+# --- Paid only when Invoice Ninja shows it (review P118-1, Oct 24 2026) -------
+# Accepting a payment is not proof the invoice is paid. A counter sale recorded
+# $2.34 before line totals were rounded; if its invoice ($2.35 at Invoice Ninja)
+# was recovered after a lost answer, MB posted $2.34 and called it Paid with a
+# cent owed. Paid now comes from reading the invoice back.
+
+def _fractional_sale(client_obj):
+    from decimal import Decimal
+    sale = Sale.objects.create(client=client_obj)
+    sale.line_items.create(kind='labor', description='Half hour', quantity=Decimal('0.50'), unit_price=Decimal('4.69'))
+    return sale
+
+
+def test_in_stand_in_rounds_lines_on_its_own():
+    """The test stand-in's cents arithmetic is its own, not MB's helper."""
+    assert _in_line_cents(0.50, 4.69) == 235 and _in_line_cents(0.50, 4.67) == 234
+    assert _in_line_cents(0.50, 0.01) == 1 and _in_line_cents(1.50, 0.03) == 5
+
+
+@pytest.mark.django_db
+def test_recovered_legacy_sale_payment_short_of_the_invoice_is_not_called_paid(client, admin_user, client_obj, monkeypatch):
+    """The reviewer's case, step for step: checkout recorded $2.34 (the old
+    prefill); the create's answer was lost and the first look-up missed, so
+    nothing was paid. The later Send finds the $2.35 invoice and posts the
+    recorded $2.34. MB shows Partial and the cent owed, not Paid, and sending
+    again adds no second payment."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    from core.models import InvoiceNinjaRequest
+    _enable_in()
+    _linked_client(client_obj)
+    sale = _fractional_sale(client_obj)
+    fake = _FakeIN(invoice_ninja)
+    fake.lose_creates = fake.miss_finds = 1
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    client.force_login(admin_user)
+    client.post(reverse('core:sale_checkout', args=[sale.pk]), {'payment_method': 'cash', 'amount': '2.34', 'reference': ''})
+    req = InvoiceNinjaRequest.objects.get(sale=sale, kind='invoice')
+    assert req.state == 'unknown' and not fake.payments()
+    resp = client.post(reverse('core:sale_send_in', args=[sale.pk]), follow=True)
+    assert len(fake.creates()) == 1, 'the lost invoice is found, not created twice'
+    assert [p[3]['amount'] for p in fake.payments()] == [2.34], 'the recorded payment is sent as recorded'
+    sale.refresh_from_db()
+    assert sale.amount == Decimal('2.34')
+    assert sale.in_status == 'Partial' and not sale.in_payment_pending
+    assert fake.state(fake.invoices[0]['id'])['balance'] == 0.01
+    page = resp.content.decode()
+    assert 'with $0.01 still owed' in page and 'as paid' not in page
+    client.post(reverse('core:sale_send_in', args=[sale.pk]), follow=True)
+    assert len(fake.payments()) == 1 and len(fake.creates()) == 1
+    assert invoice_ninja.check_sale_status(sale) == 'Partial'
+
+
+@pytest.mark.django_db
+def test_sale_checkout_with_a_reduced_amount_is_partial_not_paid(client, admin_user, client_obj, monkeypatch):
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    sale = _priced_draft_sale(client_obj)          # $30.00
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:sale_checkout', args=[sale.pk]),
+                       {'payment_method': 'cash', 'amount': '20.00', 'reference': ''}, follow=True)
+    sale.refresh_from_db()
+    assert sale.in_status == 'Partial' and sale.status == 'completed'
+    assert 'with $10.00 still owed' in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_sale_checkout_for_the_full_amount_is_paid(client, admin_user, client_obj, monkeypatch):
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    sale = _fractional_sale(client_obj)
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    client.force_login(admin_user)
+    client.post(reverse('core:sale_checkout', args=[sale.pk]), {'payment_method': 'cash', 'amount': '2.35', 'reference': ''})
+    sale.refresh_from_db()
+    assert sale.in_status == 'Paid' and fake.state(fake.invoices[0]['id'])['balance'] == 0
+
+
+@pytest.mark.django_db
+def test_sale_payment_whose_invoice_cannot_be_read_back_is_not_called_paid(client_obj, monkeypatch):
+    from decimal import Decimal
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    sale = _priced_draft_sale(client_obj)
+    sale.payment_method = 'cash'; sale.amount = Decimal('30'); sale.status = 'completed'; sale.save()
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(fake, 'state', lambda iid: (_ for _ in ()).throw(invoice_ninja.InvoiceNinjaError('timed out')))
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    with pytest.raises(invoice_ninja.InvoiceNinjaPartlyPaid, match='could not read the invoice back'):
+        invoice_ninja.push_sale(sale)
+    sale.refresh_from_db()
+    assert sale.in_status != 'Paid' and not sale.in_payment_pending
+    assert len(fake.payments()) == 1
+
+
+@pytest.mark.django_db
+def test_register_pay_short_of_the_invoice_leaves_the_work_order_unpaid(client, admin_user, client_obj, monkeypatch):
+    """A draft went to Invoice Ninja at $2.35, then the line was cut to $1.17.
+    Pay posts $1.17; Invoice Ninja shows $1.18 owed, so MB does not mark it paid."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _fractional_wo(client_obj, '0.50', '4.69')
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    client.force_login(admin_user)
+    client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'draft'})
+    wo.line_items.update(quantity=Decimal('0.25'))
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'pay', 'payment_method': 'cash'}, follow=True)
+    inv = WorkOrder.objects.get(pk=wo.pk).invoice
+    assert fake.payments()[0][3]['amount'] == 1.17
+    assert inv.billing_status == 'invoiced' and inv.in_status == 'Partial'
+    assert 'with $1.18 still owed' in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_register_will_not_add_a_second_payment_to_a_partly_paid_invoice(client, admin_user, client_obj, monkeypatch):
+    from decimal import Decimal
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _fractional_wo(client_obj, '0.50', '4.69')
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    client.force_login(admin_user)
+    client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'draft'})
+    wo.line_items.update(quantity=Decimal('0.25'))
+    client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'pay', 'payment_method': 'cash'})
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'pay', 'payment_method': 'cash'}, follow=True)
+    assert len(fake.payments()) == 1
+    assert 'already has MB&#x27;s payment of $1.17' in resp.content.decode()
+    assert WorkOrder.objects.get(pk=wo.pk).invoice.billing_status == 'invoiced'
+
+
+@pytest.mark.django_db
+def test_register_pay_whose_invoice_cannot_be_read_back_leaves_it_unpaid(client, admin_user, client_obj, monkeypatch):
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _fractional_wo(client_obj, '0.50', '4.69')
+    fake = _FakeIN(invoice_ninja)
+    monkeypatch.setattr(fake, 'state', lambda iid: (_ for _ in ()).throw(invoice_ninja.InvoiceNinjaError('timed out')))
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    client.force_login(admin_user)
+    resp = client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'pay', 'payment_method': 'cash'}, follow=True)
+    assert len(fake.payments()) == 1
+    assert WorkOrder.objects.get(pk=wo.pk).invoice.billing_status != 'paid'
+    assert 'could not read invoice' in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_reprinted_old_receipt_shows_the_rounded_total_and_the_recorded_amount(client, admin_user, client_obj):
+    """What the changelog announces: an existing record with fractional lines
+    shows the rounded total ($4.70 for two 0.50 x $4.69 lines) while the amount
+    it recorded ($4.69, before this release) does not move."""
+    from decimal import Decimal
+    from core.models import LineItem
+    wo = WorkOrder.objects.create(client=client_obj, reported_problem='x', status='completed')
+    for _ in range(2):
+        LineItem.objects.create(content_object=wo, kind='labor', description='Half hour',
+                                quantity=Decimal('0.50'), unit_price=Decimal('4.69'))
+    inv = wo.invoice
+    inv.billing_status = 'paid'; inv.amount = Decimal('4.69'); inv.payment_method = 'cash'
+    inv.paid_date = inv.paid_date or __import__('datetime').date(2026, 10, 1); inv.save()
+    client.force_login(admin_user)
+    page = client.get(reverse('core:pos_wo_receipt', args=[wo.pk])).content.decode()
+    assert '$4.70' in page and '$4.69' in page
+    assert WorkOrder.objects.get(pk=wo.pk).invoice.amount == Decimal('4.69')
+
+
+# --- PR #118 round 3: an accepted payment is never paid again (R2-1); MB's own
+# unanswered payment on a partly paid invoice is held for a person (R2-2). The
+# reviewer's sequences, with operation state and invoice state combined.
+
+def _short_paid_wo(client, client_obj, monkeypatch, fake):
+    """A $2.35 draft in Invoice Ninja whose line was then cut, so Pay sends
+    $1.17. Returns the work order before Pay."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _fractional_wo(client_obj, '0.50', '4.69')
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    client.post(reverse('core:pos_wo_settle', args=[wo.pk]), {'action': 'draft'})
+    wo.line_items.update(quantity=Decimal('0.25'))
+    return wo
+
+
+def _reads(fake, monkeypatch, *answers):
+    """GET /invoices/<id> answers each of `answers` in turn (an exception is
+    raised, a dict is answered, None is the fake's real state), then the
+    fake's real state."""
+    queue = list(answers)
+    real = fake.state
+
+    def state(iid):
+        if queue:
+            a = queue.pop(0)
+            if a is None:
+                return real(iid)
+            if isinstance(a, Exception):
+                raise a
+            return {'id': iid, **a}
+        return real(iid)
+    monkeypatch.setattr(fake, 'state', state)
+
+
+def _pay(client, wo):
+    return client.post(reverse('core:pos_wo_settle', args=[wo.pk]),
+                       {'action': 'pay', 'payment_method': 'cash'}, follow=True).content.decode()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('next_read', [{'balance': 1.18}, {'status_id': '2', 'balance': 1.18}],
+                         ids=['no-status', 'stale-sent'])
+def test_pay_after_an_accepted_payment_whose_read_back_failed_sends_nothing_more(
+        client, admin_user, client_obj, monkeypatch, next_read):
+    """R2-1: the payment is accepted and its read-back fails; the next Pay
+    reads an invoice MB cannot call Partial or Paid (no status, or a stale
+    Sent). MB's accepted payment stops a second one."""
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    wo = _short_paid_wo(client, client_obj, monkeypatch, fake)
+    _reads(fake, monkeypatch, None, invoice_ninja.InvoiceNinjaError('timed out'), next_read)
+    _pay(client, wo)
+    page = _pay(client, wo)
+    assert len(fake.payments()) == 1
+    assert 'already has MB&#x27;s payment of $1.17' in page
+    assert WorkOrder.objects.get(pk=wo.pk).invoice.billing_status == 'invoiced'
+
+
+@pytest.mark.django_db
+def test_a_new_payment_is_never_claimed_onto_an_invoice_with_mbs_accepted_one(client_obj, monkeypatch):
+    """R2-1, below the Register: whatever calls post_payment (a sale's Send
+    too), an accepted payment on the same invoice refuses a fresh key and
+    nothing is sent."""
+    from core import invoice_ninja
+    _enable_in()
+    wo = _priced_wo(client_obj)
+    _in_request(wo, 'payment', 'done', base_invoice_id='inv1', payload=_payment_payload())
+    sent = []
+    monkeypatch.setattr(invoice_ninja, '_request', lambda *a, **k: sent.append(a) or {'data': {'id': 'p2'}})
+    with pytest.raises(invoice_ninja.InvoiceNinjaRefused, match='already accepted'):
+        invoice_ninja.post_payment(wo, 'inv1', 'cl1', amount='95', method='cash', method_label='Cash')
+    assert sent == []
+    # A different invoice (a confirmed re-send) is not blocked by it.
+    invoice_ninja.post_payment(wo, 'inv2', 'cl1', amount='95', method='cash', method_label='Cash')
+    assert len(sent) == 1
+
+
+@pytest.mark.django_db
+def test_an_accepted_short_payment_finishes_with_its_own_details_once_paid(client, admin_user, client_obj, monkeypatch):
+    """R2-1 completion: the rest is settled in Invoice Ninja; Pay records MB's
+    own $1.17 and sends nothing."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    wo = _short_paid_wo(client, client_obj, monkeypatch, fake)
+    _reads(fake, monkeypatch, None, invoice_ninja.InvoiceNinjaError('timed out'))
+    _pay(client, wo)
+    fake.paid.add(WorkOrder.objects.get(pk=wo.pk).invoice_ninja_id)
+    _pay(client, wo)
+    inv = WorkOrder.objects.get(pk=wo.pk).invoice
+    assert len(fake.payments()) == 1
+    assert inv.billing_status == 'paid' and inv.amount == Decimal('1.17') and inv.payment_method == 'cash'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('status_id, label', [(None, 'Unknown'), ('5', 'Cancelled'), ('6', 'Reversed')])
+def test_pay_refuses_an_invoice_whose_status_is_no_permission_to_pay(
+        client, admin_user, client_obj, monkeypatch, status_id, label):
+    """An Unknown, Cancelled or Reversed read is not permission to post."""
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    wo = _short_paid_wo(client, client_obj, monkeypatch, fake)
+    _reads(fake, monkeypatch, {'status_id': status_id, 'balance': 2.35})
+    page = _pay(client, wo)
+    assert fake.payments() == []
+    assert f'as {label}' in page and 'Nothing was sent' in page
+
+
+@pytest.mark.django_db
+def test_pay_refuses_a_partly_paid_invoice_with_no_payment_of_mbs(client, admin_user, client_obj, monkeypatch):
+    """Somebody else's payment is there: MB adds none on top."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    wo = _short_paid_wo(client, client_obj, monkeypatch, fake)
+    fake.received[WorkOrder.objects.get(pk=wo.pk).invoice_ninja_id] = Decimal('1.00')
+    page = _pay(client, wo)
+    assert fake.payments() == []
+    assert 'partly paid. MB will not add a second payment' in page
+
+
+def _lose_both_answers(fake, monkeypatch):
+    """The first payment lands but its answer is lost, and so is the answer to
+    MB's immediate same-key try: MB's request stays unanswered."""
+    from core import invoice_ninja
+    fake.payment_outcomes = ['lost']
+    real = fake.__call__
+    tries = []
+
+    def call(method, path, **kw):
+        if method == 'POST' and path == '/payments':
+            tries.append(1)
+            if len(tries) == 2:
+                fake.calls.append((method, path, kw.get('params'), kw.get('json')))
+                raise invoice_ninja.InvoiceNinjaOutcomeUnknown('Invoice Ninja did not answer within 20 seconds.')
+        return real(method, path, **kw)
+    monkeypatch.setattr(invoice_ninja, '_request', call)
+
+
+@pytest.mark.django_db
+def test_mbs_unanswered_payment_on_a_partly_paid_invoice_is_held_and_nothing_sent(
+        client, admin_user, client_obj, monkeypatch):
+    """R2-2: $1.17 landed, both answers lost; the invoice is Partial and MB's
+    request unanswered. Pay holds it for a person and sends nothing: Partial
+    might be somebody else's payment with MB's key unused."""
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    wo = _short_paid_wo(client, client_obj, monkeypatch, fake)
+    _lose_both_answers(fake, monkeypatch)
+    _pay(client, wo)
+    req = _last(wo, 'payment')
+    assert req.state == 'unknown' and len(fake.payments()) == 2
+    page = _pay(client, wo)
+    req.refresh_from_db()
+    assert len(fake.payments()) == 2
+    assert req.state == 'held' and 'partly paid' in req.reason
+    assert 'until a person has checked' in page and 'MB will not add a second payment' not in page
+    assert 'the payment is there' in page and 'the payment is not there' in page
+    assert WorkOrder.objects.get(pk=wo.pk).invoice.billing_status == 'invoiced'
+
+
+@pytest.mark.django_db
+def test_a_held_payment_found_there_is_recorded_with_its_own_details(client, admin_user, client_obj, monkeypatch):
+    """R2-2 route: "the payment is there" makes it MB's done payment, sends
+    nothing; once the rest is settled, Pay records MB's own $1.17."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    wo = _short_paid_wo(client, client_obj, monkeypatch, fake)
+    _lose_both_answers(fake, monkeypatch)
+    _pay(client, wo)
+    _pay(client, wo)
+    req = _last(wo, 'payment')
+    page = client.post(reverse('core:in_hold', args=['wo', wo.pk, 'found']), _shown(req), follow=True).content.decode()
+    req.refresh_from_db()
+    assert req.state == 'done' and req.resolved_by == admin_user and 'is there' in req.resolved_note
+    assert 'is the one in Invoice Ninja' in page and len(fake.payments()) == 2
+    assert 'already has MB&#x27;s payment' in _pay(client, wo) and len(fake.payments()) == 2
+    fake.paid.add(WorkOrder.objects.get(pk=wo.pk).invoice_ninja_id)
+    _pay(client, wo)
+    inv = WorkOrder.objects.get(pk=wo.pk).invoice
+    assert len(fake.payments()) == 2
+    assert inv.billing_status == 'paid' and inv.amount == Decimal('1.17')
+
+
+@pytest.mark.django_db
+def test_a_held_payment_found_not_there_is_cleared_and_partial_still_refuses(client, admin_user, client_obj, monkeypatch):
+    """"Not there" clears it; the Partial invoice still takes no new payment."""
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    wo = _short_paid_wo(client, client_obj, monkeypatch, fake)
+    _lose_both_answers(fake, monkeypatch)
+    _pay(client, wo)
+    _pay(client, wo)
+    req = _last(wo, 'payment')
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'resolve']), _shown(req))
+    req.refresh_from_db()
+    assert req.state == 'cleared'
+    assert 'partly paid. MB will not add' in _pay(client, wo) and len(fake.payments()) == 2
+
+
+@pytest.mark.django_db
+def test_found_on_a_stale_page_records_nothing(client, admin_user, client_obj):
+    _enable_in()
+    wo = _priced_wo(client_obj)
+    req = _in_request(wo, 'payment', 'held', base_invoice_id='inv1', reason='x', payload=_payment_payload(), generation=2)
+    client.force_login(admin_user)
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'found']), {'request': req.pk, 'generation': 1})
+    req.refresh_from_db()
+    assert req.state == 'held'
+
+
+@pytest.mark.django_db
+def test_found_applies_only_to_a_held_payment(client, admin_user, client_obj):
+    from core import invoice_ninja
+    _enable_in()
+    wo = _priced_wo(client_obj)
+    charge = _in_request(wo, 'charge', 'held', base_invoice_id='inv1', reason='x', payload={'amount': '95'})
+    lost = _in_request(_priced_wo(client_obj), 'payment', 'unknown', base_invoice_id='inv1', payload=_payment_payload())
+    assert not invoice_ninja.found_payment(charge, admin_user)
+    assert not invoice_ninja.found_payment(lost, admin_user)
+    charge.refresh_from_db(); lost.refresh_from_db()
+    assert charge.state == 'held' and lost.state == 'unknown'
+
+
+@pytest.mark.django_db
+def test_found_on_a_sale_leaves_nothing_to_post(client, admin_user, client_obj):
+    from core.models import Sale
+    _enable_in()
+    sale = _priced_draft_sale(client_obj)
+    Sale.objects.filter(pk=sale.pk).update(invoice_ninja_id='inv1', in_payment_pending=True)
+    req = _in_request(sale, 'payment', 'held', base_invoice_id='inv1', reason='x', payload=_payment_payload())
+    client.force_login(admin_user)
+    client.post(reverse('core:in_hold', args=['sale', sale.pk, 'found']), _shown(req))
+    req.refresh_from_db()
+    assert req.state == 'done' and not Sale.objects.get(pk=sale.pk).in_payment_pending
+
+
+@pytest.mark.django_db
+def test_a_paid_hold_found_there_records_mbs_own_details(client, admin_user, client_obj, monkeypatch):
+    """The same choice on the older Paid hold (decision B): found there, Pay
+    records MB's payment details instead of a bare Paid."""
+    from core import invoice_ninja
+    from core.models import Invoice
+    _enable_in()
+    _linked_client(client_obj)
+    wo = _priced_wo(client_obj)
+    WorkOrder.objects.filter(pk=wo.pk).update(invoice_ninja_id='inv1')
+    hold = _in_request(wo, 'payment', 'held', base_invoice_id='inv1', reason='Cannot tell.', payload=_payment_payload())
+    fake = _FakeIN(invoice_ninja); fake.paid.add('inv1')
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    client.force_login(admin_user)
+    client.post(reverse('core:in_hold', args=['wo', wo.pk, 'found']), _shown(hold))
+    _pay(client, wo)
+    inv = Invoice.objects.get(work_order=wo)
+    assert fake.payments() == []
+    assert inv.billing_status == 'paid' and inv.reference == 'ORIGINAL' and inv.payment_method == 'cash'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('kind', ['wo', 'sale'])
+def test_check_in_partial_holds_an_unanswered_payment(client_obj, monkeypatch, kind):
+    """The Partial sibling of decision B, on both records' Check IN."""
+    from core import invoice_ninja
+    from core.models import Sale
+    _enable_in()
+    if kind == 'wo':
+        host = _priced_wo(client_obj)
+        WorkOrder.objects.filter(pk=host.pk).update(invoice_ninja_id='inv1')
+    else:
+        host = _priced_draft_sale(client_obj)
+        Sale.objects.filter(pk=host.pk).update(invoice_ninja_id='inv1')
+    host.refresh_from_db()
+    req = _in_request(host, 'payment', 'unknown', base_invoice_id='inv1', payload=_payment_payload())
+    monkeypatch.setattr(invoice_ninja, '_request', lambda *a, **k: {'data': {'status_id': '3'}})
+    (invoice_ninja.check_invoice_status if kind == 'wo' else invoice_ninja.check_sale_status)(host)
+    req.refresh_from_db()
+    assert req.state == 'held' and 'partly paid' in req.reason
+
+
+@pytest.mark.django_db
+def test_check_in_holds_a_payment_whose_sender_vanished(client_obj, monkeypatch):
+    """A payment still 'being sent' long after any call could take is as
+    unanswered as an unknown one: Paid or Partial holds it too."""
+    from datetime import timedelta
+    from django.utils import timezone
+    from core import invoice_ninja
+    _enable_in()
+    wo = _priced_wo(client_obj)
+    WorkOrder.objects.filter(pk=wo.pk).update(invoice_ninja_id='inv1')
+    wo.refresh_from_db()
+    old = timezone.now() - invoice_ninja.IN_FLIGHT - timedelta(seconds=5)
+    req = _in_request(wo, 'payment', 'sending', base_invoice_id='inv1', payload=_payment_payload(), started_at=old)
+    fresh = _in_request(_priced_wo(client_obj), 'payment', 'sending', base_invoice_id='inv1', payload=_payment_payload())
+    monkeypatch.setattr(invoice_ninja, '_request', lambda *a, **k: {'data': {'status_id': '3'}})
+    invoice_ninja.check_invoice_status(wo)
+    req.refresh_from_db(); fresh.refresh_from_db()
+    assert req.state == 'held' and fresh.state == 'sending'
+
+
+@pytest.mark.django_db
+def test_mbs_unanswered_payment_on_an_unpaid_invoice_is_still_finished_with_its_key(
+        client, admin_user, client_obj, monkeypatch):
+    """Control: the invoice still reads unpaid, so Pay sends MB's same payment
+    with the same key, once."""
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    wo = _short_paid_wo(client, client_obj, monkeypatch, fake)
+    fake.payment_outcomes = [invoice_ninja.InvoiceNinjaOutcomeUnknown('no answer'),
+                             invoice_ninja.InvoiceNinjaOutcomeUnknown('no answer')]
+    _pay(client, wo)
+    first = _last(wo, 'payment')
+    assert first.state == 'unknown'
+    _pay(client, wo)
+    keys = {c[3]['idempotency_key'] for c in fake.payments()}
+    first.refresh_from_db()
+    assert keys == {first.key} and len(fake.payments()) == 3 and first.state == 'done'
+
+
+# --- PR #118 round 4: a counter sale reads its invoice before finishing a
+# payment (R3-1); every payment hold shows what MB sent (R3-2); counter sales
+# can Check IN, and MB's accepted payment leaves nothing pending (R3-3).
+
+def _short_sale_lost_payment(client, client_obj, monkeypatch, fake):
+    """A $2.35 sale checked out at $1.17 whose payment never reached Invoice
+    Ninja and got no answer twice: the request is unanswered, its key unused,
+    the sale pending."""
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    sale = _fractional_sale(client_obj)
+    fake.payment_outcomes = [invoice_ninja.InvoiceNinjaOutcomeUnknown('no answer'),
+                             invoice_ninja.InvoiceNinjaOutcomeUnknown('no answer')]
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    client.post(reverse('core:sale_checkout', args=[sale.pk]), {'payment_method': 'cash', 'amount': '1.17', 'reference': 'R4-REF'})
+    client.get(reverse('core:pos_sale_settle', args=[sale.pk]))  # shows (uses up) checkout's own messages
+    sale.refresh_from_db()
+    assert sale.in_payment_pending and _last(sale, 'payment').state == 'unknown' and not fake.payment_keys
+    return sale
+
+
+def _finish(client, sale):
+    return client.post(reverse('core:sale_send_in', args=[sale.pk]), follow=True).content.decode()
+
+
+@pytest.mark.django_db
+def test_finishing_a_sale_payment_onto_somebody_elses_partial_holds_and_sends_nothing(
+        client, admin_user, client_obj, monkeypatch):
+    """R3-1, first variant: $1.00 was recorded in Invoice Ninja by someone
+    else. Finishing reads the invoice, holds MB's unanswered payment, and
+    posts nothing (the unused key would have recorded $1.17 on top)."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    sale = _short_sale_lost_payment(client, client_obj, monkeypatch, fake)
+    fake.received[sale.invoice_ninja_id] = Decimal('1.00')
+    page = _finish(client, sale)
+    req = _last(sale, 'payment')
+    assert len(fake.payments()) == 2 and fake.received[sale.invoice_ninja_id] == Decimal('1.00')
+    assert req.state == 'held' and 'partly paid' in req.reason
+    assert 'until a person has checked' in page and 'R4-REF' in page
+
+
+@pytest.mark.django_db
+def test_after_not_there_a_sale_still_sends_nothing_onto_a_partial_invoice(client, admin_user, client_obj, monkeypatch):
+    """R3-1, second variant: Check IN holds it, a person says "not there",
+    and Send must still not post a fresh payment onto the Partial invoice."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    sale = _short_sale_lost_payment(client, client_obj, monkeypatch, fake)
+    fake.received[sale.invoice_ninja_id] = Decimal('1.00')
+    client.post(reverse('core:sale_check_in', args=[sale.pk]))
+    req = _last(sale, 'payment')
+    assert req.state == 'held'
+    client.post(reverse('core:in_hold', args=['sale', sale.pk, 'resolve']), _shown(req))
+    page = _finish(client, sale)
+    assert len(fake.payments()) == 2 and fake.received[sale.invoice_ninja_id] == Decimal('1.00')
+    assert 'partly paid. MB will not add a second payment' in page and 'Check IN' in page
+
+
+@pytest.mark.django_db
+def test_finishing_a_sale_payment_on_an_unpaid_invoice_sends_the_same_payment_once(
+        client, admin_user, client_obj, monkeypatch):
+    """Control: the invoice still reads unpaid, so finishing sends MB's same
+    payment with its same key, and Invoice Ninja records it once."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    sale = _short_sale_lost_payment(client, client_obj, monkeypatch, fake)
+    _finish(client, sale)
+    req = _last(sale, 'payment')
+    assert {c[3]['idempotency_key'] for c in fake.payments()} == {req.key}
+    assert req.state == 'done' and fake.received[sale.invoice_ninja_id] == Decimal('1.17')
+
+
+@pytest.mark.django_db
+def test_finishing_a_sale_whose_own_payment_already_paid_it_says_nothing_was_sent(
+        client, admin_user, client_obj, monkeypatch):
+    """MB's own payment was accepted and Invoice Ninja shows the invoice Paid,
+    but the sale is still pending (its local write lost). Finishing sends
+    nothing and must not say it sent the sale "as paid"."""
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    _enable_in()
+    _linked_client(client_obj)
+    sale = _fractional_sale(client_obj)
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    client.post(reverse('core:sale_checkout', args=[sale.pk]), {'payment_method': 'cash', 'amount': '2.35'})
+    client.get(reverse('core:pos_sale_settle', args=[sale.pk]))  # uses up checkout's own messages
+    assert _last(sale, 'payment').state == 'done'
+    Sale.objects.filter(pk=sale.pk).update(in_payment_pending=True, in_status='')
+    page = _finish(client, sale)
+    sale.refresh_from_db()
+    assert len(fake.payments()) == 1 and not sale.in_payment_pending
+    assert 'already recorded there' in page and 'Nothing more was sent' in page and 'as paid' not in page
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('read, says', [
+    (__import__('core.invoice_ninja', fromlist=['x']).InvoiceNinjaError('timed out'), 'nothing was sent'),
+    ({'status_id': None, 'balance': 2.35}, 'as Unknown'),
+    ({'status_id': '5', 'balance': 2.35}, 'as Cancelled'),
+], ids=['read-fails', 'unknown', 'cancelled'])
+def test_finishing_a_sale_payment_sends_nothing_on_an_unreadable_invoice(
+        client, admin_user, client_obj, monkeypatch, read, says):
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    sale = _short_sale_lost_payment(client, client_obj, monkeypatch, fake)
+    _reads(fake, monkeypatch, read)
+    page = _finish(client, sale)
+    assert len(fake.payments()) == 2 and says in page
+    assert Sale.objects.get(pk=sale.pk).in_payment_pending
+
+
+@pytest.mark.django_db
+def test_finishing_a_sale_whose_invoice_somebody_else_paid_posts_nothing(client, admin_user, client_obj, monkeypatch):
+    """No payment of MB's is there (its unanswered one was cleared as not
+    there): Paid is recorded and nothing is posted."""
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    sale = _short_sale_lost_payment(client, client_obj, monkeypatch, fake)
+    from core.models import InvoiceNinjaRequest as R
+    R.objects.filter(pk=_last(sale, 'payment').pk).update(state='cleared')
+    fake.paid.add(sale.invoice_ninja_id)
+    page = _finish(client, sale)
+    sale.refresh_from_db()
+    assert len(fake.payments()) == 2 and 'did not post a payment' in page
+    assert sale.in_status == 'Paid' and not sale.in_payment_pending
+
+
+@pytest.mark.django_db
+def test_a_sale_invoice_found_after_a_lost_answer_is_read_before_paying(client, admin_user, client_obj, monkeypatch):
+    """The other way a sale pays onto an invoice that already existed: its
+    create answer was lost and Send found it. Somebody had paid part of it
+    meanwhile, so MB adds nothing."""
+    from decimal import Decimal
+    from core import invoice_ninja
+    _enable_in()
+    _linked_client(client_obj)
+    sale = _fractional_sale(client_obj)
+    fake = _FakeIN(invoice_ninja)
+    fake.lose_creates = fake.miss_finds = 1
+    monkeypatch.setattr(invoice_ninja, '_request', fake)
+    client.force_login(admin_user)
+    client.post(reverse('core:sale_checkout', args=[sale.pk]), {'payment_method': 'cash', 'amount': '2.35', 'reference': ''})
+    assert fake.payments() == [] and not Sale.objects.get(pk=sale.pk).invoice_ninja_id
+    fake.received[fake.invoices[0]['id']] = Decimal('1.00')
+    page = _finish(client, sale)
+    assert fake.payments() == [] and 'partly paid' in page
+
+
+@pytest.mark.django_db
+def test_a_sale_with_mbs_accepted_payment_is_not_left_pending(client, admin_user, client_obj, monkeypatch):
+    """R3-3 crash case: the payment request is done but the sale still says
+    pending. Send refuses without promising a retry; Check IN (Partial) clears
+    the pending flag, and the Register no longer offers to finish it."""
+    from core import invoice_ninja
+    from core.models import InvoiceNinjaRequest as R
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    sale = _short_sale_lost_payment(client, client_obj, monkeypatch, fake)
+    R.objects.filter(pk=_last(sale, 'payment').pk).update(state='done')
+    from decimal import Decimal
+    fake.received[sale.invoice_ninja_id] = Decimal('1.17')
+    page = _finish(client, sale)
+    assert len(fake.payments()) == 2
+    assert 'already has MB&#x27;s payment of $1.17' in page and 'Retrying adds' not in page
+    sale.refresh_from_db()
+    assert not sale.in_payment_pending and sale.in_status == 'Partial'
+    register = client.get(reverse('core:pos_sale_settle', args=[sale.pk])).content.decode()
+    assert 'Finish recording the payment' not in register and 'Check IN' in register
+
+
+@pytest.mark.django_db
+def test_counter_sale_register_offers_check_in_and_returns_there(client, admin_user, client_obj, monkeypatch):
+    """R3-3: a linked counter sale can Check IN from the Register, pending or
+    not, and comes back to the Register; nothing is sent."""
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    sale = _short_sale_lost_payment(client, client_obj, monkeypatch, fake)
+    url = reverse('core:pos_sale_settle', args=[sale.pk])
+    page = client.get(url).content.decode()
+    assert reverse('core:sale_check_in', args=[sale.pk]) in page and 'Finish recording the payment' in page
+    resp = client.post(reverse('core:sale_check_in', args=[sale.pk]), {'next': url})
+    assert resp.status_code == 302 and resp['Location'] == url
+    assert len(fake.payments()) == 2
+    Sale.objects.filter(pk=sale.pk).update(in_payment_pending=False, in_status='Partial')
+    page = client.get(url).content.decode()
+    assert reverse('core:sale_check_in', args=[sale.pk]) in page
+
+
+@pytest.mark.django_db
+def test_counter_sale_detail_points_to_the_register_until_paid(client, admin_user, client_obj):
+    _enable_in()
+    sale = _priced_draft_sale(client_obj)
+    Sale.objects.filter(pk=sale.pk).update(status='completed', invoice_ninja_id='inv1', in_status='Partial')
+    client.force_login(admin_user)
+    detail = reverse('core:sale_detail', args=[sale.pk])
+    assert 'Open at the Register' in client.get(detail).content.decode()
+    Sale.objects.filter(pk=sale.pk).update(in_status='Paid')
+    assert 'Open at the Register' not in client.get(detail).content.decode()
+
+
+@pytest.mark.django_db
+def test_a_held_work_order_payment_shows_what_mb_sent(client, admin_user, client_obj, monkeypatch):
+    """R3-2: at the "there / not there" choice the page shows the payment's
+    amount, method, reference, date and invoice, from the request itself."""
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    wo = _short_paid_wo(client, client_obj, monkeypatch, fake)
+    _lose_both_answers(fake, monkeypatch)
+    client.post(reverse('core:pos_wo_settle', args=[wo.pk]),
+                {'action': 'pay', 'payment_method': 'cash', 'reference': 'UNIQUE-REF-118'})
+    page = _pay(client, wo)
+    req = _last(wo, 'payment')
+    wo.refresh_from_db()
+    assert req.state == 'held' and req.payload['reference'] == 'UNIQUE-REF-118'
+    assert 'ref UNIQUE-REF-118' in page and '$1.17' in page
+    assert f'dated {req.payload["payment"]["date"]}' in page
+    assert f'to invoice #{wo.invoice_ninja_ref or wo.invoice_ninja_id}' in page
+
+
+@pytest.mark.django_db
+def test_every_payment_hold_shows_what_mb_sent(client, admin_user, client_obj):
+    """The older Paid hold and the earlier-invoice hold show the same facts."""
+    _enable_in()
+    wo = _priced_wo(client_obj)
+    WorkOrder.objects.filter(pk=wo.pk).update(invoice_ninja_id='inv2', invoice_ninja_ref='0002')
+    _in_request(wo, 'payment', 'held', base_invoice_id='inv2', reason='Paid hold.', payload=_payment_payload(ref='PAID-HOLD'))
+    other = _priced_wo(client_obj)
+    WorkOrder.objects.filter(pk=other.pk).update(invoice_ninja_id='inv2')
+    _in_request(other, 'payment', 'held', base_invoice_id='inv1', reason='Earlier invoice.', payload=_payment_payload(ref=''))
+    client.force_login(admin_user)
+    page = client.get(reverse('core:pos_wo_settle', args=[wo.pk])).content.decode()
+    assert 'ref PAID-HOLD' in page and 'to invoice #0002' in page
+    page = client.get(reverse('core:pos_wo_settle', args=[other.pk])).content.decode()
+    assert 'no reference' in page and 'an earlier invoice (Invoice Ninja id inv1)' in page
+
+
+@pytest.mark.django_db
+def test_a_sale_payment_refused_after_the_read_does_not_promise_a_retry(client, admin_user, client_obj, monkeypatch):
+    """A hold (or MB's accepted payment) can land between the read and the
+    payment. Nothing is sent, so the message must not say retrying adds it."""
+    from core import invoice_ninja
+    client.force_login(admin_user)
+    fake = _FakeIN(invoice_ninja)
+    sale = _short_sale_lost_payment(client, client_obj, monkeypatch, fake)
+
+    def refused(*a, **k):
+        raise invoice_ninja.InvoiceNinjaRefused('Held meanwhile. MB will not do this until a person has checked.')
+    monkeypatch.setattr(invoice_ninja, 'post_payment', refused)
+    page = _finish(client, sale)
+    assert 'Held meanwhile' in page and 'Retrying adds' not in page

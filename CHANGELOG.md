@@ -29,6 +29,11 @@ the Unreleased entries move under that version and prod gets a single update.
 - Reports PDF: a chart picture whose header claims an enormous size is refused like any other oversized chart, instead of failing with a server error.
 - Alert boxes holding a title, a form or running text with bold words or links stack as one block again instead of splitting into narrow columns (Register hold banner, charge warnings, status and confirm boxes, the message banner).
 - Register messages and the hold banner show amounts in dollars and cents ($2.35, not $2.3450); the amount sent and stored is unchanged. The lost-send banner now says MB never sends it again on its own, and both receipts show the message from settling on screen (not when printed).
+- Each line's total is rounded to the cent, halves up, the way Invoice Ninja does it, so on new work a fractional quantity (0.50 x $4.69 = $2.35) gives the same amount on every screen, in MB's record, on the receipt and in Invoice Ninja. An invoice found after a lost answer is no longer held over that half cent. Existing records with a fractional line show the rounded total too, so an old receipt reprinted can differ from the amount it recorded (up to a cent per fractional line); recorded and sent amounts are never changed.
+- A payment is marked Paid only when Invoice Ninja shows the invoice paid. If Invoice Ninja reports Partial (a reduced checkout amount, or a payment recorded before this release), MB shows that and the amount Invoice Ninja says is owed.
+- Once Invoice Ninja has accepted MB's payment on an invoice, MB never sends another onto it, even if reading the invoice back failed. Before paying onto an existing invoice (work-order Pay, finishing a counter sale's payment), MB reads it and sends nothing onto one that is partly paid or whose status it cannot read. When a work order's invoice shows Paid, Pay records it with nothing more sent.
+- A payment that got no answer is held for a person when Invoice Ninja shows the invoice Paid or partly paid. The hold lists what MB sent (amount, method, reference, date, invoice) and asks whether that payment is there: "there" records MB's payment with its own details, "not there" clears it.
+- Counter sales have a Check IN button on the Register, to read the invoice's status back from Invoice Ninja.
 
 ## v0.17.0 — 2026-10-03
 
