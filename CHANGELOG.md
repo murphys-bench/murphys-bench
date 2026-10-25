@@ -8,7 +8,9 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
-## Unreleased
+## v0.18.0 — 2026-10-25
+
+Invoice Ninja release: MB never sends a payment or invoice twice, holds anything it cannot confirm for a person to check, and rounds line totals the way Invoice Ninja does. Before updating: MB now needs Python 3.11 or newer, and if your Invoice Ninja uses invoice custom field 4, tell us first.
 
 ### Security
 
