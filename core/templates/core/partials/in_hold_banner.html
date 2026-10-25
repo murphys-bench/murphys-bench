@@ -25,7 +25,7 @@ or Client) and `in_host` ('wo', 'sale' or 'client').
             <button type="submit" class="btn btn-sm">I checked Invoice Ninja: the invoice is not there</button>
         </form>
     {% elif req.kind == 'payment' and req.looks_lost %}
-        <div class="mb-2">A payment of ${{ req.payload.amount }} ({{ req.payload.method_label|default:"unspecified" }}{% if req.payload.reference %}, ref {{ req.payload.reference }}{% endif %}) sent on {{ req.started_at|date:"M j, g:i A" }} got no answer from Invoice Ninja. Paying again finishes that same payment; Invoice Ninja refuses it twice. If Invoice Ninja does not have it, clear it here.</div>
+        <div class="mb-2">A payment of ${{ req.payload.amount|floatformat:2 }} ({{ req.payload.method_label|default:"unspecified" }}{% if req.payload.reference %}, ref {{ req.payload.reference }}{% endif %}) sent on {{ req.started_at|date:"M j, g:i A" }} got no answer from Invoice Ninja. Paying again finishes that same payment; Invoice Ninja refuses it twice. If Invoice Ninja does not have it, clear it here.</div>
         <form method="post" action="{% url 'core:in_hold' in_host obj.pk 'resolve' %}">{% csrf_token %}
             <input type="hidden" name="request" value="{{ req.pk }}">
             <input type="hidden" name="generation" value="{{ req.generation }}">

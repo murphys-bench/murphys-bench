@@ -48,12 +48,12 @@
     {% endif %}
 
     {% if estimate.status == 'accepted' and estimate.work_order %}
-    <div class="alert alert-success">Accepted{% if estimate.accepted_at %} {{ estimate.accepted_at|date:"M j, Y" }}{% endif %}: <a href="{% url 'core:work_order_detail' estimate.work_order_id %}">{{ estimate.work_order.work_order_number }}</a>.</div>
+    <div class="alert d-block alert-success">Accepted{% if estimate.accepted_at %} {{ estimate.accepted_at|date:"M j, Y" }}{% endif %}: <a href="{% url 'core:work_order_detail' estimate.work_order_id %}">{{ estimate.work_order.work_order_number }}</a>.</div>
     {% elif estimate.status == 'declined' %}
-    <div class="alert alert-danger">Declined.{% if estimate.decline_reason %} <span style="white-space: pre-line;">{{ estimate.decline_reason }}</span>{% endif %}</div>
+    <div class="alert d-block alert-danger">Declined.{% if estimate.decline_reason %} <span style="white-space: pre-line;">{{ estimate.decline_reason }}</span>{% endif %}</div>
     {% endif %}
-    {% if estimate.revision_of %}<div class="alert alert-secondary">Revision of <a href="{% url 'core:estimate_detail' estimate.revision_of_id %}">{{ estimate.revision_of.estimate_number }}</a>.</div>{% endif %}
-    {% for rev in estimate.revisions.all %}<div class="alert alert-warning">Superseded by <a href="{% url 'core:estimate_detail' rev.pk %}">{{ rev.estimate_number }}</a>.</div>{% endfor %}
+    {% if estimate.revision_of %}<div class="alert d-block alert-secondary">Revision of <a href="{% url 'core:estimate_detail' estimate.revision_of_id %}">{{ estimate.revision_of.estimate_number }}</a>.</div>{% endif %}
+    {% for rev in estimate.revisions.all %}<div class="alert d-block alert-warning">Superseded by <a href="{% url 'core:estimate_detail' rev.pk %}">{{ rev.estimate_number }}</a>.</div>{% endfor %}
 
     {% include "core/partials/estimate_details_card.html" %}
 

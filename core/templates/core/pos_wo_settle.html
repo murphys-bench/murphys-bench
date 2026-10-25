@@ -32,7 +32,7 @@
             </table>
         </div>
         {% if wo.invoice_ninja_id %}
-        <div class="alert alert-info">Already sent to Invoice Ninja as invoice <strong>#{{ wo.invoice_ninja_ref|default:wo.invoice_ninja_id }}</strong>{% if wo.invoice.in_status %} ({{ wo.invoice.in_status }}){% endif %}. Settling uses this same invoice, it does not create a new one.</div>
+        <div class="alert alert-info d-block">Already sent to Invoice Ninja as invoice <strong>#{{ wo.invoice_ninja_ref|default:wo.invoice_ninja_id }}</strong>{% if wo.invoice.in_status %} ({{ wo.invoice.in_status }}){% endif %}. Settling uses this same invoice, it does not create a new one.</div>
         {% endif %}
     </div>
     <div class="col-12 col-lg-5">

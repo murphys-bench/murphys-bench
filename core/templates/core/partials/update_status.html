@@ -24,12 +24,12 @@ UpdateTriggerView. While a run is queued/running it polls itself every 3s.
     {% elif update_status.state == 'succeeded' %}
         {% if update_incomplete %}
         {% comment %}A green tick here would be the exact defect this panel exists to remove: the code arrived, so update.sh exits 0, but part of the release is not running. Report the consequence, not the exit code.{% endcomment %}
-        <div class="alert alert-warning">The update itself succeeded{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %} and this server is now on <strong>{{ update_current }}</strong>, but <strong>this install is incomplete</strong> and part of this release is not working.</div>
+        <div class="alert d-block alert-warning">The update itself succeeded{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %} and this server is now on <strong>{{ update_current }}</strong>, but <strong>this install is incomplete</strong> and part of this release is not working.</div>
         {% else %}
-        <div class="alert alert-success">Last update succeeded{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %}. Now on <strong>{{ update_current }}</strong>.</div>
+        <div class="alert d-block alert-success">Last update succeeded{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %}. Now on <strong>{{ update_current }}</strong>.</div>
         {% endif %}
     {% elif update_status.state == 'failed' %}
-    <div class="alert alert-danger">Last update <strong>failed</strong>{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %} and was automatically rolled back. The app is back on <strong>{{ update_current }}</strong>. See the log below.</div>
+    <div class="alert d-block alert-danger">Last update <strong>failed</strong>{% if update_status.finished_at %} ({{ update_status.finished_at|slice:":19" }} UTC){% endif %} and was automatically rolled back. The app is back on <strong>{{ update_current }}</strong>. See the log below.</div>
     {% endif %}
     {% comment %}Rendered on EVERY visit while the marker exists, not only after an update. The lead-in must NOT name the problem: the marker has two independent halves (missing system services, and a web server that cannot read this install's stylesheets) and states its own case precisely, with the command that fixes it. Found on mb-test 2026-08-05.{% endcomment %}
     {% if update_incomplete %}

@@ -29,7 +29,7 @@
 {% block content %}
 <div class="row justify-content-center"><div class="col-12 col-xl-8">
     {% if prospect.is_promoted %}
-    <div class="alert alert-success">Now a customer: <a href="{% url 'core:client_detail' prospect.promoted_to_id %}">{{ prospect.promoted_to.name }}</a>, since {{ prospect.promoted_at|date:"M j, Y" }}.</div>
+    <div class="alert d-block alert-success">Now a customer: <a href="{% url 'core:client_detail' prospect.promoted_to_id %}">{{ prospect.promoted_to.name }}</a>, since {{ prospect.promoted_at|date:"M j, Y" }}.</div>
     {% endif %}
     <div class="card">
         <div class="card-header"><h3 class="card-title">Who</h3></div>

@@ -6900,7 +6900,6 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
         })
 
     def post(self, request, pk):
-        from decimal import Decimal
         from . import invoice_ninja
         wo = get_object_or_404(WorkOrder.objects.select_related('client', 'invoice'), pk=pk)
         if wo.status not in POS_SETTLE_STATUSES:
@@ -6951,9 +6950,7 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
             messages.success(request, f'{wo.work_order_number} settled as no charge.')
             return redirect('core:pos_wo_receipt', pk=pk)
 
-        # Server-computed, never from the request; to the cent, as the charge
-        # views do (line totals carry four decimal places).
-        amount = wo.line_items_total.quantize(Decimal('0.01'))
+        amount = wo.line_items_total  # server-computed — never trust the request
         if amount <= 0:
             messages.error(request, 'This work order has no priced line items — nothing to settle.')
             return redirect('core:pos_wo_settle', pk=pk)
@@ -6988,7 +6985,7 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
             if blocker is not None:
                 messages.error(request, invoice_ninja._busy_message(blocker))
                 return redirect('core:pos_wo_settle', pk=pk)
-            messages.success(request, f'{wo.work_order_number} settled — ${amount} paid.')
+            messages.success(request, f'{wo.work_order_number} settled — ${invoice_ninja.money(amount)} paid.')
             return redirect('core:pos_wo_receipt', pk=pk)
 
         try:
@@ -7092,7 +7089,7 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
                 Invoice.objects.filter(pk=invoice.pk).update(in_status='Paid', invoice_ninja_id=wo.invoice_ninja_id)
                 messages.warning(
                     request,
-                    f'Invoice Ninja recorded the payment (${sent["amount"]}), but {wo.work_order_number} '
+                    f'Invoice Ninja recorded the payment (${invoice_ninja.money(sent["amount"])}), but {wo.work_order_number} '
                     f'is held: {invoice_ninja._busy_message(blocker)} MB\'s own record stays unpaid '
                     'until the hold is cleared; then Pay again records it without a second payment.'
                 )
@@ -7103,7 +7100,7 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
                 messages.success(
                     request,
                     f'{wo.work_order_number}: finished the earlier payment that got no answer '
-                    f'(${sent["amount"]}, {sent.get("method_label") or "unspecified"}'
+                    f'(${invoice_ninja.money(sent["amount"])}, {sent.get("method_label") or "unspecified"}'
                     f'{", ref " + sent["reference"] if sent.get("reference") else ""}), '
                     f'invoice #{wo.invoice_ninja_ref or wo.invoice_ninja_id}. This form was not sent.'
                 )
@@ -7111,7 +7108,7 @@ class POSWorkOrderSettleView(POSAccessMixin, View):
             else:
                 messages.success(
                     request,
-                    f'{wo.work_order_number} settled — ${amount} paid, '
+                    f'{wo.work_order_number} settled — ${invoice_ninja.money(amount)} paid, '
                     f'invoice #{wo.invoice_ninja_ref or wo.invoice_ninja_id}.'
                 )
             return redirect('core:pos_wo_receipt', pk=pk)

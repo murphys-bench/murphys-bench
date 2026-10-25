@@ -16,7 +16,7 @@
 
 {% block content %}
 <div class="row justify-content-center"><div class="col-12 col-lg-6">
-    <div class="alert alert-warning">
+    <div class="alert alert-warning d-block">
         This charges <strong>{{ sale.display_name }}</strong>'s card on file in Invoice Ninja for <strong>${{ amount }}</strong> against invoice <strong>#{{ sale.invoice_ninja_ref|default:sale.invoice_ninja_id }}</strong>.
         Murphy's Bench never touches the card; Invoice Ninja charges the stored Square token. The charge runs in the background; use "Check IN" afterward to confirm it posted.
     </div>

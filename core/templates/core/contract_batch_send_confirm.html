@@ -18,7 +18,7 @@
 {% block content %}
 <div class="row justify-content-center"><div class="col-12 col-lg-8">
 {% if count %}
-    <div class="alert alert-warning">This creates <strong>{{ count }}</strong> draft invoice{{ count|pluralize }} in Invoice Ninja totalling <strong>${{ total }}</strong>. Drafts are <strong>not charged</strong>; you charge each card by hand in Invoice Ninja afterward. Review the list before confirming.</div>
+    <div class="alert d-block alert-warning">This creates <strong>{{ count }}</strong> draft invoice{{ count|pluralize }} in Invoice Ninja totalling <strong>${{ total }}</strong>. Drafts are <strong>not charged</strong>; you charge each card by hand in Invoice Ninja afterward. Review the list before confirming.</div>
     <div class="card mb-3">
         <table class="table card-table table-vcenter">
             <thead><tr><th>Contract</th><th>Client</th><th class="text-end">Amount</th></tr></thead>

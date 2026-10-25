@@ -116,7 +116,7 @@ status control sits with the reply.
     {% include "core/partials/ticket_lock_banner.html" with lock_user=lock_user %}
 </div>
 {% if ticket.wo_complete %}
-<div class="alert alert-success">{% ticon 'check' 'icon-sm' %} <strong>Work is complete.</strong> Contact the client and close this ticket when done.</div>
+<div class="alert d-block alert-success">{% ticon 'check' 'icon-sm' %} <strong>Work is complete.</strong> Contact the client and close this ticket when done.</div>
 {% endif %}
 {% if ticket.needs_response %}
 <div class="alert alert-warning d-block">
