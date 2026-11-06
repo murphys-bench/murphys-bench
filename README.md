@@ -2,9 +2,9 @@
 
 **A self-hosted service management system for small MSPs that handle both managed clients and repair work.**
 
-![Dashboard](screenshots/dashboard.png)
+![The Board](screenshots/board.png)
 
-<sub>[More screenshots below](#screenshots) — tickets, work orders, clients, register, reports, and dark mode.</sub>
+<sub>[More screenshots below](#screenshots): tickets, work orders, clients, contracts, the Register, reports, and settings. Every screen is in [docs/screenshots.md](docs/screenshots.md).</sub>
 
 Murphy's Bench is the system I use to run my own IT service business.
 
@@ -110,45 +110,55 @@ It is probably not a good fit for a shop that needs:
 
 ## Screenshots
 
-**Dashboard** — ticket and work-order queues at a glance.
+The sidebar is split into four rooms: **Work** (tickets, work orders, estimates, mileage, devices), **Desk** (clients, prospects, contracts), **Register**, and **Back Office** (catalog, knowledge base, queues, reports, settings). Each room has its own color.
 
-![Dashboard](screenshots/dashboard.png)
+**Board:** what needs attention now. Past-SLA tickets, unanswered client replies, unsorted inbound email, escalations, work ready to bill, and unpaid invoices, then the open tickets and the bench.
 
-**Ticket detail** — customer conversation, internal notes, linked work order, and available actions.
+![The Board](screenshots/board.png)
 
-![Ticket detail](screenshots/ticket-detail.png)
+**Ticket and work order:** a ticket converted to a work order stays on one page. Client and device, the request, the client conversation, the work performed, bench notes, and settlement.
 
-**Work order** — reported issue, device details, labor, parts, time tracking, checklists, notes, and encrypted credentials.
+![Ticket and its work order](screenshots/ticket-work-order.png)
 
-![Work order detail](screenshots/work-order-detail.png)
+**Tickets:** active and closed tickets, with filters for past SLA, awaiting reply, and unsorted.
 
-**Clients** — client accounts, contact information, and device and work-order counts.
+![Tickets](screenshots/tickets.png)
+
+**Clients:** business and residential accounts with their device and work-order counts.
 
 ![Clients](screenshots/clients.png)
 
-**Client detail** — contacts, devices, contracts, managed assets, and work-order history.
+**Client detail:** open work, service agreements, contacts, devices, work history, and follow-ups sent.
 
 ![Client detail](screenshots/client-detail.png)
 
-**Register** — settle a completed work order or create a counter sale.
+**Devices:** every machine, its owner, and its repair history.
+
+![Device detail](screenshots/device-detail.png)
+
+**Contracts:** service agreements and their recurring charges. An active agreement is what makes a customer a managed client.
+
+![Contract detail](screenshots/contract-detail.png)
+
+**Register:** settle a finished work order or ring up a counter sale.
 
 ![Register](screenshots/register.png)
 
-**Reports** — billing summaries, ticket volume, conversion reporting, and export options.
+**Products & Services:** the priced catalog that work orders, contracts, and counter sales draw from.
 
-![Reports & analytics](screenshots/reports.png)
+![Products and Services](screenshots/products-services.png)
 
-**Settings** — most routine configuration is handled inside the application rather than Django admin.
+**Reports:** financial, ticket, work-order, and business-metric reports, with CSV, print, and PDF export.
 
-![Settings](screenshots/settings.png)
+![Business metrics report](screenshots/reports-business-metrics.png)
 
-**Dark mode**
+**Settings:** routine configuration lives in the application, not Django admin. Backups, restore, and software updates are on the Maintenance tab.
 
-![Dashboard in dark mode](screenshots/dashboard-dark.png)
-![Ticket detail in dark mode](screenshots/ticket-detail-dark.png)
-![Work order in dark mode](screenshots/work-order-detail-dark.png)
+![Settings, Maintenance tab](screenshots/settings-maintenance.png)
 
-_(Screenshots use demonstration data.)_
+[docs/screenshots.md](docs/screenshots.md) has every screen, including each Settings tab.
+
+_Screenshots use demonstration data and dark mode. Light mode is a toggle at the bottom of the sidebar._
 
 ## Tech Stack
 

@@ -4,7 +4,9 @@ You have installed Murphy's Bench, can reach the login page, and have signed in 
 
 This guide covers the initial configuration needed before technicians begin using the system. See `INSTALL.md` for installation and `FEATURES.md` for an overview of the application itself.
 
-Routine configuration is handled under Settings, available to administrators from the gear icon in the sidebar footer. You should not need Django admin for normal setup or operation.
+Routine configuration is handled under Settings, available to administrators in the Back Office section of the sidebar. Its tabs are grouped into Company & Branding, Email, Tickets & Work Orders, Integrations, Access & Security, and System. You should not need Django admin for normal setup or operation.
+
+[docs/screenshots.md](docs/screenshots.md#settings) shows each Settings tab.
 
 ## Suggested Setup Order
 
@@ -40,9 +42,13 @@ This information is used on repair reports and outbound email, so complete it be
 
 Go to Settings → Colors.
 
-Set the title-bar, sidebar, and accent colors. A live preview shows how the application will look. Email header text is selected automatically to remain readable against the chosen color.
+Upload a sidebar logo and a sign-in page logo, or leave them blank to show the company name as text.
 
-The separate Display tab controls browser-specific preferences such as font size and card density. These settings are stored per browser and user, not across the entire shop.
+Set the accent color and the color for each room. The accent colors primary buttons and links everywhere and is the Work room's color. The Register, Desk, and Back Office rooms each have their own color on the page header, the sidebar group, and their primary buttons. A sample button under each field shows the color. Blank a field to go back to the default.
+
+Ticket and work order status colors are set on the Statuses tab, and the customer email header color on the Email Templates tab.
+
+The separate Display tab sets the text size. It is stored in that browser only, not across the entire shop. Dark mode is per person, from the toggle at the bottom of the sidebar.
 
 ## 3. Outbound Email
 
@@ -57,7 +63,7 @@ Enter the SMTP settings for the address Murphy's Bench will use to send mail:
 
 The password is stored encrypted.
 
-Use Send Test Email and confirm that the message arrives before relying on outbound email for customer communication.
+Use Send test email and confirm that the message arrives before relying on outbound email for customer communication. The test goes to your own account's email address, or to the configured sending address if your account has none.
 
 Outbound email is used for functions such as:
 
@@ -68,7 +74,7 @@ Outbound email is used for functions such as:
 
 The Email Templates tab controls the wording of automated messages and shows the variables available to each template.
 
-The Suppressed Addresses list contains addresses that must not receive automated mail.
+Suppression patterns (for example `noreply@*`) and the Suppressed addresses list name senders that must never receive automated mail.
 
 ## 4. Inbound Email
 
@@ -130,16 +136,18 @@ The workflow tabs control how tickets and work orders are classified and process
 
 Available configuration includes:
 
-- Statuses — ticket and work-order statuses and their display colors
-- Help Topics — categories for incoming tickets, including an optional default SLA
-- SLA Plans — response deadlines and overdue behavior
-- Repair Types and Categories — classifications used by work orders and checklists
-- Checklist Items — pre-repair and post-repair tasks, grouped by device type
-- Canned Responses — reusable customer-facing or internal text
-- Quick Labor — common labor entries
-- Custom Fields — additional ticket or work-order fields tied to a help topic or repair type
-- Dashboard Tiles — status groups shown on the dashboard
-- KB Categories — categories used by knowledge-base articles
+- Repair Types and Categories: classifications used by work orders and checklists
+- Device Types: the machine categories offered when logging a device
+- Checklist Items: pre-repair and post-repair tasks, optionally scoped to device types
+- Canned Responses: reusable customer-facing or internal text
+- Statuses: ticket and work-order statuses and their display colors
+- Help Topics: categories for incoming tickets, including an optional default SLA
+- SLA Plans: response deadlines, overdue behavior, and the default SLA for business and residential clients
+- Tech Skills: skill tags for technicians
+- Custom Fields: additional ticket or work-order fields tied to a help topic or repair type
+- KB Categories: categories used by knowledge-base articles
+
+Common labor, parts, and services with their prices live in Products & Services, in the Back Office section of the sidebar, not in Settings.
 
 Do not add configuration simply because a tab exists. Start with the defaults and add fields, statuses, and categories when the existing workflow no longer describes the work accurately.
 
@@ -147,7 +155,7 @@ Do not add configuration simply because a tab exists. Start with the defaults an
 
 Go to Settings → Security.
 
-The main setting is Require MFA. When enabled, users who have not enrolled are prompted to configure an authenticator application at their next login.
+The main setting is Require two-factor authentication. When enabled, users who have not enrolled are prompted to configure an authenticator application at their next login.
 
 Administrators can reset a user's MFA enrollment if the device is lost or replaced.
 
@@ -171,7 +179,7 @@ Murphy's Bench prepares billing for review. Confirm the resulting drafts before 
 
 ## 9. Backups and Scheduled Jobs
 
-Go to Settings → Maintenance → Backups to configure the available backup destinations.
+Go to Settings → Maintenance and use the Backups card to configure the available backup destinations.
 
 Murphy's Bench can send backups to:
 
