@@ -1,6 +1,6 @@
 # Murphy's Bench Screenshots
 
-Every main screen in Murphy's Bench v0.18.0, grouped the way the sidebar groups them. The [README](../README.md#screenshots) has a shorter tour.
+A tour of Murphy's Bench v0.18.0, grouped the way the sidebar groups them. It covers most screens but not all: Email Templates, Users, Logs, Notifications, and the Work Orders, Estimates, Mileage and Prospects lists are not shown yet. The [README](../README.md#screenshots) has a shorter tour.
 
 All screenshots use demonstration data and dark mode. Light mode is a toggle at the bottom of the sidebar.
 
@@ -15,7 +15,7 @@ All screenshots use demonstration data and dark mode. Light mode is a toggle at 
 
 ## Board
 
-What needs attention now: past-SLA tickets, unanswered client replies, unsorted inbound email, escalations, work ready to bill, and unpaid invoices. Below that are the open tickets, the bench, and the unsorted inbound list.
+What needs attention now: past-SLA tickets, unanswered client replies, unsorted inbound email, and escalations. Administrators also see work ready to bill and unpaid invoices, as here. Below that are the open tickets, the bench, and the unsorted inbound list.
 
 ![Board](../screenshots/board.png)
 
@@ -85,7 +85,7 @@ Someone you are talking to who is not a customer yet.
 
 ### Contracts
 
-Service agreements with their billing cadence, status, and recurring amount. Billing run prepares the drafts for review.
+Service agreements with their billing cadence, status, and recurring amount. Billing run opens a worklist where you prepare draft invoices for the agreements that are due and review them before anything is sent.
 
 ![Contracts](../screenshots/contracts.png)
 
@@ -241,7 +241,7 @@ Roles: each permission with an effect outside Murphy's Bench is marked.
 
 ![Roles](../screenshots/settings-roles.png)
 
-The organization credentials vault. Every access is logged.
+The organization credentials vault. Revealing, editing, or deleting a password is logged.
 
 ![Credentials vault](../screenshots/settings-credentials.png)
 

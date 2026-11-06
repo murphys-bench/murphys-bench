@@ -4,7 +4,7 @@
 
 ![The Board](screenshots/board.png)
 
-<sub>[More screenshots below](#screenshots): tickets, work orders, clients, contracts, the Register, reports, and settings. Every screen is in [docs/screenshots.md](docs/screenshots.md).</sub>
+<sub>[More screenshots below](#screenshots): tickets, work orders, clients, contracts, the Register, reports, and settings. [docs/screenshots.md](docs/screenshots.md) has more.</sub>
 
 Murphy's Bench is the system I use to run my own IT service business.
 
@@ -112,7 +112,7 @@ It is probably not a good fit for a shop that needs:
 
 The sidebar is split into four rooms: **Work** (tickets, work orders, estimates, mileage, devices), **Desk** (clients, prospects, contracts), **Register**, and **Back Office** (catalog, knowledge base, queues, reports, settings). Each room has its own color.
 
-**Board:** what needs attention now. Past-SLA tickets, unanswered client replies, unsorted inbound email, escalations, work ready to bill, and unpaid invoices, then the open tickets and the bench.
+**Board:** what needs attention now. Past-SLA tickets, unanswered client replies, unsorted inbound email, and escalations, plus work ready to bill and unpaid invoices for administrators. Then the open tickets and the bench.
 
 ![The Board](screenshots/board.png)
 
@@ -136,7 +136,7 @@ The sidebar is split into four rooms: **Work** (tickets, work orders, estimates,
 
 ![Device detail](screenshots/device-detail.png)
 
-**Contracts:** service agreements and their recurring charges. An active agreement is what makes a customer a managed client.
+**Contracts:** service agreements and their recurring charges. Adding an active agreement makes a customer a managed client.
 
 ![Contract detail](screenshots/contract-detail.png)
 
@@ -156,7 +156,7 @@ The sidebar is split into four rooms: **Work** (tickets, work orders, estimates,
 
 ![Settings, Maintenance tab](screenshots/settings-maintenance.png)
 
-[docs/screenshots.md](docs/screenshots.md) has every screen, including each Settings tab.
+[docs/screenshots.md](docs/screenshots.md) has more screens, including most Settings tabs.
 
 _Screenshots use demonstration data and dark mode. Light mode is a toggle at the bottom of the sidebar._
 

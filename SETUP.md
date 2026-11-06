@@ -6,7 +6,7 @@ This guide covers the initial configuration needed before technicians begin usin
 
 Routine configuration is handled under Settings, available to administrators in the Back Office section of the sidebar. Its tabs are grouped into Company & Branding, Email, Tickets & Work Orders, Integrations, Access & Security, and System. You should not need Django admin for normal setup or operation.
 
-[docs/screenshots.md](docs/screenshots.md#settings) shows each Settings tab.
+[docs/screenshots.md](docs/screenshots.md#settings) shows most Settings tabs.
 
 ## Suggested Setup Order
 
@@ -44,11 +44,11 @@ Go to Settings → Colors.
 
 Upload a sidebar logo and a sign-in page logo, or leave them blank to show the company name as text.
 
-Set the accent color and the color for each room. The accent colors primary buttons and links everywhere and is the Work room's color. The Register, Desk, and Back Office rooms each have their own color on the page header, the sidebar group, and their primary buttons. A sample button under each field shows the color. Blank a field to go back to the default.
+Set the accent color and the color for each room. The accent colors primary buttons and links everywhere and is the Work room's color. The Register, Desk, and Back Office colors show as the stripe along the top of each page in that room and the dot beside its sidebar group. Blank a field to go back to the default.
 
 Ticket and work order status colors are set on the Statuses tab, and the customer email header color on the Email Templates tab.
 
-The separate Display tab sets the text size. It is stored in that browser only, not across the entire shop. Dark mode is per person, from the toggle at the bottom of the sidebar.
+The separate Display tab sets the text size. Text size and dark mode (the toggle at the bottom of the sidebar) are both saved in the browser, not on the account, so they apply to everyone who signs in from that browser and do not follow a person to another one.
 
 ## 3. Outbound Email
 
@@ -63,7 +63,7 @@ Enter the SMTP settings for the address Murphy's Bench will use to send mail:
 
 The password is stored encrypted.
 
-Use Send test email and confirm that the message arrives before relying on outbound email for customer communication. The test goes to your own account's email address, or to the configured sending address if your account has none.
+Save the settings first: Send test email uses the saved SMTP settings, not what is typed on the page. Confirm that the message arrives before relying on outbound email for customer communication. The test goes to your own account's email address; if your account has none, to the default sending address; and if there is none, to the SMTP username.
 
 Outbound email is used for functions such as:
 
@@ -74,7 +74,7 @@ Outbound email is used for functions such as:
 
 The Email Templates tab controls the wording of automated messages and shows the variables available to each template.
 
-Suppression patterns (for example `noreply@*`) and the Suppressed addresses list name senders that must never receive automated mail.
+Suppression patterns (for example `noreply@*`) and the Suppressed addresses list name addresses Murphy's Bench never emails. They apply to every message sent to a customer, including replies, templates, and documents sent by hand, not only automated mail.
 
 ## 4. Inbound Email
 
@@ -84,18 +84,22 @@ Configure the mailbox used by your support address. Murphy's Bench supports IMAP
 
 The mailbox is checked by a scheduled polling job. New messages become tickets. Replies containing a `[TKT-…]` token in the subject are attached to the existing ticket.
 
-Before using a live support mailbox, test the process with a separate mailbox and confirm that:
+**Murphy's Bench takes each message out of the queue as it downloads it, before it creates the ticket.**
+
+- POP3 deletes every message from the server as it is downloaded.
+- IMAP reads only unread messages and marks each one read as it is downloaded. With Delete messages after processing ticked, it deletes them instead.
+
+So a message that fails to import is not tried again. With POP3, or IMAP with delete ticked, it is gone from the mailbox. With IMAP's default it stays in the mailbox, marked read. Marking it unread does not bring it back either: its Message-ID is recorded on the first try, and a message already recorded is skipped as a duplicate.
+
+Settings → Logs, with the Inbound Email source, lists every message the poller handled and its result. Check it after the first runs, and deal with any failures by hand from the mailbox.
+
+Before using a live support mailbox, test with a separate mailbox and confirm that:
 
 - new messages create tickets
 - replies attach to the correct ticket
 - processed messages are not imported again
-- failed imports remain available for another attempt
 
-Choose the mailbox protocol and post-processing behavior that matches how you want mail retained.
-
-With POP3, deleting successfully processed messages from the server provides a simple one-time intake workflow, but Murphy's Bench then becomes the primary record of those messages.
-
-With IMAP, confirm how the mailbox and poller identify messages that have already been processed so the same message is not imported repeatedly.
+IMAP without delete keeps a copy of every message in the mailbox. POP3 and IMAP with delete make Murphy's Bench the only record of those messages.
 
 See `deploy/README.md` for the inbound-email timer.
 
@@ -219,18 +223,21 @@ Run it without `--confirm` first for a dry run. It removes operational records o
 — configuration, settings, roles, email templates, repair types and logins are all
 kept. Do not use `manage.py flush`, which also destroys configuration.
 
-Install with `--no-demo-data` if you would rather start empty. To add it to an
-install that started empty:
+Install with `--no-demo-data` if you would rather start empty. Decide at install
+time: adding demo data later is deliberately hard.
+
+`seed_demo_data` refuses on an install the installer has marked set up (every
+install, including one started with `--no-demo-data`), on a production-style
+install (`DEBUG=False`), and on any database that holds operational data of any
+kind, including clientless work such as counter sales, prospects and walk-in
+devices. So it can never mix demo records into real data. On an install that
+started empty, only `--force` gets past those guards:
 
 ```bash
-venv/bin/python manage.py seed_demo_data --new-install
+venv/bin/python manage.py seed_demo_data --force
 ```
 
-That command refuses to run once the installer has marked the system set up, and
-also whenever the database holds operational data of any kind — including
-clientless work such as counter sales, prospects and walk-in devices. So it can
-never mix demo records into real data. `--force` overrides every guard and should
-not be used on a system holding real client information.
+Use it only on a test system that holds no real client information.
 
 ### Walking the workflow by hand
 

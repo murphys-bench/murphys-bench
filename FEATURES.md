@@ -182,7 +182,7 @@ Billing and invoice data can also be exported to CSV.
 
 ## Queues, Assignments, and Escalation
 
-The Board, the first page after sign-in, shows what needs attention now: tickets past their SLA, client replies waiting on an answer, unsorted inbound email, work escalated to you, work ready to bill, and unpaid invoices. Below those are the open tickets and the work orders on the bench.
+The Board, the first page after sign-in, shows what needs attention now: tickets past their SLA, client replies waiting on an answer, unsorted inbound email, and work escalated to you. Administrators also see work ready to bill and unpaid invoices. Below those are the open tickets and the work orders on the bench.
 
 Technicians can see:
 
