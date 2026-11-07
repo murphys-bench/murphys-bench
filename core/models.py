@@ -3311,9 +3311,12 @@ class InboundEmailLog(models.Model):
         ('refused', 'Refused (blocked sender or suppressed client)'),
         ('failed', 'Failed, Will Retry'),
         ('gave_up', 'Gave Up, System Alert Raised'),
-        # Before Nov 2026 every failure, and every refusal, was 'error'. Those
-        # rows predate retries and stay final.
+        # Before Nov 2026 every failure, and every refusal, was 'error', and a run
+        # that died left 'processing' (migration 0122 relabels those
+        # 'needs_review'). Either can hide a ticket the old code half-finished,
+        # so if such an email arrives again it goes to a person, not a retry.
         ('error', 'Processing Error'),
+        ('needs_review', 'Needs Review (from before this update)'),
         ('processing', 'Processing (claimed)'),
     ]
 
@@ -3329,9 +3332,11 @@ class InboundEmailLog(models.Model):
     # Attempts started on this message, the first included.
     attempts = models.PositiveSmallIntegerField(default=1)
     # MB's own copy of the raw message while it is waiting to be retried.
-    # Cleared once the message is ticketed or handed to a System Alert ticket.
     raw_copy = models.FileField(upload_to='inbound_retry/', storage=private_attachment_storage,
                                 blank=True, max_length=255)
+    # Once the message is handled, the copy is kept until this time (so a backup
+    # taken meanwhile still finds it), then deleted.
+    copy_expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -80,7 +80,11 @@ The mailbox is checked by a scheduled polling job. New messages become tickets. 
 
 **No message leaves the mailbox until Murphy's Bench has it.** A message is deleted (POP3, or IMAP with Delete messages after processing ticked) or marked read (IMAP's default) only once its ticket or reply is saved, it was refused on purpose (a blocked sender, or a client set to suppress email), or Murphy's Bench has saved its own copy because processing failed.
 
-A message that fails is tried again from that copy on the next runs, up to 3 times in all. If it still fails, Murphy's Bench opens a ticket under the System Alerts client with the original email attached as `original-email.eml`, and notifies admins on the bell. Open the attachment and create the ticket by hand.
+A message that fails is tried again from that copy on the next runs, up to 3 times in all. If it still fails, Murphy's Bench opens a ticket under the System Alerts client with the original email attached as `original-email.eml`, and notifies admins on the bell. Open the attachment and create the ticket by hand. Once a message is ticketed or handed to an alert, its saved copy is deleted a day later.
+
+With POP3, Murphy's Bench ends the session normally only when it holds every message it downloaded; otherwise it drops the connection, so servers such as Gmail offer those messages again. With IMAP and Delete messages after processing ticked, it removes only the messages it handled. That needs a server with UIDPLUS; on one without it, handled messages are marked read and flagged deleted, and nothing is purged.
+
+After updating from a version before this change, a message the old version recorded as failed or unfinished is not imported automatically if it arrives again. It opens a System Alerts ticket asking you to check whether a ticket already exists.
 
 Settings → Logs, with the Inbound Email source, lists every message the poller handled, its result, and the reason for any failure or refusal.
 

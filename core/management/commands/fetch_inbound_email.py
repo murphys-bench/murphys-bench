@@ -14,13 +14,19 @@ No customer email may vanish. The rules that guarantee it:
   2. Each attempt is all-or-nothing (one transaction), so a failure halfway
      leaves no half-made ticket behind.
   3. A failed message is retried from MB's own copy, never from the mailbox:
-     some servers (Gmail POP) never offer a downloaded message again.
+     some servers (Gmail POP) never offer a downloaded message again. A copy
+     that cannot be read is kept and reported, never given up on.
   4. After MAX_ATTEMPTS failures MB gives up: a System Alert ticket carries the
      original message as an .eml attachment and rings the admin bell.
+  5. POP3 ends with QUIT only when MB holds every message it retrieved (Gmail
+     marks RETR'd mail as taken at QUIT); IMAP expunges only the UIDs it handled.
+  6. A message recorded before these rules existed ('needs_review', or an old
+     'error' that was not a refusal) goes to a person if it arrives again.
 """
 
 import contextvars
 import email
+from datetime import timedelta
 import fcntl
 import hashlib
 import imaplib
@@ -65,12 +71,16 @@ TICKET_RE = re.compile(r'\[?(TKT-[\d-]+)\]?', re.IGNORECASE)
 # How many times one message is tried before MB gives up and raises an alert.
 MAX_ATTEMPTS = 3
 
+# How long MB keeps its saved copy after the message is ticketed or handed to a
+# System Alert. Deleting it at once let a backup record a pending retry (database
+# snapshot) and then miss its file (copied a moment later).
+COPY_GRACE = timedelta(hours=24)
+
 # Statuses after which a message is finished with: it is never tried again, and
-# if it shows up in the mailbox again it is only removed. 'error' is the
-# pre-Nov-2026 status for every failure; those rows predate retries and stay final.
+# if it shows up in the mailbox again it is only removed.
 FINAL_STATUSES = frozenset({
     'new_ticket', 'reply', 'reply_flagged', 'new_ticket_linked',
-    'refused', 'gave_up', 'error', 'duplicate',
+    'refused', 'gave_up', 'duplicate',
 })
 SUCCESS_STATUSES = frozenset({'new_ticket', 'reply', 'reply_flagged', 'new_ticket_linked'})
 
@@ -292,10 +302,13 @@ def _save_attachments(obj, msg, settings):
             mime_type=mime_type,
             size_bytes=len(data),
         )
-        a.file.save(filename, ContentFile(data), save=True)
+        # File first, then record it, THEN the row: if the row save fails, the
+        # caller still knows which file to delete.
+        a.file.save(filename, ContentFile(data), save=False)
         written = _attempt_files.get()
         if written is not None:
             written.append((a.file.storage, a.file.name))
+        a.save()
 
 
 def _resolve_client_contact(from_email, from_name, settings):
@@ -586,10 +599,13 @@ def _identify(raw_bytes):
 # Both expose the same three steps, so the intake loop never needs to know which
 # protocol it is talking to: messages() yields (ref, raw_bytes) without changing
 # anything on the server, done(ref) takes one message out of the queue, and
-# close() ends the session.
+# close() ends the session. With dry_run, nothing on the server changes at all.
+
+_UID_RE = re.compile(rb'\bUID\s+(\d+)', re.IGNORECASE)
+
 
 class _ImapMailbox:
-    def __init__(self, site):
+    def __init__(self, site, dry_run=False):
         if site.inbound_ssl:
             self.conn = imaplib.IMAP4_SSL(site.inbound_host, site.inbound_port)
         else:
@@ -600,11 +616,22 @@ class _ImapMailbox:
         if typ != 'OK':
             raise imaplib.IMAP4.error(f'Could not open IMAP folder {self.folder!r}')
         self.delete = site.inbound_delete_after_fetch
-        self._deleted_any = False
+        # Capabilities can change after login, so ask now rather than trusting
+        # the greeting.
+        typ, data = self.conn.capability()
+        caps = data[0].upper().split() if typ == 'OK' and data and data[0] else []
+        # UID EXPUNGE (RFC 4315) removes only the messages we name. A plain
+        # EXPUNGE removes EVERY message in the folder flagged \Deleted, including
+        # ones another mail client flagged and MB never handled.
+        self.uidplus = b'UIDPLUS' in caps
+        self._to_expunge = []
+        if self.delete and not self.uidplus:
+            logger.warning('IMAP server has no UIDPLUS: handled messages are marked read and '
+                           'flagged deleted, but MB will not purge the folder.')
 
     def messages(self):
-        # UIDs, not sequence numbers: we now hold the session open while tickets
-        # are made, and a person deleting mail in webmail meanwhile would shift
+        # UIDs, not sequence numbers: we hold the session open while tickets are
+        # made, and a person deleting mail in webmail meanwhile would shift
         # sequence numbers under us.
         typ, data = self.conn.uid('SEARCH', None, 'UNSEEN')
         uids = data[0].split() if typ == 'OK' and data and data[0] else []
@@ -612,52 +639,95 @@ class _ImapMailbox:
             # BODY.PEEK[]: a plain RFC822 / BODY[] fetch marks the message read
             # on the server, which would take it out of the queue before MB has it.
             typ, msg_data = self.conn.uid('FETCH', uid, '(BODY.PEEK[])')
-            raw = next((part[1] for part in (msg_data or []) if isinstance(part, tuple)), None)
+            raw = None
+            parts = list(msg_data or [])
+            for n, part in enumerate(parts):
+                # Only the literal whose response names THIS uid and carries the
+                # whole body counts; a server may also send unrelated FETCH data.
+                # The UID item may come before the literal or after it (in the
+                # bytes element that closes the response).
+                if not (isinstance(part, tuple) and len(part) == 2
+                        and b'BODY[]' in part[0].upper()):
+                    continue
+                tail = parts[n + 1] if n + 1 < len(parts) and isinstance(parts[n + 1], bytes) else b''
+                m = _UID_RE.search(part[0]) or _UID_RE.search(tail)
+                if m and m.group(1) == uid:
+                    raw = part[1]
+                    break
             if typ != 'OK' or raw is None:
-                logger.warning('IMAP FETCH of UID %s returned nothing usable; left in the mailbox.', uid)
+                logger.warning('IMAP FETCH of UID %s did not return that message; left in the mailbox.',
+                               uid.decode(errors='replace'))
                 continue
             yield uid, raw
 
     def done(self, uid):
-        flag = '(\\Deleted)' if self.delete else '(\\Seen)'
+        if not self.delete:
+            flag = '(\\Seen)'
+        elif self.uidplus:
+            flag = '(\\Deleted)'
+        else:
+            flag = '(\\Seen \\Deleted)'
         typ, _ = self.conn.uid('STORE', uid, '+FLAGS', flag)
         if typ != 'OK':
             raise imaplib.IMAP4.error(f'STORE {flag} on UID {uid} failed')
-        if self.delete:
-            self._deleted_any = True
+        if self.delete and self.uidplus:
+            self._to_expunge.append(uid)
 
     def close(self):
         try:
-            if self._deleted_any:
-                self.conn.expunge()
+            if self._to_expunge:
+                typ, _ = self.conn.uid('EXPUNGE', b','.join(self._to_expunge))
+                if typ != 'OK':
+                    # Still flagged \Deleted but unread, so the next run fetches
+                    # them, recognises them and tries the expunge again.
+                    logger.warning('IMAP UID EXPUNGE failed; will retry next run.')
         finally:
             self.conn.logout()
 
 
 class _Pop3Mailbox:
-    """POP3 marks deletions during the session and applies them at QUIT, so a
-    session that dies early deletes nothing; those messages are fetched again
-    and recognised by their log row."""
+    """POP3 applies DELE only at QUIT, and Gmail (normal mode) stops offering
+    every message RETR'd in a session that ends with QUIT, DELE or not. So QUIT
+    is sent only when MB holds every message it retrieved; otherwise the session
+    is dropped without it, and the server offers them all again next run (the
+    held ones are then recognised from their log rows and removed)."""
 
-    def __init__(self, site):
+    def __init__(self, site, dry_run=False):
         if site.inbound_ssl:
             self.conn = poplib.POP3_SSL(site.inbound_host, site.inbound_port)
         else:
             self.conn = poplib.POP3(site.inbound_host, site.inbound_port)
         self.conn.user(site.inbound_username)
         self.conn.pass_(site.inbound_password)
+        self.dry_run = dry_run
+        self._retrieved = set()
+        self._held = set()
 
     def messages(self):
         count, _ = self.conn.stat()
         for i in range(1, count + 1):
-            _, lines, _ = self.conn.retr(i)
+            if self.dry_run:
+                # Headers only (TOP), and the session is never QUIT: a dry run
+                # must not take anything out of the queue.
+                _, lines, _ = self.conn.top(i, 0)
+            else:
+                self._retrieved.add(i)   # before RETR: a half-read counts too
+                _, lines, _ = self.conn.retr(i)
             yield i, b'\r\n'.join(lines)
 
     def done(self, i):
         self.conn.dele(i)
+        self._held.add(i)
 
     def close(self):
-        self.conn.quit()
+        if self.dry_run or self._retrieved - self._held:
+            if not self.dry_run:
+                logger.warning('Ending the POP3 session without QUIT: %d retrieved message(s) '
+                               'are not yet safe in MB, so the server must offer them again.',
+                               len(self._retrieved - self._held))
+            self.conn.close()
+        else:
+            self.conn.quit()
 
 
 def _delete_files(files):
@@ -720,12 +790,13 @@ class Command(BaseCommand):
             self.counts = {
                 'new_ticket': 0, 'reply': 0, 'reply_flagged': 0, 'new_ticket_linked': 0,
                 'duplicate': 0, 'refused': 0, 'failed': 0, 'gave_up': 0,
+                'copy_unreadable': 0,
             }
             self.touched = set()   # log rows already handled in this run
             self.site = site
 
             try:
-                mailbox = self._open_mailbox(site)
+                mailbox = self._open_mailbox(site, dry_run)
             except Exception as exc:
                 logger.exception('Inbound mailbox connection failed.')
                 self.stderr.write(self.style.ERROR(f'Connection error: {exc}'))
@@ -751,6 +822,10 @@ class Command(BaseCommand):
             # mailbox could not be reached.
             if not dry_run:
                 self._retry_saved()
+                try:
+                    self._purge_expired_copies()
+                except Exception:
+                    logger.exception('Purging expired inbound copies failed; will retry next run.')
 
             if not dry_run and verbosity >= 1:
                 c = self.counts
@@ -765,10 +840,10 @@ class Command(BaseCommand):
             fcntl.flock(lock_file, fcntl.LOCK_UN)
             lock_file.close()
 
-    def _open_mailbox(self, site):
+    def _open_mailbox(self, site, dry_run=False):
         if site.inbound_protocol == 'pop3':
-            return _Pop3Mailbox(site)
-        return _ImapMailbox(site)
+            return _Pop3Mailbox(site, dry_run)
+        return _ImapMailbox(site, dry_run)
 
     def _say(self, status, detail):
         if self.verbosity >= 1:
@@ -814,14 +889,24 @@ class Command(BaseCommand):
             log = InboundEmailLog.objects.filter(message_id=key).first()
             if log is None:
                 return False
-            if log.status in FINAL_STATUSES or log.status == 'failed' or log.raw_copy:
-                # Finished, or MB already holds its own copy and retries from that.
-                # It is back in the mailbox only because the last removal did not
-                # take effect, so remove it now.
-                self.counts['duplicate'] += 1
-                if self.verbosity >= 1:
-                    self.stdout.write(self.style.WARNING(f'  [duplicate] already processed {key}'))
-                return True
+            if log.status == 'needs_review' or (log.status == 'error' and not _legacy_refusal(log)):
+                # Recorded by MB before retries existed. That version could commit a
+                # ticket and then fail to finish its log row, so whether a ticket
+                # exists is unknown: a person decides, never an automatic retry.
+                if log.pk in self.touched:
+                    return False
+                self.touched.add(log.pk)
+                return self._give_up(log, raw, legacy=True)
+            if log.status in FINAL_STATUSES or log.status == 'error':
+                # Finished. It is back in the mailbox only because the last removal
+                # did not take effect, so remove it now.
+                return self._duplicate(key)
+            if log.status == 'failed' or log.raw_copy:
+                # MB retries this one from its own copy. Before letting the mailbox
+                # copy go, make sure MB's copy is really there.
+                if not self._ensure_copy(log, raw):
+                    return False
+                return self._duplicate(key)
             # 'processing' with no saved copy: a run died mid-attempt (the run lock
             # rules out a live one), or saving the copy failed. Take it again,
             # but not twice in one run (the same message listed twice).
@@ -829,7 +914,10 @@ class Command(BaseCommand):
                 return False
             self.touched.add(log.pk)
             if log.attempts >= MAX_ATTEMPTS:
-                return self._give_up(log, raw)
+                if not self._ensure_copy(log, raw):
+                    return False
+                self._give_up(log, raw)
+                return True
             taken = InboundEmailLog.objects.filter(
                 pk=log.pk, status='processing', attempts=log.attempts,
             ).update(attempts=F('attempts') + 1)
@@ -838,6 +926,37 @@ class Command(BaseCommand):
             log.refresh_from_db()
         self.touched.add(log.pk)
         return self._attempt(log, raw)
+
+    def _duplicate(self, key):
+        self.counts['duplicate'] += 1
+        if self.verbosity >= 1:
+            self.stdout.write(self.style.WARNING(f'  [duplicate] already processed {key}'))
+        return True
+
+    def _ensure_copy(self, log, raw):
+        """Make sure MB's saved copy of `raw` exists on disk, writing a fresh one
+        if the row has none or its file is gone. Returns False if it cannot."""
+        try:
+            if log.raw_copy and log.raw_copy.storage.exists(log.raw_copy.name):
+                return True
+        except Exception:
+            logger.exception('Could not check the saved copy of inbound message %s.', log.message_id)
+            return False
+        saved = None
+        try:
+            log.raw_copy.save(f'{log.pk}.eml', ContentFile(raw), save=False)
+            saved = (log.raw_copy.storage, log.raw_copy.name)
+            log.save(update_fields=['raw_copy'])
+        except Exception:
+            logger.exception('Could not save a copy of inbound message %s; leaving it in the mailbox.',
+                             log.message_id)
+            if saved:
+                _delete_files([saved])
+            log.refresh_from_db()
+            return False
+        if self.verbosity >= 1:
+            self.stdout.write(self.style.WARNING(f'  [copy restored] {log.message_id}'))
+        return True
 
     # ── Pass 2: retries from saved copies ─────────────────────────────────────
 
@@ -849,14 +968,17 @@ class Command(BaseCommand):
                    .order_by('created_at'))
         for log in pending:
             self.touched.add(log.pk)
-            raw = None
             try:
                 with log.raw_copy.open('rb') as fh:
                     raw = fh.read()
-            except Exception:
-                logger.exception('Saved copy of inbound message %s could not be read.', log.message_id)
-            if raw is None or log.attempts >= MAX_ATTEMPTS:
-                self._give_up(log, raw)
+            except Exception as exc:
+                # Never treat this as a failed attempt: the copy may be the only
+                # one left. Keep the row and the file, tell the shop, try again
+                # next run.
+                self._copy_unreadable(log, exc)
+                continue
+            if log.attempts >= MAX_ATTEMPTS:
+                self._give_up(log, raw)   # attempts used up; only the give-up is left
                 continue
             taken = InboundEmailLog.objects.filter(
                 pk=log.pk, status=log.status, attempts=log.attempts,
@@ -866,6 +988,43 @@ class Command(BaseCommand):
             log.refresh_from_db()
             self._attempt(log, raw)
 
+    def _copy_unreadable(self, log, exc):
+        from core.system_alerts import create_system_alert
+        logger.error('Saved copy of inbound message %s could not be read: %s: %s',
+                     log.message_id, type(exc).__name__, exc)
+        self.counts['copy_unreadable'] += 1
+        body = (
+            "Murphy's Bench is holding an inbound email that did not become a ticket, "
+            'and could not read its saved copy of it.\n\n'
+            f'From:       {log.from_email or "(unknown)"}\n'
+            f'Subject:    {log.subject or "(no subject)"}\n'
+            f'Message-ID: {log.message_id}\n'
+            f'Saved copy: {log.raw_copy.name}\n'
+            f'Error:      {type(exc).__name__}: {exc}\n\n'
+            'MB keeps the record and tries again on every run. If the file is gone for good, '
+            'find the email in the mailbox: if it is offered to MB again, MB saves a fresh copy '
+            'and carries on. Otherwise create the ticket by hand.'
+        )
+        try:
+            # One alert per email per week, not one per run.
+            create_system_alert(f'Inbound email copy could not be read (log #{log.pk})', body,
+                                dedupe_minutes=7 * 24 * 60)
+        except Exception:
+            logger.exception('Could not raise the unreadable-copy alert for %s.', log.message_id)
+
+    # ── Old saved copies ──────────────────────────────────────────────────────
+
+    def _purge_expired_copies(self):
+        expired = (InboundEmailLog.objects
+                   .filter(copy_expires_at__lte=timezone.now())
+                   .exclude(raw_copy='').exclude(raw_copy__isnull=True))
+        for log in expired:
+            name, storage = log.raw_copy.name, log.raw_copy.storage
+            # Row first: a file left behind by a failed delete is harmless; a row
+            # pointing at a deleted file is not.
+            InboundEmailLog.objects.filter(pk=log.pk).update(raw_copy='', copy_expires_at=None)
+            _delete_files([(storage, name)])
+
     # ── One attempt, and what happens after it ────────────────────────────────
 
     def _attempt(self, log, raw):
@@ -873,13 +1032,16 @@ class Command(BaseCommand):
         commit together or not at all. Returns True when MB holds the message."""
         written = []
         token = _attempt_files.set(written)
-        old_copy = (log.raw_copy.storage, log.raw_copy.name) if log.raw_copy else None
         try:
             with transaction.atomic():
                 status, detail, ticket = _process_message(raw, self.site, self.verbosity)
                 log.status, log.detail, log.ticket = status, detail, ticket
-                log.raw_copy = ''
-                log.save(update_fields=['status', 'detail', 'ticket', 'raw_copy'])
+                fields = ['status', 'detail', 'ticket']
+                if log.raw_copy:
+                    # Kept a while longer for backups; see COPY_GRACE.
+                    log.copy_expires_at = timezone.now() + COPY_GRACE
+                    fields.append('copy_expires_at')
+                log.save(update_fields=fields)
         except Exception as exc:
             logger.exception('Inbound message %s failed on attempt %d.', log.message_id, log.attempts)
             _delete_files(written)   # rolled back: its attachment files must go too
@@ -888,8 +1050,6 @@ class Command(BaseCommand):
         finally:
             _attempt_files.reset(token)
 
-        if old_copy:
-            _delete_files([old_copy])   # ticketed: MB's spare copy is no longer needed
         self.counts[status] = self.counts.get(status, 0) + 1
         self._say(status, detail)
 
@@ -927,58 +1087,81 @@ class Command(BaseCommand):
             self._give_up(log, raw)
         return True
 
-    def _give_up(self, log, raw):
-        """Out of attempts: raise a System Alert ticket that carries the original
-        email, ring the admin bell, and mark the row given up. All in one
-        transaction; if any of it fails, the row keeps its copy and the next run
-        tries the give-up again. Returns True when MB holds the message."""
+    def _give_up(self, log, raw, legacy=False):
+        """Raise a System Alert ticket that carries the original email, ring the
+        admin bell, and mark the row given up, all in one transaction.
+
+        Normally: out of attempts. With `legacy`: a message recorded by MB before
+        retries existed came back, and whether it already made a ticket is
+        unknown. If any of it fails, nothing is recorded; the next run tries the
+        give-up again (from MB's copy, or from the mailbox, which still has it).
+        Returns True when the alert was raised."""
         from core.system_alerts import create_system_alert
 
-        attached = raw is not None
-        body = (
-            f"Murphy's Bench tried {log.attempts} times to turn an inbound email into a ticket and gave up.\n\n"
+        facts = (
             f'From:       {log.from_email or "(unknown)"}\n'
             f'Subject:    {log.subject or "(no subject)"}\n'
             f'Message-ID: {log.message_id}\n'
             f'First seen: {timezone.localtime(log.created_at):%Y-%m-%d %H:%M}\n'
-            f'Last error: {log.detail or "(none recorded)"}\n\n'
-            + ('The original email is attached as original-email.eml. Open it and create the ticket by hand.'
-               if attached else
-               "MB's saved copy of this email could not be read, so it is not attached. "
-               'Look for the email in the mailbox.')
         )
+        if legacy:
+            subject = f'Inbound email needs a manual check (log #{log.pk})'
+            body = (
+                'This email arrived again. An earlier version of Murphy\'s Bench recorded it as '
+                f'"{log.get_status_display()}" and may or may not have made a ticket from it.\n\n'
+                + facts + f'Old detail: {log.detail or "(none recorded)"}\n\n'
+                'Search tickets for this sender and subject first. If there is no ticket, open the '
+                'attached original-email.eml and create one by hand.'
+            )
+        else:
+            subject = f'Inbound email could not become a ticket (log #{log.pk})'
+            body = (
+                f"Murphy's Bench tried {log.attempts} times to turn an inbound email into a ticket and gave up.\n\n"
+                + facts + f'Last error: {log.detail or "(none recorded)"}\n\n'
+                'The original email is attached as original-email.eml. Open it and create the ticket by hand.'
+            )
         written = []
-        old_copy = (log.raw_copy.storage, log.raw_copy.name) if log.raw_copy else None
         try:
             with transaction.atomic():
                 # The log id keeps each email's alert its own ticket: the alert
                 # helper merges same-subject alerts within an hour.
-                alert = create_system_alert(
-                    f'Inbound email could not become a ticket (log #{log.pk})', body)
-                if attached:
-                    a = Attachment(
-                        content_type=ContentType.objects.get_for_model(alert),
-                        object_id=alert.pk,
-                        original_filename='original-email.eml',
-                        mime_type='message/rfc822',
-                        size_bytes=len(raw),
-                    )
-                    a.file.save('original-email.eml', ContentFile(raw), save=True)
-                    written.append((a.file.storage, a.file.name))
+                alert = create_system_alert(subject, body)
+                a = Attachment(
+                    content_type=ContentType.objects.get_for_model(alert),
+                    object_id=alert.pk,
+                    original_filename='original-email.eml',
+                    mime_type='message/rfc822',
+                    size_bytes=len(raw),
+                )
+                a.file.save('original-email.eml', ContentFile(raw), save=False)
+                written.append((a.file.storage, a.file.name))
+                a.save()
+                if legacy:
+                    detail = (f'From before this update (was "{log.get_status_display()}"); '
+                              f'sent for a manual check in System Alert {alert.ticket_number}. '
+                              f'{log.detail}')
+                else:
+                    detail = (f'Gave up after {log.attempts} attempts; System Alert '
+                              f'{alert.ticket_number} raised. {log.detail}')
                 log.status = 'gave_up'
                 log.ticket = alert
-                log.raw_copy = ''
-                log.detail = (f'Gave up after {log.attempts} attempts; System Alert '
-                              f'{alert.ticket_number} raised. {log.detail}')[:5000]
-                log.save(update_fields=['status', 'ticket', 'raw_copy', 'detail'])
+                log.detail = detail[:5000]
+                fields = ['status', 'ticket', 'detail']
+                if log.raw_copy:
+                    log.copy_expires_at = timezone.now() + COPY_GRACE
+                    fields.append('copy_expires_at')
+                log.save(update_fields=fields)
         except Exception:
-            logger.exception('Could not raise the give-up alert for inbound message %s.',
-                             log.message_id)
+            logger.exception('Could not raise the alert for inbound message %s.', log.message_id)
             _delete_files(written)
-            # If MB still holds a copy, the next run retries the give-up from it.
-            return bool(old_copy)
-        if old_copy:
-            _delete_files([old_copy])   # the alert ticket now carries the email
+            log.refresh_from_db()
+            return False
         self.counts['gave_up'] += 1
         self._say('gave_up', log.detail)
         return True
+
+
+def _legacy_refusal(log):
+    """Pre-retry 'error' rows that were really deliberate refusals stay final."""
+    d = log.detail or ''
+    return d.startswith('Blocked sender:') or 'has suppress_emails' in d
