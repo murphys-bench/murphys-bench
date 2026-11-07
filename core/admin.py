@@ -435,10 +435,11 @@ class EmailSendLogAdmin(admin.ModelAdmin):
 
 @admin.register(InboundEmailLog)
 class InboundEmailLogAdmin(admin.ModelAdmin):
-    list_display = ['created_at', 'status', 'from_email', 'subject', 'ticket', 'detail']
+    list_display = ['created_at', 'status', 'attempts', 'from_email', 'subject', 'ticket', 'detail']
     list_filter = ['status', 'created_at']
     search_fields = ['from_email', 'subject', 'ticket__ticket_number', 'message_id']
-    readonly_fields = ['message_id', 'from_email', 'subject', 'ticket', 'status', 'detail', 'created_at']
+    readonly_fields = ['message_id', 'from_email', 'subject', 'ticket', 'status', 'attempts',
+                       'detail', 'created_at']
 
     def has_add_permission(self, request):
         return False

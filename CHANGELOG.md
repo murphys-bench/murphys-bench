@@ -8,6 +8,12 @@ New work accumulates under **Unreleased** as it lands on `main` (each fix its ow
 verified on mb-test). When a batch is ready for production, it's cut as one version tag —
 the Unreleased entries move under that version and prod gets a single update.
 
+## Unreleased
+
+### Fixed
+
+- An inbound email that fails to become a ticket is no longer lost. It leaves the mailbox only once MB has the ticket or its own copy, is retried up to 3 times, and then opens a System Alert ticket with the original email attached. Settings > Logs shows why each email failed.
+
 ## v0.18.0 — 2026-10-25
 
 Invoice Ninja release: MB never sends a payment or invoice twice, holds anything it cannot confirm for a person to check, and rounds line totals the way Invoice Ninja does. Before updating: if your Invoice Ninja uses invoice custom field 4, tell us first.

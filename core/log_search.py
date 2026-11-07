@@ -78,11 +78,14 @@ def _email_in_qs():
 
 
 def _email_in_row(e):
+    # The detail says WHY (which ticket, which refusal, which error); a failed
+    # or given-up row is unreadable without it.
+    bits = [b for b in (e.get_status_display(), e.detail) if b]
     return LogRow(
         when=e.created_at, source='email_in', source_label='Inbound Email',
         actor=e.from_email or '—',
         summary=e.subject or '(no subject)',
-        detail=e.get_status_display(),
+        detail=' · '.join(bits),
         url=reverse('core:ticket_detail', args=[e.ticket_id]) if e.ticket_id else '',
     )
 

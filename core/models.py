@@ -3304,18 +3304,34 @@ class InboundEmailLog(models.Model):
 
     STATUS_CHOICES = [
         ('new_ticket', 'Created New Ticket'),
+        ('new_ticket_linked', 'Created New Ticket (linked to a closed one)'),
         ('reply', 'Added Reply to Ticket'),
+        ('reply_flagged', 'Reply Added to Closed Ticket (flagged)'),
         ('duplicate', 'Duplicate — Already Processed'),
+        ('refused', 'Refused (blocked sender or suppressed client)'),
+        ('failed', 'Failed, Will Retry'),
+        ('gave_up', 'Gave Up, System Alert Raised'),
+        # Before Nov 2026 every failure, and every refusal, was 'error'. Those
+        # rows predate retries and stay final.
         ('error', 'Processing Error'),
         ('processing', 'Processing (claimed)'),
     ]
 
-    message_id = models.CharField(max_length=500, blank=True, db_index=True, help_text='Email Message-ID header.')
+    message_id = models.CharField(
+        max_length=500, blank=True, db_index=True,
+        help_text='Email Message-ID header; for a message without one, '
+                  '"no-message-id:sha256:" plus a hash of the raw message.')
     from_email = models.CharField(max_length=255, blank=True)
     subject = models.CharField(max_length=500, blank=True)
     ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='inbound_log')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES)
     detail = models.TextField(blank=True)
+    # Attempts started on this message, the first included.
+    attempts = models.PositiveSmallIntegerField(default=1)
+    # MB's own copy of the raw message while it is waiting to be retried.
+    # Cleared once the message is ticketed or handed to a System Alert ticket.
+    raw_copy = models.FileField(upload_to='inbound_retry/', storage=private_attachment_storage,
+                                blank=True, max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

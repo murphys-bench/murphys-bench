@@ -78,18 +78,19 @@ Configure the mailbox used by your support address. Murphy's Bench supports IMAP
 
 The mailbox is checked by a scheduled polling job. New messages become tickets. Replies containing a `[TKT-…]` token in the subject are attached to the existing ticket.
 
-Before using a live support mailbox, test the process with a separate mailbox and confirm that:
+**No message leaves the mailbox until Murphy's Bench has it.** A message is deleted (POP3, or IMAP with Delete messages after processing ticked) or marked read (IMAP's default) only once its ticket or reply is saved, it was refused on purpose (a blocked sender, or a client set to suppress email), or Murphy's Bench has saved its own copy because processing failed.
+
+A message that fails is tried again from that copy on the next runs, up to 3 times in all. If it still fails, Murphy's Bench opens a ticket under the System Alerts client with the original email attached as `original-email.eml`, and notifies admins on the bell. Open the attachment and create the ticket by hand.
+
+Settings → Logs, with the Inbound Email source, lists every message the poller handled, its result, and the reason for any failure or refusal.
+
+Before using a live support mailbox, test with a separate mailbox and confirm that:
 
 - new messages create tickets
 - replies attach to the correct ticket
 - processed messages are not imported again
-- failed imports remain available for another attempt
 
-Choose the mailbox protocol and post-processing behavior that matches how you want mail retained.
-
-With POP3, deleting successfully processed messages from the server provides a simple one-time intake workflow, but Murphy's Bench then becomes the primary record of those messages.
-
-With IMAP, confirm how the mailbox and poller identify messages that have already been processed so the same message is not imported repeatedly.
+IMAP without delete keeps every message in the mailbox, marked read. POP3 and IMAP with delete make Murphy's Bench the only record of those messages.
 
 See `deploy/README.md` for the inbound-email timer.
 

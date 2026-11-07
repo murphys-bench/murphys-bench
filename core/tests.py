@@ -1281,7 +1281,6 @@ def test_same_email_fetched_twice_creates_one_ticket(monkeypatch):
     """Regression for the duplicate-ticket bug: two fetch passes over the SAME
     message (overlapping runners or a re-fetch) must yield exactly ONE ticket.
     The atomic Message-ID claim, backed by the unique constraint, guarantees it."""
-    from core.management.commands.fetch_inbound_email import Command
     from core.models import InboundEmailLog
     from django.core.management import call_command
     site = SiteSettings.get()
@@ -1293,7 +1292,7 @@ def test_same_email_fetched_twice_creates_one_ticket(monkeypatch):
 
     raw = _raw_new_email(message_id='<race-1@davis.example>')
     # Same message returned twice in one batch == the worst case of a race.
-    monkeypatch.setattr(Command, '_fetch_pop3', lambda self, s, d, v: [raw, raw])
+    _pop3_serves(monkeypatch, [raw, raw])
 
     before = Ticket.objects.count()
     call_command('fetch_inbound_email', verbosity=0)
@@ -1301,6 +1300,7 @@ def test_same_email_fetched_twice_creates_one_ticket(monkeypatch):
     assert Ticket.objects.count() == before + 1, 'The same email must create only one ticket.'
     assert InboundEmailLog.objects.filter(
         message_id='<race-1@davis.example>').count() == 1
+    assert _FakePOP3.mailbox == [], 'both listings are removed: MB holds the email'
 
 @pytest.mark.django_db
 def test_returning_sender_reuses_existing_contact(client_obj):
@@ -1422,7 +1422,7 @@ def test_blocked_sender_creates_no_ticket():
 
     status, detail, ticket = _process_message(_raw_new_email(), site, verbosity=0)
 
-    assert status == 'error', f'Expected error (blocked), got {status}: {detail}'
+    assert status == 'refused', f'Expected refused (blocked), got {status}: {detail}'
     assert ticket is None
     assert Ticket.objects.count() == before
 
@@ -10825,7 +10825,6 @@ def test_inbound_fetch_skips_when_another_run_holds_the_lock(monkeypatch, settin
     the suite failed spuriously.
     """
     import fcntl
-    from core.management.commands.fetch_inbound_email import Command
     from django.core.management import call_command
 
     site = SiteSettings.get()
@@ -10836,7 +10835,7 @@ def test_inbound_fetch_skips_when_another_run_holds_the_lock(monkeypatch, settin
     site.save()
 
     raw = _raw_new_email(message_id='<locked-1@davis.example>')
-    monkeypatch.setattr(Command, '_fetch_pop3', lambda self, s, d, v: [raw])
+    _pop3_serves(monkeypatch, [raw])
 
     before = Ticket.objects.count()
     holder = open(settings.INBOUND_FETCH_LOCK_PATH, 'w')
@@ -16679,7 +16678,6 @@ def test_inbound_email_fires_internal_notifications(monkeypatch, admin_user, _ca
     """A new emailed ticket tells the new-ticket audience; a customer reply on
     an assigned ticket tells that tech. The whole point: Mike is not in the app
     when work arrives."""
-    from core.management.commands.fetch_inbound_email import Command
     from django.core.management import call_command
     site = _email_on(notify_new_ticket=True)
     site.inbound_email_enabled = True
@@ -16689,8 +16687,7 @@ def test_inbound_email_fires_internal_notifications(monkeypatch, admin_user, _ca
     site.save()
     admin_user.email = 'mike@example.com'; admin_user.save()
 
-    monkeypatch.setattr(Command, '_fetch_pop3',
-                        lambda self, s, d, v: [_raw_new_email(message_id='<n1@davis.example>')])
+    _pop3_serves(monkeypatch, [_raw_new_email(message_id='<n1@davis.example>')])
     call_command('fetch_inbound_email', verbosity=0)
     assert [(t, s) for t, s in _catch_internal_mail if 'New ticket' in s] \
         == [('mike@example.com', f"[{Ticket.objects.latest('id').ticket_number}] New ticket: My computer won't boot")]
@@ -16701,8 +16698,7 @@ def test_inbound_email_fires_internal_notifications(monkeypatch, admin_user, _ca
     ticket.assigned_to = tech
     ticket.save(update_fields=['assigned_to'])
     _catch_internal_mail.clear()
-    monkeypatch.setattr(Command, '_fetch_pop3',
-                        lambda self, s, d, v: [_raw_reply_email(ticket.ticket_number)])
+    _pop3_serves(monkeypatch, [_raw_reply_email(ticket.ticket_number)])
     call_command('fetch_inbound_email', verbosity=0)
     replies = [(t, s) for t, s in _catch_internal_mail if 'Customer reply' in s]
     assert replies == [('tech@example.com', f'[{ticket.ticket_number}] Customer reply: {ticket.subject}')]
@@ -21132,3 +21128,511 @@ def test_a_sale_payment_refused_after_the_read_does_not_promise_a_retry(client, 
     monkeypatch.setattr(invoice_ninja, 'post_payment', refused)
     page = _finish(client, sale)
     assert 'Held meanwhile' in page and 'Retrying adds' not in page
+
+
+# ── Inbound intake never loses a customer email (Nov 2026) ──────────────────
+# A message leaves the mailbox only once MB holds it (ticketed, refused, or its
+# own saved copy); every attempt is all-or-nothing; failures retry from MB's
+# copy, never from the mailbox; after 3 failures a System Alert ticket carries
+# the original. These fakes speak just enough POP3 / IMAP for the REAL mailbox
+# code in fetch_inbound_email to run against them.
+
+import poplib as _poplib  # noqa: E402
+import core.management.commands.fetch_inbound_email as _fie  # noqa: E402
+
+
+class _FakePOP3:
+    """Server-side mailbox shared across sessions. DELE takes effect at QUIT."""
+    mailbox = []
+    fail_quit = False
+
+    def __init__(self, *a, **k):
+        self._marked = set()
+
+    def user(self, u): pass
+    def pass_(self, p): pass
+    def stat(self): return len(_FakePOP3.mailbox), 0
+    def retr(self, i): return b'+OK', _FakePOP3.mailbox[i - 1].split(b'\r\n'), 0
+    def dele(self, i): self._marked.add(i)
+
+    def quit(self):
+        if _FakePOP3.fail_quit:
+            raise _poplib.error_proto('-ERR connection lost')
+        _FakePOP3.mailbox = [m for n, m in enumerate(_FakePOP3.mailbox, 1) if n not in self._marked]
+
+
+class _FakeIMAP:
+    """mailbox: list of {'uid', 'raw', 'flags'}. A non-PEEK FETCH sets \\Seen, as
+    real servers do."""
+    mailbox = []
+    fail_store = False
+    refuse_connect = False
+
+    def __init__(self, *a, **k):
+        if _FakeIMAP.refuse_connect:
+            raise OSError('connection refused')
+
+    def login(self, u, p): return 'OK', [b'']
+    def select(self, f): return 'OK', [str(len(_FakeIMAP.mailbox)).encode()]
+    def logout(self): return 'BYE', [b'']
+
+    def _find(self, uid):
+        return next(m for m in _FakeIMAP.mailbox if str(m['uid']).encode() == uid)
+
+    def uid(self, command, *args):
+        if command == 'SEARCH':
+            assert args[-1] == 'UNSEEN'
+            ids = [str(m['uid']).encode() for m in _FakeIMAP.mailbox if '\\Seen' not in m['flags']]
+            return 'OK', [b' '.join(ids)]
+        if command == 'FETCH':
+            uid, what = args
+            m = self._find(uid)
+            if 'PEEK' not in what:
+                m['flags'].add('\\Seen')
+            return 'OK', [(b'1 (UID ' + uid + b' BODY[] {%d}' % len(m['raw']), m['raw']), b')']
+        if command == 'STORE':
+            if _FakeIMAP.fail_store:
+                return 'NO', [b'STORE failed']
+            uid, op, flag = args
+            self._find(uid)['flags'].add(flag.strip('()'))
+            return 'OK', [b'']
+        raise AssertionError(command)
+
+    def expunge(self):
+        _FakeIMAP.mailbox = [m for m in _FakeIMAP.mailbox if '\\Deleted' not in m['flags']]
+        return 'OK', [b'']
+
+
+def _inbound_site(protocol='pop3', delete=False):
+    site = SiteSettings.get()
+    site.inbound_email_enabled = True
+    site.inbound_protocol = protocol
+    site.inbound_host = 'mail.example'
+    site.inbound_username = 'support@example'
+    site.inbound_ssl = True
+    site.inbound_delete_after_fetch = delete
+    site.save()
+    return site
+
+
+def _pop3_serves(monkeypatch, raws):
+    """Serve `raws` from a fake POP3 mailbox to the real fetch code."""
+    monkeypatch.setattr(_fie.poplib, 'POP3_SSL', _FakePOP3)
+    monkeypatch.setattr(_fie.poplib, 'POP3', _FakePOP3)
+    _FakePOP3.mailbox = list(raws)
+    _FakePOP3.fail_quit = False
+
+
+def _imap_serves(monkeypatch, raws):
+    monkeypatch.setattr(_fie.imaplib, 'IMAP4_SSL', _FakeIMAP)
+    monkeypatch.setattr(_fie.imaplib, 'IMAP4', _FakeIMAP)
+    _FakeIMAP.mailbox = [{'uid': 100 + i, 'raw': r, 'flags': set()} for i, r in enumerate(raws)]
+    _FakeIMAP.fail_store = False
+    _FakeIMAP.refuse_connect = False
+
+
+def _fetch():
+    from django.core.management import call_command
+    call_command('fetch_inbound_email', verbosity=0)
+
+
+class _Breaker:
+    """Stand-in for _process_message that fails `times` times, then defers to
+    the real one. Counts every call."""
+    def __init__(self, times=10**6, exc=RuntimeError):
+        self.real = _fie._process_message
+        self.times, self.exc, self.calls = times, exc, 0
+
+    def __call__(self, raw, site, verbosity):
+        self.calls += 1
+        if self.calls <= self.times:
+            raise self.exc('simulated failure while making the ticket')
+        return self.real(raw, site, verbosity)
+
+
+def _log(mid):
+    from core.models import InboundEmailLog
+    return InboundEmailLog.objects.get(message_id=mid)
+
+
+def _stored(field_file):
+    with field_file.open('rb') as fh:
+        return fh.read()
+
+
+@pytest.mark.django_db
+def test_inbound_failure_keeps_a_copy_and_the_next_run_tickets_it(monkeypatch):
+    """POP3: the failed email leaves the server only because MB saved its own
+    copy; the next run makes the ticket from that copy and drops the copy."""
+    _inbound_site('pop3')
+    raw = _raw_new_email(message_id='<keep-1@davis.example>')
+    _pop3_serves(monkeypatch, [raw])
+    monkeypatch.setattr(_fie, '_process_message', _Breaker(times=1))
+    notified = []
+    import core.email_utils as eu
+    monkeypatch.setattr(eu, 'notify_new_ticket', lambda t: notified.append(t.pk))
+    before = Ticket.objects.count()
+
+    _fetch()
+    log = _log('<keep-1@davis.example>')
+    assert Ticket.objects.count() == before
+    assert (log.status, log.attempts) == ('failed', 1)
+    assert 'simulated failure' in log.detail
+    assert _stored(log.raw_copy) == raw
+    copy_name, storage = log.raw_copy.name, log.raw_copy.storage
+    assert _FakePOP3.mailbox == [], 'MB holds a copy, so the server copy may go'
+
+    _fetch()
+    log.refresh_from_db()
+    assert Ticket.objects.count() == before + 1
+    assert (log.status, log.attempts) == ('new_ticket', 2)
+    assert log.ticket == Ticket.objects.latest('id')
+    assert not log.raw_copy and not storage.exists(copy_name), 'the spare copy is dropped once ticketed'
+    assert notified == [log.ticket_id], 'a retried ticket notifies like any other'
+
+
+@pytest.mark.django_db
+def test_inbound_failure_is_not_retried_again_in_the_same_run(monkeypatch):
+    _inbound_site('pop3')
+    _pop3_serves(monkeypatch, [_raw_new_email(message_id='<once-1@davis.example>')])
+    breaker = _Breaker()
+    monkeypatch.setattr(_fie, '_process_message', breaker)
+    _fetch()
+    assert breaker.calls == 1
+    assert _log('<once-1@davis.example>').attempts == 1
+
+
+@pytest.mark.django_db
+def test_inbound_three_failures_raise_one_alert_carrying_the_original(monkeypatch, admin_user):
+    from core.models import Attachment, Notification
+    from core.system_alerts import SYSTEM_ALERTS_CLIENT_NAME
+    _inbound_site('pop3')
+    raw = _raw_new_email(message_id='<dead-1@davis.example>', subject='Printer on fire')
+    _pop3_serves(monkeypatch, [raw])
+    breaker = _Breaker()
+    monkeypatch.setattr(_fie, '_process_message', breaker)
+
+    _fetch(); _fetch()
+    assert (_log('<dead-1@davis.example>').status, _log('<dead-1@davis.example>').attempts) == ('failed', 2)
+    copy = _log('<dead-1@davis.example>').raw_copy
+    copy_name, storage = copy.name, copy.storage
+
+    _fetch()
+    log = _log('<dead-1@davis.example>')
+    assert breaker.calls == 3
+    assert (log.status, log.attempts) == ('gave_up', 3)
+    alert = log.ticket
+    assert alert.client.name == SYSTEM_ALERTS_CLIENT_NAME
+    assert f'log #{log.pk}' in alert.subject
+    assert 'Printer on fire' in alert.description and 'wayne@davis.example' in alert.description
+    att = Attachment.objects.get(object_id=alert.pk, content_type__model='ticket')
+    assert (att.original_filename, att.mime_type) == ('original-email.eml', 'message/rfc822')
+    assert _stored(att.file) == raw, 'the alert carries the email exactly as received'
+    assert Notification.objects.filter(recipient=admin_user, kind='system_alert', ticket=alert).count() == 1
+    assert not log.raw_copy and not storage.exists(copy_name), 'one copy, on the alert ticket'
+    assert not Ticket.objects.exclude(pk=alert.pk).filter(subject='Printer on fire').exists()
+
+    _fetch()
+    assert breaker.calls == 3, 'a given-up email is never tried again'
+    assert Ticket.objects.filter(client__name=SYSTEM_ALERTS_CLIENT_NAME).count() == 1
+
+
+@pytest.mark.django_db
+def test_inbound_imap_reads_with_peek_so_a_crash_leaves_the_email_unread(monkeypatch):
+    """A plain FETCH marks mail read on the server. A run killed mid-attempt must
+    leave the email unread, and the next run tickets it."""
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id='<peek-1@davis.example>')])
+    before = Ticket.objects.count()
+    with monkeypatch.context() as m:
+        m.setattr(_fie, '_process_message', _Breaker(exc=KeyboardInterrupt))
+        with pytest.raises(KeyboardInterrupt):
+            _fetch()
+    assert _FakeIMAP.mailbox[0]['flags'] == set()
+    assert (_log('<peek-1@davis.example>').status, _log('<peek-1@davis.example>').attempts) == ('processing', 1)
+
+    _fetch()
+    assert Ticket.objects.count() == before + 1
+    assert (_log('<peek-1@davis.example>').status, _log('<peek-1@davis.example>').attempts) == ('new_ticket', 2)
+    assert _FakeIMAP.mailbox[0]['flags'] == {'\\Seen'}
+
+
+@pytest.mark.django_db
+def test_inbound_pop3_crash_mid_batch_deletes_nothing(monkeypatch):
+    _inbound_site('pop3')
+    raws = [_raw_new_email(message_id=f'<batch-{i}@davis.example>', subject=f'Batch {i}') for i in (1, 2, 3)]
+    _pop3_serves(monkeypatch, raws)
+    before = Ticket.objects.count()
+    with monkeypatch.context() as m:
+        m.setattr(_fie, '_process_message', _Breaker(exc=KeyboardInterrupt))
+        with pytest.raises(KeyboardInterrupt):
+            _fetch()
+    assert len(_FakePOP3.mailbox) == 3, 'nothing leaves the server before MB holds it'
+
+    _fetch()
+    assert Ticket.objects.count() == before + 3
+    assert _FakePOP3.mailbox == []
+
+
+@pytest.mark.django_db
+def test_inbound_imap_delete_mode_expunges_only_what_mb_holds(monkeypatch):
+    """Delete mode: the ticketed email and the failed-but-copied email both go;
+    the one whose copy could not be saved stays."""
+    from django.db.models.fields.files import FieldFile
+    _inbound_site('imap', delete=True)
+    _imap_serves(monkeypatch, [
+        _raw_new_email(message_id='<del-ok@davis.example>', subject='fine'),
+        _raw_new_email(message_id='<del-bad@davis.example>', subject='breaks'),
+    ])
+    real = _fie._process_message
+
+    def picky(raw, site, verbosity):
+        if b'breaks' in raw:
+            raise RuntimeError('boom')
+        return real(raw, site, verbosity)
+    monkeypatch.setattr(_fie, '_process_message', picky)
+    _fetch()
+    assert _FakeIMAP.mailbox == []
+    assert _log('<del-ok@davis.example>').status == 'new_ticket'
+    assert _log('<del-bad@davis.example>').status == 'failed'
+
+    # Copy cannot be saved: the email must stay on the server.
+    _imap_serves(monkeypatch, [_raw_new_email(message_id='<del-nocopy@davis.example>', subject='breaks')])
+
+    def no_disk(self, *a, **k):
+        raise OSError('disk full')
+    monkeypatch.setattr(FieldFile, 'save', no_disk)
+    _fetch()
+    assert len(_FakeIMAP.mailbox) == 1 and _FakeIMAP.mailbox[0]['flags'] == set()
+    log = _log('<del-nocopy@davis.example>')
+    assert (log.status, log.attempts, bool(log.raw_copy)) == ('processing', 1, False)
+
+
+@pytest.mark.django_db
+def test_inbound_copy_save_failure_is_retaken_next_run(monkeypatch):
+    from django.db.models.fields.files import FieldFile
+    _inbound_site('pop3')
+    raw = _raw_new_email(message_id='<nocopy-1@davis.example>')
+    _pop3_serves(monkeypatch, [raw])
+    breaker = _Breaker()
+    monkeypatch.setattr(_fie, '_process_message', breaker)
+    with monkeypatch.context() as m:
+        m.setattr(FieldFile, 'save', lambda self, *a, **k: (_ for _ in ()).throw(OSError('disk full')))
+        _fetch()
+    assert _FakePOP3.mailbox == [raw], 'no copy, so it stays on the server'
+
+    _fetch()
+    log = _log('<nocopy-1@davis.example>')
+    assert (log.status, log.attempts) == ('failed', 2)
+    assert _stored(log.raw_copy) == raw
+    assert _FakePOP3.mailbox == []
+
+
+@pytest.mark.django_db
+def test_inbound_late_failure_rolls_back_ticket_contact_and_files(monkeypatch, settings):
+    """A failure AFTER the ticket row and an attachment file were written must
+    leave no ticket, no new contact, no attachment row and no stray file, and
+    the shop must not be told about a ticket that does not exist."""
+    import email.message
+    import os
+    from core.models import Attachment, Contact
+    _inbound_site('pop3')
+    m = email.message.EmailMessage()
+    m['Subject'] = 'Screenshot attached'
+    m['From'] = 'New Person <new.person@elsewhere.example>'
+    m['Message-ID'] = '<late-1@elsewhere.example>'
+    m.set_content('See attached.')
+    m.add_attachment(b'PNGDATA', maintype='image', subtype='png', filename='shot.png')
+    _pop3_serves(monkeypatch, [m.as_bytes()])
+    real_save = _fie._save_attachments
+
+    def save_then_fail(obj, msg, site):
+        real_save(obj, msg, site)
+        raise RuntimeError('failed after the file was written')
+    monkeypatch.setattr(_fie, '_save_attachments', save_then_fail)
+    notified = []
+    import core.email_utils as eu
+    monkeypatch.setattr(eu, 'notify_new_ticket', lambda t: notified.append(t))
+    tickets, contacts, atts = Ticket.objects.count(), Contact.objects.count(), Attachment.objects.count()
+
+    _fetch()
+    assert (Ticket.objects.count(), Contact.objects.count(), Attachment.objects.count()) == (tickets, contacts, atts)
+    att_dir = os.path.join(str(settings.PRIVATE_MEDIA_ROOT), 'attachments')
+    stray = [f for _, _, fs in os.walk(att_dir) for f in fs]
+    assert stray == [], f'rolled-back attempt left files behind: {stray}'
+    assert notified == []
+    log = _log('<late-1@elsewhere.example>')
+    assert log.status == 'failed' and log.ticket is None
+
+    monkeypatch.setattr(_fie, '_save_attachments', real_save)
+    _fetch()
+    assert Ticket.objects.count() == tickets + 1, 'the retry makes exactly one ticket'
+    assert Attachment.objects.count() == atts + 1
+
+
+@pytest.mark.django_db
+def test_inbound_removal_failure_never_makes_a_second_ticket(monkeypatch):
+    """The ticket is made but the mailbox step fails (IMAP STORE refused, POP3
+    QUIT lost): the next run sees the email again and only removes it."""
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id='<rm-1@davis.example>')])
+    _FakeIMAP.fail_store = True
+    before = Ticket.objects.count()
+    _fetch()
+    assert Ticket.objects.count() == before + 1
+    assert _FakeIMAP.mailbox[0]['flags'] == set()
+    _FakeIMAP.fail_store = False
+    _fetch()
+    assert Ticket.objects.count() == before + 1
+    assert _FakeIMAP.mailbox[0]['flags'] == {'\\Seen'}
+
+    _inbound_site('pop3')
+    _pop3_serves(monkeypatch, [_raw_new_email(message_id='<rm-2@davis.example>', subject='pop one')])
+    _FakePOP3.fail_quit = True
+    _fetch()
+    assert Ticket.objects.count() == before + 2 and len(_FakePOP3.mailbox) == 1
+    _FakePOP3.fail_quit = False
+    _fetch()
+    assert Ticket.objects.count() == before + 2 and _FakePOP3.mailbox == []
+
+
+@pytest.mark.django_db
+def test_inbound_failed_give_up_is_retried_without_another_attempt(monkeypatch, admin_user):
+    import core.system_alerts as sa
+    from core.system_alerts import SYSTEM_ALERTS_CLIENT_NAME
+    _inbound_site('pop3')
+    raw = _raw_new_email(message_id='<gu-1@davis.example>')
+    _pop3_serves(monkeypatch, [raw])
+    breaker = _Breaker()
+    monkeypatch.setattr(_fie, '_process_message', breaker)
+    _fetch(); _fetch()
+    with monkeypatch.context() as m:
+        m.setattr(sa, 'create_system_alert', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('alerts down')))
+        _fetch()
+    log = _log('<gu-1@davis.example>')
+    assert (log.status, log.attempts) == ('failed', 3)
+    assert _stored(log.raw_copy) == raw, 'MB still holds the email'
+    assert not Ticket.objects.filter(client__name=SYSTEM_ALERTS_CLIENT_NAME).exists()
+
+    _fetch()
+    log.refresh_from_db()
+    assert log.status == 'gave_up' and breaker.calls == 3
+    assert Ticket.objects.filter(client__name=SYSTEM_ALERTS_CLIENT_NAME).count() == 1
+
+
+@pytest.mark.django_db
+def test_inbound_refusals_are_final_and_leave_the_mailbox(monkeypatch, client_obj):
+    from core.models import BlockedSender, Contact
+    _inbound_site('pop3')
+    BlockedSender.objects.create(pattern='*@spam.example')
+    client_obj.suppress_emails = True
+    client_obj.save()
+    Contact.objects.create(client=client_obj, first_name='Q', email='quiet@acme.example')
+    blocked = _raw_new_email(message_id='<ref-1@spam.example>', from_email='x@spam.example')
+    quiet = _raw_new_email(message_id='<ref-2@acme.example>', from_email='quiet@acme.example')
+    _pop3_serves(monkeypatch, [blocked, quiet])
+    before = Ticket.objects.count()
+    _fetch()
+    assert _log('<ref-1@spam.example>').status == 'refused'
+    assert _log('<ref-2@acme.example>').status == 'refused'
+    assert _FakePOP3.mailbox == [] and Ticket.objects.count() == before
+    assert not _log('<ref-1@spam.example>').raw_copy
+
+    _pop3_serves(monkeypatch, [blocked])
+    _fetch()
+    assert _log('<ref-1@spam.example>').attempts == 1 and _FakePOP3.mailbox == []
+    assert Ticket.objects.count() == before
+
+
+@pytest.mark.django_db
+def test_inbound_message_without_message_id_is_deduplicated_and_retried(monkeypatch):
+    from core.models import InboundEmailLog
+    _inbound_site('pop3')
+    raw = _raw_new_email(message_id=None, subject='No id here')
+    _pop3_serves(monkeypatch, [raw, raw])
+    before = Ticket.objects.count()
+    _fetch()
+    assert Ticket.objects.count() == before + 1, 'identical bytes are one delivery'
+    row = InboundEmailLog.objects.get(subject='No id here')
+    assert row.message_id.startswith('no-message-id:sha256:')
+
+    other = _raw_new_email(message_id=None, subject='No id, breaks')
+    _pop3_serves(monkeypatch, [other])
+    with monkeypatch.context() as m:
+        m.setattr(_fie, '_process_message', _Breaker())
+        _fetch()
+    assert InboundEmailLog.objects.get(subject='No id, breaks').status == 'failed'
+    _fetch()
+    assert InboundEmailLog.objects.get(subject='No id, breaks').status == 'new_ticket'
+
+
+@pytest.mark.django_db
+def test_inbound_dry_run_changes_nothing_on_the_server(monkeypatch):
+    from core.models import InboundEmailLog
+    from django.core.management import call_command
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id='<dry-1@davis.example>')])
+    call_command('fetch_inbound_email', dry_run=True, verbosity=0)
+    assert _FakeIMAP.mailbox[0]['flags'] == set()
+    assert not InboundEmailLog.objects.exists()
+
+
+@pytest.mark.django_db
+def test_inbound_retry_runs_even_when_the_mailbox_is_unreachable(monkeypatch):
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id='<down-1@davis.example>')])
+    with monkeypatch.context() as m:
+        m.setattr(_fie, '_process_message', _Breaker())
+        _fetch()
+    assert _log('<down-1@davis.example>').status == 'failed'
+    _FakeIMAP.refuse_connect = True
+    before = Ticket.objects.count()
+    _fetch()
+    assert Ticket.objects.count() == before + 1
+    assert _log('<down-1@davis.example>').status == 'new_ticket'
+
+
+@pytest.mark.django_db
+def test_inbound_rows_from_before_retries(monkeypatch):
+    """Pre-upgrade rows: an old 'error' stays final; an old 'processing' (a run
+    that died) is taken again."""
+    from core.models import InboundEmailLog
+    _inbound_site('pop3')
+    InboundEmailLog.objects.create(message_id='<old-err@davis.example>', status='error')
+    InboundEmailLog.objects.create(message_id='<old-proc@davis.example>', status='processing')
+    _pop3_serves(monkeypatch, [
+        _raw_new_email(message_id='<old-err@davis.example>', subject='old error'),
+        _raw_new_email(message_id='<old-proc@davis.example>', subject='old processing'),
+    ])
+    _fetch()
+    assert not Ticket.objects.filter(subject='old error').exists()
+    assert _log('<old-err@davis.example>').status == 'error'
+    assert Ticket.objects.filter(subject='old processing').count() == 1
+    assert (_log('<old-proc@davis.example>').status, _log('<old-proc@davis.example>').attempts) == ('new_ticket', 2)
+    assert _FakePOP3.mailbox == []
+
+
+@pytest.mark.django_db
+def test_inbound_log_row_in_settings_logs_shows_why():
+    from core.log_search import _email_in_row
+    from core.models import InboundEmailLog
+    row = InboundEmailLog.objects.create(
+        message_id='<why@x>', status='failed', detail='Attempt 1 of 3 failed: RuntimeError: boom')
+    assert _email_in_row(row).detail == 'Failed, Will Retry · Attempt 1 of 3 failed: RuntimeError: boom'
+    row.status = 'reply_flagged'
+    assert _email_in_row(row).detail.startswith('Reply Added to Closed Ticket (flagged)')
+
+
+@pytest.mark.django_db
+def test_reset_operational_data_deletes_inbound_retry_copies(monkeypatch):
+    from django.core.management import call_command
+    _inbound_site('pop3')
+    _pop3_serves(monkeypatch, [_raw_new_email(message_id='<reset-1@davis.example>')])
+    with monkeypatch.context() as m:
+        m.setattr(_fie, '_process_message', _Breaker())
+        _fetch()
+    copy = _log('<reset-1@davis.example>').raw_copy
+    name, storage = copy.name, copy.storage
+    assert storage.exists(name)
+    call_command('reset_operational_data', confirm='DELETE ALL OPERATIONAL DATA', stdout=__import__('io').StringIO())
+    assert not storage.exists(name)

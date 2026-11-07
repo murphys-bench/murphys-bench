@@ -5,12 +5,24 @@ Polls the configured mailbox (IMAP or POP3) and processes messages:
   - Subject contains [TKT-YYYYMMDD-NNNN]  →  add TicketReply
   - Otherwise                              →  create new Ticket
 
-Run via cron every 1-5 minutes:
-    */2 * * * * /path/to/venv/bin/python /path/to/manage.py fetch_inbound_email
+Run on a timer every 1-5 minutes (deploy/README.md has the systemd unit).
+
+No customer email may vanish. The rules that guarantee it:
+  1. A message leaves the mailbox (deleted, or marked read) only once MB holds
+     it: the ticket/reply is committed, the message was deliberately refused, or
+     MB has saved its own copy of the raw message.
+  2. Each attempt is all-or-nothing (one transaction), so a failure halfway
+     leaves no half-made ticket behind.
+  3. A failed message is retried from MB's own copy, never from the mailbox:
+     some servers (Gmail POP) never offer a downloaded message again.
+  4. After MAX_ATTEMPTS failures MB gives up: a System Alert ticket carries the
+     original message as an .eml attachment and rings the admin bell.
 """
 
+import contextvars
 import email
 import fcntl
+import hashlib
 import imaplib
 import logging
 import os
@@ -28,6 +40,7 @@ from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from django.db import IntegrityError, transaction
+from django.db.models import F
 from django.conf import settings as django_settings
 
 from fnmatch import fnmatch
@@ -48,6 +61,22 @@ from core.models import (
 )
 
 TICKET_RE = re.compile(r'\[?(TKT-[\d-]+)\]?', re.IGNORECASE)
+
+# How many times one message is tried before MB gives up and raises an alert.
+MAX_ATTEMPTS = 3
+
+# Statuses after which a message is finished with: it is never tried again, and
+# if it shows up in the mailbox again it is only removed. 'error' is the
+# pre-Nov-2026 status for every failure; those rows predate retries and stay final.
+FINAL_STATUSES = frozenset({
+    'new_ticket', 'reply', 'reply_flagged', 'new_ticket_linked',
+    'refused', 'gave_up', 'error', 'duplicate',
+})
+SUCCESS_STATUSES = frozenset({'new_ticket', 'reply', 'reply_flagged', 'new_ticket_linked'})
+
+# Files written to storage during the current attempt. A rolled-back attempt
+# leaves its DB rows undone but not its files; the caller deletes these.
+_attempt_files = contextvars.ContextVar('inbound_attempt_files', default=None)
 
 # Common patterns that mark the start of quoted reply text
 QUOTE_PATTERNS = [
@@ -264,6 +293,9 @@ def _save_attachments(obj, msg, settings):
             size_bytes=len(data),
         )
         a.file.save(filename, ContentFile(data), save=True)
+        written = _attempt_files.get()
+        if written is not None:
+            written.append((a.file.storage, a.file.name))
 
 
 def _resolve_client_contact(from_email, from_name, settings):
@@ -391,7 +423,7 @@ def _create_new_ticket(subject, body, from_email, from_name, settings, msg, prio
     client, contact = _resolve_client_contact(from_email, from_name, settings)
 
     if client.suppress_emails:
-        return 'error', f'Client {client.name} has suppress_emails — skipping', None
+        return 'refused', f'Client {client.name} has suppress_emails — skipping', None
 
     ticket = Ticket(
         ticket_number=Ticket.generate_ticket_number(),
@@ -410,11 +442,15 @@ def _create_new_ticket(subject, body, from_email, from_name, settings, msg, prio
 
 
 def _process_message(raw_msg_bytes, settings, verbosity):
-    """Parse and process one raw email message. Returns (status, detail, ticket)."""
+    """Parse and process one raw email message. Returns (status, detail, ticket).
+
+    'refused' means deliberately not ticketed (blocked sender, suppressed
+    client): final, never retried. Anything that goes wrong RAISES; the caller
+    turns that into a retry. Callers run this inside a transaction."""
     try:
         msg = email.message_from_bytes(raw_msg_bytes)
     except Exception as exc:
-        return 'error', f'Failed to parse message: {exc}', None
+        raise ValueError(f'Failed to parse message: {exc}') from exc
 
     message_id = (msg.get('Message-ID') or '').strip()
     subject = _decode_header_str(msg.get('Subject', '(No Subject)'))
@@ -454,10 +490,10 @@ def _process_message(raw_msg_bytes, settings, verbosity):
     # Blocked sender check (runs on the real sender once a T2 relay is unwrapped)
     blocked_patterns = list(BlockedSender.objects.values_list('pattern', flat=True))
     if any(fnmatch(from_email, p.lower()) for p in blocked_patterns):
-        return 'error', f'Blocked sender: {from_email}', None
+        return 'refused', f'Blocked sender: {from_email}', None
 
     # NOTE: duplicate detection is handled atomically by the caller
-    # (Command.handle) via a unique "claim" row on the Message-ID, backed by a DB
+    # (Command._intake) via a unique "claim" row on the Message-ID, backed by a DB
     # constraint. We deliberately do NOT check-then-act here — that non-atomic
     # race is exactly what let one email become two tickets when two fetch runs
     # overlapped.
@@ -527,6 +563,111 @@ def _process_message(raw_msg_bytes, settings, verbosity):
     return _create_new_ticket(subject, body, from_email, from_name, settings, msg, priority=inbound_priority)
 
 
+def _identify(raw_bytes):
+    """Return (claim_key, from_email, subject) for the log row.
+
+    The claim key is the Message-ID. A message without one is keyed by a hash of
+    its raw bytes instead, so it can still be deduplicated and its retries
+    counted (identical bytes are the same delivery)."""
+    mid = frm = subj = ''
+    try:
+        msg_obj = email.message_from_bytes(raw_bytes)
+        mid = (msg_obj.get('Message-ID') or '').strip()[:500]
+        frm = parseaddr(_decode_header_str(msg_obj.get('From', '')))[1][:255]
+        subj = _decode_header_str(msg_obj.get('Subject', ''))[:500]
+    except Exception:
+        logger.exception('Could not read the headers of an inbound message.')
+    if not mid:
+        mid = 'no-message-id:sha256:' + hashlib.sha256(raw_bytes).hexdigest()
+    return mid, frm, subj
+
+
+# ── Mailboxes ─────────────────────────────────────────────────────────────────
+# Both expose the same three steps, so the intake loop never needs to know which
+# protocol it is talking to: messages() yields (ref, raw_bytes) without changing
+# anything on the server, done(ref) takes one message out of the queue, and
+# close() ends the session.
+
+class _ImapMailbox:
+    def __init__(self, site):
+        if site.inbound_ssl:
+            self.conn = imaplib.IMAP4_SSL(site.inbound_host, site.inbound_port)
+        else:
+            self.conn = imaplib.IMAP4(site.inbound_host, site.inbound_port)
+        self.conn.login(site.inbound_username, site.inbound_password)
+        self.folder = site.inbound_folder or 'INBOX'
+        typ, _ = self.conn.select(self.folder)
+        if typ != 'OK':
+            raise imaplib.IMAP4.error(f'Could not open IMAP folder {self.folder!r}')
+        self.delete = site.inbound_delete_after_fetch
+        self._deleted_any = False
+
+    def messages(self):
+        # UIDs, not sequence numbers: we now hold the session open while tickets
+        # are made, and a person deleting mail in webmail meanwhile would shift
+        # sequence numbers under us.
+        typ, data = self.conn.uid('SEARCH', None, 'UNSEEN')
+        uids = data[0].split() if typ == 'OK' and data and data[0] else []
+        for uid in uids:
+            # BODY.PEEK[]: a plain RFC822 / BODY[] fetch marks the message read
+            # on the server, which would take it out of the queue before MB has it.
+            typ, msg_data = self.conn.uid('FETCH', uid, '(BODY.PEEK[])')
+            raw = next((part[1] for part in (msg_data or []) if isinstance(part, tuple)), None)
+            if typ != 'OK' or raw is None:
+                logger.warning('IMAP FETCH of UID %s returned nothing usable; left in the mailbox.', uid)
+                continue
+            yield uid, raw
+
+    def done(self, uid):
+        flag = '(\\Deleted)' if self.delete else '(\\Seen)'
+        typ, _ = self.conn.uid('STORE', uid, '+FLAGS', flag)
+        if typ != 'OK':
+            raise imaplib.IMAP4.error(f'STORE {flag} on UID {uid} failed')
+        if self.delete:
+            self._deleted_any = True
+
+    def close(self):
+        try:
+            if self._deleted_any:
+                self.conn.expunge()
+        finally:
+            self.conn.logout()
+
+
+class _Pop3Mailbox:
+    """POP3 marks deletions during the session and applies them at QUIT, so a
+    session that dies early deletes nothing; those messages are fetched again
+    and recognised by their log row."""
+
+    def __init__(self, site):
+        if site.inbound_ssl:
+            self.conn = poplib.POP3_SSL(site.inbound_host, site.inbound_port)
+        else:
+            self.conn = poplib.POP3(site.inbound_host, site.inbound_port)
+        self.conn.user(site.inbound_username)
+        self.conn.pass_(site.inbound_password)
+
+    def messages(self):
+        count, _ = self.conn.stat()
+        for i in range(1, count + 1):
+            _, lines, _ = self.conn.retr(i)
+            yield i, b'\r\n'.join(lines)
+
+    def done(self, i):
+        self.conn.dele(i)
+
+    def close(self):
+        self.conn.quit()
+
+
+def _delete_files(files):
+    for storage, name in files:
+        try:
+            storage.delete(name)
+        except Exception:
+            logger.exception('Could not delete stored file %s.', name)
+
+
 class Command(BaseCommand):
     help = 'Fetch and process inbound email from IMAP or POP3 mailbox.'
 
@@ -540,6 +681,7 @@ class Command(BaseCommand):
         site = SiteSettings.get()
         dry_run = options['dry_run']
         verbosity = options['verbosity']
+        self.verbosity = verbosity
 
         if not site.inbound_email_enabled:
             if verbosity >= 1:
@@ -558,7 +700,9 @@ class Command(BaseCommand):
             )
 
         # Single-runner lock: never let two fetches run concurrently. Overlapping
-        # runs racing on the same message is what created duplicate tickets.
+        # runs racing on the same message is what created duplicate tickets. The
+        # retry logic below also relies on it: a 'processing' row seen at the
+        # start of a run can only be one a previous run died in the middle of.
         lock_path = str(getattr(
             django_settings, 'INBOUND_FETCH_LOCK_PATH',
             os.path.join(str(django_settings.BASE_DIR), 'inbound_fetch.lock'),
@@ -567,167 +711,274 @@ class Command(BaseCommand):
         try:
             fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
+            lock_file.close()
             if verbosity >= 1:
                 self.stdout.write('Another fetch is already running; skipping this run.')
             return
 
         try:
-            if site.inbound_protocol == 'pop3':
-                messages = self._fetch_pop3(site, dry_run, verbosity)
-            else:
-                messages = self._fetch_imap(site, dry_run, verbosity)
-        except Exception as exc:
-            self.stderr.write(self.style.ERROR(f'Connection error: {exc}'))
-            return
+            self.counts = {
+                'new_ticket': 0, 'reply': 0, 'reply_flagged': 0, 'new_ticket_linked': 0,
+                'duplicate': 0, 'refused': 0, 'failed': 0, 'gave_up': 0,
+            }
+            self.touched = set()   # log rows already handled in this run
+            self.site = site
 
-        if not messages:
-            if verbosity >= 1:
-                self.stdout.write('  No new messages.')
-            return
+            try:
+                mailbox = self._open_mailbox(site)
+            except Exception as exc:
+                logger.exception('Inbound mailbox connection failed.')
+                self.stderr.write(self.style.ERROR(f'Connection error: {exc}'))
+                mailbox = None
 
-        counts = {
-            'new_ticket': 0, 'reply': 0, 'duplicate': 0, 'error': 0,
-            'reply_flagged': 0, 'new_ticket_linked': 0,
-        }
-        for raw_bytes in messages:
+            if mailbox is not None:
+                try:
+                    self._drain(mailbox, dry_run)
+                except Exception as exc:
+                    logger.exception('Inbound mailbox error part-way through a fetch.')
+                    self.stderr.write(self.style.ERROR(f'Connection error: {exc}'))
+                finally:
+                    try:
+                        mailbox.close()
+                    except Exception:
+                        # POP3 applies deletions at QUIT; IMAP expunges here. If this
+                        # fails, those messages are fetched again next run and
+                        # recognised from their log rows, so nothing is lost.
+                        logger.exception('Closing the inbound mailbox failed; removals '
+                                         'will be redone on the next run.')
+
+            # Retries come from MB's own saved copies, so they run even when the
+            # mailbox could not be reached.
+            if not dry_run:
+                self._retry_saved()
+
+            if not dry_run and verbosity >= 1:
+                c = self.counts
+                self.stdout.write(
+                    f'Done — {c["new_ticket"]} new tickets, {c["reply"]} replies, '
+                    f'{c["reply_flagged"]} flagged on closed tickets, '
+                    f'{c["new_ticket_linked"]} new tickets linked past reopen window, '
+                    f'{c["duplicate"]} duplicates, {c["refused"]} refused, '
+                    f'{c["failed"]} failed (will retry), {c["gave_up"]} gave up (alert raised).'
+                )
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+            lock_file.close()
+
+    def _open_mailbox(self, site):
+        if site.inbound_protocol == 'pop3':
+            return _Pop3Mailbox(site)
+        return _ImapMailbox(site)
+
+    def _say(self, status, detail):
+        if self.verbosity >= 1:
+            style = self.style.SUCCESS if status in SUCCESS_STATUSES else self.style.WARNING
+            self.stdout.write(style(f'  [{status}] {detail}'))
+
+    # ── Pass 1: the mailbox ───────────────────────────────────────────────────
+
+    def _drain(self, mailbox, dry_run):
+        seen = 0
+        for ref, raw in mailbox.messages():
+            seen += 1
             if dry_run:
-                msg = email.message_from_bytes(raw_bytes)
+                msg = email.message_from_bytes(raw)
                 subj = _decode_header_str(msg.get('Subject', ''))
                 frm = _decode_header_str(msg.get('From', ''))
                 self.stdout.write(f'  [DRY RUN] From: {frm} | Subject: {subj}')
                 continue
-
-            msg_obj = email.message_from_bytes(raw_bytes)
-            mid = (msg_obj.get('Message-ID') or '').strip()[:500]
-            frm = parseaddr(_decode_header_str(msg_obj.get('From', '')))[1][:255]
-            subj = _decode_header_str(msg_obj.get('Subject', ''))[:500]
-
-            # Atomically CLAIM this Message-ID before doing any work. The unique
-            # constraint means a second runner (or a re-fetch) racing on the same
-            # email loses the insert here and skips — instead of both creating a
-            # ticket. The savepoint keeps the IntegrityError from poisoning the
-            # surrounding transaction. Empty Message-IDs can't be deduped, so they
-            # fall through and are always processed.
-            claim = None
-            if mid:
+            if self._intake(raw):
                 try:
-                    with transaction.atomic():
-                        claim = InboundEmailLog.objects.create(
-                            message_id=mid, from_email=frm, subject=subj,
-                            status='processing',
-                        )
-                except IntegrityError:
-                    counts['duplicate'] += 1
-                    if verbosity >= 1:
-                        self.stdout.write(self.style.WARNING(
-                            f'  [duplicate] already processed {mid}'))
-                    continue
+                    mailbox.done(ref)
+                except Exception:
+                    logger.exception('MB holds an inbound message but could not take it out '
+                                     'of the mailbox; it will be fetched again and skipped.')
+        if seen == 0 and self.verbosity >= 1:
+            self.stdout.write('  No new messages.')
 
+    def _intake(self, raw):
+        """Handle one message fresh from the mailbox. Returns True once MB holds
+        it (finished, refused, or saved for retry), i.e. it may leave the mailbox."""
+        key, frm, subj = _identify(raw)
+        try:
+            # Atomically CLAIM this message before doing any work. The unique
+            # constraint means a re-fetch of the same email loses the insert here
+            # instead of making a second ticket. The savepoint keeps the
+            # IntegrityError from poisoning any surrounding transaction.
+            with transaction.atomic():
+                log = InboundEmailLog.objects.create(
+                    message_id=key, from_email=frm, subject=subj,
+                    status='processing', attempts=1,
+                )
+        except IntegrityError:
+            log = InboundEmailLog.objects.filter(message_id=key).first()
+            if log is None:
+                return False
+            if log.status in FINAL_STATUSES or log.status == 'failed' or log.raw_copy:
+                # Finished, or MB already holds its own copy and retries from that.
+                # It is back in the mailbox only because the last removal did not
+                # take effect, so remove it now.
+                self.counts['duplicate'] += 1
+                if self.verbosity >= 1:
+                    self.stdout.write(self.style.WARNING(f'  [duplicate] already processed {key}'))
+                return True
+            # 'processing' with no saved copy: a run died mid-attempt (the run lock
+            # rules out a live one), or saving the copy failed. Take it again,
+            # but not twice in one run (the same message listed twice).
+            if log.pk in self.touched:
+                return False
+            self.touched.add(log.pk)
+            if log.attempts >= MAX_ATTEMPTS:
+                return self._give_up(log, raw)
+            taken = InboundEmailLog.objects.filter(
+                pk=log.pk, status='processing', attempts=log.attempts,
+            ).update(attempts=F('attempts') + 1)
+            if not taken:
+                return False
+            log.refresh_from_db()
+        self.touched.add(log.pk)
+        return self._attempt(log, raw)
+
+    # ── Pass 2: retries from saved copies ─────────────────────────────────────
+
+    def _retry_saved(self):
+        pending = (InboundEmailLog.objects
+                   .filter(status__in=('failed', 'processing'))
+                   .exclude(raw_copy='').exclude(raw_copy__isnull=True)
+                   .exclude(pk__in=self.touched)
+                   .order_by('created_at'))
+        for log in pending:
+            self.touched.add(log.pk)
+            raw = None
             try:
-                status, detail, ticket = _process_message(raw_bytes, site, verbosity)
-            except Exception as exc:
-                logger.exception('Unhandled error processing inbound message %s',
-                                 mid or '(no message-id)')
-                status, detail, ticket = 'error', f'Unhandled error: {exc}', None
-            counts[status] = counts.get(status, 0) + 1
-
-            # Tell the shop. The notify helpers never raise, so a mail problem
-            # cannot break intake — the ticket/reply above is already saved.
-            if ticket is not None:
-                from core.email_utils import notify_new_ticket, notify_ticket_reply
-                if status in ('new_ticket', 'new_ticket_linked'):
-                    notify_new_ticket(ticket)
-                elif status in ('reply', 'reply_flagged'):
-                    notify_ticket_reply(ticket)
-
-            try:
-                if claim is not None:
-                    claim.status = status
-                    claim.detail = detail
-                    claim.ticket = ticket
-                    claim.save(update_fields=['status', 'detail', 'ticket'])
-                else:
-                    InboundEmailLog.objects.create(
-                        message_id='', from_email=frm, subject=subj,
-                        ticket=ticket, status=status, detail=detail,
-                    )
+                with log.raw_copy.open('rb') as fh:
+                    raw = fh.read()
             except Exception:
-                # A log write failure must not interrupt processing, but it should
-                # be visible rather than swallowed.
-                logger.exception('Failed to write InboundEmailLog row for a fetched message.')
+                logger.exception('Saved copy of inbound message %s could not be read.', log.message_id)
+            if raw is None or log.attempts >= MAX_ATTEMPTS:
+                self._give_up(log, raw)
+                continue
+            taken = InboundEmailLog.objects.filter(
+                pk=log.pk, status=log.status, attempts=log.attempts,
+            ).update(status='processing', attempts=F('attempts') + 1)
+            if not taken:
+                continue
+            log.refresh_from_db()
+            self._attempt(log, raw)
 
-            style = (
-                self.style.SUCCESS
-                if status in ('new_ticket', 'reply', 'reply_flagged', 'new_ticket_linked')
-                else self.style.WARNING
-            )
-            if verbosity >= 1:
-                self.stdout.write(style(f'  [{status}] {detail}'))
+    # ── One attempt, and what happens after it ────────────────────────────────
 
-        if not dry_run and verbosity >= 1:
-            self.stdout.write(
-                f'Done — {counts["new_ticket"]} new tickets, {counts["reply"]} replies, '
-                f'{counts["reply_flagged"]} flagged on closed tickets, '
-                f'{counts["new_ticket_linked"]} new tickets linked past reopen window, '
-                f'{counts["duplicate"]} duplicates, {counts["error"]} errors.'
-            )
+    def _attempt(self, log, raw):
+        """Try to ticket `raw` once. The ticket/reply and the log row's new status
+        commit together or not at all. Returns True when MB holds the message."""
+        written = []
+        token = _attempt_files.set(written)
+        old_copy = (log.raw_copy.storage, log.raw_copy.name) if log.raw_copy else None
+        try:
+            with transaction.atomic():
+                status, detail, ticket = _process_message(raw, self.site, self.verbosity)
+                log.status, log.detail, log.ticket = status, detail, ticket
+                log.raw_copy = ''
+                log.save(update_fields=['status', 'detail', 'ticket', 'raw_copy'])
+        except Exception as exc:
+            logger.exception('Inbound message %s failed on attempt %d.', log.message_id, log.attempts)
+            _delete_files(written)   # rolled back: its attachment files must go too
+            log.refresh_from_db()
+            return self._failed(log, raw, f'{type(exc).__name__}: {exc}')
+        finally:
+            _attempt_files.reset(token)
 
-    # ── IMAP ──────────────────────────────────────────────────────────────────
+        if old_copy:
+            _delete_files([old_copy])   # ticketed: MB's spare copy is no longer needed
+        self.counts[status] = self.counts.get(status, 0) + 1
+        self._say(status, detail)
 
-    def _fetch_imap(self, site, dry_run, verbosity):
-        if site.inbound_ssl:
-            conn = imaplib.IMAP4_SSL(site.inbound_host, site.inbound_port)
-        else:
-            conn = imaplib.IMAP4(site.inbound_host, site.inbound_port)
+        # Tell the shop. The notify helpers never raise, so a mail problem
+        # cannot break intake; the ticket/reply above is already saved.
+        if ticket is not None:
+            from core.email_utils import notify_new_ticket, notify_ticket_reply
+            if status in ('new_ticket', 'new_ticket_linked'):
+                notify_new_ticket(ticket)
+            elif status in ('reply', 'reply_flagged'):
+                notify_ticket_reply(ticket)
+        return True
 
-        conn.login(site.inbound_username, site.inbound_password)
-        conn.select(site.inbound_folder or 'INBOX')
+    def _failed(self, log, raw, error):
+        """Record a failed attempt and make sure MB holds its own copy."""
+        saved = None
+        try:
+            if not log.raw_copy:
+                log.raw_copy.save(f'{log.pk}.eml', ContentFile(raw), save=False)
+                saved = (log.raw_copy.storage, log.raw_copy.name)
+            log.status = 'failed'
+            log.detail = f'Attempt {log.attempts} of {MAX_ATTEMPTS} failed: {error}'[:5000]
+            log.save(update_fields=['status', 'detail', 'raw_copy'])
+        except Exception:
+            # No copy: leave it in the mailbox. The row stays 'processing', so the
+            # next run takes it again as the next attempt.
+            logger.exception('Could not save a copy of failed inbound message %s; '
+                             'leaving it in the mailbox.', log.message_id)
+            if saved:
+                _delete_files([saved])
+            return False
+        self.counts['failed'] += 1
+        self._say('failed', log.detail)
+        if log.attempts >= MAX_ATTEMPTS:
+            self._give_up(log, raw)
+        return True
 
-        _, data = conn.search(None, 'UNSEEN')
-        msg_ids = data[0].split() if data[0] else []
+    def _give_up(self, log, raw):
+        """Out of attempts: raise a System Alert ticket that carries the original
+        email, ring the admin bell, and mark the row given up. All in one
+        transaction; if any of it fails, the row keeps its copy and the next run
+        tries the give-up again. Returns True when MB holds the message."""
+        from core.system_alerts import create_system_alert
 
-        if verbosity >= 2:
-            self.stdout.write(f'  {len(msg_ids)} unseen message(s) in {site.inbound_folder}.')
-
-        messages = []
-        for msg_id in msg_ids:
-            _, msg_data = conn.fetch(msg_id, '(RFC822)')
-            raw = msg_data[0][1]
-            messages.append(raw)
-            if not dry_run:
-                if site.inbound_delete_after_fetch:
-                    conn.store(msg_id, '+FLAGS', '\\Deleted')
-                else:
-                    conn.store(msg_id, '+FLAGS', '\\Seen')
-
-        if not dry_run and site.inbound_delete_after_fetch:
-            conn.expunge()
-
-        conn.logout()
-        return messages
-
-    # ── POP3 ──────────────────────────────────────────────────────────────────
-
-    def _fetch_pop3(self, site, dry_run, verbosity):
-        if site.inbound_ssl:
-            conn = poplib.POP3_SSL(site.inbound_host, site.inbound_port)
-        else:
-            conn = poplib.POP3(site.inbound_host, site.inbound_port)
-
-        conn.user(site.inbound_username)
-        conn.pass_(site.inbound_password)
-
-        count, _ = conn.stat()
-        if verbosity >= 2:
-            self.stdout.write(f'  {count} message(s) in mailbox.')
-
-        messages = []
-        for i in range(1, count + 1):
-            _, lines, _ = conn.retr(i)
-            raw = b'\r\n'.join(lines)
-            messages.append(raw)
-            if not dry_run:
-                conn.dele(i)  # POP3 always deletes after retrieval
-
-        conn.quit()
-        return messages
+        attached = raw is not None
+        body = (
+            f"Murphy's Bench tried {log.attempts} times to turn an inbound email into a ticket and gave up.\n\n"
+            f'From:       {log.from_email or "(unknown)"}\n'
+            f'Subject:    {log.subject or "(no subject)"}\n'
+            f'Message-ID: {log.message_id}\n'
+            f'First seen: {timezone.localtime(log.created_at):%Y-%m-%d %H:%M}\n'
+            f'Last error: {log.detail or "(none recorded)"}\n\n'
+            + ('The original email is attached as original-email.eml. Open it and create the ticket by hand.'
+               if attached else
+               "MB's saved copy of this email could not be read, so it is not attached. "
+               'Look for the email in the mailbox.')
+        )
+        written = []
+        old_copy = (log.raw_copy.storage, log.raw_copy.name) if log.raw_copy else None
+        try:
+            with transaction.atomic():
+                # The log id keeps each email's alert its own ticket: the alert
+                # helper merges same-subject alerts within an hour.
+                alert = create_system_alert(
+                    f'Inbound email could not become a ticket (log #{log.pk})', body)
+                if attached:
+                    a = Attachment(
+                        content_type=ContentType.objects.get_for_model(alert),
+                        object_id=alert.pk,
+                        original_filename='original-email.eml',
+                        mime_type='message/rfc822',
+                        size_bytes=len(raw),
+                    )
+                    a.file.save('original-email.eml', ContentFile(raw), save=True)
+                    written.append((a.file.storage, a.file.name))
+                log.status = 'gave_up'
+                log.ticket = alert
+                log.raw_copy = ''
+                log.detail = (f'Gave up after {log.attempts} attempts; System Alert '
+                              f'{alert.ticket_number} raised. {log.detail}')[:5000]
+                log.save(update_fields=['status', 'ticket', 'raw_copy', 'detail'])
+        except Exception:
+            logger.exception('Could not raise the give-up alert for inbound message %s.',
+                             log.message_id)
+            _delete_files(written)
+            # If MB still holds a copy, the next run retries the give-up from it.
+            return bool(old_copy)
+        if old_copy:
+            _delete_files([old_copy])   # the alert ticket now carries the email
+        self.counts['gave_up'] += 1
+        self._say('gave_up', log.detail)
+        return True
