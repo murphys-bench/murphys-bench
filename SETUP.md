@@ -74,7 +74,7 @@ Outbound email is used for functions such as:
 
 The Email Templates tab controls the wording of automated messages and shows the variables available to each template.
 
-Suppression patterns (for example `noreply@*`) and the Suppressed addresses list name addresses Murphy's Bench refuses to email. They are checked against the primary recipient of every message sent to a customer, including replies, templates, and documents sent by hand, not only automated mail. Two things can bypass address-based suppression: CC and BCC addresses, such as those in a reply's Also send to box, are not checked, and an address entered with a display name (`Name <address>`), which Resend's Other address field allows, is not matched.
+Suppression patterns (for example `noreply@*`) and the Suppressed addresses list name addresses Murphy's Bench refuses to email. They are checked against the primary recipient of every message sent to a customer, including replies, templates, and documents sent by hand, not only automated mail. Known limitations include: CC and BCC addresses, such as those in a reply's Also send to box, are not checked, and an address entered with a display name (`Name <address>`), which Resend's Other address field allows, can fail to match the intended suppression rule.
 
 ## 4. Inbound Email
 
