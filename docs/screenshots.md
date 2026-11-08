@@ -241,7 +241,7 @@ Roles: each permission with an effect outside Murphy's Bench is marked.
 
 ![Roles](../screenshots/settings-roles.png)
 
-The organization credentials vault. Revealing, editing, or deleting a password is logged.
+The organization credentials vault. Revealing or editing a credential is logged. Deleting a credential also removes its access history, including the record of the deletion.
 
 ![Credentials vault](../screenshots/settings-credentials.png)
 
