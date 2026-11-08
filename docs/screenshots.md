@@ -237,7 +237,7 @@ Account security: your own two-factor authentication.
 
 ![Account security](../screenshots/settings-account-security.png)
 
-Roles: each permission with an effect outside Murphy's Bench is marked.
+Roles: selected sensitive permissions are marked.
 
 ![Roles](../screenshots/settings-roles.png)
 

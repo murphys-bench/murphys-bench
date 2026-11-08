@@ -74,7 +74,7 @@ Outbound email is used for functions such as:
 
 The Email Templates tab controls the wording of automated messages and shows the variables available to each template.
 
-Suppression patterns (for example `noreply@*`) and the Suppressed addresses list name addresses Murphy's Bench refuses to email. They apply to every message sent to a customer, including replies, templates, and documents sent by hand, not only automated mail. The check compares the plain address that the app's address fields accept. A request built outside those fields with a display name (`Name <address>`) is not matched, and the mail is delivered.
+Suppression patterns (for example `noreply@*`) and the Suppressed addresses list name addresses Murphy's Bench refuses to email. They are checked against the primary recipient of every message sent to a customer, including replies, templates, and documents sent by hand, not only automated mail. Two things can bypass address-based suppression: CC and BCC addresses, such as those in a reply's Also send to box, are not checked, and an address entered with a display name (`Name <address>`), which Resend's Other address field allows, is not matched.
 
 ## 4. Inbound Email
 
@@ -89,9 +89,9 @@ The mailbox is checked by a scheduled polling job. New messages become tickets. 
 - POP3 deletes every message from the server as it is downloaded.
 - IMAP reads only unread messages and marks each one read as it is downloaded. With Delete messages after processing ticked, it deletes them instead.
 
-So a message that fails to import is not tried again. With POP3, or IMAP with delete ticked, it is gone from the mailbox. With IMAP's default it stays in the mailbox, marked read. Marking it unread normally does not bring it back either: its Message-ID is recorded on the first try, and a message already recorded is skipped as a duplicate. A message with no Message-ID is not recorded, so with IMAP's default, marking it unread does retry it on the next poll. Check first whether the failed attempt created a ticket, because an error can happen after the ticket is saved.
+So a message that fails to import is not tried again. With POP3, or IMAP with delete ticked, it is gone from the mailbox. With IMAP's default it stays in the mailbox, marked read. Marking it unread normally does not bring it back either: its Message-ID is recorded on the first try, and a message already recorded is skipped as a duplicate. A message with no Message-ID is not recorded, so with IMAP's default, marking it unread does retry it on the next poll. Check first whether the failed attempt left a new ticket or added a reply to an existing ticket, because an error can happen after either is saved.
 
-Settings → Logs, with the Inbound Email source, lists every message the poller handled and its result. Check it after the first runs. A failed import leaves only that log row, with the sender, subject, and error. Murphy's Bench does not keep the message body or attachments, so handle the message by hand from the mailbox if a copy is still there, or from an independent archive.
+Settings → Logs, with the Inbound Email source, lists every message the poller handled and its result. Check it after the first runs. A failed import's log row has the sender, subject, and error, with no link to a ticket. Murphy's Bench keeps no separate copy of the raw message, but an error partway through can leave the body, and possibly some attachments, on a new ticket or on a reply in an existing conversation. Check both before recreating anything by hand from the mailbox, if a copy is still there, or from an independent archive.
 
 An IMAP download that fails partway through writes no log row. Messages already downloaded in that run stay marked read but are never imported. The failure appears only in the timer's service log (`journalctl -u murphys-bench-fetch-email.service`), and the run still reports success. After a failure, check the mailbox for read messages with no row in the log. With IMAP's default, mark those unread and the next poll tries them again.
 
@@ -101,7 +101,7 @@ Before using a live support mailbox, test with a separate mailbox and confirm th
 - replies attach to the correct ticket
 - processed messages are not imported again
 
-IMAP without delete keeps a copy of every message in the mailbox. With POP3 or IMAP with delete, Murphy's Bench holds the only record of each imported message and none of the content of a failed one. If you need to recover failed imports, keep an independent archive of the mailbox.
+IMAP without delete keeps a copy of every message in the mailbox. With POP3 or IMAP with delete, Murphy's Bench holds the only record of each imported message and keeps no recovery copy of a failed one. If you need to recover failed imports, keep an independent archive of the mailbox.
 
 See `deploy/README.md` for the inbound-email timer.
 
