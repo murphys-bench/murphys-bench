@@ -4,7 +4,9 @@ You have installed Murphy's Bench, can reach the login page, and have signed in 
 
 This guide covers the initial configuration needed before technicians begin using the system. See `INSTALL.md` for installation and `FEATURES.md` for an overview of the application itself.
 
-Routine configuration is handled under Settings, available to administrators from the gear icon in the sidebar footer. You should not need Django admin for normal setup or operation.
+Routine configuration is handled under Settings, available to administrators in the Back Office section of the sidebar. Its tabs are grouped into Company & Branding, Email, Tickets & Work Orders, Integrations, Access & Security, and System. You should not need Django admin for normal setup or operation.
+
+[docs/screenshots.md](docs/screenshots.md#settings) shows most Settings tabs.
 
 ## Suggested Setup Order
 
@@ -40,9 +42,13 @@ This information is used on repair reports and outbound email, so complete it be
 
 Go to Settings → Colors.
 
-Set the title-bar, sidebar, and accent colors. A live preview shows how the application will look. Email header text is selected automatically to remain readable against the chosen color.
+Upload a sidebar logo and a sign-in page logo, or leave them blank to show the company name as text.
 
-The separate Display tab controls browser-specific preferences such as font size and card density. These settings are stored per browser and user, not across the entire shop.
+Set the accent color and the color for each room. The accent colors primary buttons and links everywhere and is the Work room's color. The Register, Desk, and Back Office colors show as the stripe along the top of each page in that room and the dot beside its sidebar group. Blank a field to go back to the default.
+
+Ticket and work order status colors are set on the Statuses tab, and the customer email header color on the Email Templates tab.
+
+The separate Display tab sets the text size. Text size and dark mode (the toggle at the bottom of the sidebar) are both saved in the browser, not on the account, so they apply to everyone who signs in from that browser and do not follow a person to another one.
 
 ## 3. Outbound Email
 
@@ -57,7 +63,7 @@ Enter the SMTP settings for the address Murphy's Bench will use to send mail:
 
 The password is stored encrypted.
 
-Use Send Test Email and confirm that the message arrives before relying on outbound email for customer communication.
+Save the settings first: Send test email uses the saved SMTP settings, not what is typed on the page. Confirm that the message arrives before relying on outbound email for customer communication. The test goes to your own account's email address; if your account has none, to the default sending address; and if there is none, to the SMTP username.
 
 Outbound email is used for functions such as:
 
@@ -68,7 +74,7 @@ Outbound email is used for functions such as:
 
 The Email Templates tab controls the wording of automated messages and shows the variables available to each template.
 
-The Suppressed Addresses list contains addresses that must not receive automated mail.
+Suppression patterns (for example `noreply@*`) and the Suppressed addresses list name addresses Murphy's Bench refuses to email. They are checked against the primary recipient of every message sent to a customer, including replies, templates, and documents sent by hand, not only automated mail. Known limitations include: CC and BCC addresses, such as those in a reply's Also send to box, are not checked, and an address entered with a display name (`Name <address>`), which Resend's Other address field allows, can fail to match the intended suppression rule.
 
 ## 4. Inbound Email
 
@@ -135,16 +141,18 @@ The workflow tabs control how tickets and work orders are classified and process
 
 Available configuration includes:
 
-- Statuses — ticket and work-order statuses and their display colors
-- Help Topics — categories for incoming tickets, including an optional default SLA
-- SLA Plans — response deadlines and overdue behavior
-- Repair Types and Categories — classifications used by work orders and checklists
-- Checklist Items — pre-repair and post-repair tasks, grouped by device type
-- Canned Responses — reusable customer-facing or internal text
-- Quick Labor — common labor entries
-- Custom Fields — additional ticket or work-order fields tied to a help topic or repair type
-- Dashboard Tiles — status groups shown on the dashboard
-- KB Categories — categories used by knowledge-base articles
+- Repair Types and Categories: classifications used by work orders and checklists
+- Device Types: the machine categories offered when logging a device
+- Checklist Items: pre-repair and post-repair tasks, optionally scoped to device types
+- Canned Responses: reusable customer-facing or internal text
+- Statuses: ticket and work-order statuses and their display colors
+- Help Topics: categories for incoming tickets, including an optional default SLA
+- SLA Plans: response deadlines, overdue behavior, and the default SLA for business and residential clients
+- Tech Skills: skill tags for technicians
+- Custom Fields: additional ticket or work-order fields tied to a help topic or repair type
+- KB Categories: categories used by knowledge-base articles
+
+Common labor, parts, and services with their prices live in Products & Services, in the Back Office section of the sidebar, not in Settings.
 
 Do not add configuration simply because a tab exists. Start with the defaults and add fields, statuses, and categories when the existing workflow no longer describes the work accurately.
 
@@ -152,7 +160,7 @@ Do not add configuration simply because a tab exists. Start with the defaults an
 
 Go to Settings → Security.
 
-The main setting is Require MFA. When enabled, users who have not enrolled are prompted to configure an authenticator application at their next login.
+The main setting is Require two-factor authentication. When enabled, users who have not enrolled are prompted to configure an authenticator application at their next login.
 
 Administrators can reset a user's MFA enrollment if the device is lost or replaced.
 
@@ -176,7 +184,7 @@ Murphy's Bench prepares billing for review. Confirm the resulting drafts before 
 
 ## 9. Backups and Scheduled Jobs
 
-Go to Settings → Maintenance → Backups to configure the available backup destinations.
+Go to Settings → Maintenance and use the Backups card to configure the available backup destinations.
 
 Murphy's Bench can send backups to:
 
@@ -216,18 +224,22 @@ Run it without `--confirm` first for a dry run. It removes operational records o
 — configuration, settings, roles, email templates, repair types and logins are all
 kept. Do not use `manage.py flush`, which also destroys configuration.
 
-Install with `--no-demo-data` if you would rather start empty. To add it to an
-install that started empty:
+Install with `--no-demo-data` if you would rather start empty. Decide at install
+time: adding demo data later is deliberately hard.
+
+`seed_demo_data` refuses on an install the installer has marked set up (every
+install, including one started with `--no-demo-data`), on a production-style
+install (`DEBUG=False`), and on any database that holds operational data of any
+kind, including clientless work such as counter sales, prospects and walk-in
+devices. Without `--force`, it cannot mix demo records into real data. On an install
+that started empty, `--force` is the only way past those guards. It skips all three,
+so it can also add demo records beside real ones:
 
 ```bash
-venv/bin/python manage.py seed_demo_data --new-install
+venv/bin/python manage.py seed_demo_data --force
 ```
 
-That command refuses to run once the installer has marked the system set up, and
-also whenever the database holds operational data of any kind — including
-clientless work such as counter sales, prospects and walk-in devices. So it can
-never mix demo records into real data. `--force` overrides every guard and should
-not be used on a system holding real client information.
+Use it only on a test system that holds no real operational data.
 
 ### Walking the workflow by hand
 

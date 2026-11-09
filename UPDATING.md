@@ -28,9 +28,9 @@ upgrade itself, and until now it did not tell you when that mattered.
 
 | Button | What it does | What it cannot do |
 |---|---|---|
-| **Back up now** | Runs a full backup and ships it to your configured destination. | Nothing. It works. |
-| **Restore** | Lists backups on your destination and restores the one you pick. | Nothing, *if* its systemd units are installed. See below. |
-| **Update** | Pulls new application code, runs migrations, restarts. | Cannot install systemd units, sudoers rules, OS packages or nginx config. |
+| **Run backup now** | Runs a full backup and ships it to your configured destination. | Nothing. It works. |
+| **Show available backups**, then **Restore** | Lists backups on your destination and restores the one you pick. | Nothing, *if* its systemd units are installed. See below. |
+| **Update to latest** | Pulls new application code, runs migrations, restarts. | Cannot install systemd units, sudoers rules, OS packages or nginx config. |
 
 ### A note on Restore
 

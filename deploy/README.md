@@ -164,7 +164,7 @@ bad release self-heals to the last good state instead of leaving the box broken.
 > that's the intended "revert to last stable." Each rollback also leaves a
 > `backups/pre-restore-<ts>/` safety copy (harmless; prune when convenient).
 
-## In-app updates (Settings → Updates)
+## In-app updates (Settings → Maintenance → Software updates)
 
 Lets an admin trigger `update.sh` from the web UI instead of SSHing in. A web
 request can't restart its own gunicorn, so the page drops a trigger file that a
