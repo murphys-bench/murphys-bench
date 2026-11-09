@@ -21218,6 +21218,7 @@ class _FakeIMAP:
     uidplus = True
     uid_after_literal = False
     wrong_uid = False
+    fail_search = False
     hangs = ()       # UIDs whose FETCH times out
     refuses = ()     # UIDs whose FETCH answers NO
 
@@ -21238,6 +21239,8 @@ class _FakeIMAP:
     def uid(self, command, *args):
         if command == 'SEARCH':
             assert args[-1] == 'UNSEEN'
+            if _FakeIMAP.fail_search:
+                return 'NO', [b'SEARCH failed']
             ids = [str(m['uid']).encode() for m in _FakeIMAP.mailbox if '\\Seen' not in m['flags']]
             return 'OK', [b' '.join(ids)]
         if command == 'FETCH':
@@ -21309,6 +21312,7 @@ def _imap_serves(monkeypatch, raws):
     _FakeIMAP.wrong_uid = False
     _FakeIMAP.hangs = ()
     _FakeIMAP.refuses = ()
+    _FakeIMAP.fail_search = False
 
 
 def _fetch():
@@ -22604,3 +22608,44 @@ def test_big_backlog_stops_taking_mail_at_the_time_limit(monkeypatch):
     assert Ticket.objects.filter(subject__startswith='Big').count() == 1
     assert _FakeIMAP.mailbox[1]['flags'] == set(), 'the rest stay for the next run'
     assert ran == [True], 'saved retries still get their turn'
+
+
+# ── CodeRabbit's review of the round 2 fixes (PR #122) ──────────────────────
+
+@pytest.mark.django_db
+def test_failed_imap_search_keeps_the_record_of_failing_downloads(monkeypatch, admin_user):
+    from core.models import InboundStuckDownload
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id='<srch@davis.example>')])
+    _FakeIMAP.refuses = (b'100',)
+    _fetch()
+    before = list(InboundStuckDownload.objects.values_list('key', 'failures'))
+    assert len(before) == 1
+    _FakeIMAP.fail_search = True
+    _fetch()
+    assert list(InboundStuckDownload.objects.values_list('key', 'failures')) == before
+
+
+@pytest.mark.django_db
+def test_alert_that_half_fails_leaves_nothing_and_is_raised_later(monkeypatch, admin_user):
+    from core.models import InboundStuckDownload, Notification
+    _two_on_pop3(monkeypatch)
+    _fetch()
+    _fetch()
+    with monkeypatch.context() as m:
+        m.setattr(Notification, 'save', lambda self, *a, **k: (_ for _ in ()).throw(OSError('db busy')))
+        _fetch()
+    row = InboundStuckDownload.objects.get()
+    assert row.failures == 3 and not row.alerted and _alerts().count() == 0
+
+
+@pytest.mark.django_db
+def test_interrupted_row_with_unreadable_copy_can_be_marked_handled(monkeypatch, admin_user):
+    from core.log_search import _email_in_row
+    from core.models import InboundEmailLog
+    _, log = _waiting_row(monkeypatch, '<dead-run@davis.example>')
+    InboundEmailLog.objects.filter(pk=log.pk).update(status='processing')
+    log.raw_copy.storage.delete(log.raw_copy.name)
+    _fetch()
+    log.refresh_from_db()
+    assert log.status == 'failed' and _email_in_row(log).mark_handled_url

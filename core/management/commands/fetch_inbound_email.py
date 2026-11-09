@@ -665,7 +665,11 @@ class _ImapMailbox:
         # made, and a person deleting mail in webmail meanwhile would shift
         # sequence numbers under us.
         typ, data = self.conn.uid('SEARCH', None, 'UNSEEN')
-        uids = data[0].split() if typ == 'OK' and data and data[0] else []
+        if typ != 'OK':
+            # Not the same as an empty mailbox: an empty list would clear the
+            # record of failing downloads.
+            raise imaplib.IMAP4.error('IMAP SEARCH failed')
+        uids = data[0].split() if data and data[0] else []
         keys = {uid: f'imap:{self.folder}:{uid.decode(errors="replace")}' for uid in uids}
         for uid in self.tracker.order(keys):
             self.current = keys[uid]
@@ -846,19 +850,20 @@ class _StuckDownloads:
 
     def _alert(self, row):
         from core.system_alerts import create_system_alert
-        create_system_alert(
-            f'Inbound email could not be downloaded ({row.key})',
-            f"Murphy's Bench tried {row.failures} times to download one message and could not, "
-            'so it does not know who sent it. The message is still in the mailbox. MB now skips '
-            'it so that later mail keeps arriving, and tries it again once an hour.\n\n'
-            f'Mailbox reference: {row.key}\n'
-            f'Last error:        {row.last_error}\n\n'
-            'If a later try succeeds it becomes a ticket as usual. Otherwise look in the mailbox '
-            'for a very large or damaged message, create the ticket by hand, and remove the '
-            'message from the mailbox.',
-        )
-        row.alerted = True
-        row.save(update_fields=['alerted'])
+        with transaction.atomic():
+            create_system_alert(
+                f'Inbound email could not be downloaded ({row.key})',
+                f"Murphy's Bench tried {row.failures} times to download one message and could not, "
+                'so it does not know who sent it. The message is still in the mailbox. MB now skips '
+                'it so that later mail keeps arriving, and tries it again once an hour.\n\n'
+                f'Mailbox reference: {row.key}\n'
+                f'Last error:        {row.last_error}\n\n'
+                'If a later try succeeds it becomes a ticket as usual. Otherwise look in the mailbox '
+                'for a very large or damaged message, create the ticket by hand, and remove the '
+                'message from the mailbox.',
+            )
+            row.alerted = True
+            row.save(update_fields=['alerted'])
 
 
 class Command(BaseCommand):
@@ -1196,6 +1201,9 @@ class Command(BaseCommand):
         from core.system_alerts import create_system_alert
         logger.error('Saved copy of inbound message %s could not be read: %s: %s',
                      log.message_id, type(exc).__name__, exc)
+        # A 'processing' row seen here belongs to a run that died (the run lock
+        # rules out a live one). Make it 'failed' so Mark handled can reach it.
+        InboundEmailLog.objects.filter(pk=log.pk, status='processing').update(status='failed')
         self.counts['copy_unreadable'] += 1
         body = (
             "Murphy's Bench is holding an inbound email that did not become a ticket, "
