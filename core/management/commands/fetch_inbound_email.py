@@ -85,9 +85,12 @@ COPY_GRACE = timedelta(hours=24)
 # end cleanly, then tried once more this often in case the server has recovered.
 STUCK_RETRY_EVERY = timedelta(hours=1)
 
-# Longest one run spends taking mail in, so saved retries still get their turn
-# behind a big backlog. Anything left stays in the mailbox for the next run.
+# No new download starts after this long in one run, so saved retries still get
+# their turn behind a big backlog. Anything left stays in the mailbox.
 DRAIN_TIME_LIMIT_SECONDS = 600
+# The end of that time is held for messages waiting to try their download again,
+# so steady new mail cannot keep them out forever.
+DUE_RESERVE_SECONDS = 120
 _clock = time.monotonic
 
 # Statuses after which a message is finished with: it is never tried again, and
@@ -594,6 +597,12 @@ def _sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def _fingerprint(raw):
+    """Identifies one email's contents. Line endings at the very end are ignored,
+    because POP3 and IMAP do not report them the same way."""
+    return _sha256(raw.rstrip(b'\r\n'))
+
+
 def _identify(raw_bytes):
     """Return (claim_key, from_email, subject, old_key) for the log row. old_key
     is what MB versions before Nov 2026 stored for a very long Message-ID (its
@@ -612,7 +621,7 @@ def _identify(raw_bytes):
     except Exception:
         logger.exception('Could not read the headers of an inbound message.')
     if not mid:
-        mid = 'no-message-id:sha256:' + hashlib.sha256(raw_bytes.rstrip(b'\r\n')).hexdigest()
+        mid = 'no-message-id:sha256:' + _fingerprint(raw_bytes)
     elif len(mid) > 500:
         # Too long for the column. Cutting it short could make two different
         # messages look like one, and the second would be dropped as a duplicate.
@@ -672,6 +681,8 @@ class _ImapMailbox:
         uids = data[0].split() if data and data[0] else []
         keys = {uid: f'imap:{self.folder}:{uid.decode(errors="replace")}' for uid in uids}
         for uid in self.tracker.order(keys):
+            if not self.tracker.has_time(keys[uid]):
+                continue
             self.current = keys[uid]
             # BODY.PEEK[]: a plain RFC822 / BODY[] fetch marks the message read
             # on the server, which would take it out of the queue before MB has it.
@@ -763,6 +774,8 @@ class _Pop3Mailbox:
         count, _ = self.conn.stat()
         keys = self._keys(count)
         for i in self.tracker.order(keys):
+            if not self.tracker.has_time(keys[i]):
+                continue
             self.current = keys[i]
             if self.dry_run:
                 # Headers only (TOP), and the session is never QUIT: a dry run
@@ -806,6 +819,9 @@ class _StuckDownloads:
     def __init__(self, dry_run):
         self.dry_run = dry_run
         self.rows = {} if dry_run else {r.key: r for r in InboundStuckDownload.objects.all()}
+        self.started = _clock()
+        self.due_waiting = False
+        self.warned = False
 
     def order(self, keys):
         """Given {ref: key}, return the refs to download: healthy messages first,
@@ -820,12 +836,25 @@ class _StuckDownloads:
             elif row.failures < MAX_ATTEMPTS or row.last_failed_at <= retry_before:
                 failing.append((row.last_failed_at, ref))
         failing.sort(key=lambda item: item[0])
+        self.due_waiting = bool(failing)
         gone = set(self.rows) - set(keys.values())
         if gone:
             InboundStuckDownload.objects.filter(key__in=gone).delete()
             for key in gone:
                 del self.rows[key]
         return healthy + [ref for _, ref in failing]
+
+    def has_time(self, key):
+        """May this download start now? Checked before every attempt, whatever
+        became of the one before it."""
+        reserve = DUE_RESERVE_SECONDS if self.due_waiting and key not in self.rows else 0
+        if _clock() - self.started <= DRAIN_TIME_LIMIT_SECONDS - reserve:
+            return True
+        if not self.warned:
+            self.warned = True
+            logger.warning('Inbound fetch reached its time limit; the remaining mail stays in the '
+                           'mailbox for the next run.')
+        return False
 
     def succeeded(self, key):
         row = self.rows.pop(key, None)
@@ -852,15 +881,19 @@ class _StuckDownloads:
         from core.system_alerts import create_system_alert
         with transaction.atomic():
             create_system_alert(
-                f'Inbound email could not be downloaded ({row.key})',
-                f"Murphy's Bench tried {row.failures} times to download one message and could not, "
+                # One fixed subject: the alert helper folds repeats within the hour
+                # into this ticket, so an outage is one alert and not one per message.
+                'Inbound email could not be downloaded',
+                f"Murphy's Bench tried {row.failures} times to download a message and could not, "
                 'so it does not know who sent it. The message is still in the mailbox. MB now skips '
-                'it so that later mail keeps arriving, and tries it again once an hour.\n\n'
+                'it so that later mail keeps arriving, and tries it again once an hour. If several '
+                'messages fail together, this one alert covers them all, which usually means the '
+                'mail server is having trouble.\n\n'
                 f'Mailbox reference: {row.key}\n'
                 f'Last error:        {row.last_error}\n\n'
-                'If a later try succeeds it becomes a ticket as usual. Otherwise look in the mailbox '
-                'for a very large or damaged message, create the ticket by hand, and remove the '
-                'message from the mailbox.',
+                'If a later try succeeds the message becomes a ticket as usual. If this continues, '
+                'look in the mailbox for a very large or damaged message, create the ticket by hand, '
+                'and remove the message from the mailbox.',
             )
             row.alerted = True
             row.save(update_fields=['alerted'])
@@ -988,7 +1021,6 @@ class Command(BaseCommand):
 
     def _drain(self, mailbox, dry_run):
         seen = 0
-        started = _clock()
         for ref, raw in mailbox.messages():
             seen += 1
             if dry_run:
@@ -1003,11 +1035,6 @@ class Command(BaseCommand):
                 except Exception:
                     logger.exception('MB holds an inbound message but could not take it out '
                                      'of the mailbox; it will be fetched again and skipped.')
-            if _clock() - started > DRAIN_TIME_LIMIT_SECONDS:
-                logger.warning('Inbound fetch reached its %d second limit after %d message(s); '
-                               'the rest stay in the mailbox for the next run.',
-                               DRAIN_TIME_LIMIT_SECONDS, seen)
-                break
         if seen == 0 and self.verbosity >= 1:
             self.stdout.write('  No new messages.')
 
@@ -1056,6 +1083,10 @@ class Command(BaseCommand):
             if log.pk in self.touched:
                 return False
             self.touched.add(log.pk)
+            if earlier is not None:
+                # Before the attempts check: however many alerts have failed, the
+                # one that gets through must still say to look for an existing ticket.
+                return self._give_up(log, raw, legacy=True, earlier=earlier)
             if log.attempts >= MAX_ATTEMPTS:
                 if not self._ensure_copy(log, raw):
                     return False
@@ -1080,31 +1111,32 @@ class Command(BaseCommand):
 
     def _ensure_copy(self, log, raw):
         """Make sure MB holds a usable copy of `raw` before the mailbox copy may
-        go. A missing, unreadable or damaged copy is replaced from this delivery.
-        An intact copy that differs from this delivery is kept, and the delivery
-        goes to a person. Returns False if the mailbox copy must stay."""
+        go. A saved copy is replaced only by a delivery matching its fingerprint,
+        which proves they are the same email. Any other delivery goes to a person
+        and MB's copy is left exactly as it is, even if it cannot be read just now:
+        that may be a passing fault. Returns False if the mailbox copy must stay."""
         stale = None
         if log.raw_copy:
+            if _fingerprint(raw) != log.raw_copy_sha256:
+                return self._keep_both(log, raw)
             stale = (log.raw_copy.storage, log.raw_copy.name)
             try:
                 with log.raw_copy.open('rb') as fh:
                     held = fh.read()
             except Exception as exc:
                 logger.warning('Saved copy of inbound message %s could not be read (%s: %s); '
-                               'replacing it from this delivery.',
+                               'replacing it from this matching delivery.',
                                log.message_id, type(exc).__name__, exc)
             else:
-                if held and _sha256(held) == log.raw_copy_sha256:
-                    if held.rstrip(b'\r\n') == raw.rstrip(b'\r\n'):
-                        return True
-                    return self._keep_both(log, raw)
+                if held and _fingerprint(held) == log.raw_copy_sha256:
+                    return True
                 logger.warning('Saved copy of inbound message %s is damaged; replacing it from '
-                               'this delivery.', log.message_id)
+                               'this matching delivery.', log.message_id)
         saved = None
         try:
             log.raw_copy.save(f'{log.pk}.eml', ContentFile(raw), save=False)
             saved = (log.raw_copy.storage, log.raw_copy.name)
-            log.raw_copy_sha256 = _sha256(raw)
+            log.raw_copy_sha256 = _fingerprint(raw)
             log.save(update_fields=['raw_copy', 'raw_copy_sha256'])
         except BaseException as exc:
             if saved:
@@ -1144,13 +1176,13 @@ class Command(BaseCommand):
                 alert = create_system_alert(
                     f'Inbound email arrived in two versions (log #{log.pk})',
                     "Murphy's Bench is holding an inbound email for a retry, and another message "
-                    'arrived with the same Message-ID but different contents.\n\n'
+                    'arrived with the same Message-ID but contents that do not match it.\n\n'
                     f'From:       {log.from_email or "(unknown)"}\n'
                     f'Subject:    {log.subject or "(no subject)"}\n'
                     f'Message-ID: {log.message_id}\n\n'
-                    'MB will keep retrying the one it holds. The other is attached as '
-                    'other-version.eml. Compare it with the ticket that results, and create a '
-                    'ticket by hand if it says something different.',
+                    'MB keeps the one it holds, unchanged, and keeps retrying it. The other is '
+                    'attached as other-version.eml. It may be a different email, so it has not '
+                    'been ticketed. Read it and create a ticket by hand if it needs one.',
                 )
                 self._attach_email(alert, raw, 'other-version.eml', written)
         except BaseException as exc:
@@ -1160,6 +1192,7 @@ class Command(BaseCommand):
             logger.exception('Could not raise the two-versions alert for %s; leaving the delivery '
                              'in the mailbox.', log.message_id)
             return False
+        self._say('two_versions', f'{log.message_id}: delivery differs from the saved copy; alert raised')
         return True
 
     # ── Pass 2: retries from saved copies ─────────────────────────────────────
@@ -1181,7 +1214,7 @@ class Command(BaseCommand):
                 # next run.
                 self._copy_unreadable(log, exc)
                 continue
-            if not raw or _sha256(raw) != log.raw_copy_sha256:
+            if not raw or _fingerprint(raw) != log.raw_copy_sha256:
                 # Same rule: a damaged file must not become a damaged ticket.
                 self._copy_unreadable(log, ValueError('the saved copy is empty or has changed '
                                                       'since it was saved'))
@@ -1292,7 +1325,7 @@ class Command(BaseCommand):
             if not log.raw_copy:
                 log.raw_copy.save(f'{log.pk}.eml', ContentFile(raw), save=False)
                 saved = (log.raw_copy.storage, log.raw_copy.name)
-                log.raw_copy_sha256 = _sha256(raw)
+                log.raw_copy_sha256 = _fingerprint(raw)
             log.status = 'failed'
             log.detail = f'Attempt {log.attempts} of {MAX_ATTEMPTS} failed: {error}'[:5000]
             log.save(update_fields=['status', 'detail', 'raw_copy', 'raw_copy_sha256'])
@@ -1320,7 +1353,8 @@ class Command(BaseCommand):
         retries existed came back, and whether it already made a ticket is
         unknown. If any of it fails, nothing is recorded; the next run tries the
         give-up again (from MB's copy, or from the mailbox, which still has it).
-        Returns True when the alert was raised."""
+        Returns True when the alert was raised, or when a person finished the row
+        first (Mark handled), in which case no alert is raised and nothing changes."""
         from core.system_alerts import create_system_alert
 
         facts = (
@@ -1356,6 +1390,11 @@ class Command(BaseCommand):
         written = []
         try:
             with transaction.atomic():
+                # Claim first, the same way Mark handled does, so only one can win.
+                claimed = InboundEmailLog.objects.filter(pk=log.pk, status=log.status).update(status='gave_up')
+                if not claimed:
+                    log.refresh_from_db()
+                    return True
                 # The log id keeps each email's alert its own ticket: the alert
                 # helper merges same-subject alerts within an hour.
                 alert = create_system_alert(subject, body)

@@ -22596,18 +22596,90 @@ def test_dry_run_records_no_failed_download(monkeypatch):
     assert not InboundStuckDownload.objects.exists()
 
 
+def _ticking_imap(monkeypatch, seconds_per_fetch):
+    """IMAP where every FETCH takes `seconds_per_fetch` of simulated time."""
+    now = [0]
+    monkeypatch.setattr(_fie, '_clock', lambda: now[0])
+    real_uid = _FakeIMAP.uid
+
+    def uid(self, command, *args):
+        if command == 'FETCH':
+            now[0] += seconds_per_fetch
+        return real_uid(self, command, *args)
+
+    monkeypatch.setattr(_FakeIMAP, 'uid', uid)
+    return now
+
+
 @pytest.mark.django_db
 def test_big_backlog_stops_taking_mail_at_the_time_limit(monkeypatch):
     _inbound_site('imap')
-    _imap_serves(monkeypatch, [_raw_new_email(message_id=f'<big-{n}@davis.example>', subject=f'Big {n}') for n in (1, 2)])
-    ticks = iter([0, _fie.DRAIN_TIME_LIMIT_SECONDS + 1])
-    monkeypatch.setattr(_fie, '_clock', lambda: next(ticks))
+    _imap_serves(monkeypatch, [_raw_new_email(message_id=f'<big-{n}@davis.example>', subject=f'Big {n}') for n in (1, 2, 3)])
+    _ticking_imap(monkeypatch, _fie.DRAIN_TIME_LIMIT_SECONDS + 1)
     ran = []
     monkeypatch.setattr(_fie.Command, '_retry_saved', lambda self: ran.append(True))
     _fetch()
     assert Ticket.objects.filter(subject__startswith='Big').count() == 1
     assert _FakeIMAP.mailbox[1]['flags'] == set(), 'the rest stay for the next run'
     assert ran == [True], 'saved retries still get their turn'
+
+
+@pytest.mark.django_db
+def test_pop3_stops_taking_mail_at_the_time_limit(monkeypatch):
+    _inbound_site('pop3')
+    raws = [_on_the_wire(_raw_new_email(message_id=f'<p-{n}@davis.example>', subject='Pop big')) for n in range(3)]
+    _pop3_serves(monkeypatch, raws)
+    now = [0]
+    monkeypatch.setattr(_fie, '_clock', lambda: now[0])
+    real_retr = _FakePOP3.retr
+
+    def retr(self, i):
+        now[0] += _fie.DRAIN_TIME_LIMIT_SECONDS + 1
+        return real_retr(self, i)
+
+    monkeypatch.setattr(_FakePOP3, 'retr', retr)
+    _fetch()
+    assert _FakePOP3.retr_log == raws[:1] and _FakePOP3.quits == 1
+
+
+@pytest.mark.django_db
+def test_time_limit_also_covers_downloads_that_fail(monkeypatch, admin_user):
+    _inbound_site('imap')
+    raws = [_raw_new_email(message_id=f'<no-{n}@davis.example>') for n in range(30)]
+    _imap_serves(monkeypatch, raws)
+    _FakeIMAP.refuses = tuple(str(100 + n).encode() for n in range(30))
+    now = _ticking_imap(monkeypatch, 30)
+    when = []
+    monkeypatch.setattr(_fie.Command, '_retry_saved', lambda self: when.append(now[0]))
+    _fetch()
+    assert when and when[0] <= _fie.DRAIN_TIME_LIMIT_SECONDS + 30
+
+
+@pytest.mark.django_db
+def test_overdue_download_gets_its_turn_under_steady_mail(monkeypatch, admin_user):
+    from django.utils import timezone
+    from core.models import InboundStuckDownload
+    _inbound_site('imap')
+    stuck = _raw_new_email(message_id='<due@davis.example>', subject='Was stuck')
+    healthy = [_raw_new_email(message_id=f'<busy-{n}@davis.example>', subject='Busy') for n in range(40)]
+    _imap_serves(monkeypatch, [stuck] + healthy)
+    _ticking_imap(monkeypatch, 30)
+    InboundStuckDownload.objects.create(
+        key='imap:INBOX:100', failures=3, alerted=True,
+        last_failed_at=timezone.now() - 2 * _fie.STUCK_RETRY_EVERY)
+    _inbound_site('imap')
+    _fetch()
+    assert Ticket.objects.filter(subject='Was stuck').count() == 1, 'not shut out by the 40 behind it'
+    assert 0 < Ticket.objects.filter(subject='Busy').count() < 40
+
+
+@pytest.mark.django_db
+def test_healthy_mail_may_use_the_whole_limit_when_nothing_is_waiting(monkeypatch):
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id=f'<free-{n}@davis.example>', subject='Free') for n in range(40)])
+    _ticking_imap(monkeypatch, 30)
+    _fetch()
+    assert Ticket.objects.filter(subject='Free').count() == 21, 'every 30 seconds from 0 to 600'
 
 
 # ── CodeRabbit's review of the round 2 fixes (PR #122) ──────────────────────
@@ -22649,3 +22721,125 @@ def test_interrupted_row_with_unreadable_copy_can_be_marked_handled(monkeypatch,
     _fetch()
     log.refresh_from_db()
     assert log.status == 'failed' and _email_in_row(log).mark_handled_url
+
+
+# ── Outside review round 3 (PR #122) ────────────────────────────────────────
+
+def _other_delivery(mid):
+    _FakeIMAP.mailbox[0]['raw'] = _raw_new_email(message_id=mid, subject='Someone else entirely',
+                                                 body='An unrelated message.')
+
+
+@pytest.mark.django_db
+def test_read_fault_plus_reused_id_does_not_destroy_the_original(monkeypatch, admin_user):
+    from django.db.models.fields.files import FieldFile
+    mid = '<fault-1@davis.example>'
+    raw, log = _failed_copy_on_imap(monkeypatch, mid)
+    name, mark = log.raw_copy.name, log.raw_copy_sha256
+    _other_delivery(mid)
+    with monkeypatch.context() as m:
+        m.setattr(FieldFile, 'open', _unreadable)
+        m.setattr(_fie.Command, '_retry_saved', lambda self: None)
+        _fetch()
+    log.refresh_from_db()
+    assert (log.raw_copy.name, log.raw_copy_sha256) == (name, mark)
+    assert _stored(log.raw_copy) == raw, 'the original survives'
+    assert _FakeIMAP.mailbox[0]['flags'] == {'\\Seen'}
+    assert b'unrelated' in _stored(_fie.Attachment.objects.get(original_filename='other-version.eml').file)
+    _FakeIMAP.mailbox.clear()
+    _fetch()   # the fault has passed
+    ticket = Ticket.objects.get(pk=_log(mid).ticket_id)
+    assert 'it just beeps' in ticket.description
+    assert not Ticket.objects.filter(subject='Someone else entirely').exists()
+
+
+@pytest.mark.django_db
+def test_damaged_copy_is_not_replaced_by_a_different_email(monkeypatch, admin_user):
+    mid = '<fault-2@davis.example>'
+    raw, log = _failed_copy_on_imap(monkeypatch, mid)
+    name, mark = log.raw_copy.name, log.raw_copy_sha256
+    with open(log.raw_copy.path, 'wb') as fh:
+        fh.write(raw.replace(b'it just beeps', b'XXXXXXXXXXXXX'))
+    _other_delivery(mid)
+    _fetch()
+    log.refresh_from_db()
+    assert (log.raw_copy.name, log.raw_copy_sha256, log.status) == (name, mark, 'failed')
+    assert not Ticket.objects.filter(subject='Someone else entirely').exists()
+    assert _fie.Attachment.objects.filter(original_filename='other-version.eml').count() == 1
+
+
+@pytest.mark.django_db
+def test_same_email_over_pop3_and_imap_counts_as_a_match(monkeypatch):
+    mid = '<match-1@davis.example>'
+    raw, log = _failed_copy_on_imap(monkeypatch, mid)
+    _FakeIMAP.mailbox[0]['raw'] = raw.rstrip(b'\r\n')
+    with monkeypatch.context() as m:
+        m.setattr(_fie.Command, '_retry_saved', lambda self: None)
+        _fetch()
+    assert not _fie.Attachment.objects.filter(original_filename='other-version.eml').exists()
+
+
+@pytest.mark.django_db
+def test_legacy_warning_survives_repeated_alert_failures(monkeypatch, admin_user):
+    _old_long_id_row()
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id=_LONG_ID, subject='Long three')])
+    with monkeypatch.context() as m:
+        m.setattr(_fie.Attachment, 'save', lambda self, *a, **k: (_ for _ in ()).throw(OSError('disk full')))
+        for _ in range(4):
+            _fetch()
+    _fetch()
+    alert = _alerts().get()
+    assert 'Search tickets' in alert.description and 'gave up' not in alert.description
+    assert not Ticket.objects.filter(subject='Long three').exists()
+
+
+def _exhausted_row(monkeypatch, mid):
+    from core.models import InboundEmailLog
+    _, log = _waiting_row(monkeypatch, mid)
+    InboundEmailLog.objects.filter(pk=log.pk).update(attempts=_fie.MAX_ATTEMPTS)
+    return log
+
+
+@pytest.mark.django_db
+def test_mark_handled_beats_a_give_up_already_under_way(monkeypatch, client, admin_user, client_obj):
+    log = _exhausted_row(monkeypatch, '<race-1@davis.example>')
+    made = Ticket.objects.create(ticket_number='TKT-77002', client=client_obj, subject='By hand')
+    client.force_login(admin_user)
+    real = _fie.Command._give_up
+
+    def after_a_person_clicks(self, row, raw, **k):
+        _mark_handled(client, row, 'TKT-77002')
+        return real(self, row, raw, **k)
+
+    monkeypatch.setattr(_fie.Command, '_give_up', after_a_person_clicks)
+    _fetch()
+    log.refresh_from_db()
+    assert (log.status, log.ticket_id) == ('handled', made.pk)
+    assert _alerts().count() == 0
+
+
+@pytest.mark.django_db
+def test_failed_give_up_leaves_the_row_claimable(monkeypatch, admin_user):
+    log = _exhausted_row(monkeypatch, '<race-2@davis.example>')
+    with monkeypatch.context() as m:
+        m.setattr(_fie.Attachment, 'save', lambda self, *a, **k: (_ for _ in ()).throw(OSError('disk full')))
+        _fetch()
+    log.refresh_from_db()
+    assert log.status == 'failed', 'the rolled-back claim is released'
+    _fetch()
+    log.refresh_from_db()
+    assert log.status == 'gave_up' and _alerts().count() == 1
+
+
+@pytest.mark.django_db
+def test_outage_raises_one_alert_and_keeps_each_retry_record(monkeypatch, admin_user):
+    from core.models import InboundStuckDownload, Notification
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id=f'<out-{n}@davis.example>') for n in range(25)])
+    _FakeIMAP.refuses = tuple(str(100 + n).encode() for n in range(25))
+    for _ in range(3):
+        _fetch()
+    assert _alerts().count() == 1
+    assert Notification.objects.filter(kind='system_alert').count() == 1
+    assert InboundStuckDownload.objects.filter(failures=3, alerted=True).count() == 25
