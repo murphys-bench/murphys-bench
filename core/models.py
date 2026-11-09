@@ -3299,6 +3299,24 @@ class Notification(models.Model):
         return reverse('core:notifications')
 
 
+class InboundStuckDownload(models.Model):
+    """A message in the mailbox whose download keeps failing. MB cannot read it,
+    so it has no sender or Message-ID and no InboundEmailLog row. The row goes away
+    once the message downloads or is no longer in the mailbox."""
+
+    key = models.CharField(max_length=255, unique=True, help_text="The server's id for the message.")
+    failures = models.PositiveSmallIntegerField(default=0)
+    last_failed_at = models.DateTimeField()
+    last_error = models.TextField(blank=True)
+    alerted = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'inbound_stuck_download'
+
+    def __str__(self):
+        return f'{self.key} ({self.failures} failures)'
+
+
 class InboundEmailLog(models.Model):
     """Audit log for every message fetched from the inbound mailbox."""
 
@@ -3311,6 +3329,7 @@ class InboundEmailLog(models.Model):
         ('refused', 'Refused (blocked sender or suppressed client)'),
         ('failed', 'Failed, Will Retry'),
         ('gave_up', 'Gave Up, System Alert Raised'),
+        ('handled', 'Handled by Hand'),
         # Before Nov 2026 every failure, and every refusal, was 'error', and a run
         # that died left 'processing' (migration 0122 relabels those
         # 'needs_review'). Either can hide a ticket the old code half-finished,
@@ -3334,6 +3353,9 @@ class InboundEmailLog(models.Model):
     # MB's own copy of the raw message while it is waiting to be retried.
     raw_copy = models.FileField(upload_to='inbound_retry/', storage=private_attachment_storage,
                                 blank=True, max_length=255)
+    # Fingerprint of raw_copy when it was saved, so damage to the file on disk can
+    # be told apart from a different email reusing the same Message-ID.
+    raw_copy_sha256 = models.CharField(max_length=64, blank=True)
     # Once the message is handled, the copy is kept until this time (so a backup
     # taken meanwhile still finds it), then deleted.
     copy_expires_at = models.DateTimeField(null=True, blank=True)

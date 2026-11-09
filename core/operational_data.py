@@ -89,6 +89,7 @@ REGISTRY = (
     # deletions has to be wiped after the things it would record.
     OperationalModel('core.EmailSendLog', 'Email send logs', delete_order=21),
     OperationalModel('core.InboundEmailLog', 'Inbound email logs', delete_order=22),
+    OperationalModel('core.InboundStuckDownload', 'Stuck inbound downloads', delete_order=23),
     # ⚠ MUST DELETE LAST (delete_order 95, after Client at 90). auditlog records
     # the reset's OWN deletions: Ticket, TicketReply, WorkOrder and WorkOrderNote
     # are registered with it, and cascade deletes fire it too. Wiping the log

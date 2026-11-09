@@ -43,7 +43,26 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='inboundemaillog',
             name='status',
-            field=models.CharField(choices=[('new_ticket', 'Created New Ticket'), ('new_ticket_linked', 'Created New Ticket (linked to a closed one)'), ('reply', 'Added Reply to Ticket'), ('reply_flagged', 'Reply Added to Closed Ticket (flagged)'), ('duplicate', 'Duplicate — Already Processed'), ('refused', 'Refused (blocked sender or suppressed client)'), ('failed', 'Failed, Will Retry'), ('gave_up', 'Gave Up, System Alert Raised'), ('error', 'Processing Error'), ('needs_review', 'Needs Review (from before this update)'), ('processing', 'Processing (claimed)')], max_length=20),
+            field=models.CharField(choices=[('new_ticket', 'Created New Ticket'), ('new_ticket_linked', 'Created New Ticket (linked to a closed one)'), ('reply', 'Added Reply to Ticket'), ('reply_flagged', 'Reply Added to Closed Ticket (flagged)'), ('duplicate', 'Duplicate — Already Processed'), ('refused', 'Refused (blocked sender or suppressed client)'), ('failed', 'Failed, Will Retry'), ('gave_up', 'Gave Up, System Alert Raised'), ('handled', 'Handled by Hand'), ('error', 'Processing Error'), ('needs_review', 'Needs Review (from before this update)'), ('processing', 'Processing (claimed)')], max_length=20),
+        ),
+        migrations.CreateModel(
+            name='InboundStuckDownload',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('key', models.CharField(help_text="The server's id for the message.", max_length=255, unique=True)),
+                ('failures', models.PositiveSmallIntegerField(default=0)),
+                ('last_failed_at', models.DateTimeField()),
+                ('last_error', models.TextField(blank=True)),
+                ('alerted', models.BooleanField(default=False)),
+            ],
+            options={
+                'db_table': 'inbound_stuck_download',
+            },
+        ),
+        migrations.AddField(
+            model_name='inboundemaillog',
+            name='raw_copy_sha256',
+            field=models.CharField(blank=True, max_length=64),
         ),
         migrations.RunPython(mark_legacy_claims, migrations.RunPython.noop),
     ]

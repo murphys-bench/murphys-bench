@@ -14,6 +14,8 @@ the Unreleased entries move under that version and prod gets a single update.
 
 - An inbound email that fails to become a ticket is no longer lost. It leaves the mailbox only once MB has the ticket or its own copy, is retried up to 3 times, and then opens a System Alert ticket with the original email attached. Settings > Logs shows why each email failed.
 - Inbound IMAP with delete on removes only the messages MB handled. It used to also purge any other mail in the folder flagged deleted by another client.
+- A message that will not download no longer holds up later inbound mail. After 3 failed tries MB raises a System Alert and skips it.
+- Settings → Logs can mark a failed inbound email as handled, so a ticket made by hand is not duplicated by a retry.
 
 ## v0.18.0 — 2026-10-25
 

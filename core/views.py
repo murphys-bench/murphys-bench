@@ -7776,6 +7776,40 @@ class SuppressedAddressDeleteView(SettingsAdminMixin, View):
         return redirect(f"{reverse('core:settings')}?tab=outbound")
 
 
+class InboundEmailMarkHandledView(SettingsAdminMixin, View):
+    """A person dealt with a failed inbound email themselves. Finishes the row so
+    the poller stops retrying it, and keeps the row so the message is still
+    recognized if it comes back."""
+
+    def post(self, request, pk):
+        from core.management.commands.fetch_inbound_email import COPY_GRACE
+        from .models import InboundEmailLog
+        back = f"{reverse('core:settings')}?tab=logs&log_source=email_in"
+        number = (request.POST.get('ticket_number') or '').strip()
+        ticket = None
+        if number:
+            ticket = Ticket.objects.filter(ticket_number__iexact=number).first()
+            if ticket is None:
+                messages.error(request, f'No ticket numbered {number}. Nothing was changed.')
+                return redirect(back)
+        log = get_object_or_404(InboundEmailLog, pk=pk)
+        note = f'Marked handled by {request.user.get_username()}'
+        if ticket:
+            note += f', ticket {ticket.ticket_number}'
+        now = timezone.now()
+        # Only while still 'failed'. The poller takes a retry with the same kind of
+        # conditional update, so exactly one of the two can win.
+        updated = InboundEmailLog.objects.filter(pk=pk, status='failed').update(
+            status='handled', ticket=ticket, detail=f'{note}. {log.detail}'[:5000],
+            copy_expires_at=now + COPY_GRACE if log.raw_copy else None,
+        )
+        if updated:
+            messages.success(request, 'Marked handled. Murphy\'s Bench will not retry this email.')
+        else:
+            messages.warning(request, 'That email is no longer waiting for a retry, so nothing was changed.')
+        return redirect(back)
+
+
 class EmailTestOutboundView(SettingsAdminMixin, View):
     """HTMX: send a test email using saved SMTP settings.
 

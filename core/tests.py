@@ -21164,6 +21164,9 @@ class _FakePOP3:
     gmail = False
     quits = 0
     drops = 0
+    no_uidl = False
+    hangs = ()         # messages whose download times out
+    retr_log = []
 
     def __init__(self, *a, **k):
         self._marked = set()
@@ -21174,8 +21177,17 @@ class _FakePOP3:
     def pass_(self, p): pass
     def stat(self): return len(self._view), 0
 
+    def uidl(self):
+        if _FakePOP3.no_uidl:
+            raise _poplib.error_proto('-ERR unknown command')
+        lines = [b"%d %s" % (n, _fie.hashlib.sha256(m).hexdigest().encode()) for n, m in enumerate(self._view, 1)]
+        return b'+OK', lines, 0
+
     def retr(self, i):
         self._retrieved.add(i)
+        _FakePOP3.retr_log.append(self._view[i - 1])
+        if self._view[i - 1] in _FakePOP3.hangs:
+            raise TimeoutError('timed out')
         return b'+OK', _pop3_lines(self._view[i - 1]), 0
 
     def top(self, i, n):
@@ -21206,6 +21218,8 @@ class _FakeIMAP:
     uidplus = True
     uid_after_literal = False
     wrong_uid = False
+    hangs = ()       # UIDs whose FETCH times out
+    refuses = ()     # UIDs whose FETCH answers NO
 
     def __init__(self, *a, **k):
         if _FakeIMAP.refuse_connect:
@@ -21229,6 +21243,10 @@ class _FakeIMAP:
         if command == 'FETCH':
             uid, what = args
             m = self._find(uid)
+            if uid in _FakeIMAP.refuses:
+                return 'NO', [b'FETCH failed']
+            if uid in _FakeIMAP.hangs:
+                raise TimeoutError('timed out')
             if 'PEEK' not in what:
                 m['flags'].add('\\Seen')
             said = b'999' if _FakeIMAP.wrong_uid else uid
@@ -21275,6 +21293,9 @@ def _pop3_serves(monkeypatch, raws):
     _FakePOP3.fail_quit = False
     _FakePOP3.gmail = False
     _FakePOP3.quits = _FakePOP3.drops = 0
+    _FakePOP3.no_uidl = False
+    _FakePOP3.hangs = ()
+    _FakePOP3.retr_log = []
 
 
 def _imap_serves(monkeypatch, raws):
@@ -21286,6 +21307,8 @@ def _imap_serves(monkeypatch, raws):
     _FakeIMAP.uidplus = True
     _FakeIMAP.uid_after_literal = False
     _FakeIMAP.wrong_uid = False
+    _FakeIMAP.hangs = ()
+    _FakeIMAP.refuses = ()
 
 
 def _fetch():
@@ -22156,6 +22179,44 @@ def test_different_message_with_same_id_does_not_overwrite_the_copy(monkeypatch)
         _fetch()
     log.refresh_from_db()
     assert _stored(log.raw_copy) == raw
+    assert _FakeIMAP.mailbox[0]['flags'] == {'\\Seen'}, 'the delivery is safe on the alert'
+    att = _fie.Attachment.objects.get(original_filename='other-version.eml')
+    assert b'Not the real one' in _stored(att.file)
+
+
+@pytest.mark.django_db
+def test_different_message_stays_in_the_mailbox_if_the_alert_fails(monkeypatch):
+    raw, log = _failed_copy_on_imap(monkeypatch, '<same-2@davis.example>')
+    _FakeIMAP.mailbox[0]['raw'] = _raw_new_email(message_id='<same-2@davis.example>', subject='Other')
+    with monkeypatch.context() as m:
+        m.setattr(_fie.Command, '_retry_saved', lambda self: None)
+        m.setattr(_fie.Attachment, 'save', lambda self, *a, **k: (_ for _ in ()).throw(OSError('disk full')))
+        _fetch()
+    assert _FakeIMAP.mailbox[0]['flags'] == set()
+
+
+@pytest.mark.django_db
+def test_damaged_copy_is_replaced_and_the_ticket_has_the_real_text(monkeypatch):
+    raw, log = _failed_copy_on_imap(monkeypatch, '<dmg-1@davis.example>')
+    with open(log.raw_copy.path, 'wb') as fh:
+        fh.write(raw.replace(b'it just beeps', b'XXXXXXXXXXXXX'))
+    _fetch()
+    assert _FakeIMAP.mailbox[0]['flags'] == {'\\Seen'}
+    ticket = Ticket.objects.get(pk=_log('<dmg-1@davis.example>').ticket_id)
+    assert 'it just beeps' in ticket.description
+
+
+@pytest.mark.django_db
+def test_damaged_copy_with_no_redelivery_is_reported_not_ticketed(monkeypatch, admin_user):
+    from core.system_alerts import SYSTEM_ALERTS_CLIENT_NAME
+    raw, log = _failed_copy_on_imap(monkeypatch, '<dmg-2@davis.example>')
+    _FakeIMAP.mailbox.clear()
+    with open(log.raw_copy.path, 'wb') as fh:
+        fh.write(raw.replace(b'it just beeps', b'XXXXXXXXXXXXX'))
+    _fetch()
+    log.refresh_from_db()
+    assert log.status == 'failed' and log.attempts == 1
+    assert list(Ticket.objects.values_list('client__name', flat=True)) == [SYSTEM_ALERTS_CLIENT_NAME]
 
 
 @pytest.mark.django_db
@@ -22227,7 +22288,7 @@ def test_interrupted_repair_removes_the_uncommitted_copy(monkeypatch):
     real_save, seen = InboundEmailLog.save, []
 
     def interrupted(self, *a, **k):
-        if k.get('update_fields') == ['raw_copy']:
+        if k.get('update_fields') == ['raw_copy', 'raw_copy_sha256']:
             seen.append((self.raw_copy.storage, self.raw_copy.name))
             raise KeyboardInterrupt
         return real_save(self, *a, **k)
@@ -22270,3 +22331,276 @@ def test_admin_names_the_saved_copy_without_a_dead_file_link(monkeypatch, rf):
     fields = model_admin.get_fields(rf.get('/'), log)
     assert 'raw_copy' not in fields and 'saved_copy' in fields
     assert model_admin.saved_copy(log) == log.raw_copy.name
+
+
+# ── Outside review round 2 (PR #122) ────────────────────────────────────────
+
+_LONG_ID = '<' + 'a' * 520 + '1@x.example>'
+
+
+def _old_long_id_row():
+    from core.models import InboundEmailLog
+    return InboundEmailLog.objects.create(message_id=_LONG_ID[:500], status='new_ticket', detail='Created')
+
+
+@pytest.mark.django_db
+def test_long_id_from_an_old_version_goes_to_a_person_once(monkeypatch, admin_user):
+    from core.models import InboundEmailLog
+    from core.system_alerts import SYSTEM_ALERTS_CLIENT_NAME
+    old = _old_long_id_row()
+    _inbound_site('imap')
+    raw = _raw_new_email(message_id=_LONG_ID, subject='Long one')
+    _imap_serves(monkeypatch, [raw])
+    _fetch()
+    assert not Ticket.objects.filter(subject='Long one').exists()
+    alert = Ticket.objects.get(client__name=SYSTEM_ALERTS_CLIENT_NAME)
+    assert _stored(_fie.Attachment.objects.get(object_id=alert.pk).file) == raw
+    assert _FakeIMAP.mailbox[0]['flags'] == {'\\Seen'}
+    old.refresh_from_db()
+    assert old.status == 'new_ticket', 'the old record is not rewritten'
+    assert InboundEmailLog.objects.exclude(pk=old.pk).get().status == 'gave_up'
+    _FakeIMAP.mailbox[0]['flags'].clear()   # delivered yet again
+    _fetch()
+    assert Ticket.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_long_id_from_an_old_version_is_never_ticketed_if_the_alert_fails(monkeypatch, admin_user):
+    _old_long_id_row()
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id=_LONG_ID, subject='Long two')])
+    with monkeypatch.context() as m:
+        m.setattr(_fie.Attachment, 'save', lambda self, *a, **k: (_ for _ in ()).throw(OSError('disk full')))
+        _fetch()
+    assert _FakeIMAP.mailbox[0]['flags'] == set(), 'stays in the mailbox'
+    _fetch()
+    assert not Ticket.objects.filter(subject='Long two').exists()
+    assert _FakeIMAP.mailbox[0]['flags'] == {'\\Seen'}
+
+
+def _waiting_row(monkeypatch, mid):
+    raw, log = _failed_copy_on_imap(monkeypatch, mid)
+    _FakeIMAP.mailbox.clear()
+    return raw, log
+
+
+def _mark_handled(client, log, number=''):
+    return client.post(reverse('core:inbound_mark_handled', args=[log.pk]), {'ticket_number': number})
+
+
+@pytest.mark.django_db
+def test_mark_handled_stops_retries_and_keeps_the_dedupe_row(monkeypatch, client, admin_user, client_obj):
+    raw, log = _waiting_row(monkeypatch, '<hand-1@davis.example>')
+    made = Ticket.objects.create(ticket_number='TKT-77001', client=client_obj, subject='By hand')
+    client.force_login(admin_user)
+    _mark_handled(client, log, 'tkt-77001')
+    log.refresh_from_db()
+    assert (log.status, log.ticket_id) == ('handled', made.pk) and log.copy_expires_at
+    assert admin_user.get_username() in log.detail
+    before = Ticket.objects.count()
+    breaker = _Breaker(times=0)
+    monkeypatch.setattr(_fie, '_process_message', breaker)
+    _fetch()
+    assert breaker.calls == 0 and Ticket.objects.count() == before
+    from core.models import InboundEmailLog
+    InboundEmailLog.objects.filter(pk=log.pk).update(raw_copy='', copy_expires_at=None)
+    _imap_serves(monkeypatch, [raw])   # the same email comes back after its copy expired
+    _fetch()
+    assert breaker.calls == 0 and Ticket.objects.count() == before
+    assert _FakeIMAP.mailbox[0]['flags'] == {'\\Seen'}
+
+
+@pytest.mark.django_db
+def test_mark_handled_without_a_ticket(monkeypatch, client, admin_user):
+    _, log = _waiting_row(monkeypatch, '<hand-2@davis.example>')
+    client.force_login(admin_user)
+    _mark_handled(client, log)
+    log.refresh_from_db()
+    assert log.status == 'handled' and log.ticket_id is None
+
+
+@pytest.mark.django_db
+def test_mark_handled_with_an_unknown_ticket_changes_nothing(monkeypatch, client, admin_user):
+    _, log = _waiting_row(monkeypatch, '<hand-3@davis.example>')
+    client.force_login(admin_user)
+    _mark_handled(client, log, 'TKT-99999')
+    log.refresh_from_db()
+    assert log.status == 'failed'
+
+
+@pytest.mark.django_db
+def test_mark_handled_is_refused_for_a_non_admin(monkeypatch, client, tech_user):
+    _, log = _waiting_row(monkeypatch, '<hand-4@davis.example>')
+    client.force_login(tech_user)
+    _mark_handled(client, log)
+    log.refresh_from_db()
+    assert log.status == 'failed'
+
+
+@pytest.mark.django_db
+def test_mark_handled_cannot_overwrite_a_finished_row(monkeypatch, client, admin_user):
+    from core.models import InboundEmailLog
+    _, log = _waiting_row(monkeypatch, '<hand-5@davis.example>')
+    InboundEmailLog.objects.filter(pk=log.pk).update(status='new_ticket')
+    client.force_login(admin_user)
+    _mark_handled(client, log)
+    log.refresh_from_db()
+    assert log.status == 'new_ticket'
+
+
+@pytest.mark.django_db
+def test_logs_screen_offers_mark_handled_only_while_waiting(monkeypatch, client, admin_user):
+    from core.log_search import _email_in_row
+    from core.models import InboundEmailLog
+    _, log = _waiting_row(monkeypatch, '<hand-6@davis.example>')
+    url = reverse('core:inbound_mark_handled', args=[log.pk])
+    assert _email_in_row(log).mark_handled_url == url
+    client.force_login(admin_user)
+    page = client.get(reverse('core:settings'), {'tab': 'logs', 'log_source': 'email_in'})
+    assert url in page.content.decode()
+    InboundEmailLog.objects.filter(pk=log.pk).update(status='handled')
+    log.refresh_from_db()
+    assert _email_in_row(log).mark_handled_url == ''
+
+
+def _two_on_pop3(monkeypatch):
+    _inbound_site('pop3')
+    bad = _on_the_wire(_raw_new_email(message_id='<stuck@davis.example>', subject='Stuck one'))
+    good = _on_the_wire(_raw_new_email(message_id='<later@davis.example>', subject='Later one'))
+    _pop3_serves(monkeypatch, [bad, good])
+    _FakePOP3.hangs = (bad,)
+    return bad, good
+
+
+def _alerts():
+    from core.system_alerts import SYSTEM_ALERTS_CLIENT_NAME
+    return Ticket.objects.filter(client__name=SYSTEM_ALERTS_CLIENT_NAME)
+
+
+@pytest.mark.django_db
+def test_stuck_download_does_not_hold_up_later_mail(monkeypatch, admin_user):
+    from core.models import InboundStuckDownload
+    bad, good = _two_on_pop3(monkeypatch)
+    _fetch()
+    assert _FakePOP3.retr_log == [bad] and not Ticket.objects.filter(subject='Later one').exists()
+    _fetch()
+    assert Ticket.objects.filter(subject='Later one').count() == 1
+    assert _alerts().count() == 0
+    _fetch()
+    assert InboundStuckDownload.objects.get().failures == 3
+    assert _alerts().count() == 1
+    assert Ticket.objects.filter(subject='Later one').count() == 1
+
+
+@pytest.mark.django_db
+def test_stuck_download_is_skipped_so_pop3_can_finish_cleanly(monkeypatch, admin_user):
+    bad, good = _two_on_pop3(monkeypatch)
+    for _ in range(3):
+        _fetch()
+    _FakePOP3.retr_log.clear()
+    _FakePOP3.quits = 0
+    _fetch()
+    assert bad not in _FakePOP3.retr_log and _FakePOP3.quits == 1
+    assert _FakePOP3.mailbox == [bad], 'still in the mailbox, the handled one is gone'
+    assert _alerts().count() == 1
+
+
+@pytest.mark.django_db
+def test_stuck_download_is_tried_again_hourly_and_recovers(monkeypatch, admin_user):
+    from django.utils import timezone
+    from core.models import InboundStuckDownload
+    bad, good = _two_on_pop3(monkeypatch)
+    for _ in range(3):
+        _fetch()
+    InboundStuckDownload.objects.update(last_failed_at=timezone.now() - _fie.STUCK_RETRY_EVERY)
+    _FakePOP3.hangs = ()
+    _fetch()
+    assert Ticket.objects.filter(subject='Stuck one').count() == 1
+    assert not InboundStuckDownload.objects.exists()
+
+
+@pytest.mark.django_db
+def test_stuck_record_clears_when_the_message_leaves_the_mailbox(monkeypatch, admin_user):
+    from core.models import InboundStuckDownload
+    bad, good = _two_on_pop3(monkeypatch)
+    _fetch()
+    assert InboundStuckDownload.objects.count() == 1
+    _FakePOP3.mailbox = [good]
+    _fetch()
+    assert not InboundStuckDownload.objects.exists()
+
+
+@pytest.mark.django_db
+def test_failing_downloads_take_turns(monkeypatch, admin_user):
+    _inbound_site('pop3')
+    one = _on_the_wire(_raw_new_email(message_id='<turn-1@davis.example>'))
+    two = _on_the_wire(_raw_new_email(message_id='<turn-2@davis.example>'))
+    _pop3_serves(monkeypatch, [one, two])
+    _FakePOP3.hangs = (one, two)
+    for _ in range(4):
+        _fetch()
+    assert _FakePOP3.retr_log == [one, two, one, two]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('how', ['refuses', 'hangs'])
+def test_imap_failed_download_alerts_and_does_not_hold_up_mail(monkeypatch, admin_user, how):
+    from core.models import InboundStuckDownload
+    _inbound_site('imap')
+    bad = _raw_new_email(message_id='<i-bad@davis.example>', subject='Bad')
+    good = _raw_new_email(message_id='<i-good@davis.example>', subject='Good')
+    _imap_serves(monkeypatch, [bad, good])
+    setattr(_FakeIMAP, how, (b'100',))
+    for _ in range(3):
+        _fetch()
+    assert Ticket.objects.filter(subject='Good').count() == 1
+    assert InboundStuckDownload.objects.get().failures == 3 and _alerts().count() == 1
+    assert _FakeIMAP.mailbox[0]['flags'] == set(), 'never marked read'
+
+
+@pytest.mark.django_db
+def test_pop3_without_uidl_tracks_by_position(monkeypatch, admin_user):
+    from core.models import InboundStuckDownload
+    _two_on_pop3(monkeypatch)
+    _FakePOP3.no_uidl = True
+    _fetch()
+    assert InboundStuckDownload.objects.get().key == 'pop3:position:1'
+
+
+@pytest.mark.django_db
+def test_failed_download_alert_failure_does_not_stop_the_run(monkeypatch, admin_user):
+    from core.models import InboundStuckDownload
+    import core.system_alerts as sa
+    _two_on_pop3(monkeypatch)
+    _fetch()
+    _fetch()
+    with monkeypatch.context() as m:
+        m.setattr(sa, 'create_system_alert', lambda *a, **k: (_ for _ in ()).throw(OSError('down')))
+        _fetch()
+    row = InboundStuckDownload.objects.get()
+    assert row.failures == 3 and not row.alerted
+
+
+@pytest.mark.django_db
+def test_dry_run_records_no_failed_download(monkeypatch):
+    from django.core.management import call_command
+    from core.models import InboundStuckDownload
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id='<dry@davis.example>')])
+    _FakeIMAP.refuses = (b'100',)
+    call_command('fetch_inbound_email', verbosity=0, dry_run=True)
+    assert not InboundStuckDownload.objects.exists()
+
+
+@pytest.mark.django_db
+def test_big_backlog_stops_taking_mail_at_the_time_limit(monkeypatch):
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id=f'<big-{n}@davis.example>', subject=f'Big {n}') for n in (1, 2)])
+    ticks = iter([0, _fie.DRAIN_TIME_LIMIT_SECONDS + 1])
+    monkeypatch.setattr(_fie, '_clock', lambda: next(ticks))
+    ran = []
+    monkeypatch.setattr(_fie.Command, '_retry_saved', lambda self: ran.append(True))
+    _fetch()
+    assert Ticket.objects.filter(subject__startswith='Big').count() == 1
+    assert _FakeIMAP.mailbox[1]['flags'] == set(), 'the rest stay for the next run'
+    assert ran == [True], 'saved retries still get their turn'

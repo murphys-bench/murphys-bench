@@ -22,6 +22,10 @@ No customer email may vanish. The rules that guarantee it:
      marks RETR'd mail as taken at QUIT); IMAP expunges only the UIDs it handled.
   6. A message recorded before these rules existed ('needs_review', or an old
      'error' that was not a refusal) goes to a person if it arrives again.
+  7. A saved copy carries a fingerprint. A damaged copy is never trusted, and an
+     intact copy never silently wins over a delivery that differs from it.
+  8. A message that will not download goes to the back of the queue, so it cannot
+     hold up later mail. After MAX_ATTEMPTS failures MB alerts and skips it.
 """
 
 import contextvars
@@ -34,6 +38,7 @@ import logging
 import os
 import poplib
 import re
+import time
 
 logger = logging.getLogger('core')
 from email.header import decode_header, make_header
@@ -62,8 +67,8 @@ _T2_RELAY_ADDRESSES = {'email-connector@tier2tickets.com'}
 _FORWARDED_FROM_RE = re.compile(r'^\s*From:\s*(.+)$', re.IGNORECASE | re.MULTILINE)
 
 from core.models import (
-    Attachment, BlockedSender, Client, Contact, InboundEmailLog, SiteSettings,
-    Ticket, TicketLink, TicketReply,
+    Attachment, BlockedSender, Client, Contact, InboundEmailLog,
+    InboundStuckDownload, SiteSettings, Ticket, TicketLink, TicketReply,
 )
 
 TICKET_RE = re.compile(r'\[?(TKT-[\d-]+)\]?', re.IGNORECASE)
@@ -76,11 +81,20 @@ MAX_ATTEMPTS = 3
 # snapshot) and then miss its file (copied a moment later).
 COPY_GRACE = timedelta(hours=24)
 
+# A message that has failed to download MAX_ATTEMPTS times is skipped so POP3 can
+# end cleanly, then tried once more this often in case the server has recovered.
+STUCK_RETRY_EVERY = timedelta(hours=1)
+
+# Longest one run spends taking mail in, so saved retries still get their turn
+# behind a big backlog. Anything left stays in the mailbox for the next run.
+DRAIN_TIME_LIMIT_SECONDS = 600
+_clock = time.monotonic
+
 # Statuses after which a message is finished with: it is never tried again, and
 # if it shows up in the mailbox again it is only removed.
 FINAL_STATUSES = frozenset({
     'new_ticket', 'reply', 'reply_flagged', 'new_ticket_linked',
-    'refused', 'gave_up', 'duplicate',
+    'refused', 'gave_up', 'duplicate', 'handled',
 })
 SUCCESS_STATUSES = frozenset({'new_ticket', 'reply', 'reply_flagged', 'new_ticket_linked'})
 
@@ -576,14 +590,20 @@ def _process_message(raw_msg_bytes, settings, verbosity):
     return _create_new_ticket(subject, body, from_email, from_name, settings, msg, priority=inbound_priority)
 
 
+def _sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
 def _identify(raw_bytes):
-    """Return (claim_key, from_email, subject) for the log row.
+    """Return (claim_key, from_email, subject, old_key) for the log row. old_key
+    is what MB versions before Nov 2026 stored for a very long Message-ID (its
+    first 500 characters), else ''.
 
     The claim key is the Message-ID. A message without one is keyed by a hash of
     its raw bytes instead, so it can still be deduplicated and its retries
     counted (identical bytes are the same delivery). Line endings at the very end
     are ignored, because POP3 and IMAP do not report them the same way."""
-    mid = frm = subj = ''
+    mid = frm = subj = old_key = ''
     try:
         msg_obj = email.message_from_bytes(raw_bytes)
         mid = (msg_obj.get('Message-ID') or '').strip()
@@ -596,8 +616,9 @@ def _identify(raw_bytes):
     elif len(mid) > 500:
         # Too long for the column. Cutting it short could make two different
         # messages look like one, and the second would be dropped as a duplicate.
-        mid = 'long-message-id:sha256:' + hashlib.sha256(mid.encode('utf-8', 'backslashreplace')).hexdigest()
-    return mid, frm, subj
+        old_key = mid[:500]
+        mid = 'long-message-id:sha256:' + _sha256(mid.encode('utf-8', 'backslashreplace'))
+    return mid, frm, subj, old_key
 
 
 # ── Mailboxes ─────────────────────────────────────────────────────────────────
@@ -645,7 +666,9 @@ class _ImapMailbox:
         # sequence numbers under us.
         typ, data = self.conn.uid('SEARCH', None, 'UNSEEN')
         uids = data[0].split() if typ == 'OK' and data and data[0] else []
-        for uid in uids:
+        keys = {uid: f'imap:{self.folder}:{uid.decode(errors="replace")}' for uid in uids}
+        for uid in self.tracker.order(keys):
+            self.current = keys[uid]
             # BODY.PEEK[]: a plain RFC822 / BODY[] fetch marks the message read
             # on the server, which would take it out of the queue before MB has it.
             typ, msg_data = self.conn.uid('FETCH', uid, '(BODY.PEEK[])')
@@ -667,7 +690,11 @@ class _ImapMailbox:
             if typ != 'OK' or raw is None:
                 logger.warning('IMAP FETCH of UID %s did not return that message; left in the mailbox.',
                                uid.decode(errors='replace'))
+                self.tracker.failed(keys[uid], 'The server did not return the message.')
+                self.current = None
                 continue
+            self.tracker.succeeded(keys[uid])
+            self.current = None
             yield uid, raw
 
     def done(self, uid):
@@ -713,9 +740,26 @@ class _Pop3Mailbox:
         self._retrieved = set()
         self._held = set()
 
+    def _keys(self, count):
+        """A stable id per message. UIDL is optional in POP3; without it, fall
+        back on the message's position, which is good enough to take turns."""
+        ids = {}
+        try:
+            _, lines, _ = self.conn.uidl()
+            ids = dict(line.split(None, 1) for line in lines)
+        except poplib.error_proto:
+            logger.warning('POP3 server does not support UIDL; tracking failed downloads by position.')
+        keys = {}
+        for i in range(1, count + 1):
+            uid = ids.get(str(i).encode())
+            keys[i] = f'pop3:{uid.decode(errors="replace")}' if uid else f'pop3:position:{i}'
+        return keys
+
     def messages(self):
         count, _ = self.conn.stat()
-        for i in range(1, count + 1):
+        keys = self._keys(count)
+        for i in self.tracker.order(keys):
+            self.current = keys[i]
             if self.dry_run:
                 # Headers only (TOP), and the session is never QUIT: a dry run
                 # must not take anything out of the queue.
@@ -723,6 +767,8 @@ class _Pop3Mailbox:
             else:
                 self._retrieved.add(i)   # before RETR: a half-read counts too
                 _, lines, _ = self.conn.retr(i)
+            self.tracker.succeeded(keys[i])
+            self.current = None
             # poplib strips every line ending, including the last one.
             yield i, b'\r\n'.join(lines) + b'\r\n'
 
@@ -747,6 +793,72 @@ def _delete_files(files):
             storage.delete(name)
         except Exception:
             logger.exception('Could not delete stored file %s.', name)
+
+
+class _StuckDownloads:
+    """Remembers messages whose download failed, across runs. MB never saw their
+    contents, so all it has is the server's id for each one."""
+
+    def __init__(self, dry_run):
+        self.dry_run = dry_run
+        self.rows = {} if dry_run else {r.key: r for r in InboundStuckDownload.objects.all()}
+
+    def order(self, keys):
+        """Given {ref: key}, return the refs to download: healthy messages first,
+        then any that failed before, longest-waiting first. Messages past their
+        attempts are left out until their next hourly try."""
+        retry_before = timezone.now() - STUCK_RETRY_EVERY
+        healthy, failing = [], []
+        for ref, key in keys.items():
+            row = self.rows.get(key)
+            if row is None:
+                healthy.append(ref)
+            elif row.failures < MAX_ATTEMPTS or row.last_failed_at <= retry_before:
+                failing.append((row.last_failed_at, ref))
+        failing.sort(key=lambda item: item[0])
+        gone = set(self.rows) - set(keys.values())
+        if gone:
+            InboundStuckDownload.objects.filter(key__in=gone).delete()
+            for key in gone:
+                del self.rows[key]
+        return healthy + [ref for _, ref in failing]
+
+    def succeeded(self, key):
+        row = self.rows.pop(key, None)
+        if row is not None:
+            row.delete()
+
+    def failed(self, key, error):
+        """Record a failed download. Never raises: the retry pass must still run."""
+        if self.dry_run:
+            return
+        try:
+            row = self.rows.get(key) or InboundStuckDownload(key=key[:255])
+            row.failures += 1
+            row.last_failed_at = timezone.now()
+            row.last_error = str(error)[:1000]
+            row.save()
+            self.rows[key] = row
+            if row.failures >= MAX_ATTEMPTS and not row.alerted:
+                self._alert(row)
+        except Exception:
+            logger.exception('Could not record the failed download of %s.', key)
+
+    def _alert(self, row):
+        from core.system_alerts import create_system_alert
+        create_system_alert(
+            f'Inbound email could not be downloaded ({row.key})',
+            f"Murphy's Bench tried {row.failures} times to download one message and could not, "
+            'so it does not know who sent it. The message is still in the mailbox. MB now skips '
+            'it so that later mail keeps arriving, and tries it again once an hour.\n\n'
+            f'Mailbox reference: {row.key}\n'
+            f'Last error:        {row.last_error}\n\n'
+            'If a later try succeeds it becomes a ticket as usual. Otherwise look in the mailbox '
+            'for a very large or damaged message, create the ticket by hand, and remove the '
+            'message from the mailbox.',
+        )
+        row.alerted = True
+        row.save(update_fields=['alerted'])
 
 
 class Command(BaseCommand):
@@ -819,6 +931,10 @@ class Command(BaseCommand):
                 except Exception as exc:
                     logger.exception('Inbound mailbox error part-way through a fetch.')
                     self.stderr.write(self.style.ERROR(f'Connection error: {exc}'))
+                    if mailbox.current:
+                        # Died downloading this message. The session is unusable,
+                        # so remember it; it waits at the back of the queue next run.
+                        self.stuck.failed(mailbox.current, f'{type(exc).__name__}: {exc}')
                 finally:
                     try:
                         mailbox.close()
@@ -852,9 +968,11 @@ class Command(BaseCommand):
             lock_file.close()
 
     def _open_mailbox(self, site, dry_run=False):
-        if site.inbound_protocol == 'pop3':
-            return _Pop3Mailbox(site, dry_run)
-        return _ImapMailbox(site, dry_run)
+        self.stuck = _StuckDownloads(dry_run)
+        mailbox = (_Pop3Mailbox if site.inbound_protocol == 'pop3' else _ImapMailbox)(site, dry_run)
+        mailbox.tracker = self.stuck
+        mailbox.current = None   # the message being downloaded right now, if any
+        return mailbox
 
     def _say(self, status, detail):
         if self.verbosity >= 1:
@@ -865,6 +983,7 @@ class Command(BaseCommand):
 
     def _drain(self, mailbox, dry_run):
         seen = 0
+        started = _clock()
         for ref, raw in mailbox.messages():
             seen += 1
             if dry_run:
@@ -879,13 +998,21 @@ class Command(BaseCommand):
                 except Exception:
                     logger.exception('MB holds an inbound message but could not take it out '
                                      'of the mailbox; it will be fetched again and skipped.')
+            if _clock() - started > DRAIN_TIME_LIMIT_SECONDS:
+                logger.warning('Inbound fetch reached its %d second limit after %d message(s); '
+                               'the rest stay in the mailbox for the next run.',
+                               DRAIN_TIME_LIMIT_SECONDS, seen)
+                break
         if seen == 0 and self.verbosity >= 1:
             self.stdout.write('  No new messages.')
 
     def _intake(self, raw):
         """Handle one message fresh from the mailbox. Returns True once MB holds
         it (finished, refused, or saved for retry), i.e. it may leave the mailbox."""
-        key, frm, subj = _identify(raw)
+        key, frm, subj, old_key = _identify(raw)
+        # A very long Message-ID that an older version stored shortened. It may be
+        # that same email or a different one, so neither drop it nor ticket it.
+        earlier = InboundEmailLog.objects.filter(message_id=old_key).first() if old_key else None
         try:
             # Atomically CLAIM this message before doing any work. The unique
             # constraint means a re-fetch of the same email loses the insert here
@@ -936,6 +1063,8 @@ class Command(BaseCommand):
                 return False
             log.refresh_from_db()
         self.touched.add(log.pk)
+        if earlier is not None:
+            return self._give_up(log, raw, legacy=True, earlier=earlier)
         return self._attempt(log, raw)
 
     def _duplicate(self, key):
@@ -945,28 +1074,33 @@ class Command(BaseCommand):
         return True
 
     def _ensure_copy(self, log, raw):
-        """Make sure MB holds a usable copy of `raw`, writing a fresh one if the
-        row has none or its file is gone, unreadable, empty or cut short. Returns
-        False if it cannot."""
+        """Make sure MB holds a usable copy of `raw` before the mailbox copy may
+        go. A missing, unreadable or damaged copy is replaced from this delivery.
+        An intact copy that differs from this delivery is kept, and the delivery
+        goes to a person. Returns False if the mailbox copy must stay."""
         stale = None
         if log.raw_copy:
             stale = (log.raw_copy.storage, log.raw_copy.name)
             try:
                 with log.raw_copy.open('rb') as fh:
                     held = fh.read()
-                # Replace only a copy that is the start of this delivery. A
-                # different message reusing the Message-ID must not overwrite it.
-                if not (len(held) < len(raw) and raw.startswith(held)):
-                    return True
             except Exception as exc:
                 logger.warning('Saved copy of inbound message %s could not be read (%s: %s); '
                                'replacing it from this delivery.',
                                log.message_id, type(exc).__name__, exc)
+            else:
+                if held and _sha256(held) == log.raw_copy_sha256:
+                    if held.rstrip(b'\r\n') == raw.rstrip(b'\r\n'):
+                        return True
+                    return self._keep_both(log, raw)
+                logger.warning('Saved copy of inbound message %s is damaged; replacing it from '
+                               'this delivery.', log.message_id)
         saved = None
         try:
             log.raw_copy.save(f'{log.pk}.eml', ContentFile(raw), save=False)
             saved = (log.raw_copy.storage, log.raw_copy.name)
-            log.save(update_fields=['raw_copy'])
+            log.raw_copy_sha256 = _sha256(raw)
+            log.save(update_fields=['raw_copy', 'raw_copy_sha256'])
         except BaseException as exc:
             if saved:
                 _delete_files([saved])
@@ -980,6 +1114,47 @@ class Command(BaseCommand):
             _delete_files([stale])
         if self.verbosity >= 1:
             self.stdout.write(self.style.WARNING(f'  [copy restored] {log.message_id}'))
+        return True
+
+    def _attach_email(self, alert, raw, filename, written):
+        a = Attachment(
+            content_type=ContentType.objects.get_for_model(alert),
+            object_id=alert.pk,
+            original_filename=filename,
+            mime_type='message/rfc822',
+            size_bytes=len(raw),
+        )
+        a.file.save(filename, ContentFile(raw), save=False)
+        written.append((a.file.storage, a.file.name))
+        a.save()
+
+    def _keep_both(self, log, raw):
+        """MB's copy is intact, yet this delivery has the same id and different
+        contents. Keep the copy for its retry and hand the delivery to a person.
+        Returns True once the delivery is safe, so it may leave the mailbox."""
+        from core.system_alerts import create_system_alert
+        written = []
+        try:
+            with transaction.atomic():
+                alert = create_system_alert(
+                    f'Inbound email arrived in two versions (log #{log.pk})',
+                    "Murphy's Bench is holding an inbound email for a retry, and another message "
+                    'arrived with the same Message-ID but different contents.\n\n'
+                    f'From:       {log.from_email or "(unknown)"}\n'
+                    f'Subject:    {log.subject or "(no subject)"}\n'
+                    f'Message-ID: {log.message_id}\n\n'
+                    'MB will keep retrying the one it holds. The other is attached as '
+                    'other-version.eml. Compare it with the ticket that results, and create a '
+                    'ticket by hand if it says something different.',
+                )
+                self._attach_email(alert, raw, 'other-version.eml', written)
+        except BaseException as exc:
+            _delete_files(written)
+            if not isinstance(exc, Exception):
+                raise
+            logger.exception('Could not raise the two-versions alert for %s; leaving the delivery '
+                             'in the mailbox.', log.message_id)
+            return False
         return True
 
     # ── Pass 2: retries from saved copies ─────────────────────────────────────
@@ -1001,9 +1176,10 @@ class Command(BaseCommand):
                 # next run.
                 self._copy_unreadable(log, exc)
                 continue
-            if not raw:
-                # Same rule: an empty file must not become a blank ticket.
-                self._copy_unreadable(log, ValueError('the saved copy is empty'))
+            if not raw or _sha256(raw) != log.raw_copy_sha256:
+                # Same rule: a damaged file must not become a damaged ticket.
+                self._copy_unreadable(log, ValueError('the saved copy is empty or has changed '
+                                                      'since it was saved'))
                 continue
             if log.attempts >= MAX_ATTEMPTS:
                 self._give_up(log, raw)   # attempts used up; only the give-up is left
@@ -1031,7 +1207,9 @@ class Command(BaseCommand):
             f'Error:      {type(exc).__name__}: {exc}\n\n'
             'MB keeps the record and tries again on every run. If the file is gone for good, '
             'find the email in the mailbox: if it is offered to MB again, MB saves a fresh copy '
-            'and carries on. Otherwise create the ticket by hand.'
+            'and carries on.\n\n'
+            'If you create the ticket by hand instead, go to Settings, Logs, find this email, and '
+            'choose Mark handled. Until you do, MB keeps retrying and can make a second ticket.'
         )
         try:
             # One alert per email per week, not one per run.
@@ -1106,9 +1284,10 @@ class Command(BaseCommand):
             if not log.raw_copy:
                 log.raw_copy.save(f'{log.pk}.eml', ContentFile(raw), save=False)
                 saved = (log.raw_copy.storage, log.raw_copy.name)
+                log.raw_copy_sha256 = _sha256(raw)
             log.status = 'failed'
             log.detail = f'Attempt {log.attempts} of {MAX_ATTEMPTS} failed: {error}'[:5000]
-            log.save(update_fields=['status', 'detail', 'raw_copy'])
+            log.save(update_fields=['status', 'detail', 'raw_copy', 'raw_copy_sha256'])
         except BaseException as exc:
             if saved:
                 _delete_files([saved])
@@ -1125,7 +1304,7 @@ class Command(BaseCommand):
         self.counts['failed'] += 1
         return True
 
-    def _give_up(self, log, raw, legacy=False):
+    def _give_up(self, log, raw, legacy=False, earlier=None):
         """Raise a System Alert ticket that carries the original email, ring the
         admin bell, and mark the row given up, all in one transaction.
 
@@ -1142,12 +1321,20 @@ class Command(BaseCommand):
             f'Message-ID: {log.message_id}\n'
             f'First seen: {timezone.localtime(log.created_at):%Y-%m-%d %H:%M}\n'
         )
+        old = earlier or log
         if legacy:
             subject = f'Inbound email needs a manual check (log #{log.pk})'
-            body = (
+            opening = (
+                'This email has a very long Message-ID, and the start of it matches one that an '
+                "earlier version of Murphy's Bench recorded. It may be that same email or a "
+                f'different one. The earlier record says "{old.get_status_display()}".\n\n'
+                if earlier else
                 'This email arrived again. An earlier version of Murphy\'s Bench recorded it as '
-                f'"{log.get_status_display()}" and may or may not have made a ticket from it.\n\n'
-                + facts + f'Old detail: {log.detail or "(none recorded)"}\n\n'
+                f'"{old.get_status_display()}" and may or may not have made a ticket from it.\n\n'
+            )
+            body = (
+                opening
+                + facts + f'Old detail: {old.detail or "(none recorded)"}\n\n'
                 'Search tickets for this sender and subject first. If there is no ticket, open the '
                 'attached original-email.eml and create one by hand.'
             )
@@ -1164,20 +1351,11 @@ class Command(BaseCommand):
                 # The log id keeps each email's alert its own ticket: the alert
                 # helper merges same-subject alerts within an hour.
                 alert = create_system_alert(subject, body)
-                a = Attachment(
-                    content_type=ContentType.objects.get_for_model(alert),
-                    object_id=alert.pk,
-                    original_filename='original-email.eml',
-                    mime_type='message/rfc822',
-                    size_bytes=len(raw),
-                )
-                a.file.save('original-email.eml', ContentFile(raw), save=False)
-                written.append((a.file.storage, a.file.name))
-                a.save()
+                self._attach_email(alert, raw, 'original-email.eml', written)
                 if legacy:
-                    detail = (f'From before this update (was "{log.get_status_display()}"); '
+                    detail = (f'From before this update (was "{old.get_status_display()}"); '
                               f'sent for a manual check in System Alert {alert.ticket_number}. '
-                              f'{log.detail}')
+                              f'{old.detail}')
                 else:
                     detail = (f'Gave up after {log.attempts} attempts; System Alert '
                               f'{alert.ticket_number} raised. {log.detail}')
