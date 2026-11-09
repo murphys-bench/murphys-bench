@@ -21143,7 +21143,10 @@ import core.management.commands.fetch_inbound_email as _fie  # noqa: E402
 
 def _pop3_lines(raw):
     """What poplib hands back for a message: its lines, with every ending gone."""
-    return raw.replace(b'\r\n', b'\n').rstrip(b'\n').split(b'\n')
+    lines = raw.replace(b'\r\n', b'\n').split(b'\n')
+    if lines[-1] == b'':
+        lines.pop()   # the split after the final line ending, not a blank line
+    return lines
 
 
 def _on_the_wire(raw):
@@ -21941,9 +21944,10 @@ def test_no_message_id_is_one_ticket_across_imap_and_pop3(monkeypatch, ending):
 
 
 @pytest.mark.django_db
-def test_pop3_copy_is_the_exact_message_on_the_wire(monkeypatch):
+@pytest.mark.parametrize('blank_lines', [b'', b'\r\n\r\n'])
+def test_pop3_copy_is_the_exact_message_on_the_wire(monkeypatch, blank_lines):
     _inbound_site('pop3')
-    raw = _on_the_wire(_raw_new_email(message_id='<wire-1@davis.example>'))
+    raw = _on_the_wire(_raw_new_email(message_id='<wire-1@davis.example>')) + blank_lines
     _pop3_serves(monkeypatch, [raw])
     with monkeypatch.context() as m:
         m.setattr(_fie, '_process_message', _Breaker())
@@ -22115,6 +22119,127 @@ def test_a_give_up_that_cannot_alert_still_counts_as_awaiting_retry(monkeypatch)
     out = StringIO()
     call_command('fetch_inbound_email', verbosity=1, stdout=out)
     assert '1 failed (will retry), 0 gave up' in out.getvalue()
+
+
+# ── CodeRabbit's review of the fixes above (PR #122) ────────────────────────
+
+@pytest.mark.django_db
+def test_long_message_ids_sharing_a_start_are_two_tickets(monkeypatch):
+    _inbound_site('imap')
+    start = 'a' * 520
+    one = _raw_new_email(message_id=f'<{start}1@x.example>', subject='First long id')
+    two = _raw_new_email(message_id=f'<{start}2@x.example>', subject='Second long id')
+    _imap_serves(monkeypatch, [one, two])
+    _fetch()
+    assert Ticket.objects.filter(subject__endswith='long id').count() == 2
+
+
+@pytest.mark.django_db
+def test_cut_short_copy_is_replaced_before_the_mailbox_copy_goes(monkeypatch):
+    raw, log = _failed_copy_on_imap(monkeypatch, '<short-1@davis.example>')
+    with open(log.raw_copy.path, 'wb') as fh:
+        fh.write(raw[:len(raw) // 2])
+    with monkeypatch.context() as m:
+        m.setattr(_fie.Command, '_retry_saved', lambda self: None)
+        _fetch()
+    log.refresh_from_db()
+    assert _stored(log.raw_copy) == raw
+    assert _FakeIMAP.mailbox[0]['flags'] == {'\\Seen'}
+
+
+@pytest.mark.django_db
+def test_different_message_with_same_id_does_not_overwrite_the_copy(monkeypatch):
+    raw, log = _failed_copy_on_imap(monkeypatch, '<same-1@davis.example>')
+    _FakeIMAP.mailbox[0]['raw'] = _raw_new_email(message_id='<same-1@davis.example>', subject='Not the real one')
+    with monkeypatch.context() as m:
+        m.setattr(_fie.Command, '_retry_saved', lambda self: None)
+        _fetch()
+    log.refresh_from_db()
+    assert _stored(log.raw_copy) == raw
+
+
+@pytest.mark.django_db
+def test_empty_copy_is_not_retried_into_a_blank_ticket(monkeypatch, admin_user):
+    from core.system_alerts import SYSTEM_ALERTS_CLIENT_NAME
+    raw, log = _failed_copy_on_imap(monkeypatch, '<blank-1@davis.example>')
+    _FakeIMAP.mailbox.clear()
+    with open(log.raw_copy.path, 'wb'):
+        pass
+    _fetch()
+    log.refresh_from_db()
+    assert log.status == 'failed' and log.attempts == 1 and log.raw_copy
+    assert list(Ticket.objects.values_list('client__name', flat=True)) == [SYSTEM_ALERTS_CLIENT_NAME]
+
+
+def _expired_copy(monkeypatch, mid):
+    from django.utils import timezone
+    from core.models import InboundEmailLog
+    _, log = _failed_copy_on_imap(monkeypatch, mid)
+    InboundEmailLog.objects.filter(pk=log.pk).update(
+        status='new_ticket', copy_expires_at=timezone.now() - timezone.timedelta(hours=1))
+    log.refresh_from_db()
+    _FakeIMAP.mailbox.clear()
+    return log
+
+
+@pytest.mark.django_db
+def test_failed_purge_keeps_the_row_so_the_next_run_tries_again(monkeypatch):
+    log = _expired_copy(monkeypatch, '<purge-1@davis.example>')
+    storage_class = type(log.raw_copy.storage)
+    name = log.raw_copy.name
+    with monkeypatch.context() as m:
+        m.setattr(storage_class, 'delete', lambda self, n: (_ for _ in ()).throw(OSError('busy')))
+        _fetch()
+    log.refresh_from_db()
+    assert log.raw_copy.name == name and log.copy_expires_at
+    _fetch()
+    log.refresh_from_db()
+    assert not log.raw_copy and not log.copy_expires_at
+
+
+@pytest.mark.django_db
+def test_interrupted_failure_save_removes_the_uncommitted_copy(monkeypatch):
+    from core.models import InboundEmailLog
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id='<int-3@davis.example>')])
+    monkeypatch.setattr(_fie, '_process_message', _Breaker())
+    real_save, seen = InboundEmailLog.save, []
+
+    def interrupted(self, *a, **k):
+        if self.raw_copy and self.status == 'failed':
+            seen.append((self.raw_copy.storage, self.raw_copy.name))
+            raise KeyboardInterrupt
+        return real_save(self, *a, **k)
+
+    monkeypatch.setattr(InboundEmailLog, 'save', interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        _fetch()
+    assert seen and not seen[0][0].exists(seen[0][1])
+
+
+@pytest.mark.django_db
+def test_interrupted_repair_removes_the_uncommitted_copy(monkeypatch):
+    from core.models import InboundEmailLog
+    raw, log = _failed_copy_on_imap(monkeypatch, '<int-4@davis.example>')
+    old = log.raw_copy.name
+    with open(log.raw_copy.path, 'wb'):
+        pass
+    real_save, seen = InboundEmailLog.save, []
+
+    def interrupted(self, *a, **k):
+        if k.get('update_fields') == ['raw_copy']:
+            seen.append((self.raw_copy.storage, self.raw_copy.name))
+            raise KeyboardInterrupt
+        return real_save(self, *a, **k)
+
+    with monkeypatch.context() as m:
+        m.setattr(InboundEmailLog, 'save', interrupted)
+        m.setattr(_fie.Command, '_retry_saved', lambda self: None)
+        with pytest.raises(KeyboardInterrupt):
+            _fetch()
+    assert seen and seen[0][1] != old and not seen[0][0].exists(seen[0][1])
+    log.refresh_from_db()
+    assert log.raw_copy.name == old and log.raw_copy.storage.exists(old), 'the committed copy is untouched'
 
 
 def _admin_for_inbound_log():

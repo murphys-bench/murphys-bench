@@ -586,13 +586,17 @@ def _identify(raw_bytes):
     mid = frm = subj = ''
     try:
         msg_obj = email.message_from_bytes(raw_bytes)
-        mid = (msg_obj.get('Message-ID') or '').strip()[:500]
+        mid = (msg_obj.get('Message-ID') or '').strip()
         frm = parseaddr(_decode_header_str(msg_obj.get('From', '')))[1][:255]
         subj = _decode_header_str(msg_obj.get('Subject', ''))[:500]
     except Exception:
         logger.exception('Could not read the headers of an inbound message.')
     if not mid:
         mid = 'no-message-id:sha256:' + hashlib.sha256(raw_bytes.rstrip(b'\r\n')).hexdigest()
+    elif len(mid) > 500:
+        # Too long for the column. Cutting it short could make two different
+        # messages look like one, and the second would be dropped as a duplicate.
+        mid = 'long-message-id:sha256:' + hashlib.sha256(mid.encode('utf-8', 'backslashreplace')).hexdigest()
     return mid, frm, subj
 
 
@@ -941,16 +945,19 @@ class Command(BaseCommand):
         return True
 
     def _ensure_copy(self, log, raw):
-        """Make sure MB holds a copy of `raw` it can actually read, writing a fresh
-        one if the row has none or its file is gone, empty or unreadable. Returns
+        """Make sure MB holds a usable copy of `raw`, writing a fresh one if the
+        row has none or its file is gone, unreadable, empty or cut short. Returns
         False if it cannot."""
         stale = None
         if log.raw_copy:
             stale = (log.raw_copy.storage, log.raw_copy.name)
             try:
                 with log.raw_copy.open('rb') as fh:
-                    if fh.read(1):
-                        return True
+                    held = fh.read()
+                # Replace only a copy that is the start of this delivery. A
+                # different message reusing the Message-ID must not overwrite it.
+                if not (len(held) < len(raw) and raw.startswith(held)):
+                    return True
             except Exception as exc:
                 logger.warning('Saved copy of inbound message %s could not be read (%s: %s); '
                                'replacing it from this delivery.',
@@ -960,15 +967,17 @@ class Command(BaseCommand):
             log.raw_copy.save(f'{log.pk}.eml', ContentFile(raw), save=False)
             saved = (log.raw_copy.storage, log.raw_copy.name)
             log.save(update_fields=['raw_copy'])
-            if stale and stale != saved:   # same name when the old file was gone
-                _delete_files([stale])
-        except Exception:
-            logger.exception('Could not save a copy of inbound message %s; leaving it in the mailbox.',
-                             log.message_id)
+        except BaseException as exc:
             if saved:
                 _delete_files([saved])
+            if not isinstance(exc, Exception):
+                raise   # Ctrl-C or exit: the half-made copy is gone, carry on stopping
+            logger.exception('Could not save a copy of inbound message %s; leaving it in the mailbox.',
+                             log.message_id)
             log.refresh_from_db()
             return False
+        if stale and stale != saved:   # same name when the old file was gone
+            _delete_files([stale])
         if self.verbosity >= 1:
             self.stdout.write(self.style.WARNING(f'  [copy restored] {log.message_id}'))
         return True
@@ -991,6 +1000,10 @@ class Command(BaseCommand):
                 # one left. Keep the row and the file, tell the shop, try again
                 # next run.
                 self._copy_unreadable(log, exc)
+                continue
+            if not raw:
+                # Same rule: an empty file must not become a blank ticket.
+                self._copy_unreadable(log, ValueError('the saved copy is empty'))
                 continue
             if log.attempts >= MAX_ATTEMPTS:
                 self._give_up(log, raw)   # attempts used up; only the give-up is left
@@ -1035,10 +1048,15 @@ class Command(BaseCommand):
                    .exclude(raw_copy='').exclude(raw_copy__isnull=True))
         for log in expired:
             name, storage = log.raw_copy.name, log.raw_copy.storage
-            # Row first: a file left behind by a failed delete is harmless; a row
-            # pointing at a deleted file is not.
+            # File first: if the delete fails, the row still names the file and
+            # the next run tries again. These rows are finished, so one that
+            # briefly names a deleted file is never read.
+            try:
+                storage.delete(name)
+            except Exception:
+                logger.exception('Could not delete expired inbound copy %s; will retry next run.', name)
+                continue
             InboundEmailLog.objects.filter(pk=log.pk).update(raw_copy='', copy_expires_at=None)
-            _delete_files([(storage, name)])
 
     # ── One attempt, and what happens after it ────────────────────────────────
 
@@ -1091,13 +1109,15 @@ class Command(BaseCommand):
             log.status = 'failed'
             log.detail = f'Attempt {log.attempts} of {MAX_ATTEMPTS} failed: {error}'[:5000]
             log.save(update_fields=['status', 'detail', 'raw_copy'])
-        except Exception:
+        except BaseException as exc:
+            if saved:
+                _delete_files([saved])
+            if not isinstance(exc, Exception):
+                raise   # Ctrl-C or exit: the half-made copy is gone, carry on stopping
             # No copy: leave it in the mailbox. The row stays 'processing', so the
             # next run takes it again as the next attempt.
             logger.exception('Could not save a copy of failed inbound message %s; '
                              'leaving it in the mailbox.', log.message_id)
-            if saved:
-                _delete_files([saved])
             return False
         self._say('failed', log.detail)
         if log.attempts >= MAX_ATTEMPTS and self._give_up(log, raw):

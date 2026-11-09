@@ -90,7 +90,7 @@ A message that fails is tried again from that copy on the next runs, up to 3 tim
 
 With POP3, Murphy's Bench ends the session normally only when it holds every message it downloaded; otherwise it drops the connection, so servers such as Gmail offer those messages again. With IMAP and Delete messages after processing ticked, it removes only the messages it handled. That needs a server with UIDPLUS; on one without it, handled messages are marked read and flagged deleted, and nothing is purged.
 
-After updating from a version before this change, a message the old version recorded as failed or unfinished is not imported automatically if it arrives again. It opens a System Alerts ticket asking you to check whether a ticket already exists.
+After updating from a version before this change, a message the old version recorded as failed or unfinished is not imported automatically if it arrives again. It opens a System Alerts ticket asking you to check whether a ticket already exists. A message with no Message-ID cannot be matched to its old record, so it is imported as new. Check for an existing ticket before you mark one unread.
 
 Settings → Logs, with the Inbound Email source, lists every message the poller handled, its result, and the reason for any failure or refusal.
 
