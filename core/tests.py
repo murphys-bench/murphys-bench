@@ -22869,3 +22869,25 @@ def test_outage_raises_one_alert_and_keeps_each_retry_record(monkeypatch, admin_
     assert InboundStuckDownload.objects.filter(failures=3, alerted=True).count() == 25
     description = _alerts().get().description
     assert all(key in description for key in InboundStuckDownload.objects.values_list('key', flat=True))
+
+
+# ── Outside review round 4 (PR #122) ────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_grouped_alert_keeps_a_reference_that_starts_another(monkeypatch, admin_user):
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id='<g-long@davis.example>'),
+                               _raw_new_email(message_id='<g-short@davis.example>')])
+    _FakeIMAP.mailbox[1].update(uid=10, flags={'\\Seen'})   # older, already read
+    _FakeIMAP.refuses = (b'100',)
+    for _ in range(3):
+        _fetch()
+    _FakeIMAP.mailbox[1]['flags'].clear()   # someone marks it unread, and it hangs
+    _FakeIMAP.hangs = (b'10',)
+    for _ in range(3):
+        _fetch()
+    description = _alerts().get().description
+    assert 'Mailbox reference: imap:INBOX:100\n' in description
+    assert 'The server did not return the message.' in description
+    assert 'Also failing: imap:INBOX:10 (TimeoutError: timed out)' in description
+

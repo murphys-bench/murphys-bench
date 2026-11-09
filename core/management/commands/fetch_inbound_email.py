@@ -901,7 +901,8 @@ class _StuckDownloads:
                 'look in the mailbox for a very large or damaged message, create the ticket by hand, '
                 'and remove the message from the mailbox.',
             )
-            if row.key not in alert.description:   # folded into an earlier alert
+            # Whole line, so imap:INBOX:10 is not mistaken for imap:INBOX:100.
+            if f'Mailbox reference: {row.key}\n' not in alert.description:   # folded into an earlier alert
                 alert.description += f'\n\nAlso failing: {row.key} ({row.last_error})'
                 alert.save(update_fields=['description'])
             row.alerted = True
