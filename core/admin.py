@@ -438,14 +438,31 @@ class InboundEmailLogAdmin(admin.ModelAdmin):
     list_display = ['created_at', 'status', 'attempts', 'from_email', 'subject', 'ticket', 'detail']
     list_filter = ['status', 'created_at']
     search_fields = ['from_email', 'subject', 'ticket__ticket_number', 'message_id']
+    # raw_copy lives in private storage, so the file link the admin would draw
+    # for it can only ever 404. Show its name instead.
+    exclude = ['raw_copy']
     readonly_fields = ['message_id', 'from_email', 'subject', 'ticket', 'status', 'attempts',
-                       'detail', 'created_at']
+                       'detail', 'saved_copy', 'created_at']
+
+    @admin.display(description='Saved copy')
+    def saved_copy(self, obj):
+        return obj.raw_copy.name if obj.raw_copy else ''
 
     def has_add_permission(self, request):
         return False
 
     def has_change_permission(self, request, obj=None):
         return False
+
+    # A saved copy is customer email on disk and must not outlive its row.
+    def delete_model(self, request, obj):
+        self.delete_queryset(request, InboundEmailLog.objects.filter(pk=obj.pk))
+
+    def delete_queryset(self, request, queryset):
+        from core.management.commands.fetch_inbound_email import _delete_files
+        files = [(log.raw_copy.storage, log.raw_copy.name) for log in queryset if log.raw_copy]
+        super().delete_queryset(request, queryset)
+        _delete_files(files)
 
 
 @admin.register(MFAResetLog)

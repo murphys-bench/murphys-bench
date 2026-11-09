@@ -581,7 +581,8 @@ def _identify(raw_bytes):
 
     The claim key is the Message-ID. A message without one is keyed by a hash of
     its raw bytes instead, so it can still be deduplicated and its retries
-    counted (identical bytes are the same delivery)."""
+    counted (identical bytes are the same delivery). Line endings at the very end
+    are ignored, because POP3 and IMAP do not report them the same way."""
     mid = frm = subj = ''
     try:
         msg_obj = email.message_from_bytes(raw_bytes)
@@ -591,7 +592,7 @@ def _identify(raw_bytes):
     except Exception:
         logger.exception('Could not read the headers of an inbound message.')
     if not mid:
-        mid = 'no-message-id:sha256:' + hashlib.sha256(raw_bytes).hexdigest()
+        mid = 'no-message-id:sha256:' + hashlib.sha256(raw_bytes.rstrip(b'\r\n')).hexdigest()
     return mid, frm, subj
 
 
@@ -603,13 +604,18 @@ def _identify(raw_bytes):
 
 _UID_RE = re.compile(rb'\bUID\s+(\d+)', re.IGNORECASE)
 
+# Seconds a silent mail server may hold up one network operation. Without a limit
+# a hung server blocks the run forever, so saved retries and give-up alerts never
+# happen and the run lock stays held.
+MAILBOX_TIMEOUT = 60
+
 
 class _ImapMailbox:
     def __init__(self, site, dry_run=False):
         if site.inbound_ssl:
-            self.conn = imaplib.IMAP4_SSL(site.inbound_host, site.inbound_port)
+            self.conn = imaplib.IMAP4_SSL(site.inbound_host, site.inbound_port, timeout=MAILBOX_TIMEOUT)
         else:
-            self.conn = imaplib.IMAP4(site.inbound_host, site.inbound_port)
+            self.conn = imaplib.IMAP4(site.inbound_host, site.inbound_port, timeout=MAILBOX_TIMEOUT)
         self.conn.login(site.inbound_username, site.inbound_password)
         self.folder = site.inbound_folder or 'INBOX'
         typ, _ = self.conn.select(self.folder)
@@ -694,9 +700,9 @@ class _Pop3Mailbox:
 
     def __init__(self, site, dry_run=False):
         if site.inbound_ssl:
-            self.conn = poplib.POP3_SSL(site.inbound_host, site.inbound_port)
+            self.conn = poplib.POP3_SSL(site.inbound_host, site.inbound_port, timeout=MAILBOX_TIMEOUT)
         else:
-            self.conn = poplib.POP3(site.inbound_host, site.inbound_port)
+            self.conn = poplib.POP3(site.inbound_host, site.inbound_port, timeout=MAILBOX_TIMEOUT)
         self.conn.user(site.inbound_username)
         self.conn.pass_(site.inbound_password)
         self.dry_run = dry_run
@@ -713,7 +719,8 @@ class _Pop3Mailbox:
             else:
                 self._retrieved.add(i)   # before RETR: a half-read counts too
                 _, lines, _ = self.conn.retr(i)
-            yield i, b'\r\n'.join(lines)
+            # poplib strips every line ending, including the last one.
+            yield i, b'\r\n'.join(lines) + b'\r\n'
 
     def done(self, i):
         self.conn.dele(i)
@@ -934,19 +941,27 @@ class Command(BaseCommand):
         return True
 
     def _ensure_copy(self, log, raw):
-        """Make sure MB's saved copy of `raw` exists on disk, writing a fresh one
-        if the row has none or its file is gone. Returns False if it cannot."""
-        try:
-            if log.raw_copy and log.raw_copy.storage.exists(log.raw_copy.name):
-                return True
-        except Exception:
-            logger.exception('Could not check the saved copy of inbound message %s.', log.message_id)
-            return False
+        """Make sure MB holds a copy of `raw` it can actually read, writing a fresh
+        one if the row has none or its file is gone, empty or unreadable. Returns
+        False if it cannot."""
+        stale = None
+        if log.raw_copy:
+            stale = (log.raw_copy.storage, log.raw_copy.name)
+            try:
+                with log.raw_copy.open('rb') as fh:
+                    if fh.read(1):
+                        return True
+            except Exception as exc:
+                logger.warning('Saved copy of inbound message %s could not be read (%s: %s); '
+                               'replacing it from this delivery.',
+                               log.message_id, type(exc).__name__, exc)
         saved = None
         try:
             log.raw_copy.save(f'{log.pk}.eml', ContentFile(raw), save=False)
             saved = (log.raw_copy.storage, log.raw_copy.name)
             log.save(update_fields=['raw_copy'])
+            if stale and stale != saved:   # same name when the old file was gone
+                _delete_files([stale])
         except Exception:
             logger.exception('Could not save a copy of inbound message %s; leaving it in the mailbox.',
                              log.message_id)
@@ -1047,6 +1062,9 @@ class Command(BaseCommand):
             _delete_files(written)   # rolled back: its attachment files must go too
             log.refresh_from_db()
             return self._failed(log, raw, f'{type(exc).__name__}: {exc}')
+        except BaseException:
+            _delete_files(written)   # Ctrl-C or exit: rolled back the same way
+            raise
         finally:
             _attempt_files.reset(token)
 
@@ -1081,10 +1099,10 @@ class Command(BaseCommand):
             if saved:
                 _delete_files([saved])
             return False
-        self.counts['failed'] += 1
         self._say('failed', log.detail)
-        if log.attempts >= MAX_ATTEMPTS:
-            self._give_up(log, raw)
+        if log.attempts >= MAX_ATTEMPTS and self._give_up(log, raw):
+            return True   # final: counted as gave up, not as awaiting a retry
+        self.counts['failed'] += 1
         return True
 
     def _give_up(self, log, raw, legacy=False):
@@ -1156,6 +1174,9 @@ class Command(BaseCommand):
             _delete_files(written)
             log.refresh_from_db()
             return False
+        except BaseException:
+            _delete_files(written)   # Ctrl-C or exit: rolled back the same way
+            raise
         self.counts['gave_up'] += 1
         self._say('gave_up', log.detail)
         return True

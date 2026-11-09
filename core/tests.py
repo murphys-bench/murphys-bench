@@ -21141,6 +21141,16 @@ import poplib as _poplib  # noqa: E402
 import core.management.commands.fetch_inbound_email as _fie  # noqa: E402
 
 
+def _pop3_lines(raw):
+    """What poplib hands back for a message: its lines, with every ending gone."""
+    return raw.replace(b'\r\n', b'\n').rstrip(b'\n').split(b'\n')
+
+
+def _on_the_wire(raw):
+    """A test message as it really travels: CRLF line endings throughout."""
+    return raw.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+
+
 class _FakePOP3:
     """Server-side mailbox shared across sessions. DELE takes effect at QUIT. With
     `gmail`, every message RETR'd in a session that ends with QUIT stops being
@@ -21163,11 +21173,10 @@ class _FakePOP3:
 
     def retr(self, i):
         self._retrieved.add(i)
-        return b'+OK', self._view[i - 1].split(b'\r\n'), 0
+        return b'+OK', _pop3_lines(self._view[i - 1]), 0
 
     def top(self, i, n):
-        head = self._view[i - 1].split(b'\n\n', 1)[0]
-        return b'+OK', head.split(b'\r\n'), 0
+        return b'+OK', _pop3_lines(self._view[i - 1].replace(b'\r\n', b'\n').split(b'\n\n', 1)[0]), 0
 
     def dele(self, i): self._marked.add(i)
 
@@ -21310,7 +21319,7 @@ def test_inbound_failure_keeps_a_copy_and_the_next_run_tickets_it(monkeypatch):
     """POP3: the failed email leaves the server only because MB saved its own
     copy; the next run makes the ticket from that copy and drops the copy."""
     _inbound_site('pop3')
-    raw = _raw_new_email(message_id='<keep-1@davis.example>')
+    raw = _on_the_wire(_raw_new_email(message_id='<keep-1@davis.example>'))
     _pop3_serves(monkeypatch, [raw])
     monkeypatch.setattr(_fie, '_process_message', _Breaker(times=1))
     notified = []
@@ -21359,7 +21368,7 @@ def test_inbound_three_failures_raise_one_alert_carrying_the_original(monkeypatc
     from core.models import Attachment, Notification
     from core.system_alerts import SYSTEM_ALERTS_CLIENT_NAME
     _inbound_site('pop3')
-    raw = _raw_new_email(message_id='<dead-1@davis.example>', subject='Printer on fire')
+    raw = _on_the_wire(_raw_new_email(message_id='<dead-1@davis.example>', subject='Printer on fire'))
     _pop3_serves(monkeypatch, [raw])
     breaker = _Breaker()
     monkeypatch.setattr(_fie, '_process_message', breaker)
@@ -21464,7 +21473,7 @@ def test_inbound_imap_delete_mode_expunges_only_what_mb_holds(monkeypatch):
 def test_inbound_copy_save_failure_is_retaken_next_run(monkeypatch):
     from django.db.models.fields.files import FieldFile
     _inbound_site('pop3')
-    raw = _raw_new_email(message_id='<nocopy-1@davis.example>')
+    raw = _on_the_wire(_raw_new_email(message_id='<nocopy-1@davis.example>'))
     _pop3_serves(monkeypatch, [raw])
     breaker = _Breaker()
     monkeypatch.setattr(_fie, '_process_message', breaker)
@@ -21553,7 +21562,7 @@ def test_inbound_failed_give_up_is_retried_without_another_attempt(monkeypatch, 
     import core.system_alerts as sa
     from core.system_alerts import SYSTEM_ALERTS_CLIENT_NAME
     _inbound_site('pop3')
-    raw = _raw_new_email(message_id='<gu-1@davis.example>')
+    raw = _on_the_wire(_raw_new_email(message_id='<gu-1@davis.example>'))
     _pop3_serves(monkeypatch, [raw])
     breaker = _Breaker()
     monkeypatch.setattr(_fie, '_process_message', breaker)
@@ -21659,9 +21668,9 @@ def test_inbound_rows_from_before_retries_go_to_a_person(monkeypatch, admin_user
                                    detail='Unhandled error: database is locked')
     InboundEmailLog.objects.create(message_id='<old-proc@davis.example>', status='needs_review')
     raws = {
-        'ref': _raw_new_email(message_id='<old-ref@davis.example>', subject='old refusal'),
-        'err': _raw_new_email(message_id='<old-err@davis.example>', subject='old error'),
-        'proc': _raw_new_email(message_id='<old-proc@davis.example>', subject='old processing'),
+        'ref': _on_the_wire(_raw_new_email(message_id='<old-ref@davis.example>', subject='old refusal')),
+        'err': _on_the_wire(_raw_new_email(message_id='<old-err@davis.example>', subject='old error')),
+        'proc': _on_the_wire(_raw_new_email(message_id='<old-proc@davis.example>', subject='old processing')),
     }
     _pop3_serves(monkeypatch, list(raws.values()))
     _fetch()
@@ -21912,3 +21921,227 @@ def test_attachment_row_failure_leaves_no_file(monkeypatch, settings):
     monkeypatch.setattr(Attachment, 'save', real_save)
     _fetch()
     assert _log('<att-1@davis.example>').status == 'gave_up'
+
+
+# ── CodeRabbit's review of the first commit (PR #122) ───────────────────────
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('ending', [b'\r\n', b''])
+def test_no_message_id_is_one_ticket_across_imap_and_pop3(monkeypatch, ending):
+    from core.models import InboundEmailLog
+    raw = _on_the_wire(_raw_new_email(message_id=None, subject='No id at all')).rstrip(b'\r\n') + ending
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [raw])
+    _fetch()
+    _inbound_site('pop3')
+    _pop3_serves(monkeypatch, [raw])
+    _fetch()
+    assert Ticket.objects.filter(subject='No id at all').count() == 1
+    assert InboundEmailLog.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_pop3_copy_is_the_exact_message_on_the_wire(monkeypatch):
+    _inbound_site('pop3')
+    raw = _on_the_wire(_raw_new_email(message_id='<wire-1@davis.example>'))
+    _pop3_serves(monkeypatch, [raw])
+    with monkeypatch.context() as m:
+        m.setattr(_fie, '_process_message', _Breaker())
+        _fetch()
+    assert _stored(_log('<wire-1@davis.example>').raw_copy) == raw
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('protocol', ['pop3', 'imap'])
+def test_mailbox_connections_have_a_time_limit(monkeypatch, protocol):
+    _inbound_site(protocol)
+    limits = []
+    if protocol == 'pop3':
+        _pop3_serves(monkeypatch, [])
+        class Fake(_FakePOP3):
+            def __init__(self, *a, **k):
+                limits.append(k.get('timeout'))
+                super().__init__(*a, **k)
+        monkeypatch.setattr(_fie.poplib, 'POP3_SSL', Fake)
+    else:
+        _imap_serves(monkeypatch, [])
+        class Fake(_FakeIMAP):
+            def __init__(self, *a, **k):
+                limits.append(k.get('timeout'))
+                super().__init__(*a, **k)
+        monkeypatch.setattr(_fie.imaplib, 'IMAP4_SSL', Fake)
+    _fetch()
+    assert limits == [_fie.MAILBOX_TIMEOUT]
+
+
+@pytest.mark.django_db
+def test_saved_retries_still_run_when_the_mailbox_times_out(monkeypatch):
+    _inbound_site('pop3')
+    raw = _on_the_wire(_raw_new_email(message_id='<hang-1@davis.example>'))
+    _pop3_serves(monkeypatch, [raw])
+    with monkeypatch.context() as m:
+        m.setattr(_fie, '_process_message', _Breaker())
+        _fetch()
+    assert _log('<hang-1@davis.example>').status == 'failed'
+    with monkeypatch.context() as m:
+        m.setattr(_FakePOP3, 'stat', lambda self: (_ for _ in ()).throw(TimeoutError('timed out')))
+        _fetch()
+    assert _log('<hang-1@davis.example>').status == 'new_ticket'
+
+
+def _failed_copy_on_imap(monkeypatch, mid):
+    _inbound_site('imap')
+    raw = _raw_new_email(message_id=mid)
+    _imap_serves(monkeypatch, [raw])
+    with monkeypatch.context() as m:
+        m.setattr(_fie, '_process_message', _Breaker())
+        _fetch()
+    _FakeIMAP.mailbox[0]['flags'].clear()   # someone marks it unread
+    return raw, _log(mid)
+
+
+def _unreadable(self, *a, **k):
+    raise PermissionError('copy cannot be opened')
+
+
+@pytest.mark.django_db
+def test_unreadable_copy_is_replaced_before_the_mailbox_copy_goes(monkeypatch):
+    from django.db.models.fields.files import FieldFile
+    raw, log = _failed_copy_on_imap(monkeypatch, '<unread-1@davis.example>')
+    old = log.raw_copy.name
+    with monkeypatch.context() as m:
+        m.setattr(FieldFile, 'open', _unreadable)
+        m.setattr(_fie.Command, '_retry_saved', lambda self: None)
+        _fetch()
+    log.refresh_from_db()
+    assert log.raw_copy.name != old and _stored(log.raw_copy) == raw
+    assert not log.raw_copy.storage.exists(old), 'the bad copy does not linger'
+    assert _FakeIMAP.mailbox[0]['flags'] == {'\\Seen'}
+
+
+@pytest.mark.django_db
+def test_empty_copy_is_replaced_before_the_mailbox_copy_goes(monkeypatch):
+    raw, log = _failed_copy_on_imap(monkeypatch, '<unread-2@davis.example>')
+    with open(log.raw_copy.path, 'wb'):
+        pass
+    with monkeypatch.context() as m:
+        m.setattr(_fie.Command, '_retry_saved', lambda self: None)
+        _fetch()
+    log.refresh_from_db()
+    assert _stored(log.raw_copy) == raw
+
+
+@pytest.mark.django_db
+def test_unreadable_copy_that_cannot_be_replaced_keeps_the_mailbox_copy(monkeypatch):
+    from django.db.models.fields.files import FieldFile
+    raw, log = _failed_copy_on_imap(monkeypatch, '<unread-3@davis.example>')
+    old = log.raw_copy.name
+    with monkeypatch.context() as m:
+        m.setattr(FieldFile, 'open', _unreadable)
+        m.setattr(FieldFile, 'save', lambda self, *a, **k: (_ for _ in ()).throw(OSError('disk full')))
+        m.setattr(_fie.Command, '_retry_saved', lambda self: None)
+        _fetch()
+    log.refresh_from_db()
+    assert log.raw_copy.name == old and log.raw_copy.storage.exists(old)
+    assert _FakeIMAP.mailbox[0]['flags'] == set(), 'not acknowledged while MB cannot read its copy'
+
+
+@pytest.mark.django_db
+def test_interrupted_attempt_removes_its_files(monkeypatch):
+    from django.core.files.base import ContentFile
+    from core.models import InboundEmailLog
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id='<int-1@davis.example>')])
+    storage = InboundEmailLog._meta.get_field('raw_copy').storage
+    names = []
+
+    def interrupted(raw, site, verbosity):
+        names.append(storage.save('stray-attachment.txt', ContentFile(b'x')))
+        _fie._attempt_files.get().append((storage, names[0]))
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(_fie, '_process_message', interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        _fetch()
+    assert names and not storage.exists(names[0])
+
+
+@pytest.mark.django_db
+def test_interrupted_give_up_removes_its_file(monkeypatch):
+    from core.models import Attachment
+    _inbound_site('imap')
+    raw = _raw_new_email(message_id='<int-2@davis.example>')
+    _imap_serves(monkeypatch, [raw])
+    monkeypatch.setattr(_fie, '_process_message', _Breaker())
+    _fetch()
+    _fetch()
+    seen = []
+
+    def interrupted(self, *a, **k):
+        seen.append((self.file.storage, self.file.name))
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Attachment, 'save', interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        _fetch()
+    assert seen and not seen[0][0].exists(seen[0][1])
+
+
+@pytest.mark.django_db
+def test_a_give_up_is_not_also_counted_as_awaiting_retry(monkeypatch):
+    from io import StringIO
+    from django.core.management import call_command
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id='<count-1@davis.example>')])
+    monkeypatch.setattr(_fie, '_process_message', _Breaker())
+    _fetch()
+    _fetch()
+    out = StringIO()
+    call_command('fetch_inbound_email', verbosity=1, stdout=out)
+    assert '0 failed (will retry), 1 gave up' in out.getvalue()
+
+
+@pytest.mark.django_db
+def test_a_give_up_that_cannot_alert_still_counts_as_awaiting_retry(monkeypatch):
+    from io import StringIO
+    from django.core.management import call_command
+    from core.models import Attachment
+    _inbound_site('imap')
+    _imap_serves(monkeypatch, [_raw_new_email(message_id='<count-2@davis.example>')])
+    monkeypatch.setattr(_fie, '_process_message', _Breaker())
+    _fetch()
+    _fetch()
+    monkeypatch.setattr(Attachment, 'save', lambda self, *a, **k: (_ for _ in ()).throw(OSError('disk full')))
+    out = StringIO()
+    call_command('fetch_inbound_email', verbosity=1, stdout=out)
+    assert '1 failed (will retry), 0 gave up' in out.getvalue()
+
+
+def _admin_for_inbound_log():
+    from django.contrib import admin
+    from core.models import InboundEmailLog
+    return admin.site._registry[InboundEmailLog]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('how', ['one', 'selected'])
+def test_deleting_a_log_row_in_admin_deletes_its_saved_copy(monkeypatch, how):
+    from core.models import InboundEmailLog
+    _, log = _failed_copy_on_imap(monkeypatch, f'<admin-{how}@davis.example>')
+    storage, name = log.raw_copy.storage, log.raw_copy.name
+    model_admin = _admin_for_inbound_log()
+    if how == 'one':
+        model_admin.delete_model(None, log)
+    else:
+        model_admin.delete_queryset(None, InboundEmailLog.objects.filter(pk=log.pk))
+    assert not InboundEmailLog.objects.filter(pk=log.pk).exists()
+    assert not storage.exists(name)
+
+
+@pytest.mark.django_db
+def test_admin_names_the_saved_copy_without_a_dead_file_link(monkeypatch, rf):
+    _, log = _failed_copy_on_imap(monkeypatch, '<admin-link@davis.example>')
+    model_admin = _admin_for_inbound_log()
+    fields = model_admin.get_fields(rf.get('/'), log)
+    assert 'raw_copy' not in fields and 'saved_copy' in fields
+    assert model_admin.saved_copy(log) == log.raw_copy.name
