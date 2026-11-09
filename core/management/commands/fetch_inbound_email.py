@@ -821,6 +821,7 @@ class _StuckDownloads:
         self.rows = {} if dry_run else {r.key: r for r in InboundStuckDownload.objects.all()}
         self.started = _clock()
         self.due_waiting = False
+        self.due_turn_taken = False
         self.warned = False
 
     def order(self, keys):
@@ -847,6 +848,11 @@ class _StuckDownloads:
     def has_time(self, key):
         """May this download start now? Checked before every attempt, whatever
         became of the one before it."""
+        if key in self.rows and not self.due_turn_taken:
+            # Every run gives one waiting message its turn, even if a slow message
+            # used up the reserve. That is at most one download past the limit.
+            self.due_turn_taken = True
+            return True
         reserve = DUE_RESERVE_SECONDS if self.due_waiting and key not in self.rows else 0
         if _clock() - self.started <= DRAIN_TIME_LIMIT_SECONDS - reserve:
             return True
@@ -880,7 +886,7 @@ class _StuckDownloads:
     def _alert(self, row):
         from core.system_alerts import create_system_alert
         with transaction.atomic():
-            create_system_alert(
+            alert = create_system_alert(
                 # One fixed subject: the alert helper folds repeats within the hour
                 # into this ticket, so an outage is one alert and not one per message.
                 'Inbound email could not be downloaded',
@@ -895,6 +901,9 @@ class _StuckDownloads:
                 'look in the mailbox for a very large or damaged message, create the ticket by hand, '
                 'and remove the message from the mailbox.',
             )
+            if row.key not in alert.description:   # folded into an earlier alert
+                alert.description += f'\n\nAlso failing: {row.key} ({row.last_error})'
+                alert.save(update_fields=['description'])
             row.alerted = True
             row.save(update_fields=['alerted'])
 

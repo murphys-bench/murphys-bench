@@ -22674,6 +22674,23 @@ def test_overdue_download_gets_its_turn_under_steady_mail(monkeypatch, admin_use
 
 
 @pytest.mark.django_db
+def test_one_overdue_download_gets_a_turn_after_a_slow_message(monkeypatch, admin_user):
+    from django.utils import timezone
+    from core.models import InboundStuckDownload
+    _inbound_site('imap')
+    due = [_raw_new_email(message_id=f'<due-{n}@davis.example>', subject='Was stuck') for n in range(2)]
+    healthy = [_raw_new_email(message_id=f'<slow-{n}@davis.example>', subject='Slow') for n in range(5)]
+    _imap_serves(monkeypatch, due + healthy)
+    _ticking_imap(monkeypatch, 700)   # one message overruns the whole limit
+    for uid in (100, 101):
+        InboundStuckDownload.objects.create(
+            key=f'imap:INBOX:{uid}', failures=3, alerted=True,
+            last_failed_at=timezone.now() - 2 * _fie.STUCK_RETRY_EVERY)
+    _fetch()
+    assert Ticket.objects.filter(subject='Was stuck').count() == 1, 'one, and only one, past the limit'
+
+
+@pytest.mark.django_db
 def test_healthy_mail_may_use_the_whole_limit_when_nothing_is_waiting(monkeypatch):
     _inbound_site('imap')
     _imap_serves(monkeypatch, [_raw_new_email(message_id=f'<free-{n}@davis.example>', subject='Free') for n in range(40)])
@@ -22700,6 +22717,7 @@ def test_failed_imap_search_keeps_the_record_of_failing_downloads(monkeypatch, a
 
 @pytest.mark.django_db
 def test_alert_that_half_fails_leaves_nothing_and_is_raised_later(monkeypatch, admin_user):
+    from django.utils import timezone
     from core.models import InboundStuckDownload, Notification
     _two_on_pop3(monkeypatch)
     _fetch()
@@ -22709,6 +22727,11 @@ def test_alert_that_half_fails_leaves_nothing_and_is_raised_later(monkeypatch, a
         _fetch()
     row = InboundStuckDownload.objects.get()
     assert row.failures == 3 and not row.alerted and _alerts().count() == 0
+    InboundStuckDownload.objects.update(last_failed_at=timezone.now() - _fie.STUCK_RETRY_EVERY)
+    _fetch()   # its hourly retry fails too, and this time the alert goes through
+    row.refresh_from_db()
+    assert row.alerted and _alerts().count() == 1
+    assert Notification.objects.filter(kind='system_alert').count() == 1
 
 
 @pytest.mark.django_db
@@ -22777,6 +22800,7 @@ def test_same_email_over_pop3_and_imap_counts_as_a_match(monkeypatch):
         m.setattr(_fie.Command, '_retry_saved', lambda self: None)
         _fetch()
     assert not _fie.Attachment.objects.filter(original_filename='other-version.eml').exists()
+    assert _FakeIMAP.mailbox[0]['flags'] == {'\\Seen'}, 'a matching delivery may leave the mailbox'
 
 
 @pytest.mark.django_db
@@ -22843,3 +22867,5 @@ def test_outage_raises_one_alert_and_keeps_each_retry_record(monkeypatch, admin_
     assert _alerts().count() == 1
     assert Notification.objects.filter(kind='system_alert').count() == 1
     assert InboundStuckDownload.objects.filter(failures=3, alerted=True).count() == 25
+    description = _alerts().get().description
+    assert all(key in description for key in InboundStuckDownload.objects.values_list('key', flat=True))

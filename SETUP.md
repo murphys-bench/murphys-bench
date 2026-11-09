@@ -94,7 +94,7 @@ After updating from a version before this change, a message the old version reco
 
 If you create a ticket by hand for a message that is still waiting for a retry, find it in Settings → Logs, with the Inbound Email source, and choose Mark handled, adding the ticket number if you made one. Until you do, Murphy's Bench keeps retrying it and can create a second ticket.
 
-A message that cannot be downloaded goes to the back of the queue, so later mail is not held up. After 3 failed downloads Murphy's Bench raises a System Alerts ticket, skips the message, leaves it in the mailbox, and tries it again once an hour. One alert covers messages that fail around the same time. A run starts no new download after 10 minutes, though one already under way can finish past that, and anything left waits for the next run. When messages are waiting to try again, the last 2 of those minutes are held for them.
+A message that cannot be downloaded goes to the back of the queue, so later mail is not held up. After 3 failed downloads Murphy's Bench raises a System Alerts ticket, skips the message, leaves it in the mailbox, and tries it again once an hour. One alert covers messages that fail around the same time. A run starts no new download after 10 minutes, though one already under way can finish past that, and anything left waits for the next run. When messages are waiting to try again, the last 2 of those minutes are held for them. Each run also gives one waiting message a turn even if the time has run out.
 
 Settings → Logs, with the Inbound Email source, lists every message the poller handled, its result, and the reason for any failure or refusal.
 
