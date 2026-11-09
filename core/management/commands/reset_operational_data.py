@@ -127,6 +127,13 @@ class Command(BaseCommand):
             for att in operational_data.operational_queryset(attachment_entry)
             if att.file
         ]
+        # Same rule for the inbound log's saved copies of messages awaiting a
+        # retry: customer email on disk that must not outlive its row.
+        from core.models import InboundEmailLog
+        files_to_unlink += [
+            (log.raw_copy.storage, log.raw_copy.name)
+            for log in InboundEmailLog.objects.exclude(raw_copy='').exclude(raw_copy__isnull=True)
+        ]
 
         with transaction.atomic():
             # Ordered by the registry's delete_order: GenericFK and SET_NULL rows

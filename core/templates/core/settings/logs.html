@@ -21,7 +21,7 @@
         <thead><tr><th>Time</th>{% if not log_source %}<th>Source</th>{% endif %}<th>Who</th><th>Event</th><th>Detail</th></tr></thead>
         <tbody>
         {% for row in log_rows %}
-        <tr><td class="text-secondary text-nowrap">{{ row.when|date:"M j Y H:i" }}</td>{% if not log_source %}<td><span class="badge bg-secondary-lt">{{ row.source_label }}</span></td>{% endif %}<td class="text-nowrap">{{ row.actor }}</td><td>{% if row.url %}<a href="{{ row.url }}">{{ row.summary }}</a>{% else %}{{ row.summary }}{% endif %}</td><td class="text-secondary small">{{ row.detail|default:"" }}</td></tr>
+        <tr><td class="text-secondary text-nowrap">{{ row.when|date:"M j Y H:i" }}</td>{% if not log_source %}<td><span class="badge bg-secondary-lt">{{ row.source_label }}</span></td>{% endif %}<td class="text-nowrap">{{ row.actor }}</td><td>{% if row.url %}<a href="{{ row.url }}">{{ row.summary }}</a>{% else %}{{ row.summary }}{% endif %}</td><td class="text-secondary small">{{ row.detail|default:"" }}{% if row.mark_handled_url %}<form method="post" action="{{ row.mark_handled_url }}" class="d-flex gap-1 mt-1">{% csrf_token %}<input type="text" name="ticket_number" class="form-control form-control-sm" placeholder="Ticket number, if you made one" aria-label="Ticket number, if you made one"><button type="submit" class="btn btn-sm text-nowrap">Mark handled</button></form>{% endif %}</td></tr>
         {% empty %}<tr><td colspan="5" class="text-secondary">{% if log_filtered or log_source %}Nothing matched.{% else %}No entries yet.{% endif %}</td></tr>{% endfor %}
         </tbody>
     </table>

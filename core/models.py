@@ -3299,23 +3299,66 @@ class Notification(models.Model):
         return reverse('core:notifications')
 
 
+class InboundStuckDownload(models.Model):
+    """A message in the mailbox whose download keeps failing. MB cannot read it,
+    so it has no sender or Message-ID and no InboundEmailLog row. The row goes away
+    once the message downloads or is no longer in the mailbox."""
+
+    key = models.CharField(max_length=255, unique=True, help_text="The server's id for the message.")
+    failures = models.PositiveSmallIntegerField(default=0)
+    last_failed_at = models.DateTimeField()
+    last_error = models.TextField(blank=True)
+    alerted = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'inbound_stuck_download'
+
+    def __str__(self):
+        return f'{self.key} ({self.failures} failures)'
+
+
 class InboundEmailLog(models.Model):
     """Audit log for every message fetched from the inbound mailbox."""
 
     STATUS_CHOICES = [
         ('new_ticket', 'Created New Ticket'),
+        ('new_ticket_linked', 'Created New Ticket (linked to a closed one)'),
         ('reply', 'Added Reply to Ticket'),
+        ('reply_flagged', 'Reply Added to Closed Ticket (flagged)'),
         ('duplicate', 'Duplicate — Already Processed'),
+        ('refused', 'Refused (blocked sender or suppressed client)'),
+        ('failed', 'Failed, Will Retry'),
+        ('gave_up', 'Gave Up, System Alert Raised'),
+        ('handled', 'Handled by Hand'),
+        # Before Nov 2026 every failure, and every refusal, was 'error', and a run
+        # that died left 'processing' (migration 0122 relabels those
+        # 'needs_review'). Either can hide a ticket the old code half-finished,
+        # so if such an email arrives again it goes to a person, not a retry.
         ('error', 'Processing Error'),
+        ('needs_review', 'Needs Review (from before this update)'),
         ('processing', 'Processing (claimed)'),
     ]
 
-    message_id = models.CharField(max_length=500, blank=True, db_index=True, help_text='Email Message-ID header.')
+    message_id = models.CharField(
+        max_length=500, blank=True, db_index=True,
+        help_text='Email Message-ID header; for a message without one, '
+                  '"no-message-id:sha256:" plus a hash of the raw message.')
     from_email = models.CharField(max_length=255, blank=True)
     subject = models.CharField(max_length=500, blank=True)
     ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='inbound_log')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES)
     detail = models.TextField(blank=True)
+    # Attempts started on this message, the first included.
+    attempts = models.PositiveSmallIntegerField(default=1)
+    # MB's own copy of the raw message while it is waiting to be retried.
+    raw_copy = models.FileField(upload_to='inbound_retry/', storage=private_attachment_storage,
+                                blank=True, max_length=255)
+    # Fingerprint of raw_copy when it was saved, so damage to the file on disk can
+    # be told apart from a different email reusing the same Message-ID.
+    raw_copy_sha256 = models.CharField(max_length=64, blank=True)
+    # Once the message is handled, the copy is kept until this time (so a backup
+    # taken meanwhile still finds it), then deleted.
+    copy_expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

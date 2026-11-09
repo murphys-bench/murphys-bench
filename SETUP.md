@@ -84,16 +84,19 @@ Configure the mailbox used by your support address. Murphy's Bench supports IMAP
 
 The mailbox is checked by a scheduled polling job. New messages become tickets. Replies containing a `[TKT-…]` token in the subject are attached to the existing ticket.
 
-**Murphy's Bench takes each message out of the queue as it downloads it, before it creates the ticket.**
+**No message leaves the mailbox until Murphy's Bench has it.** A message is deleted (POP3, or IMAP with Delete messages after processing ticked) or marked read (IMAP's default) only once its ticket or reply is saved, it was refused on purpose (a blocked sender, or a client set to suppress email), or Murphy's Bench has saved its own copy because processing failed.
 
-- POP3 deletes every message from the server as it is downloaded.
-- IMAP reads only unread messages and marks each one read as it is downloaded. With Delete messages after processing ticked, it deletes them instead.
+A message that fails is tried again from that copy on the next runs, up to 3 times in all. If it still fails, Murphy's Bench opens a ticket under the System Alerts client with the original email attached as `original-email.eml`, and notifies admins on the bell. Open the attachment and create the ticket by hand. Once a message is ticketed or handed to an alert, its saved copy becomes eligible for deletion after a day and is removed by a later poll.
 
-So a message that fails to import is not tried again. With POP3, or IMAP with delete ticked, it is gone from the mailbox. With IMAP's default it stays in the mailbox, marked read. Marking it unread normally does not bring it back either: its Message-ID is recorded on the first try, and a message already recorded is skipped as a duplicate. A message with no Message-ID is not recorded, so with IMAP's default, marking it unread does retry it on the next poll. Check first whether the failed attempt left a new ticket or added a reply to an existing ticket, because an error can happen after either is saved.
+With POP3, Murphy's Bench ends the session normally only when it holds every message it downloaded; otherwise it drops the connection, so servers such as Gmail offer those messages again. With IMAP and Delete messages after processing ticked, it removes only the messages it handled. That needs a server with UIDPLUS; on one without it, handled messages are marked read and flagged deleted, and nothing is purged.
 
-Settings → Logs, with the Inbound Email source, lists every message the poller handled and its result. Check it after the first runs. A failed import's log row has the sender, subject, and error, with no link to a ticket. Murphy's Bench keeps no separate copy of the raw message, but an error partway through can leave the body, and possibly some attachments, on a new ticket or on a reply in an existing conversation. Check both before recreating anything by hand from the mailbox, if a copy is still there, or from an independent archive.
+After updating from a version before this change, a message the old version recorded as failed or unfinished is not imported automatically if it arrives again. It opens a System Alerts ticket asking you to check whether a ticket already exists. A message with no Message-ID cannot be matched to its old record, so it is imported as new. Check for an existing ticket before you mark one unread.
 
-An IMAP download that fails partway through writes no log row. Messages already downloaded in that run stay marked read but are never imported. The failure appears only in the timer's service log (`journalctl -u murphys-bench-fetch-email.service`), and the run still reports success. After a failure, check the mailbox for read messages with no row in the log. With IMAP's default, mark those unread and the next poll tries them again.
+If you create a ticket by hand for a message that is still waiting for a retry, find it in Settings → Logs, with the Inbound Email source, and choose Mark handled, adding the ticket number if you made one. Until you do, Murphy's Bench keeps retrying it and can create a second ticket.
+
+A message that cannot be downloaded goes to the back of the queue, so later mail is not held up. After 3 failed downloads Murphy's Bench raises a System Alerts ticket, skips the message, leaves it in the mailbox, and tries it again once an hour. One alert covers messages that fail around the same time. A run starts no new download after 10 minutes, though one already under way can finish past that, and anything left waits for the next run. When messages are waiting to try again, the last 2 of those minutes are held for them. Each run also gives one waiting message a turn even if the time has run out.
+
+Settings → Logs, with the Inbound Email source, lists every message the poller handled, its result, and the reason for any failure or refusal.
 
 Before using a live support mailbox, test with a separate mailbox and confirm that:
 
@@ -101,7 +104,7 @@ Before using a live support mailbox, test with a separate mailbox and confirm th
 - replies attach to the correct ticket
 - processed messages are not imported again
 
-IMAP without delete keeps a copy of every message in the mailbox. With POP3 or IMAP with delete, Murphy's Bench holds the only record of each imported message and keeps no recovery copy of a failed one. If you need to recover failed imports, keep an independent archive of the mailbox.
+IMAP without delete keeps every message in the mailbox, marked read. POP3 and IMAP with delete make Murphy's Bench the only record of those messages.
 
 See `deploy/README.md` for the inbound-email timer.
 

@@ -89,7 +89,8 @@ MB self-monitors: its own operational failures open a **System Alert ticket**
 `manage.py send_alert` / `core.system_alerts.create_system_alert`. This is used
 instead of email because the box can't send system mail. App 500s also auto-open
 a ticket (`core.log_handlers.SystemAlertHandler` on the `django.request` logger,
-production only — wired in `settings.LOGGING`).
+production only — wired in `settings.LOGGING`). An inbound email that still fails
+after 3 attempts opens one too, with the original email attached.
 
 Log rotation is installed for you by `scripts/install.sh` (via
 `scripts/install_units.sh`), rendered for this install's real path and user.

@@ -204,6 +204,7 @@ urlpatterns = [
     # (two_factor:profile), which carries backup codes and Disable 2FA.
     path('my-security/', views.MySecurityView.as_view(), name='my_security'),
     path('settings/', views.SettingsView.as_view(), name='settings'),
+    path('settings/inbound-email/<int:pk>/mark-handled/', views.InboundEmailMarkHandledView.as_view(), name='inbound_mark_handled'),
     path('settings/test-outbound-email/', views.EmailTestOutboundView.as_view(), name='settings_test_outbound'),
     path('settings/sending-addresses/add/', views.SendingAddressSaveView.as_view(), name='sending_address_add'),
     path('settings/sending-addresses/<int:pk>/edit/', views.SendingAddressSaveView.as_view(), name='sending_address_edit'),
