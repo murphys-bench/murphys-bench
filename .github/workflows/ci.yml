@@ -8,6 +8,8 @@ name: CI
 #   3.12 — Ubuntu 24.04, which prod runs
 #   3.14 — Ubuntu 26.04, which the installer targets and mb-test runs
 # Testing only one of those meant claiming support for a runtime nothing verified.
+# Each leg runs on its own Ubuntu release (named explicitly, not ubuntu-latest),
+# so the pairing above is what actually runs.
 #
 # Actions are pinned to immutable commit SHAs, not moving tags. A tag can be
 # repointed at new code by whoever controls the action's repo; a SHA cannot. This
@@ -58,11 +60,19 @@ jobs:
         run: flake8 --select=F,E9 --show-source core/ murphys_bench/ accounts/
 
   suite:
-    runs-on: ubuntu-latest
+    # Explicit releases, not ubuntu-latest. GitHub moved ubuntu-latest to 26.04
+    # in Nov 2026, which quietly put the 3.12 leg on a release prod does not run
+    # and left nothing testing 24.04. Naming them means the next label move
+    # cannot do that again.
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false          # one version failing must not hide the other's result
       matrix:
-        python-version: ['3.12', '3.14']
+        include:
+          - python-version: '3.12'
+            os: ubuntu-24.04
+          - python-version: '3.14'
+            os: ubuntu-26.04
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
