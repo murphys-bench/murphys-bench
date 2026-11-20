@@ -232,6 +232,16 @@ Releases through `v0.4.52` did not follow this. The number tracked infrastructur
 of the product shipped as patch releases, which is why `v0.9.0` follows `v0.4.52` directly.
 The [CHANGELOG](CHANGELOG.md) entry for `v0.9.0` has the detail.
 
+## Supporting Murphy's Bench
+
+Murphy's Bench is free, open-source software developed by Shamrock Computer Services, LLC.
+
+If you find it useful and would like to help support its continued maintenance and development, voluntary contributions are appreciated.
+
+Contributions do not include technical support, priority development, or a commitment to future releases. Contributions are not tax-deductible charitable donations.
+
+[Contribute through Square](https://square.link/u/xxGyg3h5)
+
 ## License
 
 Murphy's Bench is licensed under the GNU Affero General Public License v3.0. See [LICENSE](LICENSE).
