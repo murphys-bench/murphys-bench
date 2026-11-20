@@ -12921,9 +12921,29 @@ def test_ci_tests_every_supported_python_runtime():
     so half of that support claim was verified once by hand on a throwaway VM that
     was then destroyed — the same "verified against a box we built" gap as the
     installer defects."""
+    import re
     ci = _ci_workflow()
-    assert "python-version: ['3.12', '3.14']" in ci
+    # Each version runs on its own Ubuntu release, named explicitly. On
+    # ubuntu-latest, GitHub's Nov 2026 move to 26.04 quietly took the 3.12 leg
+    # off the release prod runs.
+    pairs = re.findall(r"- python-version: '([0-9.]+)'\n\s+os: (ubuntu-[0-9.]+)", ci)
+    assert ('3.12', 'ubuntu-24.04') in pairs and ('3.14', 'ubuntu-26.04') in pairs, pairs
+    assert 'runs-on: ${{ matrix.os }}' in ci
     assert 'fail-fast: false' in ci, 'one version failing must not hide the other'
+
+
+def test_clean_room_installs_on_every_supported_ubuntu_release():
+    """INSTALL.md says Ubuntu 24.04 and 26.04 are both verified end to end, and
+    clean-room is that verification. On ubuntu-latest it only ever covered the
+    release GitHub pointed the label at (26.04 from Nov 2026), so 24.04, which
+    prod runs, went untested."""
+    import re
+    from pathlib import Path
+    from django.conf import settings
+    cr = (Path(settings.BASE_DIR) / '.github/workflows/clean-room.yml').read_text()
+    assert 'os: [ubuntu-24.04, ubuntu-26.04]' in cr
+    assert re.findall(r'^\s*runs-on:\s*(.+)$', cr, re.M) == ['${{ matrix.os }}']
+    assert 'fail-fast: false' in cr
 
 
 def test_ci_runs_the_production_deployment_check():

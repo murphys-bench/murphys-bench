@@ -36,7 +36,15 @@ permissions:
 
 jobs:
   clean-room:
-    runs-on: ubuntu-latest
+    # Both Ubuntu releases MB runs on: 24.04 (prod) and 26.04 (what the
+    # installer targets, and mb-test). Named explicitly, not ubuntu-latest:
+    # when GitHub moved that label to 26.04 in Nov 2026, nothing installed
+    # onto 24.04 any more, so a 24.04-only break would have reached prod untested.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false          # a failure on one release must not hide the other's result
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
