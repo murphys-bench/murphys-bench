@@ -12974,12 +12974,44 @@ def test_clean_room_reports_one_check_main_can_require():
     assert re.search(r'^    needs: clean-room$', install, re.M)
     assert re.search(r'^    if: always\(\)$', install, re.M), \
         'must run even when a leg failed, to report red'
-    assert '[ "${{ needs.clean-room.result }}" = "success" ] || {' in install
-    assert 'exit 1' in install
-    # Another workflow reporting a check of the same name would let either one
-    # satisfy the rule.
+    assert 'NEEDS_RESULT: ${{ needs.clean-room.result }}' in install
+    assert '[ "$NEEDS_RESULT" = "success" ] || {' in install
+    # Its own runner is named, not a moving label.
+    assert re.findall(r'^\s*runs-on:\s*(.+)$', install, re.M) == ['ubuntu-24.04']
+    # Another job reporting a check called "install", by key or by `name:`, would
+    # let either one satisfy the rule.
+    named_install = re.compile(r'^\s+name:\s*[\'"]?install[\'"]?\s*$', re.M)
+    assert not named_install.search(jobs['clean-room'])
     for other in ('ci.yml', 'scheduled-audit.yml'):
-        assert 'install' not in _workflow_jobs(other), other
+        other_jobs = _workflow_jobs(other)
+        assert 'install' not in other_jobs, other
+        assert not any(named_install.search(j) for j in other_jobs.values()), other
+
+
+def test_install_check_does_not_trust_the_matrix_summary_alone():
+    """GitHub has reported needs.<matrix job>.result as "success" for a run where
+    it cancelled one leg before it started (no runner picked it up; community
+    discussion 211624, found by outside review of PR #126). So "install" also
+    lists the run's jobs and requires every expected leg, by name, to exist and to
+    have succeeded. The expected list must be exactly the matrix, or a new release
+    would go unchecked."""
+    jobs = _workflow_jobs('clean-room.yml')
+    install = jobs['install']
+    expected = re.search(r'^      EXPECTED_RELEASES: (.+)$', install, re.M).group(1).split()
+    matrix = re.search(r'os: \[([^\]]+)\]', jobs['clean-room']).group(1)
+    assert expected == [r.strip() for r in matrix.split(',')], (expected, matrix)
+    # Only the read it needs.
+    assert re.search(r'^    permissions:\n      actions: read', install, re.M)
+    assert not re.search(r'^\s+\w+: write', install, re.M)
+    # The newest run of each job (re-runs), every page, each leg by exact name,
+    # and anything but "success" fails.
+    assert 'actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100' in install
+    assert 'gh api --paginate' in install
+    assert '-v want="clean-room ($release)"' in install
+    assert '[ "$conclusion" = "success" ] || bad=1' in install
+    assert '[ "$bad" = 0 ] || {' in install
+    assert install.count('exit 1') == 2
+    assert 'set -euo pipefail' in install
 
 
 def test_scheduled_audit_runs_on_the_pairing_prod_runs():
