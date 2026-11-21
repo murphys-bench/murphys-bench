@@ -12937,13 +12937,59 @@ def test_clean_room_installs_on_every_supported_ubuntu_release():
     clean-room is that verification. On ubuntu-latest it only ever covered the
     release GitHub pointed the label at (26.04 from Nov 2026), so 24.04, which
     prod runs, went untested."""
-    import re
-    from pathlib import Path
-    from django.conf import settings
-    cr = (Path(settings.BASE_DIR) / '.github/workflows/clean-room.yml').read_text()
+    cr = _workflow_jobs('clean-room.yml')['clean-room']
     assert 'os: [ubuntu-24.04, ubuntu-26.04]' in cr
     assert re.findall(r'^\s*runs-on:\s*(.+)$', cr, re.M) == ['${{ matrix.os }}']
     assert 'fail-fast: false' in cr
+
+
+def _workflow_jobs(name):
+    """Job name -> its text, from the `jobs:` section of .github/workflows/<name>.
+
+    Job keys sit at two spaces; everything inside a job is indented further, so
+    splitting on two-space keys gives one entry per job. Text, not a YAML parse:
+    there is no YAML library in requirements.txt.
+    """
+    from pathlib import Path
+    from django.conf import settings
+    text = (Path(settings.BASE_DIR) / '.github/workflows' / name).read_text()
+    parts = re.split(r'^  ([A-Za-z0-9_-]+):\n', text.split('\njobs:\n', 1)[1], flags=re.M)
+    return dict(zip(parts[1::2], parts[2::2]))
+
+
+def test_clean_room_reports_one_check_main_can_require():
+    """main's merge rules require a check named exactly "install", so a PR cannot
+    merge when the install fails on any supported Ubuntu release. The matrix legs
+    report under per-release names; requiring those would leave every PR waiting
+    forever on a check that never reports the day a release is added or dropped.
+    The "install" job is that one stable name, and it must go red when any leg
+    failed, was cancelled or was skipped, not just run after them.
+
+    If the required check is ever renamed in the merge rules, update this test with
+    it; do not delete it.
+    """
+    jobs = _workflow_jobs('clean-room.yml')
+    assert 'install' in jobs, 'a job named exactly "install" must exist'
+    install = jobs['install']
+    assert re.search(r'^    needs: clean-room$', install, re.M)
+    assert re.search(r'^    if: always\(\)$', install, re.M), \
+        'must run even when a leg failed, to report red'
+    assert '[ "${{ needs.clean-room.result }}" = "success" ] || {' in install
+    assert 'exit 1' in install
+    # Another workflow reporting a check of the same name would let either one
+    # satisfy the rule.
+    for other in ('ci.yml', 'scheduled-audit.yml'):
+        assert 'install' not in _workflow_jobs(other), other
+
+
+def test_scheduled_audit_runs_on_the_pairing_prod_runs():
+    """The weekly CVE audit ran on ubuntu-latest, which GitHub moved to 26.04 in
+    Nov 2026, while prod runs Ubuntu 24.04 with Python 3.12. Outside review of
+    PR #125 noted the audit is not provably OS-independent, so it audits on prod's
+    own pairing."""
+    audit = _workflow_jobs('scheduled-audit.yml')['audit']
+    assert re.findall(r'^\s*runs-on:\s*(.+)$', audit, re.M) == ['ubuntu-24.04']
+    assert re.findall(r"python-version: '([0-9.]+)'", audit) == ['3.12']
 
 
 def test_ci_runs_the_production_deployment_check():

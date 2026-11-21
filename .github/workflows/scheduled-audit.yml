@@ -19,7 +19,11 @@ permissions:
 
 jobs:
   audit:
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04 with Python 3.12: the pairing prod runs. The lockfile pins
+    # every version, so the result should rarely depend on the OS, but auditing
+    # on prod's own pairing removes the question. Named explicitly, not
+    # ubuntu-latest, which GitHub moved to 26.04 in Nov 2026.
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7

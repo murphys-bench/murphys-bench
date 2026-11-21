@@ -131,3 +131,22 @@ jobs:
           echo "=== sudoers drop-in ==="; sudo -n cat /etc/sudoers.d/murphys-bench 2>/dev/null || echo "(absent or unreadable — blanket sudo is gone by this point, which is intended)"
           echo "=== service ==="; systemctl status murphys-bench --no-pager -l 2>/dev/null || true
           journalctl -u murphys-bench -n 40 --no-pager 2>/dev/null || true
+
+  install:
+    # ⚠ THE NAME MATTERS. main's merge rules require a check called exactly
+    # "install", so a PR cannot merge when the install fails on any Ubuntu
+    # release MB supports. The matrix legs above report as
+    # "clean-room (ubuntu-24.04)" and "clean-room (ubuntu-26.04)"; requiring those
+    # names directly would leave every PR waiting forever on a check that never
+    # reports the day a release is added or dropped. This one name stays put:
+    # green only when every leg passed, red when any leg failed, was cancelled,
+    # or was skipped.
+    needs: clean-room
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the install to have passed on every Ubuntu release
+        run: |
+          echo "clean-room: ${{ needs.clean-room.result }}"
+          [ "${{ needs.clean-room.result }}" = "success" ] || { echo "::error::the install did not pass on every Ubuntu release"; exit 1; }
+          echo "the install passed on every Ubuntu release"
