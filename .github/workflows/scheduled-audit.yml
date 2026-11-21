@@ -19,7 +19,11 @@ permissions:
 
 jobs:
   audit:
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04 with Python 3.12: the pairing prod runs, so the audit
+    # matches production. Pinned versions alone do not rule out differences
+    # between platforms. Named explicitly, not ubuntu-latest, which GitHub
+    # moved to 26.04 in Nov 2026.
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
@@ -51,7 +55,7 @@ jobs:
               '',
               `See the failed run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               '',
-              'Fix: bump the flagged package in requirements.txt, run the test suite, and push.',
+              'Fix: requirements.txt is generated. Change the pin in requirements.in, regenerate requirements.txt with pip-compile (the command is in the header of requirements.in), run the test suite, and ship it as a normal PR.',
             ].join('\n');
             await github.rest.issues.create({
               owner: context.repo.owner,

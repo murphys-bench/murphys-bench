@@ -131,3 +131,53 @@ jobs:
           echo "=== sudoers drop-in ==="; sudo -n cat /etc/sudoers.d/murphys-bench 2>/dev/null || echo "(absent or unreadable — blanket sudo is gone by this point, which is intended)"
           echo "=== service ==="; systemctl status murphys-bench --no-pager -l 2>/dev/null || true
           journalctl -u murphys-bench -n 40 --no-pager 2>/dev/null || true
+
+  install:
+    # ⚠ THE NAME MATTERS. main's merge rules require a check called exactly
+    # "install", so a PR cannot merge when the install fails on any Ubuntu
+    # release MB supports. The matrix legs above report as
+    # "clean-room (ubuntu-24.04)" and "clean-room (ubuntu-26.04)"; requiring those
+    # names directly would leave every PR waiting forever on a check that never
+    # reports the day a release is added or dropped. This one name stays put.
+    #
+    # It does NOT trust needs.clean-room.result alone. GitHub has reported that
+    # summary as "success" for a run where it cancelled one matrix leg before it
+    # started (no runner ever picked it up; community discussion 211624, Oct
+    # 2026). So it also asks the API for each expected leg by name and requires
+    # every one to exist and to have succeeded. A leg that is missing, failed,
+    # cancelled or skipped turns this check red.
+    needs: clean-room
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read             # to list this run's jobs; nothing else
+    env:
+      # Every release the clean-room matrix installs onto. Must match its
+      # `os:` list; a test in core/tests.py checks that it does.
+      EXPECTED_RELEASES: ubuntu-24.04 ubuntu-26.04
+    steps:
+      - name: Require the install to have passed on every Ubuntu release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS_RESULT: ${{ needs.clean-room.result }}
+        run: |
+          set -euo pipefail
+          echo "clean-room summary: $NEEDS_RESULT"
+          [ "$NEEDS_RESULT" = "success" ] || { echo "::error::the install did not pass on every Ubuntu release"; exit 1; }
+
+          # filter=latest: after "Re-run failed jobs", the newest run of each
+          # job, so a leg that failed and then passed on re-run counts as passed.
+          # --paginate: every page, however many jobs the run grows to.
+          jobs=$(gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
+            --jq '.jobs[] | "\(.name)\t\(.conclusion)"')
+          bad=0
+          for release in $EXPECTED_RELEASES; do
+            # One line per job with this exact name. Anything but exactly one
+            # "success" (none, a failure, or two entries) fails the check.
+            conclusion=$(printf '%s\n' "$jobs" | awk -F'\t' -v want="clean-room ($release)" '$1 == want { print $2 }')
+            echo "clean-room ($release): ${conclusion:-did not run}"
+            [ "$conclusion" = "success" ] || bad=1
+          done
+          [ "$bad" = 0 ] || { echo "::error::the install did not pass on every Ubuntu release"; exit 1; }
+          echo "the install passed on every Ubuntu release"
